@@ -1,58 +1,74 @@
 import * as restate from "@restatedev/restate-sdk";
 import { MyService } from "./my_service";
-import { MyVirtualObject } from "./my_virtual_object";
+import { MyObject } from "./my_virtual_object";
 import { MyWorkflow } from "./workflow";
 
 const service = restate.service({
   name: "Router",
   handlers: {
     greet: async (ctx: restate.Context, name: string) => {
-      // <start_request_response_service>
-      const response = await ctx.serviceClient(MyService).myHandler("Hi");
-      // <end_request_response_service>
+      // <start_request_response>
+      // To call a Service:
+      const svcResponse = await ctx.serviceClient(MyService).myHandler("Hi");
+
+      // To call a Virtual Object:
+      const objResponse = await ctx
+        .objectClient(MyObject, "Mary")
+        .myHandler("Hi");
+        
+      // To call a Workflow:
+      // `run` handler — can only be called once per workflow ID
+      const wfResponse = await ctx
+        .workflowClient(MyWorkflow, "wf-id")
+        .run("Hi");
+      // Other handlers can be called anytime within workflow retention
+      const result = await ctx
+        .workflowClient(MyWorkflow, "wf-id")
+        .interactWithWorkflow();
+      // <end_request_response>
     },
     greet2: async (ctx: restate.Context, name: string) => {
-      // <start_request_response_object>
-      const response = await ctx
-        .objectClient(MyVirtualObject, "Mary")
-        .myHandler("Hi");
-      // <end_request_response_object>
 
-      // <start_one_way_service>
+      // <start_one_way>
+      // To message a Service:
       ctx.serviceSendClient(MyService).myHandler("Hi");
-      // <end_one_way_service>
 
-      // <start_one_way_object>
-      ctx.objectSendClient(MyVirtualObject, "Mary").myHandler("Hi");
-      // <end_one_way_object>
+      // To message a Virtual Object:
+      ctx.objectSendClient(MyObject, "Mary").myHandler("Hi");
 
-      // <start_delayed_service>
+      // To message a Workflow:
+      // `run` handler — can only be called once per workflow ID
+      ctx.workflowSendClient(MyWorkflow, "wf-id").run("Hi");
+      // Other handlers can be called anytime within workflow retention
+      ctx.workflowSendClient(MyWorkflow, "wf-id").interactWithWorkflow();
+      // <end_one_way>
+
+      // <start_delayed>
+      // To message a Service with a delay:
       ctx
         .serviceSendClient(MyService)
         .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
-      // <end_delayed_service>
 
-      // <start_delayed_object>
+      // To message a Virtual Object with a delay:
       ctx
-        .objectSendClient(MyVirtualObject, "Mary")
+        .objectSendClient(MyObject, "Mary")
         .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
-      // <end_delayed_object>
 
-      // <start_delayed_workflow>
+      // To message a Workflow with a delay:
       ctx
         .workflowSendClient(MyWorkflow, "Mary")
         .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
-      // <end_delayed_workflow>
+      // <end_delayed>
 
       // <start_ordering>
-      ctx.objectSendClient(MyVirtualObject, "Mary").myHandler("I'm call A");
-      ctx.objectSendClient(MyVirtualObject, "Mary").myHandler("I'm call B");
+      ctx.objectSendClient(MyObject, "Mary").myHandler("I'm call A");
+      ctx.objectSendClient(MyObject, "Mary").myHandler("I'm call B");
       // <end_ordering>
     },
     genericGreet: async (ctx: restate.Context, name: string) => {
       // <start_generic_call>
       const response = await ctx.genericCall({
-        service: "MyVirtualObject",
+        service: "MyObject",
         method: "myHandler",
         parameter: "Hi",
         key: "Mary", // drop this for Service calls
@@ -78,33 +94,16 @@ const service = restate.service({
       });
       // <end_generic_delayed>
     },
-    callWorkflows: async (ctx: restate.Context, name: string) => {
-      // <start_request_response_workflow>
-      // Call the `run` handler of the workflow (only allowed once).
-      await ctx.workflowClient(MyWorkflow, "my-workflow-id").run("Hi");
-      // Call some other `interactWithWorkflow` handler of the workflow.
-      await ctx
-        .workflowClient(MyWorkflow, "my-workflow-id")
-        .interactWithWorkflow();
-      // <end_request_response_workflow>
-
-      // <start_one_way_workflow>
-      // Call the `run` handler of the workflow (only works once).
-      ctx.workflowSendClient(MyWorkflow, "wf-id").run("Hi");
-      // Call some other `interactWithWorkflow` handler of the workflow.
-      ctx.workflowSendClient(MyWorkflow, "wf-id").interactWithWorkflow();
-      // <end_one_way_workflow>
-    },
     greet3: async (ctx: restate.Context) => {
       // <start_idempotency_key>
-      // For a regular call
+      // For request-response
       const response = await ctx.serviceClient(MyService).myHandler(
         "Hi",
         restate.rpc.opts({
           idempotencyKey: "my-idempotency-key",
         })
       );
-      // For a one way call
+      // For sending a message
       ctx.serviceSendClient(MyService).myHandler(
         "Hi",
         restate.rpc.sendOpts({
@@ -118,13 +117,12 @@ const service = restate.service({
       const handle = ctx.serviceSendClient(MyService).myHandler(
         "Hi",
         restate.rpc.sendOpts({
-          // Optional: send attaching idempotency key
           idempotencyKey: "my-idempotency-key",
         })
       );
       const invocationId = await handle.invocationId;
 
-      // Later re-attach to the request
+      // Later...
       const response = ctx.attach(invocationId);
       // <end_attach>
     },
@@ -133,7 +131,7 @@ const service = restate.service({
       const handle = ctx.serviceSendClient(MyService).myHandler("Hi");
       const invocationId = await handle.invocationId;
 
-      // I don't need this invocation anymore, let me just cancel it
+      // Cancel the invocation
       ctx.cancel(invocationId);
       // <end_cancel>
     },
