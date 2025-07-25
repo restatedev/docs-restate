@@ -1,0 +1,104 @@
+---
+title: "Journaling Results"
+description: "Persist results of operations."
+---
+
+Restate uses an execution log to replay operations after failures and suspensions. This means that non-deterministic results (such as database responses or UUID generation) need to have their results journaled (persisted) for deterministic replay.
+
+The SDK helps with this via:
+
+1. **[Journaled actions](/develop/ts/journaling-results#journaled-actions)**: Wrap any code block in `ctx.run(...)` to persist its result.
+2. **[Deterministic randoms](/develop/ts/journaling-results#generating-randoms)**: Generate UUIDs and random numbers that are deterministic on retries.
+3. **[`RestatePromise` combinators](/develop/ts/journaling-results#combineable-promise-combinators)**: Run multiple async operations in parallel while preserving the exact order of resolution.
+
+## Journaled actions
+Use [`ctx.run`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#run) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
+
+```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect}
+const result = await ctx.run<string>(async () => doDbRequest());
+```
+
+<Note>
+Inside `ctx.run`, you **cannot use** the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
+</Note>
+
+<Note>
+By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
+</Note>
+
+<Note>
+Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
+</Note>
+
+### Run-block Retry Policies
+
+You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
+
+```typescript  {CODE_LOAD::ts/src/develop/retries.ts?1}
+try {
+  const myRunRetryPolicy = {
+    initialRetryInterval: { milliseconds: 500 },
+    retryIntervalFactor: 2,
+    maxRetryInterval: { seconds: 1 },
+    maxRetryAttempts: 5,
+    maxRetryDuration: { seconds: 1 },
+  };
+  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
+} catch (e) {
+  if (e instanceof restate.TerminalError) {
+    // Undo or compensate here (see Sagas guide)
+  }
+  throw e;
+}
+```
+
+* You can limit retries by time or count
+* When the policy is exhausted, a `TerminalError` is thrown
+* See [Error Handling](/develop/ts/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
+
+## Deterministic randoms
+
+The SDK provides deterministic helpers for random values — seeded by the invocation ID — so they return the **same result on retries**.
+
+### UUIDs
+
+Use `ctx.rand.uuidv4()` to generate stable UUIDs for things like idempotency keys:
+
+```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#uuid}
+const uuid = ctx.rand.uuidv4();
+```
+
+### Random numbers
+
+Use `ctx.rand.random()` to generate a deterministic float between `0` and `1`:
+
+
+```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb}
+const randomNumber = ctx.rand.random();
+```
+
+This behaves like `Math.random()` but is deterministically replayable.
+
+
+## `RestatePromise` combinators
+
+To run multiple operations concurrently and deterministically, use `RestatePromise` combinators.
+Restate then logs the order in which they get resolved or rejected so they are deterministic on replay.
+
+```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#all}
+const sleepPromise = ctx.sleep({ milliseconds: 100 });
+const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
+const externalCallPromise = ctx.run(() => httpCall());
+
+const resultArray = await RestatePromise.all([
+  sleepPromise,
+  callPromise,
+  externalCallPromise,
+]);
+```
+
+Restate provides the following deterministic combinators:
+- [`RestatePromise.all`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#all): similar to [`Promise.all`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all)
+- [`RestatePromise.any`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#any): similar to [`Promise.any`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any)
+- [`RestatePromise.race`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#race): similar to [`Promise.race`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race)
+- [`RestatePromise.allSettled`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#allsettled): similar to [`Promise.allSettled`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled)

@@ -10,7 +10,7 @@ public class RpcCalls {
 
   // <start_rpc>
   @Handler
-  public void myRestateHandler(Context ctx) {
+  public void myRestaaateHandler(Context ctx) {
     // !focus(1:2)
     // From a Java Restate service
     String nik = "aaaa";

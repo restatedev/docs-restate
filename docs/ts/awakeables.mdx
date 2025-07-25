@@ -1,0 +1,74 @@
+---
+title: "Awakeables"
+description: "Pause and resume invocations using the callback (task token) pattern."
+---
+
+**Awakeables** allow you to pause an invocation while waiting for another process to complete a task. This enables a handler to delegate work elsewhere and resume once the result is available. This pattern is also known as the **callback** or **task token** pattern.
+
+
+## How Awakeables Work
+
+1. **Create an awakeable**  
+   Generate an awakeable, which provides a unique string identifier and a Promise.
+2. **Trigger an external task**  
+   Start a task or process elsewhere, passing along the awakeable ID (e.g., via Kafka, HTTP, etc.).  
+3. **Wait for completion**  
+   The handler pauses and waits for the external process to complete the task and respond.  
+   Once the result is available, the handler resumes with the payload.
+
+```ts  {CODE_LOAD::ts/src/develop/awakeable.ts}
+const { id, promise } = ctx.awakeable<string>();
+await ctx.run(() => triggerTaskAndDeliverId(id));
+const payload = await promise;
+```
+
+
+<Note>
+  The TypeScript SDK uses built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization by default. See the [serialization docs](/develop/ts/serialization) for customization options.
+</Note>
+
+<Tip>
+  On Function-as-a-Service platforms like AWS Lambda, Restate suspends the handler while waiting for the awakeable. **You are only billed for active execution time, not for waiting.**
+</Tip> 
+
+<Warning>
+  Virtual Objects process one invocation at a time. While waiting on an awakeable, the Virtual Object is blocked and cannot process other invocations.
+</Warning>
+
+## Completing Awakeables
+
+The external process completes the awakeable by either:
+
+- **Resolving** it with an optional payload, or
+- **Rejecting** it with a reason for failure.
+
+If rejected, a [terminal error](/develop/ts/error-handling) is thrown in the waiting handler.
+
+### Completing Awakeables via HTTP
+
+- **Resolve** (with ID and optional payload):
+  ```shell
+  curl localhost:8080/restate/awakeables/prom_1PePOqp/resolve \
+    --json '{"hello": "world"}'
+  ```
+
+
+- **Reject** (with ID and reason):
+  ```shell
+  curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
+    -H 'content-type: text/plain' \
+    -d 'Very bad error!'
+  ```
+
+### Completing Awakeables via the SDK
+
+- **Resolve**:
+```ts  {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve}
+ctx.resolveAwakeable(id, "hello");
+```
+
+- **Reject**:
+```ts  {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject}
+ctx.rejectAwakeable(id, "my error reason");
+```
+
