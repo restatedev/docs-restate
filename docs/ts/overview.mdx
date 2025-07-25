@@ -84,18 +84,19 @@ export const MyObject: typeof myObject = { name: "MyObject" };
 restate.endpoint().bind(myObject).listen();
 ```
 
-* Define a virtual object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
-* Each instance is identified by a `key` (accessible via `ctx.key`) and can store persistent K/V state
-* Handlers receive an [`ObjectContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext), allowing:
+* Define a Virtual Object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
+* Each instance is identified by a `key` (accessible via `ctx.key`) and can store persistent K/V state.
+* Virtual Objects can have [exclusive and shared handlers](/ts/overview#exclusive-vs-shared-handlers). 
+* Exclusive handlers receive an [`ObjectContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext), allowing:
   * Read/write access to object state
   * Access to the object key (`ctx.key`)
-* Only one handler runs at a time per object for consistency
+* Only one exclusive handler runs at a time per object for consistency ([learn more](/ts/overview#exclusive-vs-shared-handlers)).
 * Use [`handlers.object.shared(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.handlers.object.shared) to define **concurrent** read-only handlers with [`ObjectSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectSharedContext)
 
 
 ## Workflows
 
-Workflows are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations, which require external interaction.
+Workflows are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations, which require external interaction via signals and queries.
 
 ```ts
 import * as restate from "@restatedev/restate-sdk";
@@ -126,12 +127,37 @@ restate.endpoint().bind(myWorkflow).listen();
   * This is the main orchestration entry point
   * It runs exactly once per workflow execution and uses [`WorkflowContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowContext)
   * Use `ctx.key` to access the workflow's unique ID
-  * Compose logic from SDK actions (e.g., [`sleep`](/develop/ts/durable-timers), [`run block`](/develop/ts/journaling-results#journaled-actions), or service calls)
-* Additional handlers using [`WorkflowSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowSharedContext) can:
+  * Compose logic from SDK actions (e.g., [`sleep`](/develop/ts/durable-timers), [`run block`](/develop/ts/journaling-results#journaled-actions), [set K/V state](/ts/state#setting-state) or service calls)
+* Additional handlers must use the [`WorkflowSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowSharedContext) and can:
 
   * Query workflow state
   * Send signals
-  * Run concurrently with the `run` handler and even after it finishes
+  * Run concurrently with the `run` handler and even after it finishes ([learn more](/ts/overview#exclusive-vs-shared-handlers))
 
 Learn more in the [Workflows guide](/develop/ts/workflows).
 
+## Exclusive vs. Shared Handlers
+
+Virtual Objects and Workflows can have two types of handlers: **exclusive** handlers and **shared** handlers:
+
+### Exclusive Handlers
+* Use `ObjectContext` or `WorkflowContext`.
+* Can **read and write** state (`ctx.set`, `ctx.clear`, etc.).
+* Only **one exclusive handler** can run at a time per Virtual Object key or Workflow execution.
+* Calls to exclusive handlers are **queued** and executed sequentially to ensure state consistency.
+* This serialization guarantees that concurrent writes don't conflict or overwrite each other.
+
+⚠️ **Why this matters:**
+If two exclusive handlers were allowed to run concurrently, Restate couldn't safely determine which write is the final one. Serial execution avoids this race condition.
+
+### Shared Handlers
+* Use `ObjectSharedContext` or `WorkflowSharedContext`.
+* Can **only read** state—**no write access**.
+* Do **not block** or queue—they can run concurrently with other handlers, including an ongoing exclusive handler.
+
+### When to Use Shared Handlers
+
+Shared handlers are useful for **interacting with long-running exclusive handlers** without blocking or waiting:
+
+* Example: A long-running workflow updates a status in its state.
+* Meanwhile, a dashboard can read that status using a shared handler without interrupting or waiting on the main workflow.
