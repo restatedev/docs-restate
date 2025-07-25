@@ -1,12 +1,26 @@
 import * as restate from "@restatedev/restate-sdk";
+import { MyService } from "./my_service";
 
 const service = restate.service({
   name: "DurableTimers",
   handlers: {
     greet: async (ctx: restate.Context, name: string) => {
-      // <start_here>
+      // <start_sleep>
       await ctx.sleep({ seconds: 10 });
-      // <end_here>
+      // <end_sleep>
+
+      // <start_timer>
+      try {
+        await ctx.serviceClient(MyService).myHandler("Hi")
+            .orTimeout({ seconds: 5 });
+      } catch (error) {
+        if (error instanceof restate.TimeoutError) {
+          console.error("Operation timed out:", error);
+        } else {
+          throw error; // Re-throw other errors
+        }
+      }
+      // <end_timer>
     },
   },
 });
