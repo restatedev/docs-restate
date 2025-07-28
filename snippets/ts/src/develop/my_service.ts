@@ -1,4 +1,3 @@
-// <start_svc>
 import * as restate from "@restatedev/restate-sdk";
 
 const myService = restate.service({
@@ -15,8 +14,3 @@ export const MyService: typeof myService = { name: "MyService" };
 // <end_api_export>
 
 restate.endpoint().bind(myService).listen();
-// <end_svc>
-
-
-
-

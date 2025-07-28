@@ -28,7 +28,7 @@ Services are the fundamental units in Restate. They group related **handlers** a
 
 Here’s a basic example of a service:
 
-```ts
+```ts  {CODE_LOAD::ts/src/develop/my_service.ts}
 import * as restate from "@restatedev/restate-sdk";
 
 const myService = restate.service({
@@ -62,7 +62,7 @@ restate.endpoint().bind(myService).listen();
 
 Virtual Objects are like services, but stateful and key-addressable — each object instance has a unique ID and persistent state.
 
-```ts
+```ts  {CODE_LOAD::ts/src/develop/my_virtual_object.ts}
 import * as restate from "@restatedev/restate-sdk";
 
 const myObject = restate.object({
@@ -98,19 +98,21 @@ restate.endpoint().bind(myObject).listen();
 
 Workflows are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations, which require external interaction via signals and queries.
 
-```ts
+```ts  {CODE_LOAD::ts/src/develop/workflow.ts}
 import * as restate from "@restatedev/restate-sdk";
 
 const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.WorkflowContext, req: string) => {
-      // orchestrate your workflow logic here
+      // implement workflow logic here
+
       return "success";
     },
 
     interactWithWorkflow: async (ctx: restate.WorkflowSharedContext) => {
-      // signal, resolve a promise, or query state
+      // implement interaction logic here
+      // e.g. resolve a promise that the workflow is waiting on
     },
   },
 });
@@ -160,3 +162,84 @@ Shared handlers are useful for **interacting with long-running exclusive handler
 
 * Example: A long-running workflow updates a status in its state.
 * Meanwhile, a dashboard can read that status using a shared handler without interrupting or waiting on the main workflow.
+
+## Service options
+
+There are a set of [`ServiceOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions) you can set for your services to customize their behavior.
+
+```ts  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#options}
+restate.service({
+  name: "MyService",
+  // This description is exposed via the OpenAPI spec
+  // and visible in the Restate UI.
+  description: "An example service that doesn't do anything.",
+  handlers: {
+    run: async (ctx: restate.Context) => {},
+  },
+  options: {
+    // Specify your service options here
+  }
+});
+```
+
+<AccordionGroup>
+  <Accordion title="Abort and inactivity timeout">
+    If Restate doesn't receive new journal entries from a service for more than one minute (by default), it will automatically abort the invocation and retry it.
+
+    However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
+
+    In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+
+    For more information, see the [error handling guide](/guides/error-handling).
+
+    ```json  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#timeout}
+options: {
+    abortTimeout: { minutes: 15 },
+    inactivityTimeout: { minutes: 15 }
+}
+```
+  </Accordion>
+
+  <Accordion title="Idempotency retention">
+    Restate allows you to [add an idempotency key](/invoke/http#invoke-a-handler-idempotently) to your request headers to ensure that duplicate requests are processed only once.
+
+    You can configure how long idempotency keys are retained using the [service’s options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#idempotencyretention). 
+
+    ```json  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#idempotency}
+options: {
+    idempotencyRetention: { days: 3 }
+}
+```
+  </Accordion>
+
+  <Accordion title="Hiding services from external access">
+    You can hide a service from external access by marking it as [**private** in the service options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#ingressprivate).
+
+    This prevents the service from being exposed through the ingress to external callers, while still allowing other Restate services to invoke it internally.
+    
+
+    ```json  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#private}
+options: {
+    ingressPrivate: true
+}
+```
+  </Accordion>
+
+  <Accordion title="Journal retention">
+    By default, Restate discards the invocation journal after an invocation completes to save storage space.
+
+    However, for certain handlers, such as workflows or AI agent runs, it can be useful to be able to inspect the journal after the invocation has finished.
+
+    In this case, you can specify the journal retention in the [service options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#journalretention). 
+
+    ```json  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#journal}
+options: {
+    journalRetention: { days: 7 }
+}
+```
+  </Accordion>
+
+  <Accordion title="Mapping errors to terminal errors">
+    Have a look at the [error handling docs](/develop/ts/error-handling#mapping-errors-to-terminalerror).
+  </Accordion>
+</AccordionGroup>
