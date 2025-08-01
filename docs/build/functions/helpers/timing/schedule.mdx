@@ -1,0 +1,290 @@
+---
+title: Schedule
+description: Schedule functions to run at specific times in the future
+---
+
+Schedule functions to run at specific times in the future using delayed calls. This is like setting an alarm clock for your code - the function will run after the specified delay, even if your service restarts.
+
+## Delayed function calls
+
+Delayed calls let you schedule a function to run at a specific time in the future. This is different from sleep - instead of pausing the current function, you're scheduling a completely separate function to run later.
+
+<CodeGroup>
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the order immediately
+  const result = await processOrderLogic(ctx, order);
+  
+  // Schedule a reminder email for tomorrow
+  ctx.serviceCall(ReminderService).sendFollowUp(order.customerId, {
+    delay: 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+  });
+  
+  // Schedule order cancellation if not paid within 15 minutes
+  ctx.serviceCall(OrderService).cancelIfNotPaid(order.id, {
+    delay: 15 * 60 * 1000 // 15 minutes
+  });
+  
+  return result;
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Process the order immediately
+    String result = processOrderLogic(ctx, order);
+    
+    // Schedule a reminder email for tomorrow
+    ReminderServiceClient.fromContext(ctx)
+        .sendFollowUp(order.getCustomerId())
+        .delayedCall(Duration.ofDays(1));
+    
+    // Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.fromContext(ctx)
+        .cancelIfNotPaid(order.getId())
+        .delayedCall(Duration.ofMinutes(15));
+    
+    return result;
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Process the order immediately
+    result = await process_order_logic(ctx, order)
+    
+    # Schedule a reminder email for tomorrow
+    ReminderServiceClient.from_context(ctx).send_follow_up(
+        order.customer_id
+    ).delayed_call(timedelta(days=1))
+    
+    # Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.from_context(ctx).cancel_if_not_paid(
+        order.id
+    ).delayed_call(timedelta(minutes=15))
+    
+    return result
+```
+</CodeGroup>
+
+The delay is durable - even if your service crashes and restarts, the scheduled call will still happen at the right time.
+
+## Scheduling patterns
+
+### Follow-up reminders
+
+<CodeGroup>
+```typescript TypeScript
+export const scheduleFollowUps = async (ctx: Context, customerId: string) => {
+  // Schedule a series of follow-up emails
+  
+  // Day 1: Welcome tips
+  ctx.serviceCall(EmailService).sendTips(customerId, {
+    delay: 24 * 60 * 60 * 1000 // 1 day
+  });
+  
+  // Day 7: Check-in email
+  ctx.serviceCall(EmailService).sendCheckIn(customerId, {
+    delay: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+  
+  // Day 30: Feedback survey
+  ctx.serviceCall(EmailService).sendSurvey(customerId, {
+    delay: 30 * 24 * 60 * 60 * 1000 // 30 days
+  });
+  
+  return { scheduled: true, customerId };
+};
+```
+</CodeGroup>
+
+### Timeout handlers
+
+<CodeGroup>
+```typescript TypeScript
+export const processWithTimeout = async (ctx: Context, taskId: string) => {
+  // Start processing
+  ctx.set("status", "processing");
+  
+  // Schedule timeout handler
+  ctx.serviceCall(TimeoutService).handleTimeout(taskId, {
+    delay: 30 * 60 * 1000 // 30 minutes
+  });
+  
+  // Continue with actual processing...
+  const result = await processTask(ctx, taskId);
+  
+  // Cancel timeout if we completed successfully
+  ctx.serviceCall(TimeoutService).cancelTimeout(taskId);
+  
+  return result;
+};
+```
+</CodeGroup>
+
+### Maintenance tasks
+
+<CodeGroup>
+```typescript TypeScript
+export const scheduleMaintenanceTasks = async (ctx: Context) => {
+  // Schedule daily cleanup at 2 AM
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(2, 0, 0, 0);
+  const delay = tomorrow.getTime() - Date.now();
+  
+  ctx.serviceCall(MaintenanceService).runDailyCleanup({
+    delay: delay
+  });
+  
+  // Schedule weekly backup on Sundays at 3 AM
+  const nextSunday = new Date();
+  nextSunday.setDate(nextSunday.getDate() + (7 - nextSunday.getDay()));
+  nextSunday.setHours(3, 0, 0, 0);
+  const weeklyDelay = nextSunday.getTime() - Date.now();
+  
+  ctx.serviceCall(BackupService).runWeeklyBackup({
+    delay: weeklyDelay
+  });
+  
+  return { maintenanceScheduled: true };
+};
+```
+</CodeGroup>
+
+### Subscription renewals
+
+<CodeGroup>
+```typescript TypeScript
+export const scheduleRenewalReminders = async (ctx: Context, subscription: Subscription) => {
+  const expirationDate = new Date(subscription.expiresAt);
+  
+  // Reminder 30 days before expiration
+  const reminder30Days = new Date(expirationDate);
+  reminder30Days.setDate(reminder30Days.getDate() - 30);
+  const delay30 = reminder30Days.getTime() - Date.now();
+  
+  if (delay30 > 0) {
+    ctx.serviceCall(NotificationService).sendRenewalReminder(subscription.userId, {
+      delay: delay30,
+      daysLeft: 30
+    });
+  }
+  
+  // Reminder 7 days before expiration
+  const reminder7Days = new Date(expirationDate);
+  reminder7Days.setDate(reminder7Days.getDate() - 7);
+  const delay7 = reminder7Days.getTime() - Date.now();
+  
+  if (delay7 > 0) {
+    ctx.serviceCall(NotificationService).sendRenewalReminder(subscription.userId, {
+      delay: delay7,
+      daysLeft: 7
+    });
+  }
+  
+  // Final reminder on expiration day
+  const delayExpiration = expirationDate.getTime() - Date.now();
+  
+  if (delayExpiration > 0) {
+    ctx.serviceCall(SubscriptionService).handleExpiration(subscription.id, {
+      delay: delayExpiration
+    });
+  }
+  
+  return { remindersScheduled: true };
+};
+```
+</CodeGroup>
+
+## Scheduling different service types
+
+### Schedule Basic Service calls
+
+<CodeGroup>
+```typescript TypeScript
+// Schedule stateless service function
+ctx.serviceCall(DataProcessor).processDaily({
+  delay: 24 * 60 * 60 * 1000
+});
+```
+</CodeGroup>
+
+### Schedule Virtual Object calls
+
+<CodeGroup>
+```typescript TypeScript
+// Schedule Virtual Object function with specific key
+ctx.objectCall(UserAccount, userId).sendBirthdayGreeting({
+  delay: birthdayDelay
+});
+```
+</CodeGroup>
+
+### Schedule Workflow calls
+
+<CodeGroup>
+```typescript TypeScript
+// Schedule workflow to start
+ctx.workflowCall(OrderWorkflow, orderId).processOrder(order, {
+  delay: processingDelay
+});
+
+// Schedule signal to workflow
+ctx.workflowSend(ApprovalWorkflow, requestId).escalate({
+  delay: 2 * 60 * 60 * 1000 // 2 hours
+});
+```
+</CodeGroup>
+
+## Calling scheduled functions from clients
+
+You can also schedule function calls from client applications:
+
+<CodeGroup>
+```bash cURL
+curl localhost:8080/ReminderService/sendFollowUp/send \
+  -H 'content-type: application/json' \
+  -d '{"customerId": "user-123"}' \
+  --http1.1 \
+  --raw '%3Cdelay%3E24h%3C/delay%3E'
+```
+
+```typescript TypeScript Client
+// Schedule from client with 24 hour delay
+restateClient
+  .serviceClient(ReminderService)
+  .sendFollowUp({ customerId: "user-123" }, { delay: 24 * 60 * 60 * 1000 });
+```
+
+```java Java Client
+ReminderServiceClient.fromContext(ctx)
+    .sendFollowUp("user-123")
+    .delayedCall(Duration.ofDays(1));
+```
+</CodeGroup>
+
+## Best practices
+
+**Use meaningful delays**: Choose delays that make business sense and align with user expectations.
+
+**Handle timezone considerations**: Be careful with absolute time calculations, especially across timezones.
+
+**Consider cancellation**: For timeout scenarios, implement cancellation mechanisms when the main operation completes.
+
+**Batch related schedules**: Group related scheduled operations to reduce complexity.
+
+<CodeGroup>
+```typescript TypeScript
+// Good: Business-meaningful delays
+ctx.serviceCall(ReminderService).sendFollowUp(userId, {
+  delay: 7 * 24 * 60 * 60 * 1000 // 1 week follow-up
+});
+
+// Good: Implement cancellation for timeouts
+ctx.serviceCall(TimeoutService).cancelTimeout(taskId);
+```
+</CodeGroup>
+
+Scheduling enables sophisticated time-based coordination and business logic while maintaining reliability and exactly-once execution guarantees.

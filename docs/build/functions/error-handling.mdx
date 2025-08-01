@@ -1,0 +1,302 @@
+---
+title: Error Handling
+description: Handle errors effectively in Restate functions with retries and terminal errors
+---
+
+Restate provides sophisticated error handling that distinguishes between retryable failures and permanent errors. Understanding when and how to use different error types is crucial for building reliable applications.
+
+## Automatic retries vs terminal errors
+
+By default, Restate automatically retries failed operations with exponential backoff. However, some errors shouldn't be retried because they indicate permanent failures or invalid input.
+
+**Retryable errors** (automatic retry):
+- Network timeouts
+- Temporary service unavailability  
+- Database connection failures
+- Rate limiting (429 responses)
+
+**Terminal errors** (stop retry immediately):
+- Invalid input data
+- Authentication failures
+- Authorization denials
+- Business rule violations
+- Resource not found errors
+
+## Using terminal errors
+
+Use `TerminalError` to stop retries for permanent failures:
+
+<CodeGroup>
+```typescript TypeScript
+export const processPayment = async (ctx: Context, payment: Payment) => {
+  // Validate input - terminal error stops retries
+  if (!payment.amount || payment.amount <= 0) {
+    throw new TerminalError("Payment amount must be positive", { errorCode: 400 });
+  }
+  
+  if (!payment.customerId) {
+    throw new TerminalError("Customer ID is required", { errorCode: 400 });
+  }
+  
+  try {
+    // This will retry on network/service issues
+    const result = await ctx.run("charge-payment", async () => {
+      return await paymentService.charge(payment);
+    });
+    
+    return { success: true, transactionId: result.id };
+    
+  } catch (error) {
+    // Check for business logic failures
+    if (error.message.includes("insufficient funds")) {
+      throw new TerminalError("Insufficient funds", { errorCode: 402 });
+    }
+    
+    if (error.message.includes("invalid card")) {
+      throw new TerminalError("Invalid payment method", { errorCode: 400 });
+    }
+    
+    // Network/service errors will retry automatically
+    throw error;
+  }
+};
+```
+
+```java Java
+@Handler
+public PaymentResult processPayment(Context ctx, Payment payment) {
+    // Validate input - terminal error stops retries
+    if (payment.getAmount() <= 0) {
+        throw new TerminalException(400, "Payment amount must be positive");
+    }
+    
+    if (payment.getCustomerId() == null) {
+        throw new TerminalException(400, "Customer ID is required");
+    }
+    
+    try {
+        PaymentResult result = ctx.run("charge-payment", () -> {
+            return paymentService.charge(payment);
+        });
+        
+        return new PaymentResult(true, result.getId());
+        
+    } catch (Exception error) {
+        // Check for business logic failures
+        if (error.getMessage().contains("insufficient funds")) {
+            throw new TerminalException(402, "Insufficient funds");
+        }
+        
+        if (error.getMessage().contains("invalid card")) {
+            throw new TerminalException(400, "Invalid payment method");
+        }
+        
+        // Network/service errors will retry automatically
+        throw error;
+    }
+}
+```
+
+```python Python
+async def process_payment(ctx: Context, payment: Payment):
+    # Validate input - terminal error stops retries
+    if not payment.amount or payment.amount <= 0:
+        raise TerminalError("Payment amount must be positive", error_code=400)
+    
+    if not payment.customer_id:
+        raise TerminalError("Customer ID is required", error_code=400)
+    
+    try:
+        # This will retry on network/service issues
+        result = await ctx.run("charge-payment", 
+            lambda: payment_service.charge(payment))
+        
+        return {"success": True, "transaction_id": result.id}
+        
+    except Exception as error:
+        # Check for business logic failures
+        if "insufficient funds" in str(error):
+            raise TerminalError("Insufficient funds", error_code=402)
+        
+        if "invalid card" in str(error):
+            raise TerminalError("Invalid payment method", error_code=400)
+        
+        # Network/service errors will retry automatically
+        raise error
+```
+</CodeGroup>
+
+## Error handling patterns
+
+### Input validation
+
+Always validate input at the start of functions and use terminal errors for invalid data:
+
+<CodeGroup>
+```typescript TypeScript
+export const createUser = async (ctx: ObjectContext, user: CreateUserRequest) => {
+  // Validate required fields
+  if (!user.email || !user.email.includes("@")) {
+    throw new TerminalError("Valid email address is required");
+  }
+  
+  if (!user.name || user.name.trim().length === 0) {
+    throw new TerminalError("Name is required");
+  }
+  
+  // Check for duplicate user
+  const existingUser = await ctx.run("check-duplicate", async () => {
+    return await userService.findByEmail(user.email);
+  });
+  
+  if (existingUser) {
+    throw new TerminalError("User with this email already exists");
+  }
+  
+  // Proceed with user creation...
+};
+```
+</CodeGroup>
+
+### Timeout handling
+
+Combine timeouts with error handling to prevent indefinite waiting:
+
+<CodeGroup>
+```typescript TypeScript
+export const processWithTimeout = async (ctx: Context, task: Task) => {
+  try {
+    // Race between work and timeout
+    const result = await Promise.race([
+      ctx.serviceCall(ExternalService).processTask(task),
+      ctx.sleep(30000).then(() => {
+        throw new Error("Operation timed out after 30 seconds");
+      })
+    ]);
+    
+    return result;
+    
+  } catch (error) {
+    if (error.message.includes("timed out")) {
+      // Send timeout notification
+      await ctx.serviceSend(NotificationService).sendTimeoutAlert(task.id);
+      throw new TerminalError("Task timed out and alert sent");
+    }
+    
+    // Other errors may be retryable
+    throw error;
+  }
+};
+```
+</CodeGroup>
+
+### Circuit breaker pattern
+
+Prevent cascading failures by temporarily stopping calls to failing services:
+
+<CodeGroup>
+```typescript TypeScript
+export const callWithCircuitBreaker = async (ctx: ObjectContext, serviceCall: () => Promise<any>) => {
+  const failureCount = (await ctx.get<number>("failures")) ?? 0;
+  const lastFailure = await ctx.get<number>("lastFailure");
+  
+  // Circuit is open (too many recent failures)
+  if (failureCount >= 5 && lastFailure && (Date.now() - lastFailure) < 60000) {
+    throw new TerminalError("Circuit breaker is open - service temporarily unavailable");
+  }
+  
+  try {
+    const result = await ctx.run("service-call", serviceCall);
+    
+    // Reset failure count on success
+    ctx.clear("failures");
+    ctx.clear("lastFailure");
+    return result;
+    
+  } catch (error) {
+    // Track failure
+    ctx.set("failures", failureCount + 1);
+    ctx.set("lastFailure", Date.now());
+    
+    // After 5 failures, circuit opens
+    if (failureCount >= 4) {
+      throw new TerminalError("Service failed repeatedly - circuit breaker opened");
+    }
+    
+    throw error; // Will retry
+  }
+};
+```
+</CodeGroup>
+
+### Graceful degradation
+
+Provide fallback behavior when primary operations fail:
+
+<CodeGroup>
+```typescript TypeScript
+export const getDataWithFallback = async (ctx: Context, userId: string) => {
+  try {
+    // Try primary data source
+    return await ctx.run("primary-source", () => 
+      primaryService.getUserData(userId)
+    );
+    
+  } catch (error) {
+    // Log the primary failure
+    console.warn("Primary service failed, using fallback", error);
+    
+    try {
+      // Try secondary data source
+      return await ctx.run("fallback-source", () => 
+        fallbackService.getUserData(userId)
+      );
+      
+    } catch (fallbackError) {
+      // Return minimal default data
+      return {
+        userId,
+        name: "Unknown User",
+        preferences: getDefaultPreferences()
+      };
+    }
+  }
+};
+```
+</CodeGroup>
+
+## Error categorization best practices
+
+**Design for failure**: Assume external services will fail and design accordingly with fallbacks and circuit breakers.
+
+**Categorize errors appropriately**:
+- **Transient errors**: Let Restate retry (network timeouts, temporary service issues)
+- **Terminal errors**: Stop immediately (validation failures, business rule violations)  
+- **Permanent errors**: Use terminal errors (resource not found, unauthorized access)
+
+**Provide meaningful error messages**: Include enough context for debugging while being user-friendly when appropriate.
+
+**Monitor error patterns**: Track error rates and types to identify systemic issues and improve reliability.
+
+<CodeGroup>
+```typescript TypeScript
+// Good error categorization
+if (!isValidEmail(email)) {
+  throw new TerminalError("Invalid email format"); // Don't retry
+}
+
+try {
+  await externalAPI.call();
+} catch (error) {
+  if (error.status === 404) {
+    throw new TerminalError("Resource not found"); // Don't retry
+  }
+  if (error.status >= 500) {
+    throw error; // Retry server errors
+  }
+  throw new TerminalError("Client error: " + error.message); // Don't retry 4xx
+}
+```
+</CodeGroup>
+
+By combining automatic retries with strategic terminal errors, timeouts, and fallback patterns, you can build applications that gracefully handle both temporary glitches and permanent failures while providing excellent user experiences.

@@ -1,0 +1,403 @@
+---
+title: Scheduled Tasks
+description: Replace cron with reliable, distributed task scheduling
+---
+
+Traditional cron jobs are fragile - they run on single servers, don't handle failures well, and provide poor visibility into what happened. Restate's scheduled tasks solve these problems by providing durable, distributed, observable task scheduling.
+
+This pattern replaces cron jobs, task queues, and other scheduling systems with a more reliable approach that survives failures and scales across multiple servers.
+
+## Problems with traditional scheduling
+
+**Cron job limitations:**
+- Lost when servers restart or fail
+- No automatic retry on failures
+- Difficult to monitor and debug
+- Can't easily scale across multiple servers
+- No coordination between multiple instances
+
+**Task queue problems:**
+- Complex setup and maintenance
+- Separate infrastructure to manage
+- Limited visibility into task execution
+- Difficult error handling and recovery
+
+## How scheduled tasks work in Restate
+
+Restate provides two approaches to scheduled tasks:
+
+**Delayed invocations:** Schedule a specific handler to run at a future time
+**Recurring workflows:** Create self-perpetuating workflows that reschedule themselves
+
+**Scheduled task handlers:**
+<CodeGroup>
+```typescript TypeScript
+// One-time scheduled task
+export const scheduleCleanup = async (ctx: Context, cleanupType: string) => {
+  // Schedule cleanup to run in 24 hours
+  await CleanupService.performCleanup(ctx, cleanupType, { delay: 24 * 60 * 60 * 1000 });
+  return { scheduled: true, executeAt: new Date(Date.now() + 24 * 60 * 60 * 1000) };
+};
+
+// Recurring task pattern
+export const startDailyReports = async (ctx: WorkflowContext, config: ReportConfig) => {
+  while (true) {
+    try {
+      // Generate and send the report
+      const report = await ctx.run("generate-report", async () => {
+        return await ReportService.generateDailyReport(config.reportType);
+      });
+      
+      await ctx.run("send-report", async () => {
+        return await EmailService.sendReport(config.recipients, report);
+      });
+      
+      // Update last run time
+      ctx.set("lastRun", Date.now());
+      ctx.set("runCount", ((await ctx.get<number>("runCount")) ?? 0) + 1);
+      
+    } catch (error) {
+      // Log error but continue scheduling
+      await ctx.run("log-error", async () => {
+        return await LogService.error("Daily report failed", error);
+      });
+    }
+    
+    // Sleep until next day (24 hours)
+    await ctx.sleep(24 * 60 * 60 * 1000);
+  }
+};
+
+// Cron-like scheduling
+export const scheduleWeeklyBackup = async (ctx: Context) => {
+  // Calculate next Sunday at 2 AM
+  const nextSunday = getNextSunday2AM();
+  const delay = nextSunday.getTime() - Date.now();
+  
+  await BackupService.performWeeklyBackup(ctx, { delay });
+  
+  return { 
+    scheduled: true, 
+    nextRun: nextSunday.toISOString(),
+    delay: delay 
+  };
+};
+
+function getNextSunday2AM(): Date {
+  const now = new Date();
+  const nextSunday = new Date(now);
+  const daysUntilSunday = (7 - now.getDay()) % 7;
+  nextSunday.setDate(now.getDate() + (daysUntilSunday === 0 ? 7 : daysUntilSunday));
+  nextSunday.setHours(2, 0, 0, 0);
+  
+  // If it's already past 2 AM on Sunday, schedule for next week
+  if (nextSunday <= now) {
+    nextSunday.setDate(nextSunday.getDate() + 7);
+  }
+  
+  return nextSunday;
+}
+```
+
+```java Java
+// One-time scheduled task
+@Handler
+public ScheduleResult scheduleCleanup(Context ctx, String cleanupType) {
+    // Schedule cleanup to run in 24 hours
+    CleanupServiceClient.fromContext(ctx)
+        .performCleanup(cleanupType)
+        .delayedCall(Duration.ofDays(1));
+    
+    return new ScheduleResult(true, Instant.now().plus(Duration.ofDays(1)));
+}
+
+// Recurring task pattern
+@Workflow
+public void startDailyReports(WorkflowContext ctx, ReportConfig config) {
+    while (true) {
+        try {
+            // Generate and send the report
+            Report report = ctx.run("generate-report", () -> 
+                ReportServiceClient.fromContext(ctx).generateDailyReport(config.getReportType()).await()
+            );
+            
+            ctx.run("send-report", () ->
+                EmailServiceClient.fromContext(ctx).sendReport(config.getRecipients(), report).await()
+            );
+            
+            // Update tracking
+            ctx.set("lastRun", System.currentTimeMillis());
+            ctx.set("runCount", ctx.get("runCount", Integer.class).orElse(0) + 1);
+            
+        } catch (Exception error) {
+            // Log error but continue
+            ctx.run("log-error", () ->
+                LogServiceClient.fromContext(ctx).error("Daily report failed", error.getMessage()).await()
+            );
+        }
+        
+        // Sleep until next day
+        ctx.sleep(Duration.ofDays(1));
+    }
+}
+
+// Complex scheduling logic
+@Handler
+public ScheduleResult scheduleWeeklyBackup(Context ctx) {
+    // Calculate next Sunday at 2 AM
+    Instant nextSunday = getNextSunday2AM();
+    Duration delay = Duration.between(Instant.now(), nextSunday);
+    
+    BackupServiceClient.fromContext(ctx)
+        .performWeeklyBackup()
+        .delayedCall(delay);
+    
+    return new ScheduleResult(true, nextSunday, delay);
+}
+
+private Instant getNextSunday2AM() {
+    LocalDateTime now = LocalDateTime.now();
+    LocalDateTime nextSunday = now.with(TemporalAdjusters.next(DayOfWeek.SUNDAY))
+                                   .withHour(2).withMinute(0).withSecond(0).withNano(0);
+    
+    // If we're already past Sunday 2 AM this week, get next week
+    if (nextSunday.isBefore(now) || nextSunday.isEqual(now)) {
+        nextSunday = nextSunday.plusWeeks(1);
+    }
+    
+    return nextSunday.atZone(ZoneId.systemDefault()).toInstant();
+}
+```
+
+```python Python
+# One-time scheduled task
+async def schedule_cleanup(ctx: Context, cleanup_type: str):
+    # Schedule cleanup to run in 24 hours
+    await CleanupService.from_context(ctx).perform_cleanup(
+        cleanup_type, 
+        delay=timedelta(days=1)
+    )
+    
+    execute_at = datetime.now() + timedelta(days=1)
+    return {"scheduled": True, "execute_at": execute_at.isoformat()}
+
+# Recurring task pattern
+async def start_daily_reports(ctx: WorkflowContext, config: ReportConfig):
+    while True:
+        try:
+            # Generate and send the report
+            report = await ctx.run("generate-report",
+                lambda: ReportService.from_context(ctx).generate_daily_report(config.report_type)
+            )
+            
+            await ctx.run("send-report",
+                lambda: EmailService.from_context(ctx).send_report(config.recipients, report)
+            )
+            
+            # Update tracking
+            await ctx.set("last_run", time.time())
+            run_count = await ctx.get("run_count", int) or 0
+            await ctx.set("run_count", run_count + 1)
+            
+        except Exception as error:
+            # Log error but continue
+            await ctx.run("log-error",
+                lambda: LogService.from_context(ctx).error("Daily report failed", str(error))
+            )
+        
+        # Sleep until next day
+        await ctx.sleep(timedelta(days=1))
+
+# Cron-like scheduling
+async def schedule_weekly_backup(ctx: Context):
+    # Calculate next Sunday at 2 AM
+    next_sunday = get_next_sunday_2am()
+    delay = next_sunday - datetime.now()
+    
+    await BackupService.from_context(ctx).perform_weekly_backup(delay=delay)
+    
+    return {
+        "scheduled": True,
+        "next_run": next_sunday.isoformat(),
+        "delay_seconds": delay.total_seconds()
+    }
+
+def get_next_sunday_2am():
+    now = datetime.now()
+    days_until_sunday = (6 - now.weekday()) % 7
+    if days_until_sunday == 0:
+        days_until_sunday = 7
+    
+    next_sunday = now + timedelta(days=days_until_sunday)
+    next_sunday = next_sunday.replace(hour=2, minute=0, second=0, microsecond=0)
+    
+    if next_sunday <= now:
+        next_sunday += timedelta(weeks=1)
+    
+    return next_sunday
+```
+</CodeGroup>
+
+**Invoking scheduled task handlers:**
+<CodeGroup>
+```bash cURL
+# Schedule a one-time task
+curl localhost:8080/CleanupService/cleanup-123/dailyCleanup/send \
+  -H 'content-type: application/json' \
+  -d '{"type": "user_data"}' \
+  --http1.1 \
+  --raw '%3Cdelay%3E24h%3C/delay%3E'
+
+# Start a recurring workflow
+curl localhost:8080/SchedulerWorkflow/daily-reports/startDailyReports \
+  --json '{"reportType": "sales", "recipients": ["admin@company.com"]}'
+```
+
+```typescript TypeScript Client
+// Schedule one-time cleanup
+restateClient
+  .serviceClient(CleanupService, "cleanup-123")
+  .performCleanup("user_data", { delay: 24 * 60 * 60 * 1000 });
+
+// Start recurring workflow
+const result = await restateClient
+  .workflowClient(SchedulerWorkflow, "daily-reports")
+  .startDailyReports({ reportType: "sales", recipients: ["admin@company.com"] });
+```
+
+```java Java Client
+// Schedule one-time cleanup
+CleanupServiceClient.fromContext(ctx, "cleanup-123")
+    .performCleanup("user_data")
+    .delayedCall(Duration.ofDays(1));
+
+// Start recurring workflow
+ScheduleResult result = SchedulerWorkflowClient.fromContext(ctx, "daily-reports")
+    .startDailyReports(config).await();
+```
+</CodeGroup>
+
+## Scheduling patterns
+
+### One-time delayed tasks
+Schedule a task to run once at a specific future time:
+```typescript
+// Run in 30 minutes
+await TaskService.processData(ctx, data, { delay: 30 * 60 * 1000 });
+
+// Run at specific time
+const targetTime = new Date('2024-12-25T09:00:00Z');
+const delay = targetTime.getTime() - Date.now();
+await TaskService.sendHolidayGreeting(ctx, users, { delay });
+```
+
+### Self-perpetuating workflows
+Create workflows that reschedule themselves:
+```typescript
+export const hourlyDataSync = async (ctx: WorkflowContext) => {
+  while (true) {
+    await syncData(ctx);
+    await ctx.sleep(60 * 60 * 1000); // 1 hour
+  }
+};
+```
+
+### Conditional scheduling
+Schedule tasks based on business logic:
+```typescript
+export const scheduleMaintenanceWindow = async (ctx: Context, urgency: 'low' | 'high') => {
+  const delay = urgency === 'high' ? 
+    2 * 60 * 60 * 1000 :  // 2 hours for urgent
+    24 * 60 * 60 * 1000;  // 24 hours for normal
+  
+  await MaintenanceService.performMaintenance(ctx, { delay });
+};
+```
+
+## Monitoring and observability
+
+**Track execution history:**
+```typescript
+export const monitoredTask = async (ctx: WorkflowContext) => {
+  const startTime = Date.now();
+  
+  try {
+    await performWork(ctx);
+    
+    ctx.set("lastSuccess", startTime);
+    ctx.set("successCount", ((await ctx.get<number>("successCount")) ?? 0) + 1);
+    
+  } catch (error) {
+    ctx.set("lastFailure", startTime);
+    ctx.set("failureCount", ((await ctx.get<number>("failureCount")) ?? 0) + 1);
+    ctx.set("lastError", error.message);
+    
+    throw error; // Restate will retry
+  }
+};
+```
+
+**Progress tracking for long tasks:**
+```typescript
+export const longRunningReport = async (ctx: WorkflowContext, config: ReportConfig) => {
+  const totalSteps = 5;
+  let currentStep = 0;
+  
+  const updateProgress = (step: string) => {
+    currentStep++;
+    ctx.set("progress", { step, current: currentStep, total: totalSteps });
+  };
+  
+  updateProgress("Fetching data");
+  const data = await fetchReportData(ctx);
+  
+  updateProgress("Processing data");
+  const processed = await processData(ctx, data);
+  
+  updateProgress("Generating charts");
+  const charts = await generateCharts(ctx, processed);
+  
+  updateProgress("Creating PDF");
+  const pdf = await createPDF(ctx, processed, charts);
+  
+  updateProgress("Sending report");
+  await sendReport(ctx, pdf);
+  
+  ctx.set("completed", true);
+};
+```
+
+## Common scheduling use cases
+
+**Data maintenance:**
+- Database cleanup and archiving
+- Log rotation and compression  
+- Cache invalidation and warming
+- Index rebuilding and optimization
+
+**Report generation:**
+- Daily/weekly/monthly business reports
+- System health and performance reports
+- User activity summaries
+- Financial and compliance reports
+
+**System maintenance:**
+- Security scans and updates
+- Backup and disaster recovery
+- Certificate renewal
+- Health checks and monitoring
+
+**Business processes:**
+- Invoice generation and billing
+- Subscription renewals and notifications
+- Inventory reconciliation
+- Customer follow-up campaigns
+
+## Advantages over traditional scheduling
+
+**Reliability:** Tasks survive server restarts, deployments, and failures
+**Scalability:** Distribute tasks across multiple servers without conflicts
+**Observability:** Built-in monitoring and debugging through Restate's UI
+**Error handling:** Automatic retries with exponential backoff
+**State management:** Maintain task state and progress across executions
+**Flexibility:** Dynamic scheduling based on business logic and conditions

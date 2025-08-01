@@ -1,0 +1,517 @@
+---
+title: Handle Timing & Retries
+description: Add delays, timeouts, and retry logic to your applications
+---
+
+Restate provides durable timing mechanisms and automatic retry handling that survive failures and restarts. Build time-aware applications that coordinate reliably with external systems.
+
+Think of these as "time travel" capabilities for your code - you can pause execution, schedule future work, and handle failures gracefully, all while maintaining perfect consistency.
+
+## Sleep and delays
+
+Sleep pauses your handler's execution for a specific amount of time. Unlike regular `setTimeout` or `sleep()` functions, Restate's sleep is durable and efficient.
+
+**What makes Restate sleep special:**
+- **Durable**: If your service crashes during a sleep, it will resume exactly where it left off when restarted
+- **Resource efficient**: Sleeping handlers don't consume CPU or memory - they're completely suspended
+- **Precise**: The handler will resume at the exact time specified, regardless of restarts
+- **Reliable**: The sleep will complete even through system failures
+
+This is perfect for implementing delays, timeouts, scheduled reminders, or any time-based business logic.
+
+**Sleep in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const scheduleReminder = async (ctx: Context, message: string) => {
+  // Wait for 1 hour - handler is suspended, consuming no resources
+  await ctx.sleep(60 * 60 * 1000); // milliseconds
+  
+  // Send the reminder after the delay
+  await NotificationService.send(ctx, message);
+  
+  return { sent: true, message, timestamp: new Date().toISOString() };
+};
+
+// Example with complex timing
+export const processWithDelay = async (ctx: Context, data: ProcessData) => {
+  // Do initial work
+  const result = await ctx.run("initial-work", () => processData(data));
+  
+  // Wait using different time formats  
+  await ctx.sleep(30 * 1000); // 30 seconds
+  // await ctx.sleep({ hours: 1, minutes: 30 }); // Alternative syntax
+  
+  // Continue after delay
+  return await finalizeProcessing(ctx, result);
+};
+```
+
+```java Java
+@Handler
+public ReminderResult scheduleReminder(Context ctx, String message) {
+    // Wait for 1 hour - handler is suspended, consuming no resources
+    ctx.sleep(Duration.ofHours(1));
+    
+    // Send the reminder after the delay
+    NotificationServiceClient.fromContext(ctx).send(message).await();
+    
+    return new ReminderResult(true, message, Instant.now().toString());
+}
+
+@Handler
+public ProcessResult processWithDelay(Context ctx, ProcessData data) {
+    // Do initial work
+    ProcessResult result = ctx.run("initial-work", () -> processData(data));
+    
+    // Wait for 30 seconds
+    ctx.sleep(Duration.ofSeconds(30));
+    
+    // Continue after delay
+    return finalizeProcessing(ctx, result);
+}
+```
+
+```python Python
+async def schedule_reminder(ctx: Context, message: str):
+    # Wait for 1 hour
+    await ctx.sleep(timedelta(hours=1))
+    
+    # Send the reminder after the delay
+    await NotificationService.from_context(ctx).send(message)
+```
+
+```go Go
+func ScheduleReminder(ctx restate.Context, message string) error {
+    // Wait for 1 hour
+    restate.Sleep(ctx, 1*time.Hour)
+    
+    // Send the reminder after the delay
+    return clients.FromCtx(ctx).NotificationService().Send(message)
+}
+```
+
+```rust Rust
+async fn schedule_reminder(ctx: Context, message: String) -> Result<(), Error> {
+    // Wait for 1 hour
+    ctx.sleep(Duration::from_secs(3600)).await?;
+    
+    // Send the reminder after the delay
+    NotificationServiceClient::new(ctx).send(message).await?;
+    Ok(())
+}
+```
+</CodeGroup>
+
+In these examples, the handler will pause for exactly one hour, then continue. During that hour, it consumes no resources. If the service restarts after 30 minutes, the handler will still resume after the remaining 30 minutes.
+
+## Automatic retries
+
+When a handler fails, Restate doesn't just give up - it automatically retries the handler. But here's the key: it's an intelligent retry that skips work that's already been done.
+
+**How Restate's smart retries work:**
+1. Each operation is recorded in a journal as it completes
+2. When a handler fails, Restate looks at the journal to see what was already done
+3. On retry, completed operations are skipped and their previous results are used
+4. Only the failed operation and subsequent operations are re-executed
+
+This means no duplicate payments, no duplicate emails, and no wasted work. Your handlers can fail and retry safely without causing side effects.
+
+<CodeGroup>
+```typescript TypeScript
+export const processPayment = async (ctx: Context, payment: Payment) => {
+  // This will automatically retry on failure
+  const validation = await ctx.run(() => validatePayment(payment));
+  
+  // If this fails, Restate retries without re-running validation
+  const charge = await PaymentService.charge(ctx, payment.amount);
+  
+  // Only runs if previous steps succeeded
+  await NotificationService.sendReceipt(ctx, payment.userId);
+  
+  return { paymentId: charge.id, status: "completed" };
+};
+```
+
+```java Java
+@Handler
+public String processPayment(Context ctx, Payment payment) {
+    // This will automatically retry on failure
+    ValidationResult validation = ctx.run(() -> validatePayment(payment));
+    
+    // If this fails, Restate retries without re-running validation
+    ChargeResult charge = PaymentServiceClient.fromContext(ctx)
+        .charge(payment.getAmount()).await();
+    
+    // Only runs if previous steps succeeded
+    NotificationServiceClient.fromContext(ctx)
+        .sendReceipt(payment.getUserId()).await();
+    
+    return charge.getId();
+}
+```
+
+```python Python
+async def process_payment(ctx: Context, payment: Payment):
+    # Step 1: This will automatically retry on failure
+    validation = await ctx.run("validate-payment", lambda: validate_payment(payment))
+    
+    # Step 2: If this fails, Restate retries without re-running validation
+    charge = await PaymentService.from_context(ctx).charge(payment.amount)
+    
+    # Step 3: Only runs if previous steps succeeded
+    await NotificationService.from_context(ctx).send_receipt(payment.user_id)
+    
+    return {"payment_id": charge.id, "status": "completed", "validation_id": validation.id}
+```
+</CodeGroup>
+
+In this example, if the payment service call fails, Restate will retry the entire handler. But it won't re-run the validation step - it will use the previous validation result and jump straight to retrying the payment call.
+
+## Timeout handling
+
+Sometimes external services are slow or unresponsive. Timeout handling lets you set limits on how long you're willing to wait, then take appropriate action if those limits are exceeded.
+
+**Timeout strategies:**
+- **Race against time**: Use `Promise.race()` to compete your operation against a sleep timer
+- **Graceful degradation**: Fall back to alternative approaches when timeouts occur
+- **User notification**: Alert users or administrators when operations time out
+- **Resource cleanup**: Cancel or clean up resources when operations are abandoned
+
+The key is combining Restate's durable sleep with error handling to create reliable timeout behavior.
+
+**Timeout handling in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processWithTimeout = async (ctx: Context, task: Task) => {
+  try {
+    // Race between the actual work and a timeout
+    const result = await Promise.race([
+      ExternalService.processTask(ctx, task),
+      ctx.sleep(30000).then(() => { throw new Error("Timeout after 30s"); })
+    ]);
+    
+    return result;
+  } catch (error) {
+    if (error.message.includes("Timeout")) {
+      // Handle timeout specifically
+      await NotificationService.sendTimeoutAlert(ctx, task.id);
+      throw new Error("Task timed out and alert sent");
+    }
+    throw error; // Re-throw other errors
+  }
+};
+```
+
+```java Java
+@Handler
+public String processWithTimeout(Context ctx, Task task) {
+    try {
+        // Set up timeout using completable futures
+        CompletableFuture<String> work = ExternalServiceClient.fromContext(ctx)
+            .processTask(task).toCompletableFuture();
+        
+        CompletableFuture<String> timeout = ctx.timer(Duration.ofSeconds(30))
+            .thenApply(v -> { throw new RuntimeException("Timeout after 30s"); });
+        
+        return CompletableFuture.anyOf(work, timeout).get();
+        
+    } catch (Exception e) {
+        if (e.getMessage().contains("Timeout")) {
+            NotificationServiceClient.fromContext(ctx)
+                .sendTimeoutAlert(task.getId()).await();
+        }
+        throw new RuntimeException("Task failed", e);
+    }
+}
+```
+</CodeGroup>
+
+In this example, we race the actual work against a 30-second timeout. If the work completes first, we return the result. If the timeout wins, we send an alert and throw an error. This prevents handlers from waiting indefinitely for slow external services.
+
+## Delayed execution
+
+Delayed execution lets you schedule work to happen at a specific time in the future. This is different from sleep - instead of pausing the current handler, you're scheduling a completely separate handler to run later.
+
+<CodeGroup>
+```typescript TypeScript
+export const scheduleFollowUp = async (ctx: Context, customerId: string) => {
+  // Schedule a follow-up call for tomorrow at 9 AM
+  const tomorrow9AM = new Date();
+  tomorrow9AM.setDate(tomorrow9AM.getDate() + 1);
+  tomorrow9AM.setHours(9, 0, 0, 0);
+  
+  const delay = tomorrow9AM.getTime() - Date.now();
+  
+  await FollowUpService.makeCall(ctx, customerId, { delay });
+};
+
+// Or use ctx.sleep for the same effect
+export const scheduleFollowUpWithSleep = async (ctx: Context, customerId: string) => {
+  // Calculate delay until tomorrow 9 AM
+  const tomorrow9AM = new Date();
+  tomorrow9AM.setDate(tomorrow9AM.getDate() + 1);
+  tomorrow9AM.setHours(9, 0, 0, 0);
+  
+  const delay = tomorrow9AM.getTime() - Date.now();
+  await ctx.sleep(delay);
+  
+  // This runs tomorrow at 9 AM
+  await FollowUpService.makeCall(ctx, customerId);
+};
+```
+</CodeGroup>
+
+The examples show two approaches: using delayed calls to schedule other handlers, or using sleep within the current handler. Both achieve the same result - work happens at the specified future time.
+
+## Retry patterns
+
+While Restate handles basic retries automatically, sometimes you need more sophisticated retry logic. Here are common patterns for handling retries in specific ways:
+
+### Exponential backoff
+
+Exponential backoff increases the delay between retry attempts. This prevents overwhelming a failing service and gives it time to recover.
+```typescript
+export const retryWithBackoff = async (ctx: Context, operation: () => Promise<any>) => {
+  let attempt = 0;
+  const maxAttempts = 5;
+  
+  while (attempt < maxAttempts) {
+    try {
+      return await ctx.run(`attempt-${attempt}`, operation);
+    } catch (error) {
+      attempt++;
+      if (attempt >= maxAttempts) throw error;
+      
+      // Exponential backoff: 1s, 2s, 4s, 8s
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      await ctx.sleep(delay);
+    }
+  }
+};
+```
+
+This pattern tries an operation up to 5 times with increasing delays: 1 second, 2 seconds, 4 seconds, 8 seconds. Each failed attempt has a longer delay before the next retry, giving the external service more time to recover.
+
+### Circuit breaker pattern
+
+Circuit breakers prevent cascading failures by temporarily stopping calls to a failing service. After too many failures, the circuit "opens" and calls are rejected immediately instead of waiting for more failures.
+```typescript
+export const circuitBreakerCall = async (ctx: Context, serviceCall: () => Promise<any>) => {
+  const failureCount = (await ctx.get<number>("failures")) ?? 0;
+  const lastFailure = await ctx.get<number>("lastFailure");
+  
+  // Circuit is open (too many failures recently)
+  if (failureCount >= 5 && lastFailure && (Date.now() - lastFailure) < 60000) {
+    throw new Error("Circuit breaker is open");
+  }
+  
+  try {
+    const result = await ctx.run("service-call", serviceCall);
+    // Reset failure count on success
+    ctx.clear("failures");
+    ctx.clear("lastFailure");
+    return result;
+    
+  } catch (error) {
+    // Track failure
+    ctx.set("failures", failureCount + 1);
+    ctx.set("lastFailure", Date.now());
+    throw error;
+  }
+};
+```
+
+This pattern tracks failures in state. After 5 failures within 60 seconds, the circuit opens and immediately rejects calls. On success, the failure count is reset. This prevents hammering a failing service while allowing recovery.
+
+### Terminal error handling
+
+Sometimes you want to stop retries immediately instead of letting Restate retry forever. Terminal errors tell Restate "don't retry this - it will never succeed" and immediately end the invocation.
+
+**When to use terminal errors:**
+- Invalid input that will never be valid (malformed data, wrong format)
+- Authentication failures (expired tokens, invalid credentials)
+- Business logic violations (insufficient funds, permissions denied)
+- Permanent external service errors (resource not found, method not supported)
+
+**How terminal errors work:**
+- Restate stops retrying immediately
+- The error propagates back to the caller
+- You can specify an HTTP status code and custom message
+- The handler execution ends without further retries
+
+```typescript
+export const processPaymentWithValidation = async (ctx: Context, payment: Payment) => {
+  // Validate input - throw terminal error for invalid data
+  if (!payment.amount || payment.amount <= 0) {
+    throw new TerminalError("Payment amount must be positive", { errorCode: 400 });
+  }
+  
+  if (!payment.customerId) {
+    throw new TerminalError("Customer ID is required", { errorCode: 400 });
+  }
+  
+  try {
+    // This will retry on transient failures
+    const result = await ctx.run("charge-payment", async () => {
+      return await PaymentService.charge(payment);
+    });
+    
+    return result;
+    
+  } catch (error) {
+    // Check if this is a permanent failure
+    if (error.message.includes("insufficient funds")) {
+      throw new TerminalError("Insufficient funds", { errorCode: 402 });
+    }
+    
+    if (error.message.includes("invalid card")) {
+      throw new TerminalError("Invalid payment method", { errorCode: 400 });
+    }
+    
+    // Let other errors retry (network issues, temporary service errors)
+    throw error;
+  }
+};
+```
+
+In this example, input validation errors and business logic failures (insufficient funds) are terminal - retrying won't fix them. But network errors or temporary service issues will still retry automatically.
+
+**Java terminal errors:**
+```java
+@Handler
+public PaymentResult processPaymentWithValidation(Context ctx, Payment payment) {
+    // Validate input - throw terminal error for invalid data
+    if (payment.getAmount() <= 0) {
+        throw new TerminalException(400, "Payment amount must be positive");
+    }
+    
+    try {
+        PaymentResult result = ctx.run("charge-payment", () -> {
+            return PaymentService.charge(payment);
+        });
+        
+        return result;
+        
+    } catch (Exception error) {
+        // Check if this is a permanent failure
+        if (error.getMessage().contains("insufficient funds")) {
+            throw new TerminalException(402, "Insufficient funds");
+        }
+        
+        // Let other errors retry
+        throw error;
+    }
+}
+```
+
+**Python terminal errors:**
+```python
+async def process_payment_with_validation(ctx: Context, payment: Payment):
+    # Validate input - throw terminal error for invalid data
+    if not payment.amount or payment.amount <= 0:
+        raise TerminalError("Payment amount must be positive", error_code=400)
+    
+    if not payment.customer_id:
+        raise TerminalError("Customer ID is required", error_code=400)
+    
+    try:
+        # This will retry on transient failures
+        result = await ctx.run("charge-payment", 
+            lambda: PaymentService.charge(payment))
+        
+        return result
+        
+    except Exception as error:
+        # Check if this is a permanent failure
+        if "insufficient funds" in str(error):
+            raise TerminalError("Insufficient funds", error_code=402)
+        
+        if "invalid card" in str(error):
+            raise TerminalError("Invalid payment method", error_code=400)
+        
+        # Let other errors retry
+        raise error
+```
+
+Terminal errors give you fine-grained control over when to stop retrying, helping you build more efficient and user-friendly applications.
+
+## Error handling best practices
+
+Combine Restate's automatic retries with strategic terminal errors for robust error handling:
+
+**Design for failure:**
+- Assume external services will fail and design accordingly
+- Use circuit breakers for frequently failing services
+- Implement compensation logic (sagas) for multi-step processes
+- Monitor error rates and patterns to identify systemic issues
+
+**Categorize your errors:**
+- **Transient errors:** Let Restate retry (network timeouts, temporary service issues)
+- **Terminal errors:** Stop immediately (validation failures, business rule violations)
+- **Permanent errors:** Use terminal errors (resource not found, unauthorized access)
+
+**Provide meaningful error messages:**
+- Include enough context for debugging
+- Use appropriate HTTP status codes
+- Consider user-facing vs. system error messages
+- Log errors for monitoring and troubleshooting
+
+By combining automatic retries, terminal errors, circuit breakers, and timeouts, you can build applications that gracefully handle both temporary glitches and permanent failures.
+
+## Awakeables - Wait for External Events
+
+Sometimes you need to wait for external systems or human input to complete before continuing. Awakeables let you pause execution until an external event happens, without consuming resources while waiting.
+
+**Perfect for:**
+- Waiting for webhook callbacks
+- Human approval workflows
+- External system notifications
+- Third-party service completion
+
+**How awakeables work:**
+1. Create an awakeable and get its unique ID
+2. Share the ID with the external system (via API, webhook registration, etc.)
+3. Your handler pauses, waiting for the awakeable to be resolved
+4. External system calls Restate with the awakeable ID and result
+5. Your handler resumes with the result
+
+```typescript
+export const processWithExternalApproval = async (ctx: Context, request: ApprovalRequest) => {
+  // Create an awakeable for external completion
+  const awakeable = ctx.awakeable<ApprovalResult>();
+  
+  // Register the awakeable ID with external approval system
+  await ctx.run("register-approval", async () => {
+    return await approvalSystem.requestApproval({
+      requestId: request.id,
+      awakeableId: awakeable.id,
+      callbackUrl: `${RESTATE_URL}/awakeables/${awakeable.id}`
+    });
+  });
+  
+  // Wait for external system to resolve it (could be hours or days)
+  const approvalResult = await awakeable.promise;
+  
+  if (approvalResult.approved) {
+    return await processApprovedRequest(ctx, request);
+  } else {
+    return { status: "rejected", reason: approvalResult.reason };
+  }
+};
+```
+
+**External system resolves the awakeable:**
+```bash
+# External system calls this when approval is ready
+curl -X POST ${RESTATE_URL}/awakeables/awakeable_1234567890abcdef \
+  --json '{"approved": true, "approver": "manager@company.com"}'
+```
+
+**Key benefits:**
+- **Resource efficient**: Handlers consume no CPU or memory while waiting
+- **Durable**: Awakeables survive service restarts and failures
+- **Flexible**: External systems can resolve with any data structure
+- **Timeout-safe**: Combine with `Promise.race()` and `ctx.sleep()` for timeouts
+
+Awakeables enable sophisticated coordination between your services and external systems without polling or complex state management.
+

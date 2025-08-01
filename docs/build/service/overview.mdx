@@ -1,0 +1,90 @@
+---
+title: Service Overview
+description: Build fast, scalable functions for processing and business logic
+---
+
+Services process requests without maintaining persistent state between calls. They're perfect for data processing, transformations, API calls, and business logic that doesn't need to remember anything between requests.
+
+## Define service functions
+
+Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+
+```typescript TypeScript
+export const processData = async (ctx: Context, input: DataInput) => {
+  // Process the input data
+  const result = await ctx.run("transform-data", () => transformData(input));
+  
+  // Call external APIs safely
+  const enriched = await ctx.run("enrich-data", () => callExternalAPI(result));
+  
+  return {
+    processed: true,
+    result: enriched,
+    timestamp: new Date().toISOString()
+  };
+};
+```
+
+```java Java
+@Handler
+public ProcessResult processData(Context ctx, DataInput input) {
+    // Process the input data
+    TransformResult result = ctx.run("transform-data", () -> transformData(input));
+    
+    // Call external APIs safely
+    EnrichedData enriched = ctx.run("enrich-data", () -> callExternalAPI(result));
+    
+    return new ProcessResult(true, enriched, Instant.now().toString());
+}
+```
+
+```python Python
+async def process_data(ctx: Context, input: DataInput):
+    # Process the input data
+    result = await ctx.run("transform-data", lambda: transform_data(input))
+    
+    # Call external APIs safely
+    enriched = await ctx.run("enrich-data", lambda: call_external_api(result))
+    
+    return {
+        "processed": True,
+        "result": enriched,
+        "timestamp": datetime.now().isoformat()
+    }
+```
+
+## Key characteristics
+
+**No persistent state**: Each request is independent and doesn't remember previous requests.
+
+**Horizontal scaling**: Multiple instances can run simultaneously without coordination.
+
+**High throughput**: Optimized for fast, concurrent processing.
+
+**Automatic durability**: Functions automatically get reliability and retry capabilities.
+
+## When to use Services
+
+Perfect for data processing, transformations, API integrations, business logic, image/document processing, mathematical computations, and ETL operations.
+
+Not ideal for operations that need to remember previous requests, like shopping carts, user sessions, or workflows that coordinate multiple steps over time.
+
+## Call service functions
+
+```bash cURL
+curl localhost:8080/DataProcessor/processData \
+  --json '{"userId": "123", "data": {"name": "John", "age": 30}}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .serviceClient(DataProcessor)
+  .processData({ userId: "123", data: { name: "John", age: 30 } });
+```
+
+```java Java Client
+ProcessResult result = DataProcessorClient.fromContext(ctx)
+    .processData(inputData).await();
+```
+
+Service functions automatically get durability and retry capabilities while remaining simple to develop, test, and deploy at any scale.

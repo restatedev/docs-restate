@@ -1,0 +1,224 @@
+---
+title: Durable Execution
+description: Make external operations safe for retries with ctx.run()
+---
+
+Durable execution helpers ensure your functions work correctly during retries and failures. The main helper is `ctx.run()`, which wraps non-deterministic operations to make them safe for replay.
+
+## ctx.run()
+
+The foundation of reliable external system integration. Wraps any code that might produce different results on each execution, making it safe for retries.
+
+### Why you need ctx.run()
+
+Without `ctx.run()`, operations like external API calls, database queries, random number generation, current timestamps, and file system operations would produce different results during replay, breaking Restate's recovery guarantees.
+
+**How it works:**
+1. **First execution**: Restate runs your code and stores the result in its journal
+2. **On retry/replay**: Restate returns the stored result without re-executing
+3. **Your code stays deterministic** while still calling external systems
+
+<CodeGroup>
+```typescript TypeScript
+// ❌ Don't do this - will break on retry
+const timestamp = new Date().toISOString();
+const userId = Math.random().toString();
+const dbResult = await database.query("SELECT * FROM users");
+
+// ✅ Do this - safe for retries
+const timestamp = await ctx.run("get-timestamp", () => new Date().toISOString());
+const userId = await ctx.run("generate-id", () => Math.random().toString());
+const dbResult = await ctx.run("query-users", () => database.query("SELECT * FROM users"));
+```
+
+```java Java
+// ❌ Don't do this - will break on retry
+String timestamp = Instant.now().toString();
+String userId = UUID.randomUUID().toString();
+List<User> dbResult = database.query("SELECT * FROM users");
+
+// ✅ Do this - safe for retries
+String timestamp = ctx.run("get-timestamp", () -> Instant.now().toString());
+String userId = ctx.run("generate-id", () -> UUID.randomUUID().toString());
+List<User> dbResult = ctx.run("query-users", () -> database.query("SELECT * FROM users"));
+```
+
+```python Python
+# ❌ Don't do this - will break on retry
+timestamp = datetime.now().isoformat()
+user_id = str(uuid.uuid4())
+db_result = await database.query("SELECT * FROM users")
+
+# ✅ Do this - safe for retries
+timestamp = await ctx.run("get-timestamp", lambda: datetime.now().isoformat())
+user_id = await ctx.run("generate-id", lambda: str(uuid.uuid4()))
+db_result = await ctx.run("query-users", lambda: database.query("SELECT * FROM users"))
+```
+</CodeGroup>
+
+### External API calls
+
+<CodeGroup>
+```typescript TypeScript
+const apiResult = await ctx.run("fetch-user-data", async () => {
+  const response = await fetch(`https://api.example.com/users/${userId}`);
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.status}`);
+  }
+  return response.json();
+});
+```
+
+```java Java
+ApiResponse apiResult = ctx.run("fetch-user-data", () -> {
+    HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+    if (response.statusCode() != 200) {
+        throw new RuntimeException("API call failed: " + response.statusCode());
+    }
+    return objectMapper.readValue(response.body(), ApiResponse.class);
+});
+```
+
+```python Python
+api_result = await ctx.run("fetch-user-data", async lambda: {
+    response = await httpx.get(f"https://api.example.com/users/{user_id}")
+    response.raise_for_status()
+    return response.json()
+})
+```
+</CodeGroup>
+
+### Database operations
+
+<CodeGroup>
+```typescript TypeScript
+const dbResult = await ctx.run("update-user-profile", async () => {
+  return await database.users.update(userId, {
+    name: profile.name,
+    email: profile.email,
+    updatedAt: new Date()
+  });
+});
+```
+
+```java Java
+DatabaseResult dbResult = ctx.run("update-user-profile", () -> {
+    return database.users()
+        .update(userId)
+        .setName(profile.getName())
+        .setEmail(profile.getEmail())
+        .setUpdatedAt(Instant.now())
+        .execute();
+});
+```
+
+```python Python
+db_result = await ctx.run("update-user-profile", lambda: 
+    database.users.update(user_id, {
+        "name": profile.name,
+        "email": profile.email,
+        "updated_at": datetime.now()
+    })
+)
+```
+</CodeGroup>
+
+### Random value generation
+
+<CodeGroup>
+```typescript TypeScript
+// Generate unique IDs safely
+const requestId = await ctx.run("generate-request-id", () => 
+  `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+);
+
+// Generate random selections
+const selectedItem = await ctx.run("select-random-item", () => {
+  const randomIndex = Math.floor(Math.random() * items.length);
+  return items[randomIndex];
+});
+```
+
+```java Java
+// Generate unique IDs safely
+String requestId = ctx.run("generate-request-id", () -> 
+    "req_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 9)
+);
+
+// Generate random selections
+Item selectedItem = ctx.run("select-random-item", () -> {
+    int randomIndex = new Random().nextInt(items.size());
+    return items.get(randomIndex);
+});
+```
+
+```python Python
+# Generate unique IDs safely
+request_id = await ctx.run("generate-request-id", lambda:
+    f"req_{int(time.time())}_{uuid.uuid4().hex[:9]}"
+)
+
+# Generate random selections
+selected_item = await ctx.run("select-random-item", lambda: 
+    random.choice(items)
+)
+```
+</CodeGroup>
+
+### File system operations
+
+```typescript TypeScript
+const fileContent = await ctx.run("read-config-file", async () => {
+  return await fs.readFile('/etc/myapp/config.json', 'utf8');
+});
+
+const savedPath = await ctx.run("save-uploaded-file", async () => {
+  const filename = `upload_${Date.now()}_${file.originalname}`;
+  const path = `/uploads/${filename}`;
+  await fs.writeFile(path, file.buffer);
+  return path;
+});
+```
+
+### Third-party service calls
+
+```typescript TypeScript
+// Send email
+const emailResult = await ctx.run("send-welcome-email", async () => {
+  return await emailService.send({
+    to: user.email,
+    subject: "Welcome!",
+    template: "welcome",
+    data: { name: user.name }
+  });
+});
+
+// Payment processing
+const paymentResult = await ctx.run("process-payment", async () => {
+  return await stripe.paymentIntents.create({
+    amount: order.total * 100, // Convert to cents
+    currency: 'usd',
+    customer: order.customerId
+  });
+});
+```
+
+## Best practices
+
+**Use descriptive operation names**: Choose clear names like `"fetch-user-profile"` instead of `"api-call"`.
+
+**Keep operations focused**: Each `ctx.run()` should wrap a single logical operation.
+
+**Handle errors appropriately**: Let transient errors bubble up for automatic retry, but catch and throw terminal errors for permanent failures.
+
+**Don't wrap deterministic code**: Pure functions and calculations don't need `ctx.run()`.
+
+```typescript TypeScript
+// ❌ Don't wrap deterministic operations
+const sum = await ctx.run("add-numbers", () => a + b);
+
+// ✅ Do wrap non-deterministic operations
+const timestamp = await ctx.run("get-current-time", () => new Date().toISOString());
+```
+
+The `ctx.run()` helper is essential for building reliable applications that integrate with external systems while maintaining Restate's exactly-once execution guarantees.

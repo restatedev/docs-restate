@@ -1,0 +1,572 @@
+---
+title: Connect External Systems
+description: Integrate databases, APIs, and third-party services reliably
+---
+
+Integrate with external systems using Restate's durable patterns. Make database calls, API requests, and handle webhooks while maintaining consistency and reliability across failures.
+
+External integrations are where most distributed systems break down. Network failures, service outages, and inconsistent state between systems cause endless headaches. Restate solves these problems with durable execution patterns that keep your integrations reliable.
+
+## The ctx.run() Pattern
+
+The foundation of reliable external system integration is `ctx.run()` - this wraps any code that might produce different results on each execution, making it safe for retries.
+
+**Why you need ctx.run():**
+Without `ctx.run()`, operations like:
+- External API calls
+- Database queries  
+- Random number generation
+- Current timestamps
+- File system operations
+
+Would produce different results during replay, breaking Restate's recovery guarantees.
+
+**How it works:**
+1. **First execution**: Restate runs your code and stores the result in its journal
+2. **On retry/replay**: Restate returns the stored result without re-executing
+3. **Your code stays deterministic** while still calling external systems
+
+```typescript
+// ❌ Don't do this - will break on retry
+const timestamp = new Date().toISOString();
+const userId = Math.random().toString();
+const dbResult = await database.query("SELECT * FROM users");
+
+// ✅ Do this - safe for retries
+const timestamp = await ctx.run("get-timestamp", () => new Date().toISOString());
+const userId = await ctx.run("generate-id", () => Math.random().toString());
+const dbResult = await ctx.run("query-users", () => database.query("SELECT * FROM users"));
+```
+
+## Database connections
+
+Use `ctx.run()` to wrap your database calls so they're tracked in Restate's journal. This prevents duplicate operations during retries and ensures consistent state.
+
+**Database integration best practices:**
+- Database calls are non-deterministic (they might return different results each time)
+- Without journaling, retries could cause duplicate inserts, updates, or deletes
+- `ctx.run()` records the result so retries use the original result instead of re-executing
+- This maintains exactly-once semantics even with failures and retries
+
+**Database integration handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const updateUserProfile = async (ctx: Context, profile: UserProfile) => {
+  // Safe database call - won't duplicate on retry
+  const result = await ctx.run("update-db", async () => {
+    return await database.users.update(profile.id, {
+      name: profile.name,
+      email: profile.email,
+      updatedAt: new Date()
+    });
+  });
+  
+  // Update local state after successful DB update
+  ctx.set("profile", profile);
+  ctx.set("lastUpdated", Date.now());
+  
+  return { success: true, userId: profile.id, result };
+};
+```
+
+```java Java
+@Handler
+public UpdateResult updateUserProfile(Context ctx, UserProfile profile) {
+    // Safe database call - won't duplicate on retry
+    DatabaseResult result = ctx.run("update-db", () -> {
+        return database.users().update(profile.getId())
+            .setName(profile.getName())
+            .setEmail(profile.getEmail())
+            .setUpdatedAt(Instant.now())
+            .setName(profile.getName())
+            .setEmail(profile.getEmail())
+            .setUpdatedAt(Instant.now())
+            .execute();
+    });
+    
+    // Update local state after successful DB update
+    ctx.set("profile", profile);
+    ctx.set("lastUpdated", System.currentTimeMillis());
+    
+    return new UpdateResult(true, profile.getId(), result.getId());
+}
+```
+
+```python Python
+async def update_user_profile(ctx: Context, profile: UserProfile):
+    # Safe database call - won't duplicate on retry
+    async def update_db():
+        return await database.users.update(profile.id, {
+            "name": profile.name,
+            "email": profile.email,
+            "updated_at": datetime.now()
+        })
+    
+    result = await ctx.run("update-db", update_db)
+    
+    # Update local state after successful DB update
+    await ctx.set("profile", profile)
+    await ctx.set("lastUpdated", time.time())
+    
+    return {"success": True, "user_id": profile.id, "result": result}
+```
+</CodeGroup>
+
+**Invoking database handlers:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/UserService/user123/updateProfile \
+  --json '{"name": "John Doe", "email": "john@example.com"}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .serviceClient(UserService, "user123")
+  .updateUserProfile({ name: "John Doe", email: "john@example.com" });
+```
+
+```java Java Client
+UpdateResult result = UserServiceClient.fromContext(ctx, "user123")
+    .updateUserProfile(profile).await();
+```
+</CodeGroup>
+
+In this example, the database update is wrapped in `ctx.run()` with a unique name. If the handler retries, it will skip the database call and use the previous result. The state updates happen after the database succeeds, creating a consistent transaction across both systems.
+
+## API calls
+
+External API calls are inherently unreliable - networks fail, services go down, and responses can be slow or inconsistent. `ctx.run()` makes API calls safe by ensuring they execute exactly once, even during retries.
+
+**Common API integration challenges Restate solves:**
+- Network timeouts and retries causing duplicate API calls
+- API rate limits and backpressure handling
+- Inconsistent responses during failures
+- Coordinating state between your system and external APIs
+- Rolling back local changes when API calls fail
+
+**API integration handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const syncWithExternalAPI = async (ctx: Context, data: SyncData) => {
+  // Call external API - tracked in journal
+  const apiResponse = await ctx.run("external-api-call", async () => {
+    const response = await fetch('https://api.example.com/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.status}`);
+    }
+    
+    return response.json();
+  });
+  
+  // Process the response
+  await ctx.run("update-local-data", async () => {
+    return await updateLocalDatabase(apiResponse);
+  });
+  
+  return { syncId: apiResponse.id, status: "completed" };
+};
+```
+
+```java Java
+@Handler
+public String syncWithExternalAPI(Context ctx, SyncData data) {
+    // Call external API - tracked in journal
+    ApiResponse apiResponse = ctx.run("external-api-call", () -> {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("https://api.example.com/sync"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(data)))
+            .build();
+        
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("API call failed: " + response.statusCode());
+        }
+        
+        return objectMapper.readValue(response.body(), ApiResponse.class);
+    });
+    
+    // Process the response
+    ctx.run("update-local-data", () -> updateLocalDatabase(apiResponse));
+    
+    return apiResponse.getId();
+}
+```
+
+```python Python
+async def sync_with_external_api(ctx: Context, data: SyncData):
+    # Call external API - tracked in journal
+    async def make_api_call():
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.example.com/sync",
+                json=data.dict()
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    api_response = await ctx.run("external-api-call", make_api_call)
+    
+    # Process the response
+    await ctx.run("update-local-data", 
+                  lambda: update_local_database(api_response))
+    
+    return {"sync_id": api_response["id"], "status": "completed"}
+```
+</CodeGroup>
+
+This example shows the two-step pattern: first make the API call safely, then process the response. Both steps are journaled separately, so if processing fails, only the processing step retries - the API call result is preserved.
+
+## Webhooks and callbacks
+
+Webhooks and callbacks represent the "other direction" of integration - external systems calling into your application. Restate makes these reliable by providing durable handlers that can wait for callbacks and process webhooks consistently.
+
+**Webhook challenges Restate solves:**
+- Duplicate webhook deliveries causing duplicate processing
+- Failed webhook processing losing data
+- Long-running webhook processing that needs to survive restarts
+- Coordinating webhook data with internal state
+- Handling webhook retries and timeouts properly
+
+<CodeGroup>
+```typescript TypeScript
+// Webhook receiver
+export const handleWebhook = async (ctx: Context, payload: WebhookPayload) => {
+  // Validate and process webhook
+  const validatedData = await ctx.run("validate-webhook", async () => {
+    return validateWebhookSignature(payload);
+  });
+  
+  if (!validatedData.isValid) {
+    throw new Error("Invalid webhook signature");
+  }
+  
+  // Process the webhook data
+  await ctx.run("process-webhook", async () => {
+    switch (payload.event) {
+      case "payment.completed":
+        return await processPaymentComplete(payload.data);
+      case "user.created":
+        return await processUserCreated(payload.data);
+      default:
+        throw new Error(`Unknown event: ${payload.event}`);
+    }
+  });
+  
+  return { status: "processed", eventId: payload.id };
+};
+
+// Durable callback handler
+export const waitForCallback = async (ctx: Context, callbackId: string) => {
+  // Register callback expectation
+  await ctx.run("register-callback", async () => {
+    return await registerCallbackExpectation(callbackId);
+  });
+  
+  // Wait for callback with timeout
+  try {
+    const result = await Promise.race([
+      ctx.promise<CallbackData>(`callback-${callbackId}`),
+      ctx.sleep(300000).then(() => { // 5 minute timeout
+        throw new Error("Callback timeout");
+      })
+    ]);
+    
+    return result.value;
+  } catch (error) {
+    // Handle timeout or other errors
+    await ctx.run("cleanup-callback", async () => {
+      return await cleanupCallbackExpectation(callbackId);
+    });
+    throw error;
+  }
+};
+```
+</CodeGroup>
+
+The webhook example shows validation and processing steps, while the callback example demonstrates durable promises - waiting for external systems to call back with results. Both patterns use `ctx.run()` to ensure reliable processing.
+
+## Third-party service integration
+
+Real-world integrations often involve popular third-party services like payment processors, email providers, or cloud services. These integrations need to coordinate multiple API calls, handle webhooks, and maintain consistent state across systems.
+
+<CodeGroup>
+```typescript TypeScript
+export const processStripePayment = async (ctx: Context, payment: PaymentRequest) => {
+  // Create Stripe payment intent
+  const paymentIntent = await ctx.run("create-stripe-intent", async () => {
+    return await stripe.paymentIntents.create({
+      amount: payment.amount,
+      currency: payment.currency,
+      customer: payment.customerId,
+      metadata: { orderId: payment.orderId }
+    });
+  });
+  
+  // Store payment intent ID
+  ctx.set("stripePaymentIntentId", paymentIntent.id);
+  
+  // Send confirmation email
+  await ctx.run("send-email", async () => {
+    return await sendgrid.send({
+      to: payment.customerEmail,
+      from: 'orders@company.com',
+      subject: 'Payment Confirmation',
+      html: `Payment of ${payment.amount} is being processed.`
+    });
+  });
+  
+  return {
+    paymentIntentId: paymentIntent.id,
+    clientSecret: paymentIntent.client_secret
+  };
+};
+
+export const handleStripeWebhook = async (ctx: Context, event: StripeEvent) => {
+  if (event.type === 'payment_intent.succeeded') {
+    const paymentIntent = event.data.object;
+    
+    // Update order status
+    await ctx.run("update-order", async () => {
+      return await database.orders.update(paymentIntent.metadata.orderId, {
+        status: 'paid',
+        stripePaymentIntentId: paymentIntent.id,
+        paidAt: new Date()
+      });
+    });
+    
+    // Send success notification
+    await NotificationService.sendPaymentSuccess(ctx, paymentIntent.metadata.orderId);
+  }
+  
+  return { handled: true };
+};
+```
+</CodeGroup>
+
+This Stripe integration example shows the complete flow: create a payment intent, store the ID in state for reference, send a confirmation email, and handle the success webhook. Each step is journaled, so failures won't cause duplicate charges or emails.
+
+## Error handling and resilience
+
+External systems fail, and your integrations need to handle these failures gracefully. Restate provides patterns for fallbacks, circuit breakers, and resilient error handling that maintain system consistency even when external dependencies are down.
+
+<CodeGroup>
+```typescript TypeScript
+export const resilientExternalCall = async (ctx: Context, request: ApiRequest) => {
+  try {
+    // Try primary service
+    const result = await ctx.run("primary-service", async () => {
+      return await primaryService.call(request);
+    });
+    
+    return result;
+    
+  } catch (primaryError) {
+    // Fall back to secondary service
+    try {
+      const fallbackResult = await ctx.run("fallback-service", async () => {
+        return await fallbackService.call(request);
+      });
+      
+      // Log fallback usage
+      await ctx.run("log-fallback", async () => {
+        return await logService.warn("Used fallback service", {
+          originalError: primaryError.message,
+          requestId: request.id
+        });
+      });
+      
+      return fallbackResult;
+      
+    } catch (fallbackError) {
+      // Both services failed - store for later retry
+      ctx.set("failedRequest", request);
+      ctx.set("lastFailure", Date.now());
+      
+      throw new Error("All external services unavailable");
+    }
+  }
+};
+```
+</CodeGroup>
+
+This example shows a resilient pattern: try the primary service, fall back to a secondary service if it fails, and store the request for later retry if both services are down. Each service call is journaled separately for maximum reliability.
+
+## Terminal errors for permanent failures
+
+Sometimes external system errors are permanent and shouldn't be retried. Use terminal errors to stop retries immediately for these cases:
+
+<CodeGroup>
+```typescript TypeScript
+export const processApiRequest = async (ctx: Context, request: ApiRequest) => {
+  try {
+    const result = await ctx.run("external-api-call", async () => {
+      const response = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: JSON.stringify(request.data)
+      });
+      
+      // Terminal errors for client errors (4xx) - don't retry
+      if (response.status >= 400 && response.status < 500) {
+        if (response.status === 401) {
+          throw new TerminalError("Authentication failed", { errorCode: 401 });
+        }
+        if (response.status === 403) {
+          throw new TerminalError("Access forbidden", { errorCode: 403 });
+        }
+        if (response.status === 404) {
+          throw new TerminalError("Resource not found", { errorCode: 404 });
+        }
+        if (response.status === 422) {
+          throw new TerminalError("Invalid request data", { errorCode: 422 });
+        }
+        
+        // Generic client error
+        throw new TerminalError(`Client error: ${response.status}`, { errorCode: response.status });
+      }
+      
+      // Server errors (5xx) will retry automatically
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+      
+      return await response.json();
+    });
+    
+    return { success: true, data: result };
+    
+  } catch (error) {
+    if (error instanceof TerminalError) {
+      // Log terminal errors but don't retry
+      await ctx.run("log-terminal-error", async () => {
+        return await LogService.error("Terminal API error", {
+          request: request.url,
+          error: error.message,
+          code: error.errorCode
+        });
+      });
+      throw error;
+    }
+    
+    // Other errors will retry automatically
+    throw error;
+  }
+};
+```
+
+```java Java
+@Handler
+public ApiResult processApiRequest(Context ctx, ApiRequest request) {
+    try {
+        ApiResponse result = ctx.run("external-api-call", () -> {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(request.getUrl()))
+                .method(request.getMethod(), 
+                    HttpRequest.BodyPublishers.ofString(request.getData()))
+                .build();
+            
+            HttpResponse<String> response = client.send(httpRequest, 
+                HttpResponse.BodyHandlers.ofString());
+            
+            // Terminal errors for client errors (4xx) - don't retry
+            if (response.statusCode() >= 400 && response.statusCode() < 500) {
+                switch (response.statusCode()) {
+                    case 401:
+                        throw new TerminalException(401, "Authentication failed");
+                    case 403:
+                        throw new TerminalException(403, "Access forbidden");
+                    case 404:
+                        throw new TerminalException(404, "Resource not found");
+                    case 422:
+                        throw new TerminalException(422, "Invalid request data");
+                    default:
+                        throw new TerminalException(response.statusCode(), 
+                            "Client error: " + response.statusCode());
+                }
+            }
+            
+            // Server errors (5xx) will retry automatically
+            if (response.statusCode() >= 500) {
+                throw new RuntimeException("Server error: " + response.statusCode());
+            }
+            
+            return objectMapper.readValue(response.body(), ApiResponse.class);
+        });
+        
+        return new ApiResult(true, result);
+        
+    } catch (TerminalException error) {
+        // Log terminal errors but don't retry
+        ctx.run("log-terminal-error", () -> 
+            LogService.error("Terminal API error", error.getMessage())
+        );
+        throw error;
+    }
+}
+```
+
+```python Python
+async def process_api_request(ctx: Context, request: ApiRequest):
+    try:
+        async def make_api_call():
+            async with httpx.AsyncClient() as client:
+                response = await client.request(
+                    method=request.method,
+                    url=request.url,
+                    headers=request.headers,
+                    json=request.data
+                )
+                
+                # Terminal errors for client errors (4xx) - don't retry
+                if 400 <= response.status_code < 500:
+                    if response.status_code == 401:
+                        raise TerminalError("Authentication failed", error_code=401)
+                    elif response.status_code == 403:
+                        raise TerminalError("Access forbidden", error_code=403)
+                    elif response.status_code == 404:
+                        raise TerminalError("Resource not found", error_code=404)
+                    elif response.status_code == 422:
+                        raise TerminalError("Invalid request data", error_code=422)
+                    else:
+                        raise TerminalError(f"Client error: {response.status_code}", 
+                                          error_code=response.status_code)
+                
+                # Server errors (5xx) will retry automatically
+                if response.status_code >= 500:
+                    raise Exception(f"Server error: {response.status_code}")
+                
+                response.raise_for_status()
+                return response.json()
+        
+        result = await ctx.run("external-api-call", make_api_call)
+        return {"success": True, "data": result}
+        
+    except TerminalError as error:
+        # Log terminal errors but don't retry
+        await ctx.run("log-terminal-error", 
+            lambda: LogService.error("Terminal API error", {
+                "request": request.url,
+                "error": str(error),
+                "code": error.error_code
+            })
+        )
+        raise error
+```
+</CodeGroup>
+
+This approach distinguishes between:
+- **Client errors (4xx):** Usually permanent, use terminal errors
+- **Server errors (5xx):** Usually temporary, let Restate retry
+- **Network errors:** Temporary, let Restate retry
+
+By using terminal errors for permanent failures, you avoid wasting resources on requests that will never succeed.
+

@@ -1,0 +1,242 @@
+---
+title: State Management
+description: Store and retrieve persistent state in Virtual Objects and Workflows
+---
+
+State management helpers are available in Virtual Object and Workflow functions for persistent key-value storage. These helpers provide strong consistency guarantees and atomic operations.
+
+## ctx.get()
+
+Retrieve stored state by key. State is loaded from durable storage when your function starts, so `get()` calls are fast - they read from memory, not from disk.
+
+<CodeGroup>
+```typescript TypeScript
+// Get with type and default value
+const profile = await ctx.get<UserProfile>("profile");
+const count = (await ctx.get<number>("count")) ?? 0;
+const settings = await ctx.get<Settings>("settings") ?? defaultSettings;
+
+// Check if state exists
+const lastLogin = await ctx.get<string>("lastLogin");
+if (lastLogin) {
+  console.log(`User last logged in at: ${lastLogin}`);
+}
+```
+
+```java Java
+// Get with optional handling
+UserProfile profile = ctx.get("profile", UserProfile.class);
+Integer count = ctx.get("count", Integer.class).orElse(0);
+Settings settings = ctx.get("settings", Settings.class).orElse(defaultSettings);
+
+// Check if state exists
+Optional<String> lastLogin = ctx.get("lastLogin", String.class);
+if (lastLogin.isPresent()) {
+    System.out.println("User last logged in at: " + lastLogin.get());
+}
+```
+
+```python Python
+# Get with default values
+profile = await ctx.get("profile", UserProfile)
+count = await ctx.get("count", int) or 0
+settings = await ctx.get("settings", Settings) or default_settings
+
+# Check if state exists
+last_login = await ctx.get("lastLogin", str)
+if last_login:
+    print(f"User last logged in at: {last_login}")
+```
+</CodeGroup>
+
+**Key characteristics:**
+- Returns `null`/`None` if the key doesn't exist
+- State keys are strings
+- Values can be any JSON-serializable data
+- Multiple functions can read the same state simultaneously
+
+## ctx.set()
+
+Store state that persists across function invocations. State changes are automatically saved when your function completes successfully.
+
+<CodeGroup>
+```typescript TypeScript
+// Store simple values
+ctx.set("lastLogin", new Date().toISOString());
+ctx.set("loginCount", loginCount + 1);
+
+// Store complex objects
+ctx.set("profile", {
+  name: "John Doe",
+  email: "john@example.com",
+  preferences: { 
+    theme: "dark",
+    notifications: true 
+  }
+});
+
+// Store arrays
+ctx.set("favoriteItems", ["item1", "item2", "item3"]);
+```
+
+```java Java
+// Store values
+ctx.set("lastLogin", Instant.now().toString());
+ctx.set("loginCount", loginCount + 1);
+ctx.set("profile", userProfile);
+ctx.set("favoriteItems", Arrays.asList("item1", "item2", "item3"));
+```
+
+```python Python
+# Store values
+await ctx.set("lastLogin", datetime.now().isoformat())
+await ctx.set("loginCount", login_count + 1)
+await ctx.set("profile", user_profile)
+await ctx.set("favoriteItems", ["item1", "item2", "item3"])
+```
+</CodeGroup>
+
+**Key characteristics:**
+- State is only saved when the function completes successfully
+- If a function fails, all state changes are rolled back
+- State changes are atomic - either all changes are saved, or none are
+- Only one function can modify state for a Virtual Object at a time
+
+## ctx.clear()
+
+Remove state keys completely. After clearing, attempts to get that key will return `null`.
+
+<CodeGroup>
+```typescript TypeScript
+// Clear specific keys
+ctx.clear("tempData");
+ctx.clear("sessionToken");
+
+// Clear multiple related keys
+const keysToRemove = ["tempData", "processingStatus", "intermediateResults"];
+keysToRemove.forEach(key => ctx.clear(key));
+```
+
+```java Java
+// Clear specific keys
+ctx.clear("tempData");
+ctx.clear("sessionToken");
+
+// Clear multiple keys
+Arrays.asList("tempData", "processingStatus", "intermediateResults")
+    .forEach(ctx::clear);
+```
+
+```python Python
+# Clear specific keys
+await ctx.clear("tempData")
+await ctx.clear("sessionToken")
+
+# Clear multiple keys
+keys_to_remove = ["tempData", "processingStatus", "intermediateResults"]
+for key in keys_to_remove:
+    await ctx.clear(key)
+```
+</CodeGroup>
+
+**Why clear instead of setting to null:**
+- Clearing completely removes the key, saving storage space
+- It's clearer in your code that you don't want this data anymore
+- Some operations might treat `null` values differently than missing keys
+
+## State consistency guarantees
+
+Restate provides strong consistency guarantees for state management:
+
+**Single-writer guarantee**: Only one function can modify a Virtual Object's state at any given time, preventing race conditions.
+
+**Atomic commits**: All state changes in a function are applied together when the function completes successfully. If the function fails, all changes are rolled back.
+
+**Isolation**: Each Virtual Object's state is completely separate from every other object's state.
+
+**Durability**: Once saved, state survives service crashes, restarts, and infrastructure failures.
+
+## Common patterns
+
+### Counter pattern
+Perfect for tracking counts, likes, or any numeric value:
+
+<CodeGroup>
+```typescript TypeScript
+export const incrementCounter = async (ctx: ObjectContext, increment: number = 1) => {
+  const currentCount = (await ctx.get<number>("count")) ?? 0;
+  const newCount = currentCount + increment;
+  ctx.set("count", newCount);
+  
+  return { count: newCount, previous: currentCount };
+};
+```
+</CodeGroup>
+
+### Shopping cart pattern  
+Manages collections of items that change over time:
+
+<CodeGroup>
+```typescript TypeScript
+export const addToCart = async (ctx: ObjectContext, item: CartItem) => {
+  const items = (await ctx.get<CartItem[]>("items")) ?? [];
+  items.push(item);
+  
+  ctx.set("items", items);
+  ctx.set("lastUpdated", new Date().toISOString());
+  ctx.set("itemCount", items.length);
+  
+  return { items, itemCount: items.length };
+};
+```
+</CodeGroup>
+
+### User session pattern
+Validates and manages time-sensitive data:
+
+<CodeGroup>
+```typescript TypeScript
+export const validateSession = async (ctx: ObjectContext) => {
+  const session = await ctx.get<Session>("session");
+  
+  if (!session) {
+    throw new Error("No active session");
+  }
+  
+  if (session.expires < Date.now()) {
+    ctx.clear("session");
+    throw new Error("Session expired");
+  }
+  
+  // Update last accessed time
+  session.lastAccessed = Date.now();
+  ctx.set("session", session);
+  
+  return session;
+};
+```
+</CodeGroup>
+
+### Configuration pattern
+Store and update application settings:
+
+<CodeGroup>
+```typescript TypeScript
+export const updateSettings = async (ctx: ObjectContext, newSettings: Partial<Settings>) => {
+  const currentSettings = await ctx.get<Settings>("settings") ?? defaultSettings;
+  
+  const updatedSettings = {
+    ...currentSettings,
+    ...newSettings,
+    lastModified: new Date().toISOString()
+  };
+  
+  ctx.set("settings", updatedSettings);
+  ctx.set("version", ((await ctx.get<number>("version")) ?? 0) + 1);
+  
+  return updatedSettings;
+};
+```
+</CodeGroup>
+
+State management helpers provide reliable, consistent data storage for your Virtual Objects and Workflows without requiring external databases or complex coordination mechanisms.

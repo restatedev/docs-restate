@@ -1,0 +1,335 @@
+---
+title: Virtual Object
+description: Build stateful services with per-key isolation and consistency
+---
+
+Virtual Objects are stateful services identified by a unique key. Each object has its own built-in key-value storage with strong consistency guarantees and single-writer semantics.
+
+## What are Virtual Objects?
+
+Virtual Objects are perfect for modeling stateful entities like user accounts, shopping carts, game sessions, or any business entity that needs to:
+- Maintain state between requests
+- Process requests for the same entity sequentially (no race conditions)
+- Store data with strong consistency guarantees
+- Scale horizontally while maintaining per-key isolation
+
+**Key characteristics:**
+- **Per-key isolation**: Each object ID has its own isolated state
+- **Single-writer semantics**: Only one handler per object key runs at a time
+- **Automatic persistence**: State is saved when handlers complete successfully
+- **Failure handling**: State changes are rolled back if handlers fail
+
+Think of each Virtual Object as having its own private database that only it can access. This state is automatically managed by Restate - it's saved when handlers complete, restored when handlers restart, and kept consistent even during failures.
+
+## Key Benefits of Virtual Objects
+
+- **Consistent state**: Built-in key-value storage per object with ACID properties
+- **Single-writer guarantee**: Only one handler runs per key at a time, eliminating race conditions
+- **Automatic recovery**: State is preserved and restored across failures and restarts
+- **No external database needed**: State is managed internally by Restate
+- **Horizontal scaling**: Different object keys can process in parallel across multiple instances
+- **Strong isolation**: Each object's state is completely separate from all others
+
+## Get state
+
+Getting state is like looking up a value in a dictionary using a key. If the key exists, you get the stored value. If it doesn't exist, you get `null` (or your default value).
+
+The state is loaded from durable storage when your handler starts, so `get()` calls are fast - they read from memory, not from disk or network.
+
+**Key points:**
+- State keys are strings (like `"profile"` or `"lastLogin"`)
+- Values can be any JSON-serializable data (objects, arrays, strings, numbers)
+- If a key doesn't exist, you get `null` unless you provide a default
+- Multiple handlers can read the same state simultaneously
+
+**Reading state in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const getProfile = async (ctx: ObjectContext) => {
+  const profile = await ctx.get<UserProfile>("profile");
+  const name = (await ctx.get<string>("name")) ?? "Unknown User";
+  
+  return {
+    profile,
+    name,
+    hasProfile: profile !== null
+  };
+};
+```
+
+```java Java
+@Handler
+public ProfileResponse getProfile(ObjectContext ctx) {
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    String name = ctx.get("name", String.class).orElse("Unknown User");
+    
+    return new ProfileResponse(profile, name, profile != null);
+}
+```
+
+```python Python
+async def get_profile(ctx: ObjectContext):
+    profile = await ctx.get("profile", UserProfile)
+    name = await ctx.get("name", str) or "Unknown User"
+    
+    return {
+        "profile": profile,
+        "name": name,
+        "has_profile": profile is not None
+    }
+```
+</CodeGroup>
+
+**Invoking handlers:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/UserAccount/user123/getProfile
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .objectClient(UserAccount, "user123")
+  .getProfile();
+```
+
+```java Java Client
+ProfileResponse result = UserAccountClient.fromContext(ctx, "user123")
+    .getProfile().await();
+```
+</CodeGroup>
+
+In the handler examples above, notice how you can specify the expected type (`UserProfile`, `string`) and provide default values (`"Unknown User"`). The invocation examples show how to call these handlers.
+
+## Set state
+
+Setting state stores a value that will persist even after your handler finishes. The next time any handler for this Virtual Object runs, it can retrieve this value using the same key.
+
+State changes are automatically saved when your handler completes successfully. If your handler fails partway through, state changes are rolled back - this keeps your data consistent.
+
+**Key points:**
+- State is only saved when the handler completes successfully
+- If a handler fails, all state changes in that handler are discarded
+- State changes are atomic - either all changes in a handler are saved, or none are
+- Only one handler can modify state for a Virtual Object at a time (but multiple can read)
+
+**Setting state in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const updateProfile = async (ctx: ObjectContext, profile: UserProfile) => {
+  // Set multiple pieces of state atomically
+  ctx.set("profile", profile);
+  ctx.set("lastUpdated", new Date().toISOString());
+  ctx.set("version", ((await ctx.get<number>("version")) ?? 0) + 1);
+  
+  return { 
+    success: true, 
+    profile,
+    updatedAt: new Date().toISOString() 
+  };
+};
+```
+
+```java Java
+@Handler
+public UpdateResult updateProfile(ObjectContext ctx, UserProfile profile) {
+    // Set multiple pieces of state atomically
+    ctx.set("profile", profile);
+    ctx.set("lastUpdated", Instant.now().toString());
+    
+    Integer version = ctx.get("version", Integer.class).orElse(0);
+    ctx.set("version", version + 1);
+    
+    return new UpdateResult(true, profile, Instant.now().toString());
+}
+```
+
+```python Python
+async def update_profile(ctx: ObjectContext, profile: UserProfile):
+    # Set multiple pieces of state atomically
+    await ctx.set("profile", profile)
+    await ctx.set("lastUpdated", datetime.now().isoformat())
+    
+    version = await ctx.get("version", int) or 0
+    await ctx.set("version", version + 1)
+    
+    return {
+        "success": True,
+        "profile": profile,
+        "updated_at": datetime.now().isoformat()
+    }
+```
+</CodeGroup>
+
+**Invoking handlers:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/UserAccount/user123/updateProfile \
+  --json '{"name": "John Doe", "email": "john@example.com"}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .objectClient(UserAccount, "user123")
+  .updateProfile({ name: "John Doe", email: "john@example.com" });
+```
+
+```java Java Client
+UpdateResult result = UserAccountClient.fromContext(ctx, "user123")
+    .updateProfile(new UserProfile("John Doe", "john@example.com"))
+    .await();
+```
+</CodeGroup>
+
+Notice how the handler examples show setting multiple pieces of state - a profile object, timestamp, and version counter. All changes will be saved together when the handler completes, or all will be rolled back if it fails.
+
+## Clear state
+
+Clearing state removes a key-value pair completely. After clearing, attempts to get that key will return `null` (or your default value).
+
+This is useful for cleaning up temporary data, expiring cached values, or removing user data when they delete their account.
+
+**Why clear instead of setting to null:**
+- Clearing completely removes the key, saving storage space
+- It's clearer in your code - you explicitly don't want this data anymore
+- Some operations might treat `null` values differently than missing keys
+
+**Clearing state in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const deleteProfile = async (ctx: ObjectContext) => {
+  // Get current profile before deletion for audit log
+  const profile = await ctx.get<UserProfile>("profile");
+  
+  if (!profile) {
+    return { success: false, error: "Profile not found" };
+  }
+  
+  // Clear all user data atomically
+  ctx.clear("profile");
+  ctx.clear("tempData");
+  ctx.clear("preferences");
+  
+  // Record deletion timestamp
+  ctx.set("deletedAt", new Date().toISOString());
+  
+  return { success: true, deletedProfile: profile };
+};
+```
+
+```java Java
+@Handler
+public DeleteResult deleteProfile(ObjectContext ctx) {
+    // Get current profile before deletion for audit log
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    
+    if (profile == null) {
+        return new DeleteResult(false, "Profile not found", null);
+    }
+    
+    // Clear all user data atomically
+    ctx.clear("profile");
+    ctx.clear("tempData");
+    ctx.clear("preferences");
+    
+    // Record deletion timestamp
+    ctx.set("deletedAt", Instant.now().toString());
+    
+    return new DeleteResult(true, null, profile);
+}
+```
+
+```python Python
+async def delete_profile(ctx: ObjectContext):
+    # Get current profile before deletion for audit log
+    profile = await ctx.get("profile", UserProfile)
+    
+    if not profile:
+        return {"success": False, "error": "Profile not found"}
+    
+    # Clear all user data atomically
+    await ctx.clear("profile")
+    await ctx.clear("tempData")
+    await ctx.clear("preferences")
+    
+    # Record deletion timestamp
+    await ctx.set("deletedAt", datetime.now().isoformat())
+    
+    return {"success": True, "deleted_profile": profile}
+```
+</CodeGroup>
+
+**Invoking handlers:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/UserAccount/user123/deleteProfile
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .objectClient(UserAccount, "user123")
+  .deleteProfile();
+```
+
+```java Java Client
+DeleteResult result = UserAccountClient.fromContext(ctx, "user123")
+    .deleteProfile().await();
+```
+</CodeGroup>
+
+Like with `set()`, clear operations are only applied when the handler completes successfully. If the handler fails, the clear operations are rolled back.
+
+## State consistency guarantees
+
+Restate provides strong consistency guarantees that make state management reliable and predictable:
+
+**Single-writer guarantee:** Only one handler can modify a Virtual Object's state at any given time. This prevents race conditions where two handlers try to update the same data simultaneously. Read-only handlers can run concurrently with each other, but not with write operations.
+
+**Atomic commits:** All state changes in a handler are applied together when the handler completes successfully. If the handler fails at any point, all state changes are rolled back. This prevents partial updates that could leave your data in an inconsistent state.
+
+**Isolation:** Each Virtual Object's state is completely separate from every other object's state. Even if you have a million user accounts, each user's state is isolated from all others.
+
+**Durability:** Once a handler completes and state is saved, that data will survive service crashes, restarts, network failures, or even complete data center outages. The state is stored in durable storage and automatically restored when needed.
+
+These guarantees mean you can write simple, straightforward code without worrying about concurrency issues, partial failures, or data corruption.
+
+## Common patterns
+
+Here are some typical ways to use state in real applications:
+
+### Counter pattern
+This pattern is perfect for tracking counts, likes, or any numeric value that needs to increment reliably:
+
+```typescript
+let count = (await ctx.get<number>("count")) ?? 0;
+count++;
+ctx.set("count", count);
+return count;
+```
+
+The `?? 0` provides a default value for the first time this runs. Even with multiple concurrent requests, the single-writer guarantee ensures the count is always accurate.
+
+### Shopping cart pattern  
+This pattern manages collections of items that change over time:
+
+```typescript
+const items = (await ctx.get<CartItem[]>("items")) ?? [];
+items.push(newItem);
+ctx.set("items", items);
+ctx.set("lastUpdated", Date.now());
+```
+
+Notice how we store both the items and a timestamp. If the handler fails, both changes are rolled back together, keeping the data consistent.
+
+### User session pattern
+This pattern validates and manages time-sensitive data:
+
+```typescript
+const session = await ctx.get<Session>("session");
+if (!session || session.expires < Date.now()) {
+  ctx.clear("session");
+  throw new Error("Session expired");
+}
+return session;
+```
+
+The session is validated every time it's accessed. If it's expired, we clean it up immediately to save storage space.

@@ -1,0 +1,415 @@
+---
+title: Call Handlers
+description: Call functions across services with reliability guarantees
+---
+
+Restate provides three ways to call handlers (functions), each with automatic retries, exactly-once delivery, and durable execution guarantees.
+
+## Request-response calls
+
+Request-response calls are like regular function calls - you send a request and wait for the response. When you make a request-response call, your code pauses until the other handler finishes and returns a result.
+
+This is perfect when you need the result immediately to continue processing. For example, if you need to validate data before proceeding, or get a user's profile before updating it.
+
+**How it works:**
+1. Your handler calls another handler and waits
+2. Restate routes the call to the target handler
+3. The target handler processes the request and returns a result
+4. Your handler receives the result and continues
+
+If the target handler fails, Restate automatically retries the call. Your code doesn't need to handle retries - Restate does it for you.
+
+**Calling other handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Request-response call - wait for result
+  const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+  
+  if (!validation.isValid) {
+    throw new Error("Invalid order");
+  }
+  
+  // Continue processing with the result
+  return { orderId: order.id, status: "validated" };
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Request-response call - wait for result
+    ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+        .validateOrder(order).await();
+    
+    if (!validation.isValid()) {
+        throw new RuntimeException("Invalid order");
+    }
+    
+    // Continue processing with the result
+    return order.getId();
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Request-response call - wait for result
+    validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+    
+    if not validation.is_valid:
+        raise Exception("Invalid order")
+    
+    # Continue processing with the result
+    return {"order_id": order.id, "status": "validated"}
+```
+</CodeGroup>
+
+**Invoking handlers:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/MyService/processOrder \
+  --json '{"id": "order-123", "amount": 100}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .serviceClient(MyService)
+  .processOrder({ id: "order-123", amount: 100 });
+```
+
+```java Java Client
+String result = MyServiceClient.fromContext(ctx)
+    .processOrder(order)
+    .await();
+```
+
+```python Python Client
+result = await MyServiceClient.from_context(ctx).process_order(order)
+```
+</CodeGroup>
+
+Notice how in the handler definition, you use `await` to wait for the result from other services. The invocation examples show how to call these handlers from outside or from other handlers.
+
+## One-way calls
+
+One-way calls are "fire and forget" - you send the request but don't wait for a response. Your code continues immediately while the target handler processes the request in the background.
+
+This is perfect for background tasks like sending notifications, logging events, or triggering cleanup tasks. You don't need the result, you just want the work to happen eventually.
+
+**How it works:**
+1. Your handler makes a one-way call and continues immediately
+2. Restate queues the request for delivery
+3. The target handler processes the request when it's available
+4. Your original handler doesn't wait or get a response
+
+Restate guarantees the target handler will eventually run, even if there are failures. The call might happen seconds or minutes later, but it will happen.
+
+**Making one-way calls:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the main order logic
+  const result = await processOrderLogic(ctx, order);
+  
+  // One-way call - fire and forget notification
+  ctx.serviceSend(NotificationService).sendOrderConfirmation(order.customerId, order.id);
+  
+  // One-way call - trigger background analytics
+  ctx.serviceSend(AnalyticsService).recordOrderEvent(order);
+  
+  // Return immediately without waiting for notifications
+  return result;
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Process the main order logic
+    String result = processOrderLogic(ctx, order);
+    
+    // One-way call - fire and forget notification
+    NotificationServiceClient.fromContext(ctx).send()
+        .sendOrderConfirmation(order.getCustomerId(), order.getId());
+    
+    // One-way call - trigger background analytics
+    AnalyticsServiceClient.fromContext(ctx).send()
+        .recordOrderEvent(order);
+    
+    // Return immediately without waiting for notifications
+    return result;
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Process the main order logic
+    result = await process_order_logic(ctx, order)
+    
+    # One-way call - fire and forget notification
+    NotificationServiceClient.from_context(ctx).send().send_order_confirmation(
+        order.customer_id, order.id
+    )
+    
+    # One-way call - trigger background analytics  
+    AnalyticsServiceClient.from_context(ctx).send().record_order_event(order)
+    
+    # Return immediately without waiting for notifications
+    return result
+```
+</CodeGroup>
+
+**Invoking one-way calls:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/NotificationService/sendOrderConfirmation/send \
+  --json '{"customerId": "user-123", "orderId": "order-456"}'
+```
+
+```typescript TypeScript Client
+// One-way call from client - no await, no result
+restateClient
+  .serviceClient(NotificationService)
+  .sendOrderConfirmation({ customerId: "user-123", orderId: "order-456" });
+```
+
+```java Java Client
+// One-way call from client - no await, no result
+NotificationServiceClient.fromContext(ctx).send()
+    .sendOrderConfirmation("user-123", "order-456");
+```
+</CodeGroup>
+
+Notice the `/send` in the HTTP URL and the `send()` method in the SDK examples. This tells Restate you want a one-way call. The function returns immediately - you don't wait for the background task to finish.
+
+## Delayed calls
+
+Delayed calls let you schedule a handler to run at a specific time in the future. This is like setting an alarm clock for your code - the handler will run after the specified delay, even if your service restarts.
+
+This is perfect for reminders, follow-up tasks, or implementing timeouts. For example, you might schedule a reminder email to be sent tomorrow, or cancel an order if payment isn't received within 15 minutes.
+
+**How it works:**
+1. Your handler schedules a delayed call with a specific delay time
+2. Restate stores the scheduled call durably
+3. After the delay period, Restate automatically calls the target handler
+4. The scheduled call survives service restarts and failures
+
+The delay is durable - even if your service crashes and restarts, the scheduled call will still happen at the right time.
+
+**Scheduling delayed calls:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the order immediately
+  const result = await processOrderLogic(ctx, order);
+  
+  // Schedule a reminder email for tomorrow
+  ctx.serviceCall(ReminderService).sendFollowUp(order.customerId, {
+    delay: 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+  });
+  
+  // Schedule order cancellation if not paid within 15 minutes
+  ctx.serviceCall(OrderService).cancelIfNotPaid(order.id, {
+    delay: 15 * 60 * 1000 // 15 minutes
+  });
+  
+  return result;
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Process the order immediately
+    String result = processOrderLogic(ctx, order);
+    
+    // Schedule a reminder email for tomorrow
+    ReminderServiceClient.fromContext(ctx)
+        .sendFollowUp(order.getCustomerId())
+        .delayedCall(Duration.ofDays(1));
+    
+    // Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.fromContext(ctx)
+        .cancelIfNotPaid(order.getId())
+        .delayedCall(Duration.ofMinutes(15));
+    
+    return result;
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Process the order immediately
+    result = await process_order_logic(ctx, order)
+    
+    # Schedule a reminder email for tomorrow
+    ReminderServiceClient.from_context(ctx).send_follow_up(
+        order.customer_id
+    ).delayed_call(timedelta(days=1))
+    
+    # Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.from_context(ctx).cancel_if_not_paid(
+        order.id
+    ).delayed_call(timedelta(minutes=15))
+    
+    return result
+```
+</CodeGroup>
+
+**Invoking delayed calls:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/ReminderService/sendFollowUp/send \
+  -H 'content-type: application/json' \
+  -d '{"customerId": "user-123"}' \
+  --http1.1 \
+  --raw '%3Cdelay%3E24h%3C/delay%3E'
+```
+
+```typescript TypeScript Client
+// Schedule from client with 24 hour delay
+restateClient
+  .serviceClient(ReminderService)
+  .sendFollowUp({ customerId: "user-123" }, { delay: 24 * 60 * 60 * 1000 });
+```
+
+```java Java Client
+ReminderServiceClient.fromContext(ctx)
+    .sendFollowUp("user-123")
+    .delayedCall(Duration.ofDays(1));
+```
+</CodeGroup>
+
+The SDK examples show different ways to specify delays - milliseconds in TypeScript, `Duration` objects in Java, and so on. The HTTP example uses a delay parameter. All achieve the same result: the handler runs after the specified time.
+
+## Kafka-triggered calls
+
+Instead of your code calling handlers directly, you can configure Restate to automatically call handlers when messages arrive from Kafka topics. This turns Kafka messages into handler calls.
+
+This is perfect for event-driven architectures where you want to process events from Kafka streams. For example, when a "user created" event arrives in Kafka, you might want to automatically call a handler that sets up the user's initial data.
+
+**How it works:**
+1. You configure Restate to subscribe to specific Kafka topics
+2. When a message arrives on that topic, Restate automatically calls your handler
+3. The message contents are passed as parameters to your handler
+4. Your handler processes the event like any other handler call
+
+This gives you the reliability of Restate's durable execution for processing Kafka events. If your handler fails, Restate will retry it automatically.
+
+<CodeGroup>
+```typescript TypeScript
+// Handler automatically called for each Kafka message
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the order from Kafka
+  await ctx.run(() => validateOrder(order));
+  // ... rest of processing
+};
+```
+
+```java Java
+// Handler automatically called for each Kafka message
+@Handler
+public void processOrder(Context ctx, Order order) {
+    // Process the order from Kafka
+    ctx.run(() -> validateOrder(order));
+    // ... rest of processing
+}
+```
+
+```python Python
+# Handler automatically called for each Kafka message
+async def process_order(ctx: Context, order: Order):
+    # Process the order from Kafka
+    await ctx.run(lambda: validate_order(order))
+    # ... rest of processing
+```
+
+```go Go
+// Handler automatically called for each Kafka message
+func ProcessOrder(ctx restate.Context, order Order) error {
+    // Process the order from Kafka
+    ctx.Run(func() error { return validateOrder(order) })
+    // ... rest of processing
+}
+```
+
+```rust Rust
+// Handler automatically called for each Kafka message
+async fn process_order(ctx: Context, order: Order) -> Result<(), Error> {
+    // Process the order from Kafka
+    ctx.run(|| validate_order(order)).await?;
+    // ... rest of processing
+}
+```
+</CodeGroup>
+
+You don't write any special code for Kafka integration - you just write normal handlers. Restate handles the Kafka connection and message delivery for you.
+
+## Cancel or kill running calls
+
+Sometimes you need to stop a handler that's already running. Maybe it's taking too long, or business requirements changed, or you deployed a bug. Restate gives you two ways to stop running handlers.
+
+**Cancel vs Kill:**
+- **Cancel** lets the handler finish its current operation, then stops it gracefully. Any compensation logic (like rolling back changes) will run.
+- **Kill** stops the handler immediately without running any cleanup code. Use this when the handler is completely stuck.
+
+Both options use the Restate CLI and require the invocation ID, which you can get from the Restate UI or CLI tools.
+
+<CodeGroup>
+```bash CLI (Cancel)
+restate invocations cancel inv_1234567890abcdef
+```
+
+```bash CLI (Kill)
+restate invocations cancel --kill inv_1234567890abcdef
+```
+</CodeGroup>
+
+The invocation ID starts with `inv_` followed by a long hex string. You can find these IDs in the Restate UI when viewing running invocations.
+
+## Prevent duplicates with idempotency
+
+Sometimes you might accidentally call the same handler twice with the same data - maybe due to a network retry, or a user clicking a button twice, or your code having a bug. This could cause problems like charging a credit card twice or sending duplicate emails.
+
+Idempotency keys solve this problem. An idempotency key is a unique string you provide that identifies a specific operation. If you make multiple calls with the same idempotency key, Restate will only execute the handler once and return the same result for all subsequent calls.
+
+**How to choose idempotency keys:**
+- Use something unique to the operation: `order-${orderId}-payment` or `user-${userId}-welcome-email`
+- Include relevant data: `transfer-${fromAccount}-${toAccount}-${amount}-${timestamp}`
+- Keep them readable for debugging purposes
+
+This is especially useful for payment processing, data imports, or any operation where duplicates would cause problems.
+
+**Using idempotency keys:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/PaymentService/processPayment \
+  -H 'idempotency-key: order-12345-payment' \
+  --json '{"orderId": "12345", "amount": 100}'
+```
+
+```typescript TypeScript Client
+// Multiple calls with same key will only execute once
+await restateClient
+  .serviceClient(PaymentService)
+  .processPayment({ orderId: "12345", amount: 100 }, { 
+    idempotencyKey: "order-12345-payment" 
+  });
+```
+
+```java Java Client
+PaymentServiceClient.fromContext(ctx)
+    .processPayment(payment)
+    .idempotencyKey("order-12345-payment")
+    .await();
+```
+
+```python Python Client
+await PaymentServiceClient.from_context(ctx).process_payment(
+    payment, 
+    idempotency_key="order-12345-payment"
+)
+```
+</CodeGroup>
+
+In the examples above, if you call the same handler multiple times with `idempotency-key: order-12345-payment`, only the first call will actually execute. The subsequent calls will immediately return the same result as the first call, without re-running the handler.

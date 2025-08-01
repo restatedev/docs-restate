@@ -1,0 +1,128 @@
+---
+title: Stateless Service
+description: Build fast, scalable services for processing and business logic
+---
+
+## What are Stateless Services?
+
+Stateless services process requests without maintaining persistent state between invocations. They're perfect for data processing, transformations, API calls, and business logic that doesn't need to remember anything between requests.
+
+**Key characteristics:**
+- **No persistent state**: Each request is independent
+- **Horizontal scaling**: Multiple instances can run simultaneously
+- **High throughput**: Optimized for fast, concurrent processing
+- **Simple deployment**: No coordination needed between instances
+- **Automatic durability**: Gain reliability without complexity
+
+Stateless services automatically get durability and retry capabilities while remaining simple to develop, test, and deploy at any scale.
+
+## When to use Stateless Services
+
+**Perfect for:**
+- Data processing and transformations
+- API integrations and external service calls
+- Business logic and validation
+- Image/document processing
+- Mathematical computations
+- ETL operations
+
+**Not ideal for:**
+- Operations that need to remember previous requests
+- Shopping carts, user sessions, or accounts
+- Workflows that coordinate multiple steps over time
+
+## Building Stateless Services
+
+Stateless services are built using regular handlers that process input and return output:
+
+**Basic stateless handler:**
+```typescript TypeScript
+export const processData = async (ctx: Context, input: DataInput) => {
+  // Process the input data
+  const result = await ctx.run("transform-data", () => transformData(input));
+  
+  // Call external APIs safely
+  const enriched = await ctx.run("enrich-data", () => callExternalAPI(result));
+  
+  return {
+    processed: true,
+    result: enriched,
+    timestamp: new Date().toISOString()
+  };
+};
+```
+
+**Data validation service:**
+```typescript TypeScript
+export const validateUser = async (ctx: Context, userData: UserData) => {
+  // Validate email format
+  const emailValid = await ctx.run("validate-email", () => 
+    validateEmailFormat(userData.email)
+  );
+  
+  // Check if user exists in external system
+  const userExists = await ctx.run("check-user", () =>
+    checkUserInDatabase(userData.email)
+  );
+  
+  return {
+    valid: emailValid && !userExists,
+    errors: {
+      email: !emailValid ? "Invalid email format" : null,
+      duplicate: userExists ? "User already exists" : null
+    }
+  };
+};
+```
+
+**API integration service:**
+```typescript TypeScript
+export const fetchUserProfile = async (ctx: Context, userId: string) => {
+  // Fetch from multiple sources in parallel
+  const [profile, preferences, activity] = await Promise.all([
+    ctx.run("fetch-profile", () => profileAPI.getUser(userId)),
+    ctx.run("fetch-preferences", () => preferencesAPI.getSettings(userId)),
+    ctx.run("fetch-activity", () => activityAPI.getRecent(userId))
+  ]);
+  
+  // Combine data
+  return {
+    userId,
+    profile,
+    preferences,
+    recentActivity: activity,
+    lastUpdated: Date.now()
+  };
+};
+```
+
+## Key Benefits
+
+**Durability without complexity**: Get automatic retries and exactly-once execution without managing queues or state machines.
+
+**Perfect scaling**: Launch as many instances as needed without coordination or conflicts.
+
+**Easy testing**: Pure functions with predictable inputs and outputs.
+
+**Fast deployment**: No state to migrate or coordinate between versions.
+
+**Resource efficient**: Only consume resources while actively processing requests.
+
+## Best Practices
+
+**Use ctx.run() for external calls**: Wrap database queries, API calls, and any non-deterministic operations:
+```typescript
+// ✅ Safe for retries
+const result = await ctx.run("api-call", () => externalAPI.getData());
+
+// ❌ Will break on retry
+const result = await externalAPI.getData();
+```
+
+**Keep handlers focused**: Each handler should do one specific task well rather than multiple unrelated operations.
+
+**Handle errors appropriately**: Use terminal errors for permanent failures, let transient errors retry automatically.
+
+**Design for idempotency**: Make sure handlers can be called multiple times safely without side effects.
+
+Stateless services provide the foundation for reliable, scalable data processing while keeping your code simple and your architecture clean.

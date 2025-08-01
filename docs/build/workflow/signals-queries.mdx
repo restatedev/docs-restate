@@ -1,0 +1,263 @@
+---
+title: Signals and Queries
+description: Interact with running workflows through external events and status checks
+---
+
+Workflows can receive signals from external systems and respond to queries about their current state. This enables interactive workflows that coordinate with users, external services, and other parts of your system.
+
+## Signals - Send events to workflows
+
+Signals let you send events or data to running workflows. The workflow can wait for specific signals and react when they arrive.
+
+### Define signal functions
+
+```typescript TypeScript
+// In your workflow
+export const processOrder = async (ctx: WorkflowContext, order: Order) => {
+  ctx.set("status", "awaiting-payment");
+  
+  // Wait for payment confirmation signal
+  const paymentResult = await ctx.promise<PaymentResult>("payment-confirmed");
+  
+  if (paymentResult.success) {
+    ctx.set("status", "payment-confirmed");
+    // Continue with order processing...
+  } else {
+    ctx.set("status", "payment-failed");
+    throw new Error("Payment failed");
+  }
+};
+
+// Signal function to confirm payment
+export const confirmPayment = async (ctx: WorkflowSharedContext, result: PaymentResult) => {
+  // Resolve the promise the workflow is waiting for
+  ctx.promise("payment-confirmed").resolve(result);
+};
+```
+
+```java Java
+// In your workflow
+@Handler
+public OrderResult processOrder(WorkflowContext ctx, Order order) {
+    ctx.set("status", "awaiting-payment");
+    
+    // Wait for payment confirmation signal
+    PaymentResult paymentResult = ctx.promise("payment-confirmed", PaymentResult.class).await();
+    
+    if (paymentResult.isSuccess()) {
+        ctx.set("status", "payment-confirmed");
+        // Continue with order processing...
+    } else {
+        ctx.set("status", "payment-failed");
+        throw new RuntimeException("Payment failed");
+    }
+}
+
+// Signal function to confirm payment
+@Handler
+public void confirmPayment(WorkflowSharedContext ctx, PaymentResult result) {
+    // Resolve the promise the workflow is waiting for
+    ctx.promise("payment-confirmed").resolve(result);
+}
+```
+
+```python Python
+# In your workflow
+async def process_order(ctx: WorkflowContext, order: Order):
+    await ctx.set("status", "awaiting-payment")
+    
+    # Wait for payment confirmation signal
+    payment_result = await ctx.promise("payment-confirmed", PaymentResult)
+    
+    if payment_result.success:
+        await ctx.set("status", "payment-confirmed")
+        # Continue with order processing...
+    else:
+        await ctx.set("status", "payment-failed")
+        raise Exception("Payment failed")
+
+# Signal function to confirm payment
+async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult):
+    # Resolve the promise the workflow is waiting for
+    ctx.promise("payment-confirmed").resolve(result)
+```
+
+### Send signals
+
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-123/confirmPayment \
+  --json '{"success": true, "transactionId": "txn-456", "amount": 99.99}'
+```
+
+```typescript TypeScript Client
+await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .confirmPayment({ success: true, transactionId: "txn-456", amount: 99.99 });
+```
+
+```java Java Client
+OrderWorkflowClient.fromContext(ctx, "order-123")
+    .confirmPayment(paymentResult);
+```
+
+The signal is delivered to the workflow immediately. If the workflow is waiting for that specific signal, it resumes execution. If not, the signal data is stored until the workflow calls the corresponding promise.
+
+## Queries - Check workflow status
+
+Queries let you inspect the current state of a running workflow without affecting its execution. They're perfect for status checks, progress monitoring, and debugging.
+
+### Define query functions
+
+```typescript TypeScript
+// Query function to get current status
+export const getOrderStatus = async (ctx: WorkflowSharedContext) => {
+  const status = await ctx.get<string>("status");
+  const startTime = await ctx.get<string>("startTime");
+  const lastUpdate = await ctx.get<string>("lastUpdate");
+  
+  return {
+    status: status ?? "not-started",
+    startTime,
+    lastUpdate,
+    isActive: status && !["completed", "failed", "cancelled"].includes(status)
+  };
+};
+
+// Query function to get detailed progress
+export const getOrderProgress = async (ctx: WorkflowSharedContext) => {
+  const status = await ctx.get<string>("status");
+  const completedSteps = await ctx.get<string[]>("completedSteps") ?? [];
+  const currentStep = await ctx.get<string>("currentStep");
+  
+  return {
+    status,
+    completedSteps,
+    currentStep,
+    totalSteps: 5,
+    progressPercentage: Math.round((completedSteps.length / 5) * 100)
+  };
+};
+```
+
+```java Java
+// Query function to get current status
+@Handler
+public OrderStatus getOrderStatus(WorkflowSharedContext ctx) {
+    String status = ctx.get("status", String.class).orElse("not-started");
+    String startTime = ctx.get("startTime", String.class).orElse(null);
+    String lastUpdate = ctx.get("lastUpdate", String.class).orElse(null);
+    
+    boolean isActive = status != null && 
+        !Arrays.asList("completed", "failed", "cancelled").contains(status);
+    
+    return new OrderStatus(status, startTime, lastUpdate, isActive);
+}
+
+// Query function to get detailed progress
+@Handler
+public OrderProgress getOrderProgress(WorkflowSharedContext ctx) {
+    String status = ctx.get("status", String.class).orElse("not-started");
+    List<String> completedSteps = ctx.get("completedSteps", List.class).orElse(new ArrayList<>());
+    String currentStep = ctx.get("currentStep", String.class).orElse(null);
+    
+    int progressPercentage = Math.round((completedSteps.size() / 5.0f) * 100);
+    
+    return new OrderProgress(status, completedSteps, currentStep, 5, progressPercentage);
+}
+```
+
+```python Python
+# Query function to get current status
+async def get_order_status(ctx: WorkflowSharedContext):
+    status = await ctx.get("status", str) or "not-started"
+    start_time = await ctx.get("startTime", str)
+    last_update = await ctx.get("lastUpdate", str)
+    
+    is_active = status and status not in ["completed", "failed", "cancelled"]
+    
+    return {
+        "status": status,
+        "start_time": start_time,
+        "last_update": last_update,
+        "is_active": is_active
+    }
+
+# Query function to get detailed progress
+async def get_order_progress(ctx: WorkflowSharedContext):
+    status = await ctx.get("status", str) or "not-started"
+    completed_steps = await ctx.get("completedSteps", list) or []
+    current_step = await ctx.get("currentStep", str)
+    
+    progress_percentage = round((len(completed_steps) / 5) * 100)
+    
+    return {
+        "status": status,
+        "completed_steps": completed_steps,
+        "current_step": current_step,
+        "total_steps": 5,
+        "progress_percentage": progress_percentage
+    }
+```
+
+### Call queries
+
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-123/getOrderStatus
+
+curl localhost:8080/OrderWorkflow/order-123/getOrderProgress
+```
+
+```typescript TypeScript Client
+const status = await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .getOrderStatus();
+
+const progress = await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .getOrderProgress();
+```
+
+```java Java Client
+OrderStatus status = OrderWorkflowClient.fromContext(ctx, "order-123")
+    .getOrderStatus().await();
+
+OrderProgress progress = OrderWorkflowClient.fromContext(ctx, "order-123")
+    .getOrderProgress().await();
+```
+
+Queries are read-only and don't affect the workflow's execution. They can be called anytime to inspect the workflow's current state.
+
+## Common patterns
+
+### Human approval workflow
+```typescript
+// Wait for human approval
+const approvalResult = await ctx.promise<ApprovalResult>("approval-decision");
+
+if (approvalResult.approved) {
+  // Continue with approved process
+} else {
+  // Handle rejection
+  throw new Error(`Request rejected: ${approvalResult.reason}`);
+}
+```
+
+### External system integration
+```typescript
+// Wait for external system callback
+const externalResult = await ctx.promise<ExternalResult>("external-callback");
+
+// Process the external result
+await ctx.run("process-external-result", () => processResult(externalResult));
+```
+
+### Progress tracking
+```typescript
+// Update progress as workflow proceeds
+ctx.set("currentStep", "validating-payment");
+const completedSteps = (await ctx.get<string[]>("completedSteps")) ?? [];
+completedSteps.push("order-validated");
+ctx.set("completedSteps", completedSteps);
+```
+
+Signals and queries make workflows interactive and observable, enabling complex coordination between your workflow logic and external systems, users, or other services.

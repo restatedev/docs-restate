@@ -1,0 +1,305 @@
+---
+title: Service Communication
+description: Call functions across services with reliability guarantees
+---
+
+Service communication helpers enable reliable function calls between services with automatic retries, exactly-once delivery, and durable execution guarantees.
+
+## ctx.serviceCall()
+
+Make request-response calls to other services. Your function waits for the result before continuing.
+
+<CodeGroup>
+```typescript TypeScript
+// Call Basic Service function
+const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+
+// Call with error handling
+try {
+  const result = await ctx.serviceCall(PaymentService).processPayment(payment);
+  return { success: true, transactionId: result.id };
+} catch (error) {
+  return { success: false, error: error.message };
+}
+```
+
+```java Java
+// Call Basic Service function
+ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+    .validateOrder(order).await();
+
+// Call with error handling
+try {
+    PaymentResult result = PaymentServiceClient.fromContext(ctx)
+        .processPayment(payment).await();
+    return new ProcessResult(true, result.getId());
+} catch (Exception error) {
+    return new ProcessResult(false, error.getMessage());
+}
+```
+
+```python Python
+# Call Basic Service function
+validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+
+# Call with error handling
+try:
+    result = await PaymentServiceClient.from_context(ctx).process_payment(payment)
+    return {"success": True, "transaction_id": result.id}
+except Exception as error:
+    return {"success": False, "error": str(error)}
+```
+</CodeGroup>
+
+Use request-response calls when you need the result immediately to continue processing.
+
+## ctx.objectCall()
+
+Call Virtual Object functions with a specific object key.
+
+<CodeGroup>
+```typescript TypeScript
+// Get user profile
+const profile = await ctx.objectCall(UserAccount, userId).getProfile();
+
+// Update user balance
+const balanceResult = await ctx.objectCall(UserAccount, userId).updateBalance(amount);
+
+// Call different users
+const user1Profile = await ctx.objectCall(UserAccount, "user1").getProfile();
+const user2Profile = await ctx.objectCall(UserAccount, "user2").getProfile();
+```
+
+```java Java
+// Get user profile
+ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
+    .getProfile().await();
+
+// Update user balance
+BalanceResult balanceResult = UserAccountClient.fromContext(ctx, userId)
+    .updateBalance(amount).await();
+```
+
+```python Python
+# Get user profile
+profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
+
+# Update user balance
+balance_result = await UserAccountClient.from_context(ctx, user_id).update_balance(amount)
+```
+</CodeGroup>
+
+Each object key is processed independently, so calls to different keys can run in parallel.
+
+## ctx.workflowCall()
+
+Call Workflow functions to start workflows or query their status.
+
+<CodeGroup>
+```typescript TypeScript
+// Start a workflow
+const workflowResult = await ctx.workflowCall(OrderWorkflow, orderId).processOrder(order);
+
+// Query workflow status
+const status = await ctx.workflowCall(OrderWorkflow, orderId).getStatus();
+
+// Get workflow progress
+const progress = await ctx.workflowCall(OrderWorkflow, orderId).getProgress();
+```
+
+```java Java
+// Start a workflow
+OrderResult workflowResult = OrderWorkflowClient.fromContext(ctx, orderId)
+    .processOrder(order).await();
+
+// Query workflow status
+StatusResult status = OrderWorkflowClient.fromContext(ctx, orderId)
+    .getStatus().await();
+```
+
+```python Python
+# Start a workflow
+workflow_result = await OrderWorkflowClient.from_context(ctx, order_id).process_order(order)
+
+# Query workflow status
+status = await OrderWorkflowClient.from_context(ctx, order_id).get_status()
+```
+</CodeGroup>
+
+## ctx.serviceSend()
+
+Make one-way calls that don't return results. Your function continues immediately without waiting.
+
+<CodeGroup>
+```typescript TypeScript
+// Fire-and-forget notification
+ctx.serviceSend(NotificationService).sendEmail(userId, "Welcome!");
+
+// Background analytics
+ctx.serviceSend(AnalyticsService).recordEvent("user_signup", { 
+  userId, 
+  timestamp: new Date().toISOString() 
+});
+
+// Cleanup task
+ctx.serviceSend(CleanupService).deleteExpiredData(userId);
+```
+
+```java Java
+// Fire-and-forget calls
+NotificationServiceClient.fromContext(ctx).send()
+    .sendEmail(userId, "Welcome!");
+
+AnalyticsServiceClient.fromContext(ctx).send()
+    .recordEvent("user_signup", eventData);
+
+CleanupServiceClient.fromContext(ctx).send()
+    .deleteExpiredData(userId);
+```
+
+```python Python
+# Fire-and-forget calls
+NotificationServiceClient.from_context(ctx).send().send_email(user_id, "Welcome!")
+
+AnalyticsServiceClient.from_context(ctx).send().record_event("user_signup", event_data)
+
+CleanupServiceClient.from_context(ctx).send().delete_expired_data(user_id)
+```
+</CodeGroup>
+
+Use one-way calls for background tasks where you don't need the result.
+
+## ctx.objectSend()
+
+Send one-way calls to Virtual Object functions.
+
+<CodeGroup>
+```typescript TypeScript
+// Update multiple user accounts
+userIds.forEach(userId => {
+  ctx.objectSend(UserAccount, userId).updateLastSeen(new Date().toISOString());
+});
+
+// Notify all followers
+followerIds.forEach(followerId => {
+  ctx.objectSend(UserAccount, followerId).addNotification({
+    type: "new_post",
+    fromUserId: authorId,
+    postId: post.id
+  });
+});
+```
+</CodeGroup>
+
+## ctx.workflowSend()
+
+Send signals to running workflows.
+
+<CodeGroup>
+```typescript TypeScript
+// Send payment confirmation to workflow
+ctx.workflowSend(OrderWorkflow, orderId).confirmPayment({
+  success: true,
+  transactionId: "txn-123",
+  amount: 99.99
+});
+
+// Cancel a workflow
+ctx.workflowSend(OrderWorkflow, orderId).cancelOrder("Customer requested cancellation");
+
+// Approve a workflow
+ctx.workflowSend(ApprovalWorkflow, requestId).approve(true);
+```
+
+```java Java
+// Send signals to workflows
+OrderWorkflowClient.fromContext(ctx, orderId).send()
+    .confirmPayment(paymentResult);
+
+ApprovalWorkflowClient.fromContext(ctx, requestId).send()
+    .approve(true);
+```
+
+```python Python
+# Send signals to workflows
+OrderWorkflowClient.from_context(ctx, order_id).send().confirm_payment(payment_result)
+
+ApprovalWorkflowClient.from_context(ctx, request_id).send().approve(True)
+```
+</CodeGroup>
+
+## Delayed calls
+
+Schedule function calls to happen in the future.
+
+<CodeGroup>
+```typescript TypeScript
+// Schedule reminder for tomorrow
+ctx.serviceCall(ReminderService).sendReminder(userId, message, {
+  delay: 24 * 60 * 60 * 1000 // 24 hours
+});
+
+// Schedule timeout check
+ctx.objectCall(UserAccount, userId).expireSession({
+  delay: 30 * 60 * 1000 // 30 minutes
+});
+
+// Schedule workflow cancellation
+ctx.workflowSend(OrderWorkflow, orderId).cancelIfNotPaid({
+  delay: 15 * 60 * 1000 // 15 minutes
+});
+```
+
+```java Java
+// Schedule calls with delays
+ReminderServiceClient.fromContext(ctx)
+    .sendReminder(userId, message)
+    .delayedCall(Duration.ofDays(1));
+
+UserAccountClient.fromContext(ctx, userId)
+    .expireSession()
+    .delayedCall(Duration.ofMinutes(30));
+```
+
+```python Python
+# Schedule calls with delays
+ReminderServiceClient.from_context(ctx).send_reminder(user_id, message).delayed_call(
+    timedelta(days=1)
+)
+
+UserAccountClient.from_context(ctx, user_id).expire_session().delayed_call(
+    timedelta(minutes=30)
+)
+```
+</CodeGroup>
+
+## Error handling and retries
+
+Service communication helpers automatically handle retries for transient failures:
+
+<CodeGroup>
+```typescript TypeScript
+export const processWithFallback = async (ctx: Context, data: ProcessData) => {
+  try {
+    // Try primary service
+    return await ctx.serviceCall(PrimaryService).process(data);
+  } catch (error) {
+    // Fallback to secondary service
+    try {
+      return await ctx.serviceCall(SecondaryService).process(data);
+    } catch (fallbackError) {
+      // Both services failed
+      throw new Error("All processing services unavailable");
+    }
+  }
+};
+```
+</CodeGroup>
+
+**Automatic retries**: Transient failures are automatically retried by Restate.
+
+**Terminal errors**: Use `TerminalError` to stop retries for permanent failures.
+
+**Exactly-once delivery**: Each service call is executed exactly once, even during retries.
+
+Service communication helpers provide the foundation for building reliable, distributed applications where services can depend on each other without worrying about network failures or partial executions.

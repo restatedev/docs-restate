@@ -1,0 +1,64 @@
+---
+title: Essential Context Helpers
+description: Core tools for reliable execution - ctx.run and service calls
+---
+
+Every handler gets a `ctx` parameter with essential tools for building reliable services. These two core helpers handle the foundation of durable execution.
+
+## Run - Execute Code Safely
+
+Use `ctx.run()` to wrap code that might produce different results on each execution - like API calls, database queries, or generating random numbers.
+
+Restate records the result in its journal so the same value is returned on retries, maintaining deterministic execution.
+
+### Why you need this
+
+Without `ctx.run()`, operations like:
+- External API calls
+- Database queries  
+- Random number generation
+- Current timestamps
+
+Would produce different results during replay, breaking Restate's recovery guarantees.
+
+### How it works
+
+1. **First execution**: Restate runs your code and stores the result
+2. **On retry/replay**: Restate returns the stored result without re-executing
+3. **Your code stays deterministic** while still calling external systems
+
+```typescript
+// ❌ Don't do this - will break on retry
+const timestamp = new Date().toISOString();
+const random = Math.random();
+
+// ✅ Do this - safe for retries
+const timestamp = await ctx.run("get-timestamp", () => new Date().toISOString());
+const random = await ctx.run("generate-random", () => Math.random());
+```
+
+## Service Calls - Call Other Services
+
+Use the context to call other services with automatic retries and delivery guarantees. Make request/response calls when you need results, or fire-and-forget calls for background work.
+
+All service calls are durable and will complete successfully even if your function restarts.
+
+### Request/Response Calls
+```typescript
+// Wait for the result
+const result = await ctx.serviceCall(OtherService).processData(data);
+```
+
+### One-Way Calls  
+```typescript
+// Fire and forget - don't wait for completion
+ctx.serviceSend(NotificationService).sendEmail(email);
+```
+
+### Delayed Calls
+```typescript
+// Schedule for later execution
+await ctx.serviceCall(ReminderService).sendReminder(message, { delay: 60000 });
+```
+
+These helpers form the foundation of reliable service communication and deterministic execution in Restate.

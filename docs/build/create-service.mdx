@@ -1,0 +1,285 @@
+---
+title: Create Service
+description: Set up and deploy your first Restate service with functions
+---
+
+Create a Restate service by defining functions that handle requests. Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+
+## Choose your service type
+
+Start by deciding which type of service fits your use case:
+
+**Service**: For stateless functions that process requests without storing data between calls. Perfect for data processing, API integrations, and business logic.
+
+**Virtual Object**: For stateful functions that need to store and manage data per unique key. Perfect for user accounts, shopping carts, or any entity that needs persistent state.
+
+**Workflow**: For long-running functions that coordinate complex processes over extended periods. Perfect for approval workflows, multi-step transactions, or orchestration scenarios.
+
+## Set up your project
+
+<CodeGroup>
+```bash TypeScript
+npx @restatedev/create-app@latest --template hello-world-http my-service
+cd my-service
+npm install
+```
+
+```bash Java
+curl -LO https://github.com/restatedev/sdk-java/releases/latest/download/restate-sdk-java-starter.zip
+unzip restate-sdk-java-starter.zip -d my-service && cd my-service
+./gradlew build
+```
+
+```bash Python
+pip install restate-sdk
+mkdir my-service && cd my-service
+```
+
+```bash Go
+go mod init my-service
+go get github.com/restatedev/sdk-go
+```
+</CodeGroup>
+
+## Define your functions
+
+Create functions based on your chosen service type:
+
+<CodeGroup>
+```typescript TypeScript - Service
+import { endpoint, service } from "@restatedev/restate-sdk";
+
+const myService = service({
+  name: "MyService",
+  handlers: {
+    // Define a function
+    processData: async (ctx, input: { data: string }) => {
+      // Process the input
+      const result = await ctx.run("transform", () => transformData(input.data));
+      
+      return { processed: true, result };
+    },
+    
+    // Define another function
+    validateInput: async (ctx, input: { value: string }) => {
+      const isValid = await ctx.run("validate", () => validate(input.value));
+      
+      return { valid: isValid };
+    }
+  }
+});
+
+// Start the HTTP endpoint
+endpoint().bind(myService).listen();
+```
+
+```typescript TypeScript - Virtual Object
+import { endpoint, object } from "@restatedev/restate-sdk";
+
+const userAccount = object({
+  name: "UserAccount",
+  handlers: {
+    // Function to update user profile
+    updateProfile: async (ctx, profile: UserProfile) => {
+      ctx.set("profile", profile);
+      ctx.set("lastUpdated", new Date().toISOString());
+      
+      return { success: true, profile };
+    },
+    
+    // Function to get user profile
+    getProfile: async (ctx) => {
+      const profile = await ctx.get<UserProfile>("profile");
+      
+      return { profile };
+    }
+  }
+});
+
+endpoint().bind(userAccount).listen();
+```
+
+```typescript TypeScript - Workflow
+import { endpoint, workflow } from "@restatedev/restate-sdk";
+
+const orderWorkflow = workflow({
+  name: "OrderWorkflow",
+  handlers: {
+    // Main workflow function
+    processOrder: async (ctx, order: Order) => {
+      // Step 1: Validate order
+      const validation = await ctx.run("validate", () => validateOrder(order));
+      if (!validation.valid) {
+        throw new Error("Invalid order");
+      }
+      
+      // Step 2: Wait for payment confirmation
+      const paymentConfirmed = await ctx.promise<boolean>("payment-confirmed");
+      if (!paymentConfirmed) {
+        return { status: "cancelled" };
+      }
+      
+      // Step 3: Process fulfillment
+      await ctx.sleep(1000); // Wait 1 second
+      const fulfillment = await ctx.run("fulfill", () => fulfillOrder(order));
+      
+      return { status: "completed", fulfillmentId: fulfillment.id };
+    },
+    
+    // Signal function to confirm payment
+    confirmPayment: async (ctx, confirmed: boolean) => {
+      ctx.promise("payment-confirmed").resolve(confirmed);
+    },
+    
+    // Query function to check status
+    getStatus: async (ctx) => {
+      const status = await ctx.get<string>("status");
+      return { status: status ?? "processing" };
+    }
+  }
+});
+
+endpoint().bind(orderWorkflow).listen();
+```
+
+```java Java - Service
+import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Service;
+import dev.restate.sdk.http.vertx.RestateHttpEndpointBuilder;
+
+@Service
+public class MyService {
+    
+    // Define a function
+    @Handler
+    public ProcessResult processData(Context ctx, DataInput input) {
+        // Process the input
+        String result = ctx.run("transform", () -> transformData(input.getData()));
+        
+        return new ProcessResult(true, result);
+    }
+    
+    // Define another function
+    @Handler
+    public ValidationResult validateInput(Context ctx, ValidationInput input) {
+        boolean isValid = ctx.run("validate", () -> validate(input.getValue()));
+        
+        return new ValidationResult(isValid);
+    }
+}
+
+// Start the HTTP endpoint
+public static void main(String[] args) {
+    RestateHttpEndpointBuilder.builder()
+        .bind(new MyService())
+        .buildAndListen();
+}
+```
+
+```python Python - Service
+from restate import Service, Endpoint
+
+# Create service
+my_service = Service("MyService")
+
+# Define a function
+@my_service.handler()
+async def process_data(ctx, input: dict):
+    # Process the input
+    result = await ctx.run("transform", lambda: transform_data(input["data"]))
+    
+    return {"processed": True, "result": result}
+
+# Define another function  
+@my_service.handler()
+async def validate_input(ctx, input: dict):
+    is_valid = await ctx.run("validate", lambda: validate(input["value"]))
+    
+    return {"valid": is_valid}
+
+# Start the HTTP endpoint
+if __name__ == "__main__":
+    endpoint = Endpoint()
+    endpoint.bind(my_service)
+    endpoint.listen()
+```
+</CodeGroup>
+
+## Start your service
+
+Run your service locally to test it:
+
+<CodeGroup>
+```bash TypeScript
+npm run dev
+```
+
+```bash Java
+./gradlew run
+```
+
+```bash Python
+python app.py
+```
+
+```bash Go
+go run main.go
+```
+</CodeGroup>
+
+Your service will start on `http://localhost:9080` (or the port you configured).
+
+## Register with Restate
+
+Before you can call your functions, register your service with Restate:
+
+```bash
+# Register your service (run this once)
+restate deployment register http://localhost:9080
+
+# Check registered services
+restate services list
+```
+
+Restate discovers all your functions automatically and makes them available for invocation.
+
+## Test your functions
+
+Once registered, you can call your functions:
+
+<CodeGroup>
+```bash cURL - Service
+curl localhost:8080/MyService/processData \
+  --json '{"data": "hello world"}'
+```
+
+```bash cURL - Virtual Object
+curl localhost:8080/UserAccount/user123/updateProfile \
+  --json '{"name": "John Doe", "email": "john@example.com"}'
+
+curl localhost:8080/UserAccount/user123/getProfile
+```
+
+```bash cURL - Workflow
+curl localhost:8080/OrderWorkflow/order456/processOrder \
+  --json '{"customerId": "user123", "items": [{"id": "item1", "quantity": 2}]}'
+
+# Send signal to workflow
+curl localhost:8080/OrderWorkflow/order456/confirmPayment \
+  --json 'true'
+
+# Query workflow status
+curl localhost:8080/OrderWorkflow/order456/getStatus
+```
+</CodeGroup>
+
+## Next steps
+
+Now that you have a working service:
+
+1. **Add more functions** to handle different aspects of your business logic
+2. **Call other services** using request-response, one-way, or delayed calls
+3. **Handle external systems** safely with `ctx.run()` patterns
+4. **Deploy to production** using your preferred deployment method
+
+Your functions automatically get durability, retries, and exactly-once execution guarantees - no additional configuration needed.

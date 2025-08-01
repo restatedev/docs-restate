@@ -1,0 +1,68 @@
+---
+title: Durable Agents
+description: Build resilient AI agents with built-in durability and fault tolerance
+---
+
+AI agents are just regular code—a loop or workflow to gather context ➜ call tools or an LLM ➜ figure out what to do next ➜ repeat. The challenge is that these loops involve expensive, non-deterministic operations that can fail, timeout, or produce inconsistent results across retries.
+
+Durable agents with Restate wrap these critical operations in fault-tolerant execution contexts. Your agent workflows become crash-safe and idempotent without manual retry logic, enabling reliable long-running tasks that work seamlessly across different AI SDKs and frameworks.
+
+## Agent Loop
+
+The core agent loop of reasoning, tool use, and decision-making becomes fault-tolerant when each step is wrapped in durable execution. LLM calls and tool invocations are automatically retried and recovered, ensuring your agent can resume from any point of failure without losing progress or repeating expensive operations.
+
+```typescript
+// Each step in the loop is durable and recoverable
+const context = await ctx.run("gather-context", () => getRelevantData());
+const reasoning = await ctx.run("llm-reasoning", () => 
+  llm.analyze({ context, task: "decide next action" })
+);
+const toolResult = await ctx.run("tool-execution", () =>
+  executeTool(reasoning.selectedTool, reasoning.parameters)
+);
+```
+
+## Long-Running Agent
+
+Agents that run ambient background tasks, handle asynchronous workflows, or require human-in-the-loop interactions benefit from durable execution. These agents can suspend themselves while waiting for external signals, schedule future work, and resume processing exactly where they left off—perfect for serverless environments where you only pay for active processing time.
+
+```typescript
+// Agent waits for human approval without consuming resources
+const approval = await ctx.promise("human-review");
+
+// Schedule background processing for later
+await ctx.objectSendDelayed(backgroundProcessor, "analyze", 
+  { data }, 60 * 60 * 1000); // 1 hour delay
+
+// Resume when conditions are met
+if (approval.proceed) {
+  await ctx.run("continue-processing", () => processData());
+}
+```
+
+## Multi-Agent Systems
+
+Coordinate multiple specialized agents with reliable messaging and guaranteed delivery. Agents can hand off work to each other, share state consistently, and orchestrate complex workflows across distributed systems without worrying about message loss or duplicate processing.
+
+```typescript
+// Reliable agent-to-agent communication
+await ctx.objectCall(researchAgent, "gather-info", { topic });
+await ctx.objectCall(analysisAgent, "process", { dataId });
+
+// Orchestrate multiple agents in parallel
+const results = await Promise.all([
+  ctx.objectCall(agentA, "taskA", { input }),
+  ctx.objectCall(agentB, "taskB", { input }),
+  ctx.objectCall(agentC, "taskC", { input })
+]);
+```
+
+## What else should be here?
+
+Consider adding:
+- **Getting Started Guide**: Step-by-step tutorial for converting existing agents
+- **Architecture Patterns**: Common agent architectures (single-agent loops, multi-agent systems, hierarchical agents)  
+- **Integration Examples**: How to wrap existing AI SDKs (Vercel AI, OpenAI Agents, LangChain)
+- **Observability**: How to monitor and debug agent execution
+- **Performance Considerations**: Best practices for efficient durable agents
+- **Migration Guide**: Converting existing agents to be durable

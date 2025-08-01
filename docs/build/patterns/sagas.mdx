@@ -1,0 +1,247 @@
+---
+title: Sagas
+description: Handle failures in multi-step processes by rolling back completed steps
+---
+
+When a multi-step business process fails partway through, you're left with a partially completed operation. Some steps succeeded, others failed, and your system is in an inconsistent state. The Saga pattern solves this by implementing compensation logic that can undo completed steps.
+
+This pattern is essential for distributed transactions across multiple services, where traditional ACID transactions aren't possible.
+
+## The problem sagas solve
+
+Consider an e-commerce order process:
+1. Charge the customer's credit card
+2. Reserve inventory 
+3. Create shipping label
+4. Send confirmation email
+
+If step 3 fails (shipping service is down), you've already charged the customer and reserved inventory. Without compensation, the customer is charged for an order that will never ship.
+
+## How sagas work in Restate
+
+Sagas in Restate use durable execution to ensure compensation actions run reliably, even across failures.
+
+**The saga pattern:**
+1. Execute each step of your process
+2. Track what was done (for compensation)  
+3. If any step fails, run compensation actions in reverse order
+4. Return the system to a consistent state
+
+**Saga pattern handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrderWithSaga = async (ctx: WorkflowContext, order: Order) => {
+  const compensations: Array<() => Promise<void>> = [];
+  
+  try {
+    // Step 1: Charge payment
+    const payment = await ctx.run("charge-payment", async () => {
+      return await PaymentService.charge(order.customerId, order.total);
+    });
+    
+    // Store compensation for this step
+    compensations.push(async () => {
+      await PaymentService.refund(payment.transactionId);
+    });
+    
+    // Step 2: Reserve inventory
+    const reservation = await ctx.run("reserve-inventory", async () => {
+      return await InventoryService.reserve(order.items);
+    });
+    
+    compensations.push(async () => {
+      await InventoryService.cancelReservation(reservation.reservationId);
+    });
+    
+    // Step 3: Create shipping
+    const shipping = await ctx.run("create-shipping", async () => {
+      return await ShippingService.createLabel(order.customerId, order.items);
+    });
+    
+    compensations.push(async () => {
+      await ShippingService.cancelLabel(shipping.trackingId);
+    });
+    
+    // Step 4: Send confirmation
+    await ctx.run("send-confirmation", async () => {
+      return await NotificationService.sendOrderConfirmation(order.customerId, order.id);
+    });
+    
+    return { orderId: order.id, status: "completed" };
+    
+  } catch (error) {
+    // Run compensations in reverse order
+    for (let i = compensations.length - 1; i >= 0; i--) {
+      try {
+        await ctx.run(`compensation-${i}`, compensations[i]);
+      } catch (compensationError) {
+        // Log but continue with other compensations
+        console.error(`Compensation ${i} failed:`, compensationError);
+      }
+    }
+    
+    throw new Error(`Order failed: ${error.message}`);
+  }
+};
+```
+
+```java Java
+@Workflow
+public String processOrderWithSaga(WorkflowContext ctx, Order order) {
+    List<Runnable> compensations = new ArrayList<>();
+    
+    try {
+        // Step 1: Charge payment
+        Payment payment = ctx.run("charge-payment", () -> 
+            PaymentServiceClient.fromContext(ctx).charge(order.getCustomerId(), order.getTotal()).await()
+        );
+        
+        compensations.add(() -> 
+            PaymentServiceClient.fromContext(ctx).refund(payment.getTransactionId()).await()
+        );
+        
+        // Step 2: Reserve inventory
+        Reservation reservation = ctx.run("reserve-inventory", () ->
+            InventoryServiceClient.fromContext(ctx).reserve(order.getItems()).await()
+        );
+        
+        compensations.add(() ->
+            InventoryServiceClient.fromContext(ctx).cancelReservation(reservation.getReservationId()).await()
+        );
+        
+        // Step 3: Create shipping
+        Shipping shipping = ctx.run("create-shipping", () ->
+            ShippingServiceClient.fromContext(ctx).createLabel(order.getCustomerId(), order.getItems()).await()
+        );
+        
+        compensations.add(() ->
+            ShippingServiceClient.fromContext(ctx).cancelLabel(shipping.getTrackingId()).await()
+        );
+        
+        // Step 4: Send confirmation
+        ctx.run("send-confirmation", () ->
+            NotificationServiceClient.fromContext(ctx).sendOrderConfirmation(order.getCustomerId(), order.getId()).await()
+        );
+        
+        return order.getId();
+        
+    } catch (Exception error) {
+        // Run compensations in reverse order
+        for (int i = compensations.size() - 1; i >= 0; i--) {
+            try {
+                ctx.run("compensation-" + i, compensations.get(i));
+            } catch (Exception compensationError) {
+                // Log but continue
+                System.err.println("Compensation " + i + " failed: " + compensationError.getMessage());
+            }
+        }
+        
+        throw new RuntimeException("Order failed: " + error.getMessage());
+    }
+}
+```
+
+```python Python
+async def process_order_with_saga(ctx: WorkflowContext, order: Order):
+    compensations = []
+    
+    try:
+        # Step 1: Charge payment
+        payment = await ctx.run("charge-payment", 
+            lambda: PaymentService.from_context(ctx).charge(order.customer_id, order.total)
+        )
+        
+        compensations.append(
+            lambda: PaymentService.from_context(ctx).refund(payment.transaction_id)
+        )
+        
+        # Step 2: Reserve inventory
+        reservation = await ctx.run("reserve-inventory",
+            lambda: InventoryService.from_context(ctx).reserve(order.items)
+        )
+        
+        compensations.append(
+            lambda: InventoryService.from_context(ctx).cancel_reservation(reservation.reservation_id)
+        )
+        
+        # Step 3: Create shipping
+        shipping = await ctx.run("create-shipping",
+            lambda: ShippingService.from_context(ctx).create_label(order.customer_id, order.items)
+        )
+        
+        compensations.append(
+            lambda: ShippingService.from_context(ctx).cancel_label(shipping.tracking_id)
+        )
+        
+        # Step 4: Send confirmation
+        await ctx.run("send-confirmation",
+            lambda: NotificationService.from_context(ctx).send_order_confirmation(order.customer_id, order.id)
+        )
+        
+        return {"order_id": order.id, "status": "completed"}
+        
+    except Exception as error:
+        # Run compensations in reverse order
+        for i in range(len(compensations) - 1, -1, -1):
+            try:
+                await ctx.run(f"compensation-{i}", compensations[i])
+            except Exception as compensation_error:
+                print(f"Compensation {i} failed: {compensation_error}")
+        
+        raise Exception(f"Order failed: {error}")
+```
+</CodeGroup>
+
+**Invoking saga workflows:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-123/processOrderWithSaga \
+  --json '{"customerId": "user-456", "items": [{"id": "item-1", "qty": 2}], "total": 100}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .processOrderWithSaga({
+    customerId: "user-456",
+    items: [{ id: "item-1", qty: 2 }],
+    total: 100
+  });
+```
+
+```java Java Client
+String result = OrderWorkflowClient.fromContext(ctx, "order-123")
+    .processOrderWithSaga(order).await();
+```
+</CodeGroup>
+
+## Key implementation details
+
+**Reverse order compensation:** Compensations run in reverse order because later steps might depend on earlier ones. You cancel shipping before releasing inventory.
+
+**Idempotent compensations:** Compensation actions should be safe to run multiple times. If a refund is already processed, attempting another refund should be a no-op.
+
+**Best-effort compensation:** If a compensation fails, log it but continue with other compensations. Some inconsistencies might need manual intervention.
+
+**State tracking:** Each step stores enough information for its compensation. Payment step stores transaction ID, inventory step stores reservation ID, etc.
+
+## When to use sagas
+
+**Perfect for:**
+- Payment processing with multiple steps
+- Order fulfillment across multiple services  
+- Account setup with multiple external systems
+- Any multi-service transaction that needs rollback capability
+
+**Not ideal for:**
+- Simple single-service operations
+- Operations where partial completion is acceptable
+- Read-only operations that don't change system state
+
+## Saga vs alternatives
+
+**Traditional 2PC (Two-Phase Commit):** Sagas provide better availability but eventual consistency instead of strong consistency.
+
+**Manual cleanup:** Sagas provide structured, reliable compensation instead of ad-hoc error handling.
+
+**Event sourcing:** Sagas can complement event sourcing but provide immediate compensation rather than event replay.

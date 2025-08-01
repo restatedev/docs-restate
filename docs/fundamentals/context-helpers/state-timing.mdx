@@ -1,0 +1,72 @@
+---
+title: State & Timing Helpers
+description: Manage data and time with ctx.get, ctx.set, ctx.sleep, and ctx.awakeable
+---
+
+Store data and control timing in your handlers. These helpers provide durable state management and reliable scheduling that survive failures and restarts.
+
+## State - Store and Retrieve Data
+
+Use `ctx.get()` and `ctx.set()` to store and retrieve data in your virtual objects and workflows. Data is automatically persisted and remains consistent across failures.
+
+Simple key-value storage with strong consistency guarantees built in.
+
+### Basic Operations
+
+```typescript
+// Store data
+ctx.set("user-preference", { theme: "dark", language: "en" });
+
+// Retrieve data
+const preference = await ctx.get<UserPreference>("user-preference");
+
+// Clear data
+ctx.clear("temporary-data");
+```
+
+### Consistency Guarantees
+
+- **Single-writer**: Only one handler can modify a Virtual Object's state at a time
+- **Atomic commits**: All state changes in a handler are applied together on success
+- **Isolation**: Each Virtual Object's state is completely separate from others
+- **Durability**: State survives service crashes, restarts, and failures
+
+## Timing - Sleep and Schedule
+
+Use `ctx.sleep()` to pause your function for a specific duration, or `ctx.awakeable()` to wait for external events. Schedule future work with delayed calls.
+
+All timing operations survive restarts and provide accurate timing even across failures.
+
+### Sleep - Pause Execution
+
+```typescript
+// Sleep for 30 seconds
+await ctx.sleep(30000);
+
+// Sleep until specific time
+const targetTime = new Date('2024-12-25T09:00:00Z');
+const delay = targetTime.getTime() - Date.now();
+await ctx.sleep(delay);
+```
+
+### Awakeables - Wait for External Events
+
+```typescript
+// Create an awakeable for external completion
+const awakeable = ctx.awakeable<string>();
+
+// Register the awakeable ID with external system
+await registerCallback(awakeable.id);
+
+// Wait for external system to resolve it
+const result = await awakeable.promise;
+```
+
+### Key Benefits
+
+- **Resource efficient**: Sleeping handlers consume no CPU or memory
+- **Precise timing**: Resume at exact time specified, regardless of restarts  
+- **Failure resilient**: Timing survives system crashes and deployments
+- **Scalable**: Millions of concurrent sleeps with minimal overhead
+
+These helpers enable sophisticated time-based workflows and stateful applications that remain reliable even in distributed environments.

@@ -1,0 +1,203 @@
+---
+title: Managing State
+description: Store, retrieve, and manage consistent state in Virtual Objects
+---
+
+Virtual Objects provide built-in key-value storage with strong consistency guarantees. State is automatically persisted when functions complete and restored when they restart.
+
+## Get state
+
+Getting state is like looking up a value in a dictionary using a key. If the key exists, you get the stored value. If it doesn't exist, you get `null` (or your default value).
+
+The state is loaded from durable storage when your function starts, so `get()` calls are fast - they read from memory, not from disk or network.
+
+```typescript TypeScript
+export const getProfile = async (ctx: ObjectContext) => {
+  const profile = await ctx.get<UserProfile>("profile");
+  const name = (await ctx.get<string>("name")) ?? "Unknown User";
+  
+  return {
+    profile,
+    name,
+    hasProfile: profile !== null
+  };
+};
+```
+
+```java Java
+@Handler
+public ProfileResponse getProfile(ObjectContext ctx) {
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    String name = ctx.get("name", String.class).orElse("Unknown User");
+    
+    return new ProfileResponse(profile, name, profile != null);
+}
+```
+
+```python Python
+async def get_profile(ctx: ObjectContext):
+    profile = await ctx.get("profile", UserProfile)
+    name = await ctx.get("name", str) or "Unknown User"
+    
+    return {
+        "profile": profile,
+        "name": name,
+        "has_profile": profile is not None
+    }
+```
+
+State keys are strings (like `"profile"` or `"lastLogin"`). Values can be any JSON-serializable data. If a key doesn't exist, you get `null` unless you provide a default.
+
+## Set state
+
+Setting state stores a value that will persist even after your function finishes. The next time any function for this Virtual Object runs, it can retrieve this value using the same key.
+
+State changes are automatically saved when your function completes successfully. If your function fails partway through, state changes are rolled back - this keeps your data consistent.
+
+```typescript TypeScript
+export const updateProfile = async (ctx: ObjectContext, profile: UserProfile) => {
+  // Set multiple pieces of state atomically
+  ctx.set("profile", profile);
+  ctx.set("lastUpdated", new Date().toISOString());
+  ctx.set("version", ((await ctx.get<number>("version")) ?? 0) + 1);
+  
+  return { 
+    success: true, 
+    profile,
+    updatedAt: new Date().toISOString() 
+  };
+};
+```
+
+```java Java
+@Handler
+public UpdateResult updateProfile(ObjectContext ctx, UserProfile profile) {
+    // Set multiple pieces of state atomically
+    ctx.set("profile", profile);
+    ctx.set("lastUpdated", Instant.now().toString());
+    
+    Integer version = ctx.get("version", Integer.class).orElse(0);
+    ctx.set("version", version + 1);
+    
+    return new UpdateResult(true, profile, Instant.now().toString());
+}
+```
+
+```python Python
+async def update_profile(ctx: ObjectContext, profile: UserProfile):
+    # Set multiple pieces of state atomically
+    await ctx.set("profile", profile)
+    await ctx.set("lastUpdated", datetime.now().isoformat())
+    
+    version = await ctx.get("version", int) or 0
+    await ctx.set("version", version + 1)
+    
+    return {
+        "success": True,
+        "profile": profile,
+        "updated_at": datetime.now().isoformat()
+    }
+```
+
+All state changes in a function are applied atomically - either all changes are saved when the function completes, or none are if it fails.
+
+## Clear state
+
+Clearing state removes a key-value pair completely. After clearing, attempts to get that key will return `null` (or your default value).
+
+```typescript TypeScript
+export const deleteProfile = async (ctx: ObjectContext) => {
+  // Get current profile before deletion for audit log
+  const profile = await ctx.get<UserProfile>("profile");
+  
+  if (!profile) {
+    return { success: false, error: "Profile not found" };
+  }
+  
+  // Clear all user data atomically
+  ctx.clear("profile");
+  ctx.clear("tempData");
+  ctx.clear("preferences");
+  
+  // Record deletion timestamp
+  ctx.set("deletedAt", new Date().toISOString());
+  
+  return { success: true, deletedProfile: profile };
+};
+```
+
+```java Java
+@Handler
+public DeleteResult deleteProfile(ObjectContext ctx) {
+    // Get current profile before deletion for audit log
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    
+    if (profile == null) {
+        return new DeleteResult(false, "Profile not found", null);
+    }
+    
+    // Clear all user data atomically
+    ctx.clear("profile");
+    ctx.clear("tempData");
+    ctx.clear("preferences");
+    
+    // Record deletion timestamp
+    ctx.set("deletedAt", Instant.now().toString());
+    
+    return new DeleteResult(true, null, profile);
+}
+```
+
+Clearing completely removes the key, saving storage space and making it clearer in your code that you don't want this data anymore.
+
+## State consistency guarantees
+
+Restate provides strong consistency guarantees that make state management reliable:
+
+**Single-writer guarantee**: Only one function can modify a Virtual Object's state at any given time. This prevents race conditions where two functions try to update the same data simultaneously.
+
+**Atomic commits**: All state changes in a function are applied together when the function completes successfully. If the function fails at any point, all state changes are rolled back.
+
+**Isolation**: Each Virtual Object's state is completely separate from every other object's state. Even if you have a million user accounts, each user's state is isolated from all others.
+
+**Durability**: Once a function completes and state is saved, that data will survive service crashes, restarts, network failures, or even complete data center outages.
+
+## Common patterns
+
+### Counter pattern
+Perfect for tracking counts, likes, or any numeric value:
+
+```typescript
+let count = (await ctx.get<number>("count")) ?? 0;
+count++;
+ctx.set("count", count);
+return count;
+```
+
+The `?? 0` provides a default value for the first time this runs. The single-writer guarantee ensures the count is always accurate.
+
+### Shopping cart pattern  
+Manages collections of items that change over time:
+
+```typescript
+const items = (await ctx.get<CartItem[]>("items")) ?? [];
+items.push(newItem);
+ctx.set("items", items);
+ctx.set("lastUpdated", Date.now());
+```
+
+Both the items and timestamp are updated together atomically.
+
+### User session pattern
+Validates and manages time-sensitive data:
+
+```typescript
+const session = await ctx.get<Session>("session");
+if (!session || session.expires < Date.now()) {
+  ctx.clear("session");
+  throw new Error("Session expired");
+}
+return session;
+```
+
+The session is validated every time it's accessed and cleaned up if expired.

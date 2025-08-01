@@ -1,0 +1,150 @@
+---
+title: Connect External Systems
+description: Integrate databases, APIs, and third-party services reliably
+---
+
+Integrate with external systems using Restate's durable patterns. Make database calls, API requests, and handle webhooks while maintaining consistency and reliability across failures.
+
+## The ctx.run() pattern
+
+The foundation of reliable external system integration is `ctx.run()` - this wraps any code that might produce different results on each execution, making it safe for retries.
+
+```typescript
+// ❌ Don't do this - will break on retry
+const timestamp = new Date().toISOString();
+const userId = Math.random().toString();
+const dbResult = await database.query("SELECT * FROM users");
+
+// ✅ Do this - safe for retries
+const timestamp = await ctx.run("get-timestamp", () => new Date().toISOString());
+const userId = await ctx.run("generate-id", () => Math.random().toString());
+const dbResult = await ctx.run("query-users", () => database.query("SELECT * FROM users"));
+```
+
+Without `ctx.run()`, operations like external API calls, database queries, random number generation, current timestamps, and file system operations would produce different results during replay, breaking Restate's recovery guarantees.
+
+## Database connections
+
+Use `ctx.run()` to wrap your database calls so they're tracked in Restate's journal. This prevents duplicate operations during retries and ensures consistent state.
+
+```typescript TypeScript
+export const updateUserProfile = async (ctx: Context, profile: UserProfile) => {
+  // Safe database call - won't duplicate on retry
+  const result = await ctx.run("update-db", async () => {
+    return await database.users.update(profile.id, {
+      name: profile.name,
+      email: profile.email,
+      updatedAt: new Date()
+    });
+  });
+  
+  return { success: true, userId: profile.id, result };
+};
+```
+
+```java Java
+@Handler
+public UpdateResult updateUserProfile(Context ctx, UserProfile profile) {
+    // Safe database call - won't duplicate on retry
+    DatabaseResult result = ctx.run("update-db", () -> {
+        return database.users().update(profile.getId())
+            .setName(profile.getName())
+            .setEmail(profile.getEmail())
+            .setUpdatedAt(Instant.now())
+            .execute();
+    });
+    
+    return new UpdateResult(true, profile.getId(), result.getId());
+}
+```
+
+```python Python
+async def update_user_profile(ctx: Context, profile: UserProfile):
+    # Safe database call - won't duplicate on retry
+    async def update_db():
+        return await database.users.update(profile.id, {
+            "name": profile.name,
+            "email": profile.email,
+            "updated_at": datetime.now()
+        })
+    
+    result = await ctx.run("update-db", update_db)
+    
+    return {"success": True, "user_id": profile.id, "result": result}
+```
+
+## API calls
+
+External API calls are inherently unreliable - networks fail, services go down, and responses can be slow or inconsistent. `ctx.run()` makes API calls safe by ensuring they execute exactly once, even during retries.
+
+```typescript TypeScript
+export const syncWithExternalAPI = async (ctx: Context, data: SyncData) => {
+  // Call external API - tracked in journal
+  const apiResponse = await ctx.run("external-api-call", async () => {
+    const response = await fetch('https://api.example.com/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.status}`);
+    }
+    
+    return response.json();
+  });
+  
+  // Process the response
+  await ctx.run("update-local-data", async () => {
+    return await updateLocalDatabase(apiResponse);
+  });
+  
+  return { syncId: apiResponse.id, status: "completed" };
+};
+```
+
+This two-step pattern first makes the API call safely, then processes the response. Both steps are journaled separately, so if processing fails, only the processing step retries - the API call result is preserved.
+
+## Terminal errors for permanent failures
+
+Sometimes external system errors are permanent and shouldn't be retried. Use terminal errors to stop retries immediately for these cases:
+
+```typescript TypeScript
+export const processApiRequest = async (ctx: Context, request: ApiRequest) => {
+  try {
+    const result = await ctx.run("external-api-call", async () => {
+      const response = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: JSON.stringify(request.data)
+      });
+      
+      // Terminal errors for client errors (4xx) - don't retry
+      if (response.status >= 400 && response.status < 500) {
+        if (response.status === 401) {
+          throw new TerminalError("Authentication failed", { errorCode: 401 });
+        }
+        if (response.status === 404) {
+          throw new TerminalError("Resource not found", { errorCode: 404 });
+        }
+        throw new TerminalError(`Client error: ${response.status}`, { errorCode: response.status });
+      }
+      
+      // Server errors (5xx) will retry automatically
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+      
+      return await response.json();
+    });
+    
+    return { success: true, data: result };
+    
+  } catch (error) {
+    // Other errors will retry automatically
+    throw error;
+  }
+};
+```
+
+This approach distinguishes between client errors (4xx) that are usually permanent and use terminal errors, versus server errors (5xx) that are usually temporary and should retry.

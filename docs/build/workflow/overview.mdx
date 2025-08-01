@@ -1,0 +1,150 @@
+---
+title: Workflow Overview
+description: Build long-running functions that coordinate complex processes
+---
+
+Workflows coordinate long-running processes that span minutes, hours, or days. They can sleep, wait for external events, handle human interactions, and manage complex business logic while consuming no resources during idle periods.
+
+## What are Workflows?
+
+Workflows are perfect for processes that involve coordination, human input, or long delays. Unlike regular functions that must complete quickly, workflows can run for extended periods while consuming resources only when actively processing.
+
+Think of workflows as persistent processes that can pause, wait, and resume exactly where they left off, even across system failures and restarts.
+
+## Define workflow functions
+
+Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+
+```typescript TypeScript
+export const processOrder = async (ctx: WorkflowContext, order: Order) => {
+  // Start the workflow
+  ctx.set("status", "processing");
+  ctx.set("startTime", new Date().toISOString());
+  
+  // Step 1: Validate the order
+  const validation = await ctx.run("validate-order", () => validateOrder(order));
+  if (!validation.valid) {
+    ctx.set("status", "failed");
+    throw new Error("Order validation failed");
+  }
+  
+  // Step 2: Wait for payment confirmation (could be hours)
+  const paymentConfirmed = await ctx.promise<boolean>("payment-confirmation");
+  if (!paymentConfirmed) {
+    ctx.set("status", "cancelled");
+    return { status: "cancelled", reason: "Payment not confirmed" };
+  }
+  
+  // Step 3: Schedule delivery
+  await ctx.sleep(24 * 60 * 60 * 1000); // Wait 24 hours
+  
+  const delivery = await ctx.run("schedule-delivery", () => scheduleDelivery(order));
+  ctx.set("status", "shipped");
+  
+  return { 
+    status: "completed", 
+    deliveryId: delivery.id,
+    estimatedDelivery: delivery.estimatedDate
+  };
+};
+```
+
+```java Java
+@Handler
+public OrderResult processOrder(WorkflowContext ctx, Order order) {
+    // Start the workflow
+    ctx.set("status", "processing");
+    ctx.set("startTime", Instant.now().toString());
+    
+    // Step 1: Validate the order
+    ValidationResult validation = ctx.run("validate-order", () -> validateOrder(order));
+    if (!validation.isValid()) {
+        ctx.set("status", "failed");
+        throw new RuntimeException("Order validation failed");
+    }
+    
+    // Step 2: Wait for payment confirmation
+    Boolean paymentConfirmed = ctx.promise("payment-confirmation", Boolean.class).await();
+    if (!paymentConfirmed) {
+        ctx.set("status", "cancelled");
+        return new OrderResult("cancelled", "Payment not confirmed");
+    }
+    
+    // Step 3: Schedule delivery after 24 hours
+    ctx.sleep(Duration.ofDays(1));
+    
+    DeliveryResult delivery = ctx.run("schedule-delivery", () -> scheduleDelivery(order));
+    ctx.set("status", "shipped");
+    
+    return new OrderResult("completed", delivery.getId(), delivery.getEstimatedDate());
+}
+```
+
+```python Python
+async def process_order(ctx: WorkflowContext, order: Order):
+    # Start the workflow
+    await ctx.set("status", "processing")
+    await ctx.set("startTime", datetime.now().isoformat())
+    
+    # Step 1: Validate the order
+    validation = await ctx.run("validate-order", lambda: validate_order(order))
+    if not validation.valid:
+        await ctx.set("status", "failed")
+        raise Exception("Order validation failed")
+    
+    # Step 2: Wait for payment confirmation
+    payment_confirmed = await ctx.promise("payment-confirmation", bool)
+    if not payment_confirmed:
+        await ctx.set("status", "cancelled")
+        return {"status": "cancelled", "reason": "Payment not confirmed"}
+    
+    # Step 3: Schedule delivery after 24 hours
+    await ctx.sleep(timedelta(days=1))
+    
+    delivery = await ctx.run("schedule-delivery", lambda: schedule_delivery(order))
+    await ctx.set("status", "shipped")
+    
+    return {
+        "status": "completed",
+        "delivery_id": delivery.id,
+        "estimated_delivery": delivery.estimated_date
+    }
+```
+
+## Key characteristics
+
+**Long-running**: Execute for extended periods without consuming resources while waiting.
+
+**Durable orchestration**: Coordinate multiple services and steps reliably across failures.
+
+**Event-driven**: Respond to external signals and human input through promises and signals.
+
+**Resource efficient**: Only consume resources while actively processing, not while sleeping or waiting.
+
+**Failure resilient**: Resume exactly where they left off after failures or restarts.
+
+## When to use Workflows
+
+Perfect for approval processes requiring human input, multi-step transactions across different services, user onboarding flows with email verification, order processing with payment and shipping coordination, or any scenario requiring orchestration over extended periods.
+
+Not ideal for simple request-response processing or operations that complete quickly without coordination.
+
+## Call workflow functions
+
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-123/processOrder \
+  --json '{"customerId": "user-456", "items": [{"id": "item-1", "quantity": 2}]}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .processOrder({ customerId: "user-456", items: [{ id: "item-1", quantity: 2 }] });
+```
+
+```java Java Client
+OrderResult result = OrderWorkflowClient.fromContext(ctx, "order-123")
+    .processOrder(order).await();
+```
+
+Each workflow is identified by a unique key (like `"order-123"`). The workflow can run for days or weeks, automatically resuming after any failures.

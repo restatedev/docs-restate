@@ -1,0 +1,332 @@
+---
+title: Awakeables
+description: Wait for external events and systems to provide data
+---
+
+Awakeables let you pause execution until an external event happens, without consuming resources while waiting. This is how workflows wait for external systems, human input, or webhook callbacks.
+
+## What are awakeables?
+
+Awakeables are perfect for:
+- Waiting for webhook callbacks
+- Human approval workflows  
+- External system notifications
+- Third-party service completion
+
+**How awakeables work:**
+1. Create an awakeable and get its unique ID
+2. Share the ID with the external system (via API, webhook registration, etc.)
+3. Your function pauses, waiting for the awakeable to be resolved
+4. External system calls Restate with the awakeable ID and result
+5. Your function resumes with the result
+
+## Basic awakeable usage
+
+<CodeGroup>
+```typescript TypeScript
+export const processWithExternalApproval = async (ctx: Context, request: ApprovalRequest) => {
+  // Create an awakeable for external completion
+  const awakeable = ctx.awakeable<ApprovalResult>();
+  
+  // Register the awakeable ID with external approval system
+  await ctx.run("register-approval", async () => {
+    return await approvalSystem.requestApproval({
+      requestId: request.id,
+      awakeableId: awakeable.id,
+      callbackUrl: `${RESTATE_URL}/awakeables/${awakeable.id}`
+    });
+  });
+  
+  // Wait for external system to resolve it (could be hours or days)
+  const approvalResult = await awakeable.promise;
+  
+  if (approvalResult.approved) {
+    return await processApprovedRequest(ctx, request);
+  } else {
+    return { status: "rejected", reason: approvalResult.reason };
+  }
+};
+```
+
+```java Java
+@Handler
+public ProcessResult processWithExternalApproval(Context ctx, ApprovalRequest request) {
+    // Create an awakeable for external completion
+    Awakeable<ApprovalResult> awakeable = ctx.awakeable(ApprovalResult.class);
+    
+    // Register the awakeable ID with external approval system
+    ctx.run("register-approval", () -> {
+        return approvalSystem.requestApproval(
+            request.getId(),
+            awakeable.getId(),
+            RESTATE_URL + "/awakeables/" + awakeable.getId()
+        );
+    });
+    
+    // Wait for external system to resolve it
+    ApprovalResult approvalResult = awakeable.await();
+    
+    if (approvalResult.isApproved()) {
+        return processApprovedRequest(ctx, request);
+    } else {
+        return new ProcessResult("rejected", approvalResult.getReason());
+    }
+}
+```
+
+```python Python
+async def process_with_external_approval(ctx: Context, request: ApprovalRequest):
+    # Create an awakeable for external completion
+    awakeable = ctx.awakeable()
+    
+    # Register the awakeable ID with external approval system
+    await ctx.run("register-approval", lambda: approval_system.request_approval(
+        request_id=request.id,
+        awakeable_id=awakeable.id,
+        callback_url=f"{RESTATE_URL}/awakeables/{awakeable.id}"
+    ))
+    
+    # Wait for external system to resolve it
+    approval_result = await awakeable.promise
+    
+    if approval_result.approved:
+        return await process_approved_request(ctx, request)
+    else:
+        return {"status": "rejected", "reason": approval_result.reason}
+```
+</CodeGroup>
+
+## External system resolves the awakeable
+
+The external system calls Restate to resolve the awakeable:
+
+<CodeGroup>
+```bash
+# External system calls this when approval is ready
+curl -X POST ${RESTATE_URL}/awakeables/awakeable_1234567890abcdef \
+  --json '{"approved": true, "approver": "manager@company.com"}'
+```
+</CodeGroup>
+
+## Awakeable patterns
+
+### Webhook integration
+
+<CodeGroup>
+```typescript TypeScript
+export const processPaymentWithWebhook = async (ctx: Context, payment: PaymentRequest) => {
+  // Create payment intent with external provider
+  const paymentIntent = await ctx.run("create-payment", () => 
+    stripe.paymentIntents.create({
+      amount: payment.amount,
+      currency: payment.currency,
+      metadata: { orderId: payment.orderId }
+    })
+  );
+  
+  // Create awakeable for webhook
+  const webhookAwakeable = ctx.awakeable<PaymentWebhook>();
+  
+  // Store awakeable ID for webhook handler to find
+  await ctx.run("store-awakeable", () => 
+    database.storeAwakeableId(paymentIntent.id, webhookAwakeable.id)
+  );
+  
+  try {
+    // Wait for webhook (with 30 minute timeout)
+    const webhookResult = await Promise.race([
+      webhookAwakeable.promise,
+      ctx.sleep(30 * 60 * 1000).then(() => {
+        throw new Error("Payment webhook timeout");
+      })
+    ]);
+    
+    if (webhookResult.status === "succeeded") {
+      return { status: "completed", paymentId: webhookResult.id };
+    } else {
+      return { status: "failed", reason: webhookResult.failure_reason };
+    }
+    
+  } catch (error) {
+    if (error.message === "Payment webhook timeout") {
+      // Cancel the payment intent
+      await ctx.run("cancel-payment", () => 
+        stripe.paymentIntents.cancel(paymentIntent.id)
+      );
+      return { status: "timeout", reason: "Payment confirmation timeout" };
+    }
+    throw error;
+  }
+};
+
+// Webhook handler function (separate service)
+export const handleStripeWebhook = async (ctx: Context, webhook: StripeWebhook) => {
+  if (webhook.type === "payment_intent.succeeded" || webhook.type === "payment_intent.payment_failed") {
+    const paymentIntent = webhook.data.object;
+    
+    // Get the stored awakeable ID
+    const awakeableId = await ctx.run("get-awakeable", () => 
+      database.getAwakeableId(paymentIntent.id)
+    );
+    
+    if (awakeableId) {
+      // Resolve the awakeable
+      await ctx.run("resolve-awakeable", () => 
+        fetch(`${RESTATE_URL}/awakeables/${awakeableId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: paymentIntent.status,
+            id: paymentIntent.id,
+            failure_reason: paymentIntent.last_payment_error?.message
+          })
+        })
+      );
+    }
+  }
+  
+  return { handled: true };
+};
+```
+</CodeGroup>
+
+### Human approval workflow
+
+<CodeGroup>
+```typescript TypeScript
+export const processExpenseApproval = async (ctx: WorkflowContext, expense: ExpenseReport) => {
+  ctx.set("status", "pending-approval");
+  ctx.set("submittedAt", new Date().toISOString());
+  
+  // Create awakeable for approval decision
+  const approvalAwakeable = ctx.awakeable<ApprovalDecision>();
+  
+  // Send approval request email with awakeable ID
+  await ctx.run("send-approval-email", async () => {
+    const approvalUrl = `${APPROVAL_UI_URL}/approve?id=${approvalAwakeable.id}`;
+    return await emailService.sendApprovalRequest({
+      to: expense.managerEmail,
+      expenseId: expense.id,
+      amount: expense.amount,
+      approvalUrl,
+      denyUrl: `${APPROVAL_UI_URL}/deny?id=${approvalAwakeable.id}`
+    });
+  });
+  
+  try {
+    // Wait for approval decision (with 7 day timeout)
+    const decision = await Promise.race([
+      approvalAwakeable.promise,
+      ctx.sleep(7 * 24 * 60 * 60 * 1000).then(() => ({
+        approved: false,
+        reason: "Approval timeout - auto-denied after 7 days"
+      }))
+    ]);
+    
+    if (decision.approved) {
+      ctx.set("status", "approved");
+      ctx.set("approvedBy", decision.approver);
+      
+      // Process reimbursement
+      const reimbursement = await ctx.run("process-reimbursement", () => 
+        processReimbursement(expense, decision.approver)
+      );
+      
+      return { status: "approved", reimbursementId: reimbursement.id };
+    } else {
+      ctx.set("status", "denied");
+      ctx.set("deniedBy", decision.approver);
+      ctx.set("denialReason", decision.reason);
+      
+      return { status: "denied", reason: decision.reason };
+    }
+    
+  } catch (error) {
+    ctx.set("status", "error");
+    throw error;
+  }
+};
+```
+</CodeGroup>
+
+### Multi-step external coordination
+
+<CodeGroup>
+```typescript TypeScript
+export const processComplexWorkflow = async (ctx: WorkflowContext, request: ComplexRequest) => {
+  // Step 1: Wait for initial approval
+  const approval1 = ctx.awakeable<ApprovalResult>();
+  await ctx.run("request-approval-1", () => 
+    approvalService.requestApproval(request.id, approval1.id, "initial")
+  );
+  const approval1Result = await approval1.promise;
+  
+  if (!approval1Result.approved) {
+    return { status: "rejected", stage: "initial-approval" };
+  }
+  
+  // Step 2: Wait for technical validation
+  const techValidation = ctx.awakeable<ValidationResult>();
+  await ctx.run("request-tech-validation", () => 
+    techTeam.requestValidation(request.id, techValidation.id)
+  );
+  const techResult = await techValidation.promise;
+  
+  if (!techResult.valid) {
+    return { status: "rejected", stage: "technical-validation", reason: techResult.reason };
+  }
+  
+  // Step 3: Wait for final sign-off
+  const finalApproval = ctx.awakeable<ApprovalResult>();
+  await ctx.run("request-final-approval", () => 
+    executiveTeam.requestApproval(request.id, finalApproval.id, "final")
+  );
+  const finalResult = await finalApproval.promise;
+  
+  if (finalResult.approved) {
+    return { status: "approved", approvedBy: finalResult.approver };
+  } else {
+    return { status: "rejected", stage: "final-approval", reason: finalResult.reason };
+  }
+};
+```
+</CodeGroup>
+
+## Key benefits
+
+**Resource efficient**: Functions consume no CPU or memory while waiting for awakeables.
+
+**Durable**: Awakeables survive service restarts and failures.
+
+**Flexible**: External systems can resolve with any data structure.
+
+**Timeout-safe**: Combine with `Promise.race()` and `ctx.sleep()` for timeouts.
+
+**Unique IDs**: Each awakeable gets a unique identifier that external systems can use.
+
+## Best practices
+
+**Always implement timeouts**: Use `Promise.race()` with `ctx.sleep()` to prevent indefinite waiting.
+
+**Store awakeable IDs securely**: Store awakeable IDs in databases or secure systems that external services can access.
+
+**Validate external data**: Always validate data received from external systems before processing.
+
+**Handle failures gracefully**: External systems might send error data instead of success data.
+
+<CodeGroup>
+```typescript TypeScript
+// Good: Timeout with awakeable
+const result = await Promise.race([
+  awakeable.promise,
+  ctx.sleep(timeoutMs).then(() => ({ error: "timeout" }))
+]);
+
+// Good: Validate external data
+if (!result.approved && !result.error) {
+  throw new Error("Invalid approval response");
+}
+```
+</CodeGroup>
+
+Awakeables enable sophisticated coordination between your functions and external systems without polling or complex state management, while maintaining exactly-once execution guarantees.

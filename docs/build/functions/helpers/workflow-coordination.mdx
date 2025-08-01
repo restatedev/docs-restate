@@ -1,0 +1,319 @@
+---
+title: External Events
+description: Coordinate with external systems using promises and signals in Workflows
+---
+
+Workflow coordination helpers are available only in Workflow functions for managing long-running processes, external events, and human interactions. These helpers enable sophisticated coordination patterns.
+
+## ctx.promise()
+
+Create promises that external systems can resolve to send data to your workflow. This is how workflows wait for external events, human input, or other services to provide data.
+
+<CodeGroup>
+```typescript TypeScript
+// Wait for external payment confirmation
+const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
+
+// Wait for human approval
+const approved = await ctx.promise<boolean>("manager-approval");
+
+// Wait for multiple events
+const [payment, inventory] = await Promise.all([
+  ctx.promise<PaymentResult>("payment-confirmed"),
+  ctx.promise<InventoryResult>("inventory-reserved")
+]);
+```
+
+```java Java
+// Wait for external payment confirmation
+PaymentResult paymentResult = ctx.promise("payment-completed", PaymentResult.class).await();
+
+// Wait for human approval
+Boolean approved = ctx.promise("manager-approval", Boolean.class).await();
+
+// Wait for multiple events
+CompletableFuture<PaymentResult> payment = ctx.promise("payment-confirmed", PaymentResult.class);
+CompletableFuture<InventoryResult> inventory = ctx.promise("inventory-reserved", InventoryResult.class);
+PaymentResult paymentResult = payment.await();
+InventoryResult inventoryResult = inventory.await();
+```
+
+```python Python
+# Wait for external payment confirmation
+payment_result = await ctx.promise("payment-completed", PaymentResult)
+
+# Wait for human approval
+approved = await ctx.promise("manager-approval", bool)
+
+# Wait for multiple events
+payment_task = ctx.promise("payment-confirmed", PaymentResult)
+inventory_task = ctx.promise("inventory-reserved", InventoryResult)
+payment_result, inventory_result = await asyncio.gather(payment_task, inventory_task)
+```
+</CodeGroup>
+
+### Promise keys
+
+Choose descriptive promise keys that clearly indicate what event you're waiting for:
+
+<CodeGroup>
+```typescript TypeScript
+// Good promise keys
+await ctx.promise<ApprovalResult>("manager-approval-12345");
+await ctx.promise<PaymentResult>("payment-confirmation-order-456");
+await ctx.promise<CallbackData>("webhook-callback-user-789");
+
+// Less clear keys
+await ctx.promise<any>("data");
+await ctx.promise<any>("result");
+await ctx.promise<any>("callback");
+```
+</CodeGroup>
+
+## ctx.promise().resolve()
+
+Resolve promises from signal functions to send data to waiting workflows.
+
+<CodeGroup>
+```typescript TypeScript
+// Signal function to confirm payment
+export const confirmPayment = async (ctx: WorkflowSharedContext, result: PaymentResult) => {
+  ctx.promise("payment-completed").resolve(result);
+};
+
+// Signal function for human approval
+export const approveRequest = async (ctx: WorkflowSharedContext, approved: boolean) => {
+  ctx.promise("manager-approval").resolve(approved);
+};
+
+// Signal function with complex data
+export const submitApplication = async (ctx: WorkflowSharedContext, application: ApplicationData) => {
+  ctx.promise("application-submitted").resolve({
+    applicationId: application.id,
+    submittedAt: new Date().toISOString(),
+    data: application
+  });
+};
+```
+
+```java Java
+// Signal function to confirm payment
+@Handler
+public void confirmPayment(WorkflowSharedContext ctx, PaymentResult result) {
+    ctx.promise("payment-completed").resolve(result);
+}
+
+// Signal function for human approval
+@Handler
+public void approveRequest(WorkflowSharedContext ctx, Boolean approved) {
+    ctx.promise("manager-approval").resolve(approved);
+}
+```
+
+```python Python
+# Signal function to confirm payment
+async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult):
+    ctx.promise("payment-completed").resolve(result)
+
+# Signal function for human approval
+async def approve_request(ctx: WorkflowSharedContext, approved: bool):
+    ctx.promise("manager-approval").resolve(approved)
+```
+</CodeGroup>
+
+## Common coordination patterns
+
+### Human approval workflow
+
+<CodeGroup>
+```typescript TypeScript
+export const processExpenseReport = async (ctx: WorkflowContext, report: ExpenseReport) => {
+  ctx.set("status", "pending-approval");
+  ctx.set("submittedAt", new Date().toISOString());
+  
+  // Determine approval level needed
+  const approvalLevel = report.amount > 1000 ? "director" : "manager";
+  ctx.set("approvalLevel", approvalLevel);
+  
+  // Wait for approval decision
+  const approvalResult = await ctx.promise<ApprovalResult>("approval-decision");
+  
+  if (approvalResult.approved) {
+    ctx.set("status", "approved");
+    ctx.set("approvedBy", approvalResult.approver);
+    ctx.set("approvedAt", new Date().toISOString());
+    
+    // Process reimbursement
+    const reimbursement = await ctx.run("process-reimbursement", () =>
+      processReimbursement(report, approvalResult.approver)
+    );
+    
+    ctx.set("status", "reimbursed");
+    return { status: "approved", reimbursementId: reimbursement.id };
+  } else {
+    ctx.set("status", "rejected");
+    ctx.set("rejectedBy", approvalResult.approver);
+    ctx.set("rejectionReason", approvalResult.reason);
+    
+    return { status: "rejected", reason: approvalResult.reason };
+  }
+};
+
+// Signal function for approval
+export const submitApproval = async (ctx: WorkflowSharedContext, decision: ApprovalResult) => {
+  ctx.promise("approval-decision").resolve(decision);
+};
+```
+</CodeGroup>
+
+### External system integration
+
+<CodeGroup>
+```typescript TypeScript
+export const processOrderWithExternalPayment = async (ctx: WorkflowContext, order: Order) => {
+  ctx.set("status", "processing");
+  
+  // Create payment intent with external provider
+  const paymentIntent = await ctx.run("create-payment-intent", () =>
+    createPaymentIntent(order.total, order.currency)
+  );
+  
+  ctx.set("paymentIntentId", paymentIntent.id);
+  ctx.set("status", "awaiting-payment");
+  
+  try {
+    // Wait for webhook from payment provider (with 30 minute timeout)
+    const paymentResult = await Promise.race([
+      ctx.promise<PaymentWebhook>("payment-webhook"),
+      ctx.sleep(30 * 60 * 1000).then(() => {
+        throw new Error("Payment timeout");
+      })
+    ]);
+    
+    if (paymentResult.status === "succeeded") {
+      ctx.set("status", "paid");
+      ctx.set("paymentId", paymentResult.id);
+      
+      // Continue with order fulfillment
+      const fulfillment = await ctx.run("fulfill-order", () => fulfillOrder(order));
+      
+      ctx.set("status", "fulfilled");
+      return { status: "completed", fulfillmentId: fulfillment.id };
+    } else {
+      ctx.set("status", "payment-failed");
+      return { status: "failed", reason: "Payment failed" };
+    }
+    
+  } catch (error) {
+    if (error.message === "Payment timeout") {
+      ctx.set("status", "payment-timeout");
+      
+      // Cancel the payment intent
+      await ctx.run("cancel-payment", () => cancelPaymentIntent(paymentIntent.id));
+      
+      return { status: "failed", reason: "Payment timeout" };
+    }
+    throw error;
+  }
+};
+
+// Signal function for payment webhook
+export const handlePaymentWebhook = async (ctx: WorkflowSharedContext, webhook: PaymentWebhook) => {
+  ctx.promise("payment-webhook").resolve(webhook);
+};
+```
+</CodeGroup>
+
+### Multi-stage coordination
+
+<CodeGroup>
+```typescript TypeScript
+export const processApplicationWorkflow = async (ctx: WorkflowContext, application: JobApplication) => {
+  ctx.set("status", "submitted");
+  ctx.set("stage", "initial-review");
+  
+  // Stage 1: Initial screening
+  const screening = await ctx.promise<ScreeningResult>("screening-complete");
+  if (!screening.passed) {
+    ctx.set("status", "rejected");
+    ctx.set("stage", "screening");
+    return { status: "rejected", reason: screening.reason };
+  }
+  
+  ctx.set("stage", "technical-interview");
+  
+  // Stage 2: Technical interview
+  const technicalResult = await ctx.promise<InterviewResult>("technical-interview-complete");
+  if (technicalResult.score < 7) {
+    ctx.set("status", "rejected");
+    ctx.set("stage", "technical-interview");
+    return { status: "rejected", reason: "Technical interview score too low" };
+  }
+  
+  ctx.set("stage", "final-interview");
+  
+  // Stage 3: Final interview
+  const finalResult = await ctx.promise<InterviewResult>("final-interview-complete");
+  if (!finalResult.passed) {
+    ctx.set("status", "rejected");
+    ctx.set("stage", "final-interview");
+    return { status: "rejected", reason: finalResult.feedback };
+  }
+  
+  ctx.set("stage", "offer");
+  ctx.set("status", "approved");
+  
+  // Generate offer
+  const offer = await ctx.run("generate-offer", () => generateJobOffer(application, technicalResult, finalResult));
+  ctx.set("offerId", offer.id);
+  
+  // Wait for offer response (30 days timeout)
+  try {
+    const offerResponse = await Promise.race([
+      ctx.promise<OfferResponse>("offer-response"),
+      ctx.sleep(30 * 24 * 60 * 60 * 1000).then(() => ({ accepted: false, reason: "Timeout" }))
+    ]);
+    
+    if (offerResponse.accepted) {
+      ctx.set("status", "hired");
+      return { status: "hired", startDate: offerResponse.startDate };
+    } else {
+      ctx.set("status", "offer-declined");
+      return { status: "declined", reason: offerResponse.reason };
+    }
+    
+  } catch (error) {
+    ctx.set("status", "offer-expired");
+    return { status: "expired", reason: "Offer expired" };
+  }
+};
+```
+</CodeGroup>
+
+## Best practices
+
+**Use meaningful promise keys**: Include relevant identifiers like order IDs, user IDs, or request IDs in promise keys.
+
+**Combine with timeouts**: Use `Promise.race()` with `ctx.sleep()` to implement timeouts for external events.
+
+**Handle promise rejection gracefully**: External systems might send error data instead of success data.
+
+**Store intermediate state**: Save progress and intermediate results so you can track workflow progression.
+
+**Implement cancellation signals**: Provide signal functions to cancel or modify running workflows.
+
+<CodeGroup>
+```typescript TypeScript
+// Good: Descriptive promise key with timeout
+const result = await Promise.race([
+  ctx.promise<ApprovalResult>(`approval-${requestId}`),
+  ctx.sleep(24 * 60 * 60 * 1000).then(() => ({ approved: false, reason: "Timeout" }))
+]);
+
+// Good: Store state for tracking
+ctx.set("currentStage", "awaiting-approval");
+ctx.set("approvalRequestedAt", new Date().toISOString());
+```
+</CodeGroup>
+
+Workflow coordination helpers enable sophisticated multi-party coordination patterns that would be complex to implement reliably with traditional approaches, while maintaining exactly-once execution guarantees.

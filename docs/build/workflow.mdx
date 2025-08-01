@@ -1,0 +1,651 @@
+---
+title: Workflow
+description: Orchestrate multi-step business processes that survive failures
+---
+
+## What are Workflows?
+
+Workflows are services that coordinate multi-step business processes and handle complex orchestration. They can run for minutes, hours, or even days while maintaining perfect consistency across failures and restarts.
+
+**Key characteristics:**
+- **Long-running**: Can execute for extended periods without consuming resources while waiting
+- **Durable orchestration**: Coordinate multiple services and external systems reliably
+- **Human-in-the-loop**: Can pause and wait for human input or external events
+- **Failure resilient**: Resume exactly where they left off after any failure
+- **Event-driven**: Respond to external signals and timeouts
+
+Workflows are perfect for business processes like order processing, user onboarding, approval flows, data pipelines, and any multi-step process that involves external systems or human interaction.
+
+## When to Use Workflows
+
+**Perfect for:**
+- Approval processes that require human input
+- Multi-step transactions across different services
+- User onboarding flows with email verification and setup steps
+- Order processing with payment, inventory, and shipping coordination
+- Data pipelines that process information through multiple stages
+- Any scenario requiring orchestration of multiple services over extended periods
+
+**Key capabilities:**
+- Handle external signals and human interactions
+- Maintain complex business logic across long time periods
+- Coordinate multiple services with automatic retry and recovery
+- Wait for external events without consuming compute resources
+- Survive failures and resume exactly where they left off
+
+## Sequential execution
+
+Sequential execution means running steps one after another in a specific order. Each step waits for the previous one to complete before starting. This is the most common pattern for workflows.
+
+**Why sequential execution:**
+- Some steps depend on results from previous steps
+- You want to fail fast if an early step fails
+- The process has a logical order that must be followed
+- You need to pass data from one step to the next
+
+Restate's durable execution means if any step fails, the workflow will retry from that exact step without re-running previous steps. This saves time and prevents duplicate operations.
+
+**Sequential workflow handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrder = async (ctx: WorkflowContext, order: Order) => {
+  // Step 1: Validate order
+  const validation = await ctx.run("validate-order", () => validateOrder(order));
+  
+  // Step 2: Charge payment - won't re-run validation on retry
+  const payment = await PaymentService.charge(ctx, order.total);
+  
+  // Step 3: Update inventory - only runs if payment succeeds
+  await InventoryService.reserve(ctx, order.items);
+  
+  // Step 4: Send confirmation - only runs if all previous steps succeed
+  await NotificationService.sendConfirmation(ctx, order.userId);
+  
+  return { orderId: order.id, status: "completed" };
+};
+```
+
+```java Java
+@Workflow
+public String processOrder(WorkflowContext ctx, Order order) {
+    // Step 1: Validate order
+    ValidationResult validation = ctx.run("validate-order", () -> validateOrder(order));
+    
+    // Step 2: Charge payment - won't re-run validation on retry
+    PaymentResult payment = PaymentServiceClient.fromContext(ctx)
+        .charge(order.getTotal()).await();
+    
+    // Step 3: Update inventory - only runs if payment succeeds
+    InventoryServiceClient.fromContext(ctx)
+        .reserve(order.getItems()).await();
+    
+    // Step 4: Send confirmation - only runs if all previous steps succeed
+    NotificationServiceClient.fromContext(ctx)
+        .sendConfirmation(order.getUserId()).await();
+    
+    return "completed";
+}
+```
+
+```python Python
+async def process_order(ctx: WorkflowContext, order: Order):
+    # Step 1: Validate order
+    validation = await ctx.run("validate-order", lambda: validate_order(order))
+    
+    # Step 2: Charge payment - won't re-run validation on retry
+    payment = await PaymentService.from_context(ctx).charge(order.total)
+    
+    # Step 3: Update inventory - only runs if payment succeeds
+    await InventoryService.from_context(ctx).reserve(order.items)
+    
+    # Step 4: Send confirmation - only runs if all previous steps succeed
+    await NotificationService.from_context(ctx).send_confirmation(order.user_id)
+    
+    return {"order_id": order.id, "status": "completed"}
+```
+</CodeGroup>
+
+**Invoking workflows:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-123/processOrder \
+  --json '{"items": ["item1", "item2"], "total": 100}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .workflowClient(OrderWorkflow, "order-123")
+  .processOrder({ items: ["item1", "item2"], total: 100 });
+```
+
+```java Java Client
+String result = OrderWorkflowClient.fromContext(ctx, "order-123")
+    .processOrder(order).await();
+```
+</CodeGroup>
+
+In this example, each step builds on the previous one. If the payment step fails, Restate will retry the workflow from the payment step - it won't re-run the validation step because that's already recorded as successful in the journal.
+
+Notice how each step is recorded in Restate's journal, making the workflow resilient to failures while avoiding duplicate work.
+
+## Parallel execution
+
+Parallel execution means running multiple steps at the same time instead of one after another. This can dramatically reduce the total time your workflow takes.
+
+**When to use parallel execution:**
+- Steps don't depend on each other's results  
+- You want to minimize total execution time
+- You're calling multiple external services that can run independently
+- Failure of one step shouldn't prevent others from completing
+
+Be careful with parallel execution - if one step fails, you might need to handle cleanup for the steps that succeeded.
+
+**Parallel workflow handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processOrderParallel = async (ctx: WorkflowContext, order: Order) => {
+  // Step 1: Validate order (must happen first)
+  await ctx.run("validate-order", () => validateOrder(order));
+  
+  // Steps 2-4: Run in parallel - all three happen simultaneously
+  const [payment, inventory, notification] = await Promise.all([
+    PaymentService.charge(ctx, order.total),
+    InventoryService.reserve(ctx, order.items),
+    NotificationService.sendConfirmation(ctx, order.userId)
+  ]);
+  
+  return { orderId: order.id, status: "completed", results: { payment, inventory, notification } };
+};
+```
+
+```java Java
+@Workflow
+public String processOrderParallel(WorkflowContext ctx, Order order) {
+    // Step 1: Validate order (must happen first)
+    ctx.run("validate-order", () -> validateOrder(order));
+    
+    // Steps 2-4: Run in parallel using Awaitable.all()
+    List<Awaitable<?>> parallelTasks = List.of(
+        PaymentServiceClient.fromContext(ctx).charge(order.getTotal()),
+        InventoryServiceClient.fromContext(ctx).reserve(order.getItems()),
+        NotificationServiceClient.fromContext(ctx).sendConfirmation(order.getUserId())
+    );
+    
+    // Wait for all parallel tasks to complete
+    List<Try<?>> results = Awaitable.all(parallelTasks).await();
+    return "completed";
+}
+```
+
+```python Python
+async def process_order_parallel(ctx: WorkflowContext, order: Order):
+    # Step 1: Validate order (must happen first) 
+    await ctx.run("validate-order", lambda: validate_order(order))
+    
+    # Steps 2-4: Run in parallel - all three happen simultaneously
+    results = await asyncio.gather(
+        PaymentService.from_context(ctx).charge(order.total),
+        InventoryService.from_context(ctx).reserve(order.items),
+        NotificationService.from_context(ctx).send_confirmation(order.user_id),
+        return_exceptions=True
+    )
+    
+    return {"order_id": order.id, "status": "completed", "results": results}
+```
+</CodeGroup>
+
+In this example, validation must happen first, but payment, inventory, and notifications can all happen simultaneously. If any of the parallel steps fail, Restate will retry just the failed step while leaving the successful ones alone.
+
+The `Promise.all()` in TypeScript and `Awaitable.all()` in Java wait for all parallel operations to complete before continuing.
+
+## Conditional workflows
+
+Conditional workflows make different decisions based on data or results from previous steps. This lets you handle different scenarios in the same workflow.
+
+**Common conditional patterns:**
+- User roles (VIP vs regular customers get different treatment)
+- Business rules (orders over $100 get free shipping)  
+- External system responses (different handling based on API results)
+- Time-based conditions (weekend vs weekday processing)
+
+The key is that all conditional logic is preserved in the journal, so retries follow the same path as the original execution.
+
+**Conditional workflow handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const smartOrderProcess = async (ctx: WorkflowContext, order: Order) => {
+  // Get customer profile to determine processing path
+  const customer = await CustomerService.getProfile(ctx, order.userId);
+  
+  if (customer.vipStatus) {
+    // VIP customers get priority processing
+    await ctx.run("add-to-priority-queue", () => priorityQueue.add(order));
+    await PaymentService.chargeVip(ctx, order.total);
+  } else {
+    // Regular processing path
+    await PaymentService.charge(ctx, order.total);
+  }
+  
+  // Common steps for all customers
+  await InventoryService.reserve(ctx, order.items);
+  return { orderId: order.id, processed: true, vipProcessing: customer.vipStatus };
+};
+```
+
+```java Java
+@Workflow
+public String smartOrderProcess(WorkflowContext ctx, Order order) {
+    // Get customer profile to determine processing path
+    Customer customer = CustomerServiceClient.fromContext(ctx)
+        .getProfile(order.getUserId()).await();
+    
+    if (customer.isVip()) {
+        // VIP customers get priority processing
+        ctx.run("add-to-priority-queue", () -> priorityQueue.add(order));
+        PaymentServiceClient.fromContext(ctx).chargeVip(order.getTotal()).await();
+    } else {
+        // Regular processing path
+        PaymentServiceClient.fromContext(ctx).charge(order.getTotal()).await();
+    }
+    
+    // Common steps for all customers
+    InventoryServiceClient.fromContext(ctx).reserve(order.getItems()).await();
+    return "processed";
+}
+```
+
+```python Python
+async def smart_order_process(ctx: WorkflowContext, order: Order):
+    # Get customer profile to determine processing path
+    customer = await CustomerService.from_context(ctx).get_profile(order.user_id)
+    
+    if customer.vip_status:
+        # VIP customers get priority processing
+        await ctx.run("add-to-priority-queue", lambda: priority_queue.add(order))
+        await PaymentService.from_context(ctx).charge_vip(order.total)
+    else:
+        # Regular processing path
+        await PaymentService.from_context(ctx).charge(order.total)
+    
+    # Common steps for all customers
+    await InventoryService.from_context(ctx).reserve(order.items)
+    return {"order_id": order.id, "processed": True, "vip_processing": customer.vip_status}
+```
+</CodeGroup>
+
+**Invoking conditional workflows:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/OrderWorkflow/order-456/smartOrderProcess \
+  --json '{"userId": "user-123", "items": ["item1"], "total": 250}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .workflowClient(OrderWorkflow, "order-456")
+  .smartOrderProcess({ userId: "user-123", items: ["item1"], total: 250 });
+```
+
+```java Java Client
+String result = OrderWorkflowClient.fromContext(ctx, "order-456")
+    .smartOrderProcess(order).await();
+```
+</CodeGroup>
+
+In this example, the workflow checks if a customer is VIP and takes different actions accordingly. If the workflow is retried, it will make the same VIP decision and follow the same path as before.
+
+## Human-in-the-loop workflows
+
+Human-in-the-loop workflows pause execution to wait for human input or approval. The workflow can wait for hours, days, or even weeks while maintaining its state.
+
+**Common human-in-the-loop patterns:**
+- Approval workflows (expense reports, purchase orders)
+- Manual review processes (content moderation, fraud detection)
+- Multi-step forms (user provides information over multiple interactions)
+- Exception handling (human intervention when automated systems fail)
+
+The key concept is **durable promises** - your workflow waits for a promise that another handler (or external system) will resolve later. The workflow sleeps efficiently until the promise is resolved.
+
+**Human-in-the-loop workflow handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const approvalWorkflow = async (ctx: WorkflowContext, request: ApprovalRequest) => {
+  // Step 1: Send approval request to humans
+  await NotificationService.sendApprovalRequest(ctx, request);
+  
+  // Step 2: Wait for human approval (can take hours/days)
+  const approval = await ctx.promise<boolean>("approval");
+  
+  if (approval.value) {
+    // Approved: process the request
+    await ProcessingService.execute(ctx, request);
+    return { status: "approved", processed: true };
+  } else {
+    // Rejected: notify requester
+    await NotificationService.sendRejection(ctx, request.userId);
+    return { status: "rejected", processed: false };
+  }
+};
+
+// Separate handler to receive human approval
+export const submitApproval = async (ctx: ObjectContext, decision: boolean) => {
+  ctx.promiseHandle("approval").resolve(decision);
+  return { submitted: true, decision };
+};
+```
+
+```java Java
+@Workflow
+public String approvalWorkflow(WorkflowContext ctx, ApprovalRequest request) {
+    // Step 1: Send approval request to humans
+    NotificationServiceClient.fromContext(ctx)
+        .sendApprovalRequest(request).await();
+    
+    // Step 2: Wait for human approval (can take hours/days)
+    DurablePromiseKey approvalKey = DurablePromiseKey.of("approval");
+    Boolean approved = ctx.promise(approvalKey, Boolean.class).awaitable().await();
+    
+    if (approved) {
+        // Approved: process the request
+        ProcessingServiceClient.fromContext(ctx).execute(request).await();
+        return "approved";
+    } else {
+        // Rejected: notify requester
+        NotificationServiceClient.fromContext(ctx)
+            .sendRejection(request.getUserId()).await();
+        return "rejected";
+    }
+}
+
+// Separate handler to receive human approval
+@Handler
+public String submitApproval(ObjectContext ctx, boolean decision) {
+    ctx.promiseHandle("approval").resolve(decision);
+    return "submitted";
+}
+```
+
+```python Python
+async def approval_workflow(ctx: WorkflowContext, request: ApprovalRequest):
+    # Step 1: Send approval request to humans
+    await NotificationService.from_context(ctx).send_approval_request(request)
+    
+    # Step 2: Wait for human approval (can take hours/days)
+    approval = await ctx.promise("approval", bool)
+    
+    if approval.value:
+        # Approved: process the request
+        await ProcessingService.from_context(ctx).execute(request)
+        return {"status": "approved", "processed": True}
+    else:
+        # Rejected: notify requester
+        await NotificationService.from_context(ctx).send_rejection(request.user_id)
+        return {"status": "rejected", "processed": False}
+
+# Separate handler to receive human approval
+async def submit_approval(ctx: ObjectContext, decision: bool):
+    ctx.promise_handle("approval").resolve(decision)
+    return {"submitted": True, "decision": decision}
+```
+</CodeGroup>
+
+**Invoking human-in-the-loop workflows:**
+<CodeGroup>
+```bash cURL
+# Start the approval workflow
+curl localhost:8080/ApprovalWorkflow/request-789/approvalWorkflow \
+  --json '{"requestId": "req-123", "userId": "user-456", "amount": 5000}'
+
+# Later: human submits approval decision
+curl localhost:8080/ApprovalHandler/request-789/submitApproval \
+  --json '{"decision": true}'
+```
+
+```typescript TypeScript Client
+// Start the approval workflow
+const workflowResult = restateClient
+  .workflowClient(ApprovalWorkflow, "request-789")
+  .approvalWorkflow({ requestId: "req-123", userId: "user-456", amount: 5000 });
+
+// Later: human submits approval decision
+const approvalResult = await restateClient
+  .objectClient(ApprovalHandler, "request-789")
+  .submitApproval(true);
+```
+</CodeGroup>
+
+In this example, the workflow sends a request and then waits (potentially for days) until someone calls the `submitApproval` handler. During this wait, the workflow consumes no compute resources - it's efficiently sleeping until awakened by the promise resolution.
+
+## Error handling and compensation
+
+Sometimes workflows fail partway through, leaving you with a partially completed process. Error handling and compensation let you gracefully undo the work that was already done.
+
+**The compensation pattern:**
+1. Keep track of what you've done as you progress
+2. If a later step fails, undo the earlier steps in reverse order
+3. This leaves the system in a consistent state, as if the workflow never ran
+
+This is especially important for workflows that involve external systems, financial transactions, or resource allocation where partial completion could cause problems.
+
+<CodeGroup>
+```typescript TypeScript
+export const reliableOrderProcess = async (ctx: WorkflowContext, order: Order) => {
+  let paymentId: string | null = null;
+  let reservationId: string | null = null;
+  
+  try {
+    // Step 1: Charge payment
+    const payment = await PaymentService.charge(ctx, order.total);
+    paymentId = payment.id;
+    
+    // Step 2: Reserve inventory
+    const reservation = await InventoryService.reserve(ctx, order.items);
+    reservationId = reservation.id;
+    
+    // Step 3: Ship order
+    await ShippingService.ship(ctx, order);
+    
+    return { orderId: order.id, status: "completed" };
+    
+  } catch (error) {
+    // Compensation: undo completed steps
+    if (reservationId) {
+      await InventoryService.cancelReservation(ctx, reservationId);
+    }
+    if (paymentId) {
+      await PaymentService.refund(ctx, paymentId);
+    }
+    throw error;
+  }
+};
+```
+</CodeGroup>
+
+In this example, we track the IDs of operations we've completed (`paymentId`, `reservationId`). If the shipping step fails, we undo the payment and inventory reservation in the `catch` block. This ensures we don't leave the customer charged for an order that didn't ship.
+
+### Advanced error handling with terminal errors
+
+Workflows can distinguish between temporary failures (which should retry) and permanent failures (which should stop immediately). This prevents unnecessary compensation when errors are permanent:
+
+<CodeGroup>
+```typescript TypeScript
+export const smartOrderProcess = async (ctx: WorkflowContext, order: Order) => {
+  // Validate order upfront - terminal errors don't need compensation
+  if (order.total <= 0) {
+    throw new TerminalError("Order total must be positive", { errorCode: 400 });
+  }
+  
+  if (!order.customerId) {
+    throw new TerminalError("Customer ID is required", { errorCode: 400 });
+  }
+  
+  let paymentId: string | null = null;
+  let reservationId: string | null = null;
+  
+  try {
+    // Step 1: Charge payment
+    const payment = await ctx.run("charge-payment", async () => {
+      return await PaymentService.charge(order.customerId, order.total);
+    });
+    paymentId = payment.id;
+    
+    // Step 2: Reserve inventory
+    const reservation = await ctx.run("reserve-inventory", async () => {
+      return await InventoryService.reserve(order.items);
+    });
+    reservationId = reservation.id;
+    
+    // Step 3: Ship order
+    await ctx.run("ship-order", async () => {
+      return await ShippingService.ship(order);
+    });
+    
+    return { orderId: order.id, status: "completed" };
+    
+  } catch (error) {
+    // Check if this is a permanent business logic failure
+    if (error.message.includes("insufficient funds")) {
+      // Clean up what we did, then fail permanently
+      if (reservationId) {
+        await ctx.run("cancel-reservation", async () => {
+          return await InventoryService.cancelReservation(reservationId!);
+        });
+      }
+      throw new TerminalError("Insufficient funds for order", { errorCode: 402 });
+    }
+    
+    if (error.message.includes("out of stock")) {
+      // Clean up payment, then fail permanently
+      if (paymentId) {
+        await ctx.run("refund-payment", async () => {
+          return await PaymentService.refund(paymentId!);
+        });
+      }
+      throw new TerminalError("Items are out of stock", { errorCode: 409 });
+    }
+    
+    if (error.message.includes("invalid address")) {
+      // Clean up everything, then fail permanently
+      if (reservationId) {
+        await ctx.run("cancel-reservation", async () => {
+          return await InventoryService.cancelReservation(reservationId!);
+        });
+      }
+      if (paymentId) {
+        await ctx.run("refund-payment", async () => {
+          return await PaymentService.refund(paymentId!);
+        });
+      }
+      throw new TerminalError("Invalid shipping address", { errorCode: 400 });
+    }
+    
+    // For transient errors (network issues, service unavailable),
+    // do compensation and let Restate retry the entire workflow
+    if (reservationId) {
+      await ctx.run("cancel-reservation", async () => {
+        return await InventoryService.cancelReservation(reservationId!);
+      });
+    }
+    if (paymentId) {
+      await ctx.run("refund-payment", async () => {
+        return await PaymentService.refund(paymentId!);
+      });
+    }
+    
+    throw error; // Let Restate retry
+  }
+};
+```
+
+```java Java
+@Workflow
+public OrderResult smartOrderProcess(WorkflowContext ctx, Order order) {
+    // Validate order upfront - terminal errors don't need compensation
+    if (order.getTotal() <= 0) {
+        throw new TerminalException(400, "Order total must be positive");
+    }
+    
+    if (order.getCustomerId() == null) {
+        throw new TerminalException(400, "Customer ID is required");
+    }
+    
+    String paymentId = null;
+    String reservationId = null;
+    
+    try {
+        // Step 1: Charge payment
+        Payment payment = ctx.run("charge-payment", () ->
+            PaymentServiceClient.fromContext(ctx)
+                .charge(order.getCustomerId(), order.getTotal()).await()
+        );
+        paymentId = payment.getId();
+        
+        // Step 2: Reserve inventory
+        Reservation reservation = ctx.run("reserve-inventory", () ->
+            InventoryServiceClient.fromContext(ctx)
+                .reserve(order.getItems()).await()
+        );
+        reservationId = reservation.getId();
+        
+        // Step 3: Ship order
+        ctx.run("ship-order", () ->
+            ShippingServiceClient.fromContext(ctx).ship(order).await()
+        );
+        
+        return new OrderResult(order.getId(), "completed");
+        
+    } catch (Exception error) {
+        // Check if this is a permanent business logic failure
+        String errorMsg = error.getMessage();
+        
+        if (errorMsg.contains("insufficient funds")) {
+            // Clean up and fail permanently
+            if (reservationId != null) {
+                ctx.run("cancel-reservation", () ->
+                    InventoryServiceClient.fromContext(ctx)
+                        .cancelReservation(reservationId).await()
+                );
+            }
+            throw new TerminalException(402, "Insufficient funds for order");
+        }
+        
+        if (errorMsg.contains("out of stock")) {
+            // Clean up and fail permanently
+            if (paymentId != null) {
+                ctx.run("refund-payment", () ->
+                    PaymentServiceClient.fromContext(ctx)
+                        .refund(paymentId).await()
+                );
+            }
+            throw new TerminalException(409, "Items are out of stock");
+        }
+        
+        // For transient errors, do compensation and let Restate retry
+        if (reservationId != null) {
+            ctx.run("cancel-reservation", () ->
+                InventoryServiceClient.fromContext(ctx)
+                    .cancelReservation(reservationId).await()
+            );
+        }
+        if (paymentId != null) {
+            ctx.run("refund-payment", () ->
+                PaymentServiceClient.fromContext(ctx)
+                    .refund(paymentId).await()
+            );
+        }
+        
+        throw new RuntimeException(error); // Let Restate retry
+    }
+}
+```
+</CodeGroup>
+
+This approach provides several benefits:
+
+**Immediate validation:** Check for obvious problems upfront with terminal errors
+**Smart error handling:** Distinguish between permanent failures (terminal errors) and temporary issues (retryable)
+**Efficient compensation:** Only run compensation when needed, and make compensation operations durable with `ctx.run()`
+**Resource optimization:** Don't waste time retrying operations that will never succeed
+
+By combining terminal errors with compensation, your workflows can handle both permanent failures efficiently and temporary failures robustly.
+

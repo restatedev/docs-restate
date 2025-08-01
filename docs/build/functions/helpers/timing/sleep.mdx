@@ -1,0 +1,238 @@
+---
+title: Sleep
+description: Pause function execution with durable sleep
+---
+
+Pause function execution for a specific duration. Unlike regular `setTimeout` or `sleep()` functions, Restate's sleep is durable and efficient.
+
+## What makes Restate sleep special
+
+**Durable**: If your service crashes during a sleep, it will resume exactly where it left off when restarted.
+
+**Resource efficient**: Sleeping functions don't consume CPU or memory - they're completely suspended.
+
+**Precise**: The function will resume at the exact time specified, regardless of restarts.
+
+**Reliable**: The sleep will complete even through system failures.
+
+This is perfect for implementing delays, timeouts, scheduled reminders, or any time-based business logic.
+
+## Basic sleep
+
+<CodeGroup>
+```typescript TypeScript
+// Sleep for 30 seconds
+await ctx.sleep(30 * 1000);
+
+// Sleep for different durations
+await ctx.sleep(5 * 60 * 1000); // 5 minutes
+await ctx.sleep(60 * 60 * 1000); // 1 hour
+
+// Sleep until specific time
+const targetTime = new Date('2024-12-25T09:00:00Z');
+const delay = targetTime.getTime() - Date.now();
+await ctx.sleep(delay);
+```
+
+```java Java
+// Sleep for durations
+ctx.sleep(Duration.ofSeconds(30));
+ctx.sleep(Duration.ofMinutes(5));
+ctx.sleep(Duration.ofHours(1));
+
+// Sleep until specific time
+Instant targetTime = Instant.parse("2024-12-25T09:00:00Z");
+Duration delay = Duration.between(Instant.now(), targetTime);
+ctx.sleep(delay);
+```
+
+```python Python
+# Sleep with timedelta
+await ctx.sleep(timedelta(seconds=30))
+await ctx.sleep(timedelta(minutes=5))
+await ctx.sleep(timedelta(hours=1))
+
+# Sleep until specific time
+target_time = datetime(2024, 12, 25, 9, 0, 0)
+delay = target_time - datetime.now()
+await ctx.sleep(delay)
+```
+</CodeGroup>
+
+In these examples, the function will pause for exactly the specified duration, then continue. During that time, it consumes no resources. If the service restarts during sleep, the function will still resume after the remaining time.
+
+## Common sleep patterns
+
+### Scheduled reminders
+<CodeGroup>
+```typescript TypeScript
+export const scheduleReminder = async (ctx: Context, message: string) => {
+  // Wait for 1 hour - function is suspended, consuming no resources
+  await ctx.sleep(60 * 60 * 1000);
+  
+  // Send the reminder after the delay
+  await ctx.serviceSend(NotificationService).send(message);
+  
+  return { sent: true, message, timestamp: new Date().toISOString() };
+};
+```
+</CodeGroup>
+
+### Rate limiting
+<CodeGroup>
+```typescript TypeScript
+export const processWithRateLimit = async (ctx: Context, data: ProcessData) => {
+  // Process the data
+  const result = await ctx.run("process", () => processData(data));
+  
+  // Wait before allowing next processing (rate limiting)
+  await ctx.sleep(1000); // 1 second cooldown
+  
+  return result;
+};
+```
+</CodeGroup>
+
+### Retry with backoff
+<CodeGroup>
+```typescript TypeScript
+export const retryWithBackoff = async (ctx: Context, operation: () => Promise<any>) => {
+  let attempt = 0;
+  const maxAttempts = 5;
+  
+  while (attempt < maxAttempts) {
+    try {
+      return await ctx.run(`attempt-${attempt}`, operation);
+    } catch (error) {
+      attempt++;
+      if (attempt >= maxAttempts) throw error;
+      
+      // Exponential backoff: 1s, 2s, 4s, 8s
+      const delay = Math.pow(2, attempt - 1) * 1000;
+      await ctx.sleep(delay);
+    }
+  }
+};
+```
+</CodeGroup>
+
+### Daily batch processing
+<CodeGroup>
+```typescript TypeScript
+export const scheduleDailyProcessing = async (ctx: Context) => {
+  while (true) {
+    // Process daily batch
+    await ctx.run("daily-processing", () => processDailyBatch());
+    
+    // Sleep until next day at same time
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(2, 0, 0, 0); // 2 AM
+    
+    const delay = tomorrow.getTime() - Date.now();
+    await ctx.sleep(delay);
+  }
+};
+```
+</CodeGroup>
+
+### Follow-up sequences
+<CodeGroup>
+```typescript TypeScript
+export const userOnboardingSequence = async (ctx: Context, userId: string) => {
+  // Welcome email immediately
+  await ctx.serviceSend(NotificationService).sendWelcomeEmail(userId);
+  
+  // Tips email after 3 days
+  await ctx.sleep(3 * 24 * 60 * 60 * 1000);
+  await ctx.serviceSend(NotificationService).sendTipsEmail(userId);
+  
+  // Check-in email after 1 week
+  await ctx.sleep(4 * 24 * 60 * 60 * 1000); // Additional 4 days
+  await ctx.serviceSend(NotificationService).sendCheckInEmail(userId);
+  
+  // Survey after 1 month
+  await ctx.sleep(21 * 24 * 60 * 60 * 1000); // Additional 21 days
+  await ctx.serviceSend(NotificationService).sendSurveyEmail(userId);
+};
+```
+</CodeGroup>
+
+## Timeout patterns
+
+Combine sleep with error handling to create reliable timeout behavior.
+
+<CodeGroup>
+```typescript TypeScript
+export const processWithTimeout = async (ctx: Context, task: Task) => {
+  try {
+    // Race between the actual work and a timeout
+    const result = await Promise.race([
+      ctx.serviceCall(ExternalService).processTask(task),
+      ctx.sleep(30000).then(() => { 
+        throw new Error("Timeout after 30s"); 
+      })
+    ]);
+    
+    return result;
+  } catch (error) {
+    if (error.message.includes("Timeout")) {
+      // Handle timeout specifically
+      await ctx.serviceSend(NotificationService).sendTimeoutAlert(task.id);
+      throw new TerminalError("Task timed out and alert sent");
+    }
+    throw error; // Re-throw other errors
+  }
+};
+```
+
+```java Java
+@Handler
+public String processWithTimeout(Context ctx, Task task) {
+    try {
+        // Set up timeout using CompletableFuture
+        CompletableFuture<String> work = ExternalServiceClient.fromContext(ctx)
+            .processTask(task).toCompletableFuture();
+        
+        CompletableFuture<String> timeout = ctx.timer(Duration.ofSeconds(30))
+            .thenApply(v -> { 
+                throw new RuntimeException("Timeout after 30s"); 
+            });
+        
+        return CompletableFuture.anyOf(work, timeout).get().toString();
+        
+    } catch (Exception e) {
+        if (e.getMessage().contains("Timeout")) {
+            NotificationServiceClient.fromContext(ctx).send()
+                .sendTimeoutAlert(task.getId());
+        }
+        throw new RuntimeException("Task failed", e);
+    }
+}
+```
+</CodeGroup>
+
+## Best practices
+
+**Use sleep for coordination**: Sleep is perfect for implementing delays, timeouts, scheduled reminders, or any time-based business logic.
+
+**Don't sleep for short periods in loops**: For very short delays (< 100ms), consider if you really need them, as they add overhead.
+
+**Handle timezone considerations**: When scheduling for specific times, be mindful of timezone handling in your application.
+
+**Combine with external events**: In workflows, combine sleep with promises to handle both time-based and event-based coordination.
+
+<CodeGroup>
+```typescript TypeScript
+// Good: Meaningful delays
+await ctx.sleep(60 * 1000); // 1 minute delay
+
+// Less ideal: Very short delays in tight loops
+for (let i = 0; i < 100; i++) {
+  await doWork(i);
+  await ctx.sleep(10); // 10ms - consider if this is necessary
+}
+```
+</CodeGroup>
+
+Sleep enables sophisticated time-based workflows and coordination patterns while maintaining reliability across failures and restarts.

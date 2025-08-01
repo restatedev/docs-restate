@@ -1,0 +1,209 @@
+---
+title: Quickstart
+description: Get started with Restate quickly and build your first durable service
+---
+
+## Prerequisites
+
+- **Node.js** >= v18.17.1 (or your preferred runtime: Java, Python, Go, Rust, etc.)
+- **Terminal** access
+
+## 1. Install Restate Server & CLI
+
+Choose your preferred installation method:
+
+**Using Homebrew (macOS/Linux):**
+```bash
+brew install restatedev/tap/restate-server restatedev/tap/restate
+```
+
+**Using npm:**
+```bash
+npm install -g @restatedev/restate-server @restatedev/restate
+```
+
+**Start the Restate server:**
+```bash
+restate-server
+```
+
+The server will start on `http://localhost:8080` by default.
+
+## 2. Create Your First Service
+
+Generate a new service from our template:
+
+<CodeGroup>
+```bash TypeScript
+restate example typescript-hello-world
+cd typescript-hello-world
+npm install
+```
+
+```bash Java
+restate example java-hello-world
+cd java-hello-world
+./gradlew build
+```
+
+```bash Python
+restate example python-hello-world
+cd python-hello-world
+pip install -r requirements.txt
+```
+</CodeGroup>
+
+## 3. Run Your Service
+
+Start your service locally:
+
+<CodeGroup>
+```bash TypeScript
+npm run dev
+```
+
+```bash Java
+./gradlew run
+```
+
+```bash Python
+python app.py
+```
+</CodeGroup>
+
+Your service will be running on `http://localhost:9080`.
+
+## 4. Register the Service
+
+Tell Restate where your service is running:
+
+```bash
+restate deployments register http://localhost:9080
+```
+
+## 5. Send a Request
+
+Now you can invoke your service! Try it with curl:
+
+```bash
+curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
+```
+
+Or use the Restate UI Playground at `http://localhost:8080`.
+
+## Understanding the Code
+
+Here's what the Greeter service looks like:
+
+<CodeGroup>
+```typescript TypeScript
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: async (ctx: Context, { name }: { name: string }) => {
+      const greetingId = ctx.rand.uuidv4();
+      
+      // This step is durable - won't repeat if the function restarts
+      await ctx.run("send-notification", () => 
+        sendNotification(greetingId, name)
+      );
+      
+      // Durable sleep - execution pauses here but can resume
+      await ctx.sleep(1000); // 1 second
+      
+      // Another durable step
+      await ctx.run("send-reminder", () => 
+        sendReminder(greetingId, name)
+      );
+      
+      return { result: `Hello ${name}!`, greetingId };
+    },
+  },
+});
+```
+
+```java Java
+@RestateType(RestateTypeOptions.Service)
+public class GreeterService {
+    
+    @Handler
+    public GreetingResponse greet(Context ctx, GreetingRequest request) {
+        String greetingId = ctx.random().nextUUID().toString();
+        
+        // This step is durable - won't repeat if the function restarts
+        ctx.run("send-notification", () -> 
+            sendNotification(greetingId, request.getName())
+        );
+        
+        // Durable sleep - execution pauses here but can resume
+        ctx.sleep(Duration.ofSeconds(1));
+        
+        // Another durable step
+        ctx.run("send-reminder", () -> 
+            sendReminder(greetingId, request.getName())
+        );
+        
+        return new GreetingResponse("Hello " + request.getName() + "!", greetingId);
+    }
+}
+```
+
+```python Python
+@restate.service
+class GreeterService:
+    
+    @restate.handler
+    async def greet(self, ctx: Context, request: GreetingRequest):
+        greeting_id = str(uuid.uuid4())
+        
+        # This step is durable - won't repeat if the function restarts
+        await ctx.run("send-notification", 
+            lambda: send_notification(greeting_id, request.name)
+        )
+        
+        # Durable sleep - execution pauses here but can resume
+        await ctx.sleep(timedelta(seconds=1))
+        
+        # Another durable step
+        await ctx.run("send-reminder", 
+            lambda: send_reminder(greeting_id, request.name)
+        )
+        
+        return {"result": f"Hello {request.name}!", "greeting_id": greeting_id}
+```
+</CodeGroup>
+
+## Key Concept: Durable Execution
+
+Restate provides **durable execution** - your functions can survive failures and restarts:
+
+- **Progress is persisted**: Completed steps won't re-execute on retry
+- **Automatic retries**: Failed steps retry with exponential backoff  
+- **Durable sleep & timers**: Pause execution without blocking resources
+- **Deterministic**: Same inputs always produce same outputs
+- **Exactly-once**: Operations execute exactly once, even during failures
+
+If the service crashes after sending the notification but before the sleep completes, Restate will restart the function, skip the notification step (already done), and continue from the sleep.
+
+## Next Steps
+
+Now that you have Restate running:
+
+**Learn the fundamentals:**
+- [Key Concepts](/concepts): Core Restate concepts and terminology
+
+**Build with Restate:**
+- [Services](/build/services/overview): Learn about the three service types
+- [Functions](/build/functions/overview): Understand how functions work
+- [Helpers](/build/functions/helpers/durable-execution): Explore durable execution patterns
+
+**See it in action:**
+- [Use Cases](/use-cases/payment-processing): Real-world examples and patterns
+- [Common Patterns](/build/patterns): Proven architectural patterns
+
+**Language-specific guides:**
+- [TypeScript SDK](/reference/typescript-sdk)
+- [Java SDK](/reference/java-kotlin-sdk)  
+- [Python SDK](/reference/python-sdk)
+
+Start building reliable distributed systems with the confidence that Restate handles all the hard parts for you!

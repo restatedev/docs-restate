@@ -1,0 +1,296 @@
+---
+title: Fan-out/Fan-in
+description: Process multiple items in parallel and collect results
+---
+
+When you have a large batch of independent work to do, processing items one by one is slow. The fan-out/fan-in pattern splits work into parallel tasks, processes them simultaneously, then collects all the results.
+
+This pattern dramatically reduces processing time for bulk operations while maintaining reliability through Restate's durable execution.
+
+## The problem fan-out/fan-in solves
+
+Imagine you need to:
+- Validate 1000 user email addresses
+- Process 500 uploaded images  
+- Send notifications to 200 users
+- Fetch data from 50 different APIs
+
+Processing these sequentially could take hours. Fan-out/fan-in processes them in parallel, reducing total time to minutes.
+
+## How fan-out/fan-in works
+
+**Fan-out phase:** Split your batch into individual tasks and start them all simultaneously.
+
+**Parallel processing:** Each task runs independently. Failures in one task don't affect others.
+
+**Fan-in phase:** Collect results from all tasks, handling both successes and failures appropriately.
+
+**Fan-out/Fan-in handlers:**
+<CodeGroup>
+```typescript TypeScript
+export const processUserEmails = async (ctx: WorkflowContext, userIds: string[]) => {
+  // Fan-out: Start all email processing tasks in parallel
+  const emailTasks = userIds.map(userId => 
+    ctx.serviceCall(EmailService).validateAndSendWelcome(userId)
+  );
+  
+  // Fan-in: Wait for all tasks to complete
+  const results = await Promise.allSettled(emailTasks);
+  
+  // Process results
+  const successful: string[] = [];
+  const failed: Array<{userId: string, error: string}> = [];
+  
+  results.forEach((result, index) => {
+    const userId = userIds[index];
+    if (result.status === 'fulfilled') {
+      successful.push(userId);
+    } else {
+      failed.push({ userId, error: result.reason.message });
+    }
+  });
+  
+  return {
+    processed: userIds.length,
+    successful: successful.length,
+    failed: failed.length,
+    failedUsers: failed
+  };
+};
+
+// Alternative: Process with progress tracking
+export const processWithProgress = async (ctx: WorkflowContext, items: string[]) => {
+  const results: Array<{id: string, status: 'success' | 'error', data?: any, error?: string}> = [];
+  
+  // Process in batches to avoid overwhelming downstream services
+  const batchSize = 10;
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    
+    // Fan-out this batch
+    const batchTasks = batch.map(async (item) => {
+      try {
+        const result = await ctx.run(`process-${item}`, () => ProcessingService.process(item));
+        return { id: item, status: 'success' as const, data: result };
+      } catch (error) {
+        return { id: item, status: 'error' as const, error: error.message };
+      }
+    });
+    
+    // Fan-in this batch
+    const batchResults = await Promise.all(batchTasks);
+    results.push(...batchResults);
+    
+    // Store progress
+    ctx.set('progress', { completed: results.length, total: items.length });
+  }
+  
+  return results;
+};
+```
+
+```java Java
+@Workflow
+public BatchResult processUserEmails(WorkflowContext ctx, List<String> userIds) {
+    // Fan-out: Start all email processing tasks in parallel
+    List<Awaitable<String>> emailTasks = userIds.stream()
+        .map(userId -> EmailServiceClient.fromContext(ctx).validateAndSendWelcome(userId))
+        .collect(Collectors.toList());
+    
+    // Fan-in: Wait for all tasks to complete
+    List<Try<String>> results = Awaitable.all(emailTasks).await();
+    
+    // Process results
+    List<String> successful = new ArrayList<>();
+    List<FailedUser> failed = new ArrayList<>();
+    
+    for (int i = 0; i < results.size(); i++) {
+        String userId = userIds.get(i);
+        Try<String> result = results.get(i);
+        
+        if (result.isSuccess()) {
+            successful.add(userId);
+        } else {
+            failed.add(new FailedUser(userId, result.getCause().getMessage()));
+        }
+    }
+    
+    return new BatchResult(userIds.size(), successful.size(), failed.size(), failed);
+}
+
+// Batch processing variant
+@Workflow  
+public List<ProcessingResult> processWithBatches(WorkflowContext ctx, List<String> items) {
+    List<ProcessingResult> allResults = new ArrayList<>();
+    int batchSize = 10;
+    
+    for (int i = 0; i < items.size(); i += batchSize) {
+        List<String> batch = items.subList(i, Math.min(i + batchSize, items.size()));
+        
+        // Fan-out this batch
+        List<Awaitable<ProcessingResult>> batchTasks = batch.stream()
+            .map(item -> ctx.run("process-" + item, () -> {
+                try {
+                    Object result = ProcessingServiceClient.fromContext(ctx).process(item).await();
+                    return new ProcessingResult(item, "success", result, null);
+                } catch (Exception error) {
+                    return new ProcessingResult(item, "error", null, error.getMessage());
+                }
+            }))
+            .collect(Collectors.toList());
+        
+        // Fan-in this batch
+        List<ProcessingResult> batchResults = Awaitable.all(batchTasks).await();
+        allResults.addAll(batchResults);
+        
+        // Store progress
+        ctx.set("progress", new Progress(allResults.size(), items.size()));
+    }
+    
+    return allResults;
+}
+```
+
+```python Python
+async def process_user_emails(ctx: WorkflowContext, user_ids: List[str]):
+    # Fan-out: Start all email processing tasks in parallel
+    email_tasks = [
+        EmailService.from_context(ctx).validate_and_send_welcome(user_id)
+        for user_id in user_ids
+    ]
+    
+    # Fan-in: Wait for all tasks to complete
+    results = await asyncio.gather(*email_tasks, return_exceptions=True)
+    
+    # Process results
+    successful = []
+    failed = []
+    
+    for i, result in enumerate(results):
+        user_id = user_ids[i]
+        if isinstance(result, Exception):
+            failed.append({"user_id": user_id, "error": str(result)})
+        else:
+            successful.append(user_id)
+    
+    return {
+        "processed": len(user_ids),
+        "successful": len(successful),
+        "failed": len(failed),
+        "failed_users": failed
+    }
+
+# Batch processing variant
+async def process_with_batches(ctx: WorkflowContext, items: List[str]):
+    results = []
+    batch_size = 10
+    
+    for i in range(0, len(items), batch_size):
+        batch = items[i:i + batch_size]
+        
+        # Fan-out this batch
+        async def process_item(item):
+            try:
+                result = await ctx.run(f"process-{item}", 
+                    lambda: ProcessingService.from_context(ctx).process(item))
+                return {"id": item, "status": "success", "data": result}
+            except Exception as error:
+                return {"id": item, "status": "error", "error": str(error)}
+        
+        batch_tasks = [process_item(item) for item in batch]
+        
+        # Fan-in this batch
+        batch_results = await asyncio.gather(*batch_tasks)
+        results.extend(batch_results)
+        
+        # Store progress
+        await ctx.set("progress", {"completed": len(results), "total": len(items)})
+    
+    return results
+```
+</CodeGroup>
+
+**Invoking fan-out/fan-in workflows:**
+<CodeGroup>
+```bash cURL
+curl localhost:8080/BatchProcessor/batch-123/processUserEmails \
+  --json '{"userIds": ["user1", "user2", "user3", "user4", "user5"]}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .workflowClient(BatchProcessor, "batch-123")
+  .processUserEmails(["user1", "user2", "user3", "user4", "user5"]);
+```
+
+```java Java Client
+BatchResult result = BatchProcessorClient.fromContext(ctx, "batch-123")
+    .processUserEmails(userIds).await();
+```
+</CodeGroup>
+
+## Key implementation patterns
+
+**Promise.allSettled() for fault tolerance:** Unlike `Promise.all()`, `allSettled()` waits for all tasks to complete, whether they succeed or fail. This prevents one failure from canceling other work.
+
+**Batch processing for large datasets:** Processing 10,000 items simultaneously might overwhelm downstream services. Break large batches into smaller chunks.
+
+**Progress tracking:** For long-running batches, store progress in state so users can track completion and resume if needed.
+
+**Error handling strategies:** Decide whether to fail fast (stop on first error) or collect all results (continue despite errors). Most fan-out scenarios want to collect all results.
+
+## Fan-out strategies
+
+**Simple fan-out:** Start all tasks immediately
+```typescript
+const tasks = items.map(item => processItem(item));
+const results = await Promise.allSettled(tasks);
+```
+
+**Batched fan-out:** Process in smaller groups to control resource usage
+```typescript
+for (let i = 0; i < items.length; i += batchSize) {
+  const batch = items.slice(i, i + batchSize);
+  // Process batch...
+}
+```
+
+**Throttled fan-out:** Add delays between starting tasks
+```typescript
+const tasks = items.map(async (item, index) => {
+  await ctx.sleep(index * 100); // Stagger by 100ms
+  return processItem(item);
+});
+```
+
+## Common use cases
+
+**Data validation:** Validate thousands of records in parallel
+- Input sanitization for bulk imports
+- Email address validation
+- Credit card verification
+
+**Content processing:** Transform media or documents
+- Image resizing and optimization  
+- PDF generation from templates
+- Audio/video transcoding
+
+**API aggregation:** Fetch data from multiple sources
+- Collect user data from different services
+- Aggregate metrics from multiple systems
+- Parallel third-party API calls
+
+**Notification delivery:** Send messages to many recipients
+- Email campaigns to subscriber lists
+- Push notifications to mobile devices
+- SMS alerts to user groups
+
+## Performance considerations
+
+**Downstream capacity:** Don't overwhelm target services. Use batching or throttling if needed.
+
+**Memory usage:** Large result sets consume memory. Consider streaming results or processing in chunks.
+
+**Failure rates:** If many tasks fail, investigate root causes rather than retrying blindly.
+
+**Resource limits:** Monitor CPU, memory, and network usage during large fan-out operations.

@@ -1,0 +1,132 @@
+---
+title: Virtual Object Overview  
+description: Build stateful functions with per-key isolation and consistency
+---
+
+Virtual Objects are stateful services identified by a unique key. Each object has its own built-in key-value storage with strong consistency guarantees and single-writer semantics.
+
+## What are Virtual Objects?
+
+Virtual Objects are perfect for modeling stateful entities like user accounts, shopping carts, game sessions, or any business entity that needs to maintain state between requests and process requests for the same entity sequentially.
+
+Think of each Virtual Object as having its own private database that only it can access. This state is automatically managed by Restate - it's saved when functions complete, restored when functions restart, and kept consistent even during failures.
+
+## Define Virtual Object functions
+
+Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+
+```typescript TypeScript
+export const updateProfile = async (ctx: ObjectContext, profile: UserProfile) => {
+  // Set multiple pieces of state atomically
+  ctx.set("profile", profile);
+  ctx.set("lastUpdated", new Date().toISOString());
+  ctx.set("version", ((await ctx.get<number>("version")) ?? 0) + 1);
+  
+  return { 
+    success: true, 
+    profile,
+    updatedAt: new Date().toISOString() 
+  };
+};
+
+export const getProfile = async (ctx: ObjectContext) => {
+  const profile = await ctx.get<UserProfile>("profile");
+  const name = (await ctx.get<string>("name")) ?? "Unknown User";
+  
+  return {
+    profile,
+    name,
+    hasProfile: profile !== null
+  };
+};
+```
+
+```java Java
+@Handler
+public UpdateResult updateProfile(ObjectContext ctx, UserProfile profile) {
+    // Set multiple pieces of state atomically
+    ctx.set("profile", profile);
+    ctx.set("lastUpdated", Instant.now().toString());
+    
+    Integer version = ctx.get("version", Integer.class).orElse(0);
+    ctx.set("version", version + 1);
+    
+    return new UpdateResult(true, profile, Instant.now().toString());
+}
+
+@Handler
+public ProfileResponse getProfile(ObjectContext ctx) {
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    String name = ctx.get("name", String.class).orElse("Unknown User");
+    
+    return new ProfileResponse(profile, name, profile != null);
+}
+```
+
+```python Python
+async def update_profile(ctx: ObjectContext, profile: UserProfile):
+    # Set multiple pieces of state atomically
+    await ctx.set("profile", profile)
+    await ctx.set("lastUpdated", datetime.now().isoformat())
+    
+    version = await ctx.get("version", int) or 0
+    await ctx.set("version", version + 1)
+    
+    return {
+        "success": True,
+        "profile": profile,
+        "updated_at": datetime.now().isoformat()
+    }
+
+async def get_profile(ctx: ObjectContext):
+    profile = await ctx.get("profile", UserProfile)
+    name = await ctx.get("name", str) or "Unknown User"
+    
+    return {
+        "profile": profile,
+        "name": name,
+        "has_profile": profile is not None
+    }
+```
+
+## Key benefits
+
+**Consistent state**: Built-in key-value storage per object with ACID properties.
+
+**Single-writer guarantee**: Only one function runs per key at a time, eliminating race conditions.
+
+**Automatic recovery**: State is preserved and restored across failures and restarts.
+
+**Per-key isolation**: Each object key has completely separate state from all others.
+
+**No external database needed**: State is managed internally by Restate.
+
+## Call Virtual Object functions
+
+```bash cURL
+curl localhost:8080/UserAccount/user123/getProfile
+
+curl localhost:8080/UserAccount/user123/updateProfile \
+  --json '{"name": "John Doe", "email": "john@example.com"}'
+```
+
+```typescript TypeScript Client
+const result = await restateClient
+  .objectClient(UserAccount, "user123")
+  .getProfile();
+
+const updateResult = await restateClient
+  .objectClient(UserAccount, "user123")
+  .updateProfile({ name: "John Doe", email: "john@example.com" });
+```
+
+```java Java Client
+ProfileResponse result = UserAccountClient.fromContext(ctx, "user123")
+    .getProfile().await();
+
+UpdateResult updateResult = UserAccountClient.fromContext(ctx, "user123")
+    .updateProfile(new UserProfile("John Doe", "john@example.com"))
+    .await();
+```
+
+Each Virtual Object is identified by a key (like `"user123"`). All requests for the same key are processed sequentially, ensuring state consistency.

@@ -1,0 +1,236 @@
+---
+title: Invoke Services
+description: Call functions across services with reliability guarantees
+---
+
+Restate provides three ways to call functions across services, each with automatic retries, exactly-once delivery, and durable execution guarantees.
+
+## Request-response calls
+
+Request-response calls are like regular function calls - you send a request and wait for the response. When you make a request-response call, your code pauses until the other function finishes and returns a result.
+
+This is perfect when you need the result immediately to continue processing. For example, if you need to validate data before proceeding, or get a user's profile before updating it.
+
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Request-response call - wait for result
+  const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+  
+  if (!validation.isValid) {
+    throw new Error("Invalid order");
+  }
+  
+  // Continue processing with the result
+  return { orderId: order.id, status: "validated" };
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Request-response call - wait for result
+    ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+        .validateOrder(order).await();
+    
+    if (!validation.isValid()) {
+        throw new RuntimeException("Invalid order");
+    }
+    
+    // Continue processing with the result
+    return order.getId();
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Request-response call - wait for result
+    validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+    
+    if not validation.is_valid:
+        raise Exception("Invalid order")
+    
+    # Continue processing with the result
+    return {"order_id": order.id, "status": "validated"}
+```
+
+If the target function fails, Restate automatically retries the call. Your code doesn't need to handle retries - Restate does it for you.
+
+## One-way calls
+
+One-way calls are "fire and forget" - you send the request but don't wait for a response. Your code continues immediately while the target function processes the request in the background.
+
+This is perfect for background tasks like sending notifications, logging events, or triggering cleanup tasks. You don't need the result, you just want the work to happen eventually.
+
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the main order logic
+  const result = await processOrderLogic(ctx, order);
+  
+  // One-way call - fire and forget notification
+  ctx.serviceSend(NotificationService).sendOrderConfirmation(order.customerId, order.id);
+  
+  // One-way call - trigger background analytics
+  ctx.serviceSend(AnalyticsService).recordOrderEvent(order);
+  
+  // Return immediately without waiting for notifications
+  return result;
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Process the main order logic
+    String result = processOrderLogic(ctx, order);
+    
+    // One-way call - fire and forget notification
+    NotificationServiceClient.fromContext(ctx).send()
+        .sendOrderConfirmation(order.getCustomerId(), order.getId());
+    
+    // One-way call - trigger background analytics
+    AnalyticsServiceClient.fromContext(ctx).send()
+        .recordOrderEvent(order);
+    
+    // Return immediately without waiting for notifications
+    return result;
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Process the main order logic
+    result = await process_order_logic(ctx, order)
+    
+    # One-way call - fire and forget notification
+    NotificationServiceClient.from_context(ctx).send().send_order_confirmation(
+        order.customer_id, order.id
+    )
+    
+    # One-way call - trigger background analytics  
+    AnalyticsServiceClient.from_context(ctx).send().record_order_event(order)
+    
+    # Return immediately without waiting for notifications
+    return result
+```
+
+Restate guarantees the target function will eventually run, even if there are failures. The call might happen seconds or minutes later, but it will happen.
+
+## Delayed calls
+
+Delayed calls let you schedule a function to run at a specific time in the future. This is like setting an alarm clock for your code - the function will run after the specified delay, even if your service restarts.
+
+This is perfect for reminders, follow-up tasks, or implementing timeouts. For example, you might schedule a reminder email to be sent tomorrow, or cancel an order if payment isn't received within 15 minutes.
+
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
+  // Process the order immediately
+  const result = await processOrderLogic(ctx, order);
+  
+  // Schedule a reminder email for tomorrow
+  ctx.serviceCall(ReminderService).sendFollowUp(order.customerId, {
+    delay: 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+  });
+  
+  // Schedule order cancellation if not paid within 15 minutes
+  ctx.serviceCall(OrderService).cancelIfNotPaid(order.id, {
+    delay: 15 * 60 * 1000 // 15 minutes
+  });
+  
+  return result;
+};
+```
+
+```java Java
+@Handler
+public String processOrder(Context ctx, Order order) {
+    // Process the order immediately
+    String result = processOrderLogic(ctx, order);
+    
+    // Schedule a reminder email for tomorrow
+    ReminderServiceClient.fromContext(ctx)
+        .sendFollowUp(order.getCustomerId())
+        .delayedCall(Duration.ofDays(1));
+    
+    // Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.fromContext(ctx)
+        .cancelIfNotPaid(order.getId())
+        .delayedCall(Duration.ofMinutes(15));
+    
+    return result;
+}
+```
+
+```python Python
+async def process_order(ctx: Context, order: Order):
+    # Process the order immediately
+    result = await process_order_logic(ctx, order)
+    
+    # Schedule a reminder email for tomorrow
+    ReminderServiceClient.from_context(ctx).send_follow_up(
+        order.customer_id
+    ).delayed_call(timedelta(days=1))
+    
+    # Schedule order cancellation if not paid within 15 minutes
+    OrderServiceClient.from_context(ctx).cancel_if_not_paid(
+        order.id
+    ).delayed_call(timedelta(minutes=15))
+    
+    return result
+```
+
+The delay is durable - even if your service crashes and restarts, the scheduled call will still happen at the right time.
+
+## Prevent duplicates with idempotency
+
+Sometimes you might accidentally call the same function twice with the same data - maybe due to a network retry, or a user clicking a button twice, or your code having a bug. This could cause problems like charging a credit card twice or sending duplicate emails.
+
+Idempotency keys solve this problem. An idempotency key is a unique string you provide that identifies a specific operation. If you make multiple calls with the same idempotency key, Restate will only execute the function once and return the same result for all subsequent calls.
+
+```bash cURL
+curl localhost:8080/PaymentService/processPayment \
+  -H 'idempotency-key: order-12345-payment' \
+  --json '{"orderId": "12345", "amount": 100}'
+```
+
+```typescript TypeScript Client
+// Multiple calls with same key will only execute once
+await restateClient
+  .serviceClient(PaymentService)
+  .processPayment({ orderId: "12345", amount: 100 }, { 
+    idempotencyKey: "order-12345-payment" 
+  });
+```
+
+```java Java Client
+PaymentServiceClient.fromContext(ctx)
+    .processPayment(payment)
+    .idempotencyKey("order-12345-payment")
+    .await();
+```
+
+```python Python Client
+await PaymentServiceClient.from_context(ctx).process_payment(
+    payment, 
+    idempotency_key="order-12345-payment"
+)
+```
+
+In these examples, if you call the same function multiple times with `idempotency-key: order-12345-payment`, only the first call will actually execute. The subsequent calls will immediately return the same result as the first call, without re-running the function.
+
+## Cancel running invocations
+
+Sometimes you need to stop a function that's already running. Maybe it's taking too long, or business requirements changed, or you deployed a bug. Restate gives you two ways to stop running functions.
+
+**Cancel** lets the function finish its current operation, then stops it gracefully. Any compensation logic (like rolling back changes) will run.
+
+**Kill** stops the function immediately without running any cleanup code. Use this when the function is completely stuck.
+
+```bash CLI (Cancel)
+restate invocations cancel inv_1234567890abcdef
+```
+
+```bash CLI (Kill)
+restate invocations cancel --kill inv_1234567890abcdef
+```
+
+Both options use the Restate CLI and require the invocation ID, which you can get from the Restate UI or CLI tools.
