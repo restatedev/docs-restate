@@ -1,0 +1,100 @@
+---
+title: "Restate Service Configuration"
+sidebarTitle: "Restate Services"
+description: "Restate services configuration options."
+---
+
+Restate services support adapting several configuration options, including the retention time of idempotency keys and inactivity timeouts.
+
+You can configure these using:
+1. [**UI**](/develop/local_dev#restate-ui): click on your registered deployment and adapt the settings
+2. **CLI**: adapt the Restate configuration file from the terminal via the CLI:
+    ```
+    restate services config edit <SERVICE>
+    ```
+3. [**Admin API**](/adminapi/modify-service):  See the [private services section](/operate/security#private-services) for an example API request.
+4. Programmatically: Use the [`ServiceOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions) when defining a service.
+
+## Configuring programmatically
+
+Use the [`ServiceOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions) to configure your services:
+
+```ts  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#options}
+restate.service({
+  name: "MyService",
+  handlers: {
+    run: async (ctx: restate.Context) => {},
+  },
+  options: {
+      abortTimeout: { minutes: 15 },
+      inactivityTimeout: { minutes: 15 },
+      idempotencyRetention: { days: 3 },
+      journalRetention: { days: 7 },
+      ingressPrivate: true
+  }
+});
+```
+
+Or use the [`ServiceHandlerOpts`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceHandlerOpts) to set them at a handler-level:
+
+```ts  {CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts}
+restate.service({
+    name: "MyService",
+    handlers: {
+        run: restate.handlers.handler(
+            {
+                abortTimeout: { minutes: 15 },
+                inactivityTimeout: { minutes: 15 },
+                idempotencyRetention: { days: 3 },
+                journalRetention: { days: 7 },
+                ingressPrivate: true
+            },
+            async (ctx: restate.Context) => {},
+        )
+    }
+});
+```
+
+## Common configuration options
+
+<AccordionGroup>
+  <Accordion title="Abort and inactivity timeout">
+    If Restate doesn't receive new journal entries from a service for more than one minute (by default), it will automatically abort the invocation and retry it.
+
+    However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
+
+    In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+
+    For more information, see the [error handling guide](/guides/error-handling).
+  </Accordion>
+
+  <Accordion title="Idempotency retention">
+    Restate allows you to [add an idempotency key](/invoke/http#invoke-a-handler-idempotently) to your request headers to ensure that duplicate requests are processed only once.
+
+    You can configure how long idempotency keys are retained using the [service’s options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#idempotencyretention). 
+  </Accordion>
+
+  <Accordion title="Hiding services from external access">
+    You can hide a service from external access by marking it as [**private** in the service options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#ingressprivate).
+
+    This prevents the service from being exposed through the ingress to external callers, while still allowing other Restate services to invoke it internally.
+    
+  </Accordion>
+
+  <Accordion title="Journal retention">
+    By default, Restate discards the invocation journal after an invocation completes to save storage space.
+
+    However, for certain handlers, such as workflows or AI agent runs, it can be useful to be able to inspect the journal after the invocation has finished.
+
+    In this case, you can specify the journal retention in the [service options](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#journalretention). 
+
+  </Accordion>
+
+  <Accordion title="Mapping errors to terminal errors">
+    Have a look at the [error handling docs](/develop/ts/error-handling#mapping-errors-to-terminalerror).
+  </Accordion>
+</AccordionGroup>
+
+
+
+
