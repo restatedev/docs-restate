@@ -288,4 +288,4 @@ function startWatcher() {
 }
 
 updateAllMdxFiles();
-startWatcher();
+// startWatcher();
