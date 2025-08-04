@@ -5,6 +5,16 @@ description: "Store key-value state in Restate."
 
 Restate lets you persist key-value (K/V) state using its embedded K/V store.
 
+## Why store state in Restate?
+
+Restate journals all state updates alongside other context actions (e.g., run, calls) in the same execution log. This ensures strong consistency: your state is always in sync with the exact point of execution, making it safe to use in distributed or failure-prone environments.
+
+This model turns your service into a stateless executor: The state is injected on every request, allowing handlers to operate without maintaining any in-memory or external persistence.
+
+This design makes it easy to:
+- Implement consistent state machines
+- Run stateful logic on stateless platforms (e.g., serverless, FaaS).
+- Avoid external databases for transient or actor-scoped data.
 
 ## Key characteristics
 
@@ -15,37 +25,17 @@ Scope & retention:
 - For Workflows: State is scoped per workflow execution (workflow ID) and retained only for the duration of the workflow’s configured retention time.
 
 Access Rules:
-- [Exclusive handlers](/ts/overview#exclusive-vs-shared-handlers) (e.g., run in workflows) can read and write state.
+- [Exclusive handlers](/ts/overview#exclusive-vs-shared-handlers) (e.g., `run()` in workflows) can read and write state.
 - [Shared handlers](/ts/overview#exclusive-vs-shared-handlers) can only read state and cannot mutate it.
 
-<Note>
-    You can inspect and edit the K/V state via the UI and the [CLI](/operate/introspection#inspecting-application-state).
-</Note>
+You can inspect and edit the K/V state via the UI and the [CLI](/operate/introspection#inspecting-application-state).
 
-<Note>
-By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
-</Note>
-
-## How it works
+<Accordion title="How it works">
 When Restate receives an invocation for a Virtual Object or Workflow:
 1. It attaches the K/V state of that object to the request.
 2. The request is forwarded along with the state to your handler.
 3. All reads and writes operate on this local state context during execution.
-
-<Tip>
-All state updates are **journaled alongside other context actions** (e.g., `run`, calls) in the same execution log.
-This ensures **strong consistency**: your state is always in sync with the exact point of execution, making it safe to use in distributed or failure-prone environments.
-</Tip> 
-
-<Tip>
-This model turns your service into a stateless executor:
-The state is injected on every request, allowing handlers to operate without maintaining any in-memory or external persistence.
-</Tip>
-
-This design makes it easy to:
-- Run stateful logic on stateless platforms (e.g., serverless, FaaS).
-- Avoid external databases for transient or actor-scoped data.
-
+</Accordion>
 
 ## List all state keys
 Use [`ctx.stateKeys()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#statekeys) to retrieve all keys for which the current Virtual Object has stored state:
@@ -61,6 +51,8 @@ Use [`ctx.get<T>()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_rest
 const myString = (await ctx.get<string>("my-string-key")) ?? "my-default";
 const myNumber = (await ctx.get<number>("my-number-key")) ?? 0;
 ```
+
+By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
 
 ## Set state value
 Use [`ctx.set()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#set-1) to write or update a value:
