@@ -85,22 +85,24 @@ restate.service({
 
 <AccordionGroup>
   <Accordion title="Timeout settings">
-    <h4>Abort timeout</h4>
-    <p>
-      The maximum time Restate waits for new journal entries from a service before aborting the invocation.
-      <strong>Default:</strong> 1 minute
-    </p>
-    
+
     <h4>Inactivity timeout</h4>
     <p>
-      The maximum time a service can be inactive before Restate considers it unresponsive.
-      <strong>Default:</strong> 1 minute
+      The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
+      After this timeout, Restate will ask the service to suspend.
     </p>
-    
+    <p><strong>Default:</strong> 1 minute</p>
     <p>
-      <strong>When to adjust:</strong> For long-running operations like LLM calls, database migrations, or external API calls that take longer than the default timeout.
+      <strong>When to adjust:</strong> For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
     </p>
-    
+
+    <h4>Abort timeout</h4>
+    <p>
+        Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
+        So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
+    </p>
+    <p><strong>Default:</strong> 1 minute</p>
+
     <p>
       <strong>Example:</strong> For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
     </p>
@@ -110,9 +112,9 @@ restate.service({
     <h4>Idempotency retention</h4>
     <p>
       How long Restate retains idempotency keys to prevent duplicate request processing.
-      <strong>Default:</strong> 24 hours
     </p>
-    
+    <p><strong>Default:</strong> 24 hours</p>
+
     <p>
       <strong>When to adjust:</strong> For services that need longer idempotency windows, such as financial transactions or critical business operations.
     </p>
@@ -120,8 +122,9 @@ restate.service({
     <h4>Journal retention</h4>
     <p>
       How long Restate keeps invocation journals after completion for debugging and auditing.
-      <strong>Default:</strong> Discarded immediately after completion
     </p>
+
+    <strong>Default:</strong> Discarded immediately after completion
     
     <p>
       <strong>When to adjust:</strong> For workflows, AI agents, or any service where you need to inspect the execution history after completion.
@@ -139,7 +142,6 @@ restate.service({
     </p>
     <ul>
       <li>Internal utility services that shouldn't be exposed externally</li>
-      <li>Services that handle sensitive data</li>
       <li>Backend services that only other Restate services should access</li>
     </ul>
     
@@ -151,82 +153,18 @@ restate.service({
   <Accordion title="Error handling">
     <h4>Error mapping</h4>
     <p>
-      Configure how specific errors are treated (retryable vs terminal) to control retry behavior.
+      Provide a function to map specific errors to terminal errors, preventing infinite retries.
     </p>
     
     <p>
-      <strong>Example:</strong> Map network timeouts to retryable errors but validation failures to terminal errors.
+      <strong>Example:</strong> Map validation failures to terminal errors.
     </p>
     
     <p>
-      See the <a href="/develop/ts/error-handling#mapping-errors-to-terminalerror">error handling guide</a> for detailed examples.
+      See the <a href="/develop/ts/error-handling#mapping-errors-to-terminalerror">error handling docs</a> for detailed examples.
     </p>
   </Accordion>
 </AccordionGroup>
-
-## Best practices
-
-### **Start with defaults**
-Begin with default settings and only adjust when you encounter specific issues or requirements.
-
-### **Monitor and adjust**
-- Use the Restate UI to monitor service performance
-- Adjust timeouts based on actual execution times
-- Set retention policies based on your compliance and debugging needs
-
-### **Security considerations**
-- Use private services for internal-only functionality
-- Set appropriate retention policies for sensitive data
-- Consider idempotency windows based on your business requirements
-
-### **Performance optimization**
-- Set timeouts to match your actual execution patterns
-- Use journal retention sparingly to avoid storage overhead
-- Configure error mapping to optimize retry behavior
-
-## Configuration examples by use case
-
-### **AI Agent Service**
-```ts
-restate.service({
-  name: "AIAgent",
-  handlers: { /* ... */ },
-  options: {
-    abortTimeout: { minutes: 10 },        // Long LLM calls
-    inactivityTimeout: { minutes: 10 },   // Allow thinking time
-    journalRetention: { days: 7 },        // Debug AI reasoning
-    idempotencyRetention: { days: 1 }     // Prevent duplicate processing
-  }
-});
-```
-
-### **Financial Transaction Service**
-```ts
-restate.service({
-  name: "PaymentProcessor",
-  handlers: { /* ... */ },
-  options: {
-    abortTimeout: { minutes: 5 },         // Payment processing time
-    idempotencyRetention: { days: 30 },   // Long window for financial ops
-    journalRetention: { days: 90 },       // Compliance requirements
-    ingressPrivate: true                  // Sensitive financial data
-  }
-});
-```
-
-### **Background Job Service**
-```ts
-restate.service({
-  name: "DataProcessor",
-  handlers: { /* ... */ },
-  options: {
-    abortTimeout: { hours: 2 },           // Long-running data processing
-    inactivityTimeout: { hours: 2 },      // Batch operations
-    journalRetention: { days: 3 }         // Debug processing issues
-  }
-});
-```
-
 
 
 
