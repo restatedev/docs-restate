@@ -20,6 +20,5 @@ export const handler = restate
   .bind(myService)
   .bind(myVirtualObject)
   .bind(myWorkflow)
-  // !mark
   .handler();
 // <end_lambda>
