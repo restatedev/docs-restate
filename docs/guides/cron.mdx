@@ -1,0 +1,661 @@
+---
+title: "Cron Jobs"
+description: "Schedule tasks periodically with Restate"
+---
+
+A cron job is a scheduled task that runs periodically at a specified time or interval. It is often used for background tasks like cleanup or sending notifications.
+
+## Why Restate for cron jobs?
+
+Restate has many features that make it a good fit for implementing cron jobs:
+- **Durable timers**: Schedule tasks to run at a specific time in the future. Restate ensures execution.
+- **Task resiliency**: Restate ensures that tasks are retried until they succeed.
+- **Task control**: Cancel and inspect running jobs.
+- **K/V state**: We store the details of the cron jobs in Restate, so we can retrieve them later and query them from the outside.
+- **FaaS support**: Run your services on FaaS infrastructure, like AWS Lambda. Restate will scale your scheduler and tasks to zero while they sleep.
+- **Scalability**: Restate can handle many cron jobs running in parallel, and can scale horizontally to handle more load.
+- **Observability**: See the execution history of the cron jobs, and their status in the Restate UI.
+
+![Cron State UI](/img/guides/cron/cron_state_ui.png)
+
+Restate has no built-in functionality for cron jobs.
+But Restate's durable building blocks make it easy to implement a service that does this for us, and uses the guarantees Restate gives to make sure tasks get executed reliably.
+
+
+## Example
+
+The example implements a **cron service that you can copy over to your own project**.
+
+<img alt="Cron Jobs Diagram" src="/img/guides/cron/cron-jobs-diagram.png" width="500px"/>
+
+Usage:
+1. Send requests to `CronJobInitiator.create()` to start new jobs with standard [cron expressions](https://www.baeldung.com/cron-expressions):
+```json
+{
+    "cronExpression": "0 0 * * *", # E.g. run every day at midnight
+    "service": "TaskService", # Schedule any Restate handler
+    "method": "executeTask",
+    "key": "taskId", # Optional, Virtual Object key
+    "payload": "Hello midnight!"
+}
+```
+2. Each job gets a unique ID and runs as a CronJob virtual object
+3. Jobs automatically reschedule themselves after each execution
+
+<CodeGroup>
+
+```ts TypeScript expandable {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/cron/cron_service.ts#&collapse_prequel} 
+import * as restate from "@restatedev/restate-sdk";
+import { CronExpressionParser } from "cron-parser";
+import { InvocationId, serde, TerminalError } from "@restatedev/restate-sdk";
+
+type JobRequest = {
+  cronExpression: string; // The cron expression e.g. "0 0 * * *" (every day at midnight)
+  service: string;
+  method: string; // Handler to execute with this schedule
+  key?: string; // Optional: Virtual Object key of task to call
+  payload?: string; // Optional payload to pass to the handler
+};
+
+type JobInfo = {
+  request: JobRequest;
+  next_execution_time: string;
+  next_execution_id: InvocationId;
+};
+
+// Key of the K/V state that we store in Restate
+const JOB_STATE = "job-state";
+
+/*
+ * A distributed cron service built with Restate that schedules tasks based on cron expressions.
+ *
+ * Features:
+ * - Create cron jobs with standard cron expressions (e.g., "0 0 * * *" for daily at midnight)
+ * - Schedule any Restate service handler or virtual object method
+ * - Guaranteed execution with Restate's durability
+ * - Cancel and inspect running jobs
+ *
+ * Usage:
+ * 1. Send requests to CronInitiator.create() to start new jobs
+ * 2. Each job gets a unique ID and runs as a CronJob virtual object
+ * 3. Jobs automatically reschedule themselves after each execution
+ */
+export const cronJobInitiator = restate.service({
+  name: "CronJobInitiator",
+  handlers: {
+    create: async (ctx: restate.Context, request: JobRequest) => {
+      // Create a new job ID and initiate the cron job object for that ID
+      // We can then address this job object by its ID
+      const jobId = ctx.rand.uuidv4();
+      const job = await ctx.objectClient(cronJob, jobId).initiate(request);
+      return `Job created with ID ${jobId} and next execution time ${job.next_execution_time}`;
+    },
+  },
+});
+
+export const cronJob = restate.object({
+  name: "CronJob",
+  handlers: {
+    initiate: async (ctx: restate.ObjectContext, request: JobRequest): Promise<JobInfo> => {
+      if (await ctx.get<JobInfo>(JOB_STATE)) {
+        throw new TerminalError("Job already exists for this ID.");
+      }
+
+      return await scheduleNextExecution(ctx, request);
+    },
+    execute: async (ctx: restate.ObjectContext) => {
+      const jobState = await ctx.get<JobInfo>(JOB_STATE);
+      if (!jobState) {
+        throw new TerminalError("Job not found.");
+      }
+
+      // execute the task
+      const { service, method, key, payload } = jobState.request;
+      if (payload) {
+        ctx.genericSend({
+          service,
+          method,
+          parameter: payload,
+          key,
+          inputSerde: serde.json,
+        });
+      } else {
+        ctx.genericSend({
+          service,
+          method,
+          parameter: undefined,
+          key,
+          inputSerde: serde.empty,
+        });
+      }
+
+      await scheduleNextExecution(ctx, jobState.request);
+    },
+    cancel: async (ctx: restate.ObjectContext) => {
+      // Cancel the next execution
+      const jobState = await ctx.get<JobInfo>(JOB_STATE);
+      if (jobState) {
+        ctx.cancel(jobState.next_execution_id);
+      }
+
+      // Clear the job state
+      ctx.clearAll();
+    },
+    getInfo: async (ctx: restate.ObjectSharedContext) => ctx.get<JobInfo>(JOB_STATE),
+  },
+});
+
+const scheduleNextExecution = async (
+  ctx: restate.ObjectContext,
+  request: JobRequest
+): Promise<JobInfo> => {
+  // Parse cron expression
+  // Persist current date in Restate for deterministic replay
+  const currentDate = await ctx.date.now();
+  let interval;
+  try {
+    interval = CronExpressionParser.parse(request.cronExpression, { currentDate });
+  } catch (e) {
+    throw new TerminalError(`Invalid cron expression: ${(e as Error).message}`);
+  }
+
+  const next = interval.next().toDate();
+  const delay = next.getTime() - currentDate;
+
+  // Schedule next execution for this job
+  const thisJobId = ctx.key; // This got generated by the CronJobInitiator
+  const handle = ctx.objectSendClient(cronJob, thisJobId, { delay }).execute();
+
+  // Store the job information
+  const jobState = {
+    request,
+    next_execution_time: next.toString(),
+    next_execution_id: await handle.invocationId,
+  };
+  ctx.set<JobInfo>(JOB_STATE, jobState);
+  return jobState;
+};
+
+```
+
+```java Java expandable {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/patterns-use-cases/src/main/java/my/example/cron/Cron.java} 
+package my.example.cron;
+
+import static com.cronutils.model.CronType.UNIX;
+
+import com.cronutils.model.definition.CronDefinitionBuilder;
+import com.cronutils.model.time.ExecutionTime;
+import com.cronutils.parser.CronParser;
+import dev.restate.common.Request;
+import dev.restate.common.Target;
+import dev.restate.sdk.Context;
+import dev.restate.sdk.ObjectContext;
+import dev.restate.sdk.SharedObjectContext;
+import dev.restate.sdk.annotation.*;
+import dev.restate.sdk.common.StateKey;
+import dev.restate.sdk.common.TerminalException;
+import dev.restate.serde.TypeTag;
+import java.time.ZonedDateTime;
+import java.util.Optional;
+
+/*
+ * A distributed cron service built with Restate that schedules tasks based on cron expressions.
+ *
+ * Features:
+ * - Create cron jobs with standard cron expressions (e.g., "0 0 * * *" for daily at midnight)
+ * - Schedule any Restate service handler or virtual object method
+ * - Guaranteed execution with Restate's durability
+ * - Cancel and inspect running jobs
+ *
+ * Usage:
+ * 1. Send requests to CronInitiator.create() to start new jobs
+ * 2. Each job gets a unique ID and runs as a CronJob virtual object
+ * 3. Jobs automatically reschedule themselves after each execution
+ */
+public class Cron {
+
+  public record JobRequest(
+      String cronExpression, // e.g. "0 0 * * *" (every day at midnight)
+      String service,
+      String method, // Handler to execute with this schedule
+      Optional<String> key, // Optional Virtual Object key of the task to call
+      Optional<String> payload) {} // Optional data to pass to the handler
+
+  public record JobInfo(JobRequest request, String nextExecutionTime, String nextExecutionId) {}
+
+  @Name("CronJobInitiator")
+  @Service
+  public static class JobInitiator {
+    @Handler
+    public String create(Context ctx, JobRequest request) {
+      // Create a new job ID and initiate the cron job object for that ID
+      // We can then address this job object by its ID
+      var jobId = ctx.random().nextUUID().toString();
+      var cronJob = CronJobClient.fromContext(ctx, jobId).initiate(request).await();
+      return String.format(
+          "Job created with ID %s and next execution time %s", jobId, cronJob.nextExecutionTime());
+    }
+  }
+
+  @Name("CronJob")
+  @VirtualObject
+  public static class Job {
+
+    private final StateKey<JobInfo> JOB_STATE = StateKey.of("job-state", JobInfo.class);
+    private final CronParser PARSER =
+        new CronParser(CronDefinitionBuilder.instanceDefinitionFor(UNIX));
+
+    @Handler
+    public JobInfo initiate(ObjectContext ctx, JobRequest request) {
+      if (ctx.get(JOB_STATE).isPresent()) {
+        throw new TerminalException("Job already exists for this ID");
+      }
+      return scheduleNextExecution(ctx, request);
+    }
+
+    @Handler
+    public void execute(ObjectContext ctx) {
+      JobRequest request =
+          ctx.get(JOB_STATE).orElseThrow(() -> new TerminalException("Job not found")).request;
+
+      executeTask(ctx, request);
+      scheduleNextExecution(ctx, request);
+    }
+
+    @Handler
+    public void cancel(ObjectContext ctx) {
+      ctx.get(JOB_STATE)
+          .ifPresent(jobState -> ctx.invocationHandle(jobState.nextExecutionId).cancel());
+
+      // Clear the job state
+      ctx.clearAll();
+    }
+
+    @Shared
+    public Optional<JobInfo> getInfo(SharedObjectContext ctx) {
+      return ctx.get(JOB_STATE);
+    }
+
+    private void executeTask(ObjectContext ctx, JobRequest job) {
+      Target target =
+          (job.key.isPresent())
+              ? Target.virtualObject(job.service, job.method, job.key.get())
+              : Target.service(job.service, job.method);
+      var request =
+          (job.payload.isPresent())
+              ? Request.of(
+                  target, TypeTag.of(String.class), TypeTag.of(Void.class), job.payload.get())
+              : Request.of(target, new byte[0]);
+      ctx.send(request);
+    }
+
+    private JobInfo scheduleNextExecution(ObjectContext ctx, JobRequest request) {
+      // Parse cron expression
+      ExecutionTime executionTime;
+      try {
+        executionTime = ExecutionTime.forCron(PARSER.parse(request.cronExpression));
+      } catch (IllegalArgumentException e) {
+        throw new TerminalException("Invalid cron expression: " + e.getMessage());
+      }
+
+      // Calculate next execution time
+      var now = ctx.run(ZonedDateTime.class, ZonedDateTime::now);
+      var delay =
+          executionTime
+              .timeToNextExecution(now)
+              .orElseThrow(() -> new TerminalException("Cannot determine next execution time"));
+      var next =
+          executionTime
+              .nextExecution(now)
+              .orElseThrow(() -> new TerminalException("Cannot determine next execution time"));
+
+      // Schedule next execution for this job
+      String thisJobId = ctx.key(); // This got generated by the CronJobInitiator
+      var handle = CronJobClient.fromContext(ctx, thisJobId).send().execute(delay);
+
+      // Save job state
+      var jobState = new JobInfo(request, next.toString(), handle.invocationId());
+      ctx.set(JOB_STATE, jobState);
+      return jobState;
+    }
+  }
+}
+
+```
+
+```go Go expandable {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/cron/cron.go} 
+package main
+
+import (
+  "fmt"
+  "time"
+
+  restate "github.com/restatedev/sdk-go"
+  "github.com/robfig/cron/v3"
+)
+
+// JobRequest represents the structure for creating a cron job
+type JobRequest struct {
+  CronExpression string `json:"cronExpression"` // The cron expression e.g. "0 0 * * *" (every day at midnight)
+  Service        string `json:"service"`
+  Method         string `json:"method"`            // Handler to execute with this schedule
+  Key            string `json:"key,omitempty"`     // Optional: Virtual Object key of task to call
+  Payload        string `json:"payload,omitempty"` // Optional payload to pass to the handler
+}
+
+// JobInfo represents the stored job information
+type JobInfo struct {
+  Request           JobRequest `json:"request"`
+  NextExecutionTime time.Time  `json:"next_execution_time"`
+  NextExecutionID   string     `json:"next_execution_id"`
+}
+
+const JOB_STATE = "job-state" // K/V state key for storing job info in the Restate
+
+// CronJobInitiator service for creating new cron jobs
+//
+// A distributed cron service built with Restate that schedules tasks based on cron expressions.
+//
+// Features:
+// - Create cron jobs with standard cron expressions (e.g., "0 0 * * *" for daily at midnight)
+// - Schedule any Restate service handler or virtual object method
+// - Guaranteed execution with Restate's durability
+// - Cancel and inspect running jobs
+//
+// Usage:
+// 1. Send requests to CronJobInitiator.Create() to start new jobs
+// 2. Each job gets a unique ID and runs as a CronJob virtual object
+// 3. Jobs automatically reschedule themselves after each execution
+
+type CronJobInitiator struct{}
+
+func (CronJobInitiator) Create(ctx restate.Context, req JobRequest) (string, error) {
+  // Create a new job ID and initiate the cron job object for that ID
+  // We can then address this job object by its ID
+  jobID := restate.Rand(ctx).UUID().String()
+
+  fmt.Printf("Creating new cron job with ID %s for service %s and method %s", jobID, req.Service, req.Method)
+  job, err := restate.Object[*JobInfo](ctx, "CronJob", jobID, "Initiate").Request(req)
+  if err != nil {
+    return "", err
+  }
+
+  return fmt.Sprintf("Job created with ID %s and next execution time %s",
+    jobID, job.NextExecutionTime.Format(time.RFC3339)), nil
+}
+
+type CronJob struct{}
+
+func (CronJob) Initiate(ctx restate.ObjectContext, req JobRequest) (*JobInfo, error) {
+  // Check if jobState already exists
+  jobState, err := restate.Get[*JobInfo](ctx, JOB_STATE)
+  if err != nil {
+    return nil, err
+  }
+  if jobState != nil {
+    return nil, restate.TerminalErrorf("jobState already exists for this ID", 500)
+  }
+
+  return scheduleNextExecution(ctx, req)
+}
+
+func (CronJob) Execute(ctx restate.ObjectContext) error {
+  // Get the job information
+  jobState, err := restate.Get[*JobInfo](ctx, JOB_STATE)
+  if err != nil {
+    return err
+  }
+  if jobState == nil {
+    return restate.TerminalErrorf("job not found", 500)
+  }
+
+  // Add key if it's a virtual object call
+  req := jobState.Request
+  fmt.Printf("Executing job with ID: %s for service %s for method %s", restate.Key(ctx), req.Service, req.Method)
+  if req.Key != "" {
+    restate.ObjectSend(ctx, req.Service, req.Key, req.Method).Send(req.Payload)
+  } else {
+    restate.ServiceSend(ctx, req.Service, req.Method).Send(req.Payload)
+  }
+
+  // Schedule the next execution
+  _, err = scheduleNextExecution(ctx, req)
+  return err
+}
+
+func (CronJob) Cancel(ctx restate.ObjectContext) error {
+  // Get the job to cancel the next execution
+  job, err := restate.Get[*JobInfo](ctx, JOB_STATE)
+  if err != nil {
+    return err
+  }
+  if job == nil {
+    return restate.TerminalErrorf("job not found for cancellation", 404)
+  }
+  restate.CancelInvocation(ctx, job.NextExecutionID)
+
+  restate.ClearAll(ctx)
+  return nil
+}
+
+func (CronJob) GetInfo(ctx restate.ObjectSharedContext) (*JobInfo, error) {
+  return restate.Get[*JobInfo](ctx, JOB_STATE)
+}
+
+// scheduleNextExecution calculates and schedules the next execution of the cron job
+func scheduleNextExecution(ctx restate.ObjectContext, req JobRequest) (*JobInfo, error) {
+  // Parse cron expression
+  parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+  schedule, err := parser.Parse(req.CronExpression)
+  if err != nil {
+    return nil, restate.TerminalErrorf("invalid cron expression: %v", err, 500)
+  }
+
+  // Get current time deterministically from Restate
+  currentTime, _ := restate.Run(ctx, func(ctx restate.RunContext) (time.Time, error) {
+    return time.Now(), nil
+  })
+
+  // Calculate next execution time
+  nextTime := schedule.Next(currentTime)
+  delay := nextTime.Sub(currentTime)
+
+  // Schedule next execution for this job
+  thisJobID := restate.Key(ctx) // This got generated by the CronJobInitiator
+  handle := restate.ObjectSend(ctx, "CronJob", thisJobID, "Execute").Send(nil, restate.WithDelay(delay))
+
+  // Store the job information
+  jobState := &JobInfo{
+    Request:           req,
+    NextExecutionTime: nextTime,
+    NextExecutionID:   handle.GetInvocationId(),
+  }
+  restate.Set(ctx, JOB_STATE, jobState)
+  return jobState, nil
+}
+
+```
+
+</CodeGroup>
+
+<Icon icon="github" iconType="solid" /> Open in Github: 
+[TS](https://github.com/restatedev/examples/blob/main/typescript/patterns-use-cases/src/cron/cron_service.ts) / 
+[Java](https://github.com/restatedev/examples/blob/main/java/patterns-use-cases/src/main/java/my/example/cron/Cron.java) / 
+[Go](https://github.com/restatedev/examples/blob/main/go/patterns-use-cases/src/cron/cron.go)
+
+<Note>
+    This pattern is implementable with any of our SDKs. We are still working on translating all patterns to all SDK languages.
+    If you need help with a specific language, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Note>
+
+## Running the example
+
+<Steps>
+    <Step title="Download the example">
+        <CodeGroup>
+
+          ```bash TypeScript
+          restate example typescript-patterns-use-cases && cd typescript-patterns-use-cases
+          ```
+
+          ```bash java
+          restate example java-patterns-use-cases && cd java-patterns-use-cases
+          ```
+
+          ```bash Go
+          restate example go-patterns-use-cases && cd go-patterns-use-cases
+          ```
+
+        </CodeGroup>
+    </Step>
+
+    <Step title="Start the Restate Server">
+        ```bash
+        restate-server
+        ```
+    </Step>
+
+    <Step title="Start the Service">
+        <CodeGroup>
+
+          ```bash TypeScript
+          npx tsx watch ./src/cron/task_service.ts
+          ```
+
+          ```bash Java
+          ./gradlew -PmainClass=my.example.cron.TaskService run
+          ```
+
+          ```bash Go
+          go run ./src/cron
+          ```
+
+        </CodeGroup>
+    </Step>
+
+    <Step title="Register the services">
+        ```bash
+        restate deployments register localhost:9080
+        ```
+    </Step>
+
+    <Step title="Send a request">
+        For example, run `executeTask` every minute:
+        <CodeGroup>
+
+            ```bash TypeScript
+            curl localhost:8080/CronJobInitiator/create --json '{
+              "cronExpression": "* * * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello new minute!"
+            }'
+            ```
+
+            ```bash Java
+            curl localhost:8080/CronJobInitiator/create --json '{
+              "cronExpression": "* * * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello new minute!"
+            }'
+            ```
+
+            ```bash Go
+            curl localhost:8080/CronJobInitiator/Create --json '{
+              "cronExpression": "* * * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello new minute!"
+            }'
+            ```
+
+        </CodeGroup>
+
+        For example, or run `executeTask` at midnight:
+        <CodeGroup>
+
+            ```bash TypeScript
+            curl localhost:8080/CronJobInitiator/create --json '{
+              "cronExpression": "0 0 * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello midnight!"
+            }'
+            ```
+
+            ```bash Java
+            curl localhost:8080/CronJobInitiator/create --json '{
+              "cronExpression": "0 0 * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello midnight!"
+            }'
+            ```
+
+            ```bash Go
+            curl localhost:8080/CronJobInitiator/Create --json '{
+              "cronExpression": "0 0 * * *",
+              "service": "TaskService",
+              "method": "executeTask",
+              "payload": "Hello midnight!"
+            }'
+            ```
+
+        </CodeGroup>
+
+        You can also use the cron service to execute handlers on Virtual Objects, by specifying the Virtual Object key in the request.
+
+        You will get back a response with the job ID.
+
+        Using the job ID, you can then get information about the job:
+        <CodeGroup>
+
+            ```bash TypeScript
+            curl localhost:8080/CronJob/myJobId/getInfo
+            ```
+
+            ```bash Java
+            curl localhost:8080/CronJob/myJobId/getInfo
+            ```
+
+            ```bash Go
+            curl localhost:8080/CronJob/myJobId/GetInfo
+            ```
+
+        </CodeGroup>
+
+        Or cancel the job later:
+        <CodeGroup>
+
+            ```bash TypeScript
+            curl localhost:8080/CronJob/myJobId/cancel
+            ```
+
+            ```bash Java
+            curl localhost:8080/CronJob/myJobId/cancel
+            ```
+
+            ```bash Go
+            curl localhost:8080/CronJob/myJobId/Cancel
+            ```
+
+        </CodeGroup>
+    </Step>
+
+    <Step title="Check the scheduled tasks and state">
+        In the UI, you can see how the tasks are scheduled, and how the state of the cron jobs is stored in Restate.
+
+        ![Cron Service Schedule](/img/guides/cron/cron_service_schedule.png)
+        ![Cron State UI](/img/guides/cron/cron_state_ui.png)
+
+        You can kill and restart any of the services or the Restate Server, and the scheduled tasks will still be there.
+    </Step>
+</Steps>
+
+## Adapt to your use case
+
+Note that this implementation is fully resilient, but you might need to make some adjustments to make this fit your use case:
+- Take into account time zones.
+- Adjust how you want to handle tasks that fail until the next task gets scheduled. With the current implementation, you would have concurrent executions of the same cron job (one retrying and the other starting up).
+If you want to cancel the failing task when a new one needs to start, you can do the following: at the beginning of the `execute` call, retrieve the `next_execution_id` from the job state and check if it is completed by [attaching to it](/develop/ts/service-communication#re-attach-to-an-invocation) with [a timeout set to 0](/develop/ts/journaling-results#combineable-promise-combinators). If it is not completed, [cancel it](/develop/ts/service-communication#cancel-an-invocation) and start the new iteration.
