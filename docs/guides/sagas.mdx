@@ -446,19 +446,70 @@ Different APIs require different approaches:
 This type of API usually auto-cancels reservations after a timeout.
 <CodeGroup>
 
-```ts TypeScript {CODE_LOAD::ts/src/guides/sagas/booking_workflow.ts#twostep}
+```ts TypeScript {CODE_LOAD::ts/src/guides/sagas/booking_workflow.ts#twostep} 
+const bookingId = await ctx.run(() =>
+  flightClient.reserve(customerId, flight)
+);
+compensations.push(() =>
+  ctx.run(() => flightClient.cancel(bookingId))
+);
+
+// ... do other work, like reserving a car, etc. ...
+
+await ctx.run(() => flightClient.confirm(bookingId));
 ```
 
-```python Python {CODE_LOAD::python/src/guides/sagas/app.py#twostep}
+```python Python {CODE_LOAD::python/src/guides/sagas/app.py#twostep} 
+booking_id = await ctx.run("reserve", flight_client.reserve, args=(customer_id, flight))
+compensations.append(
+    lambda: ctx.run("cancel", flight_client.cancel, args=(booking_id,))
+)
+
+#  ... do other work, like reserving a car, etc. ...
+
+await ctx.run("confirm", flight_client.confirm, args=(booking_id,))
 ```
 
-```java Java {CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#twostep}
+```java Java {CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#twostep} 
+String bookingId = ctx.run(String.class, () -> FlightClient.reserve(flight));
+compensations.add(() -> ctx.run(() -> FlightClient.cancel(bookingId)));
+
+// ... do other work, like reserving a car, etc. ...
+
+ctx.run(() -> FlightClient.confirm(bookingId));
 ```
 
-```kotlin Kotlin {CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#twostep}
+```kotlin Kotlin {CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#twostep} 
+// For each action, we register a compensation that will be executed on failures
+val bookingId = ctx.runBlock { reserveFlight(customerId, flight) }
+compensations.add { ctx.runBlock { cancelFlight(bookingId) } }
+
+// ... do other work, like reserving a car, etc. ...
+
+compensations.add { ctx.runBlock { confirmFlight(bookingId) } }
 ```
 
-```go Go {CODE_LOAD::go/guides/sagas/bookingworkflow.go#twostep}
+```go Go {CODE_LOAD::go/guides/sagas/bookingworkflow.go#twostep} 
+bookingId, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+  return ReserveFlight(req.CustomerId, req.Flight)
+})
+if err != nil {
+  return err
+}
+
+compensations = append(compensations, func() (restate.Void, error) {
+  return restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return CancelFlight(bookingId)
+  })
+})
+
+// ... do other work, like reserving a car, etc. ...
+
+if _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return ConfirmFlight(bookingId)
+}); err != nil {
+  return err
+}
 ```
 
 </CodeGroup>
@@ -467,19 +518,50 @@ This type of API usually auto-cancels reservations after a timeout.
 
 <CodeGroup>
 
-```ts TypeScript {CODE_LOAD::ts/src/guides/sagas/booking_workflow.ts#idempotency}
+```ts TypeScript {CODE_LOAD::ts/src/guides/sagas/booking_workflow.ts#idempotency} 
+const paymentId = ctx.rand.uuidv4();
+compensations.push(() =>
+  ctx.run(() => paymentClient.refund(paymentId))
+);
+await ctx.run(() => paymentClient.charge(paymentInfo, paymentId));
 ```
 
-```python Python {CODE_LOAD::python/src/guides/sagas/app.py#idempotency}
+```python Python {CODE_LOAD::python/src/guides/sagas/app.py#idempotency} 
+payment_id = await ctx.run("payment id", lambda: str(uuid.uuid4()))
+compensations.append(
+    lambda: ctx.run("refund", payment.refund, args=(payment_id,))
+)
+await ctx.run("charge", payment.charge, args=(payment_info, payment_id))
 ```
 
-```java Java {CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#idempotency}
+```java Java {CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#idempotency} 
+String paymentId = ctx.random().nextUUID().toString();
+compensations.add(() -> ctx.run(() -> PaymentClient.refund(paymentId)));
+ctx.run(() -> PaymentClient.charge(paymentInfo, paymentId));
 ```
 
-```kotlin Kotlin {CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#idempotency}
+```kotlin Kotlin {CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#idempotency} 
+val paymentId = ctx.random().nextUUID().toString()
+compensations.add { ctx.runBlock { refund(paymentId) } }
+ctx.runBlock { charge(paymentInfo, paymentId) }
 ```
 
-```go Go {CODE_LOAD::go/guides/sagas/bookingworkflow.go#idempotency}
+```go Go {CODE_LOAD::go/guides/sagas/bookingworkflow.go#idempotency} 
+paymentID := restate.Rand(ctx).UUID().String()
+
+// Register the refund as a compensation, using the idempotency key
+compensations = append(compensations, func() (restate.Void, error) {
+  return restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return Refund(paymentID)
+  })
+})
+
+// Do the payment using the idempotency key
+if _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return Charge(paymentID, req.PaymentInfo)
+}); err != nil {
+  return err
+}
 ```
 
 </CodeGroup>

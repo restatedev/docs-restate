@@ -100,8 +100,7 @@ function extractAndClean(fileContent, customTag, filePath, collapsePrequel, remo
         if (removeComments) keepLine = keepLine && !trimmedLine.startsWith(commentSymbol);
         return keepLine;
     });
-    
-    console.info(collapsePrequel)
+
     if (collapsePrequel) {
         finalLines = collapsePrequelFn(finalLines, serviceSymbol, commentSymbol);
     }
