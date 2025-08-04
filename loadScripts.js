@@ -51,59 +51,43 @@ function extractLanguageSymbol(filePath) {
 const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{CODE_LOAD::([^#?\}]+)(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
 
 function parseOptions(optionsStr) {
-    // optionsStr: markNumber&collapse_prequel&remove_comments
-    const opts = { markNumber: undefined, collapsePrequel: false, removeComments: false };
+    // optionsStr: collapse_prequel&remove_comments
+    const opts = { collapsePrequel: false, removeComments: false };
     if (!optionsStr) return opts;
     const parts = optionsStr.split("&");
     for (const part of parts) {
-        if (/^\d+$/.test(part)) opts.markNumber = part;
-        if (part === "collapse_prequel") opts.collapsePrequel = true;
-        if (part === "remove_comments") opts.removeComments = true;
+        if (part.includes("collapse_prequel")) opts.collapsePrequel = true;
+        if (part.includes("remove_comments")) opts.removeComments = true;
     }
     return opts;
 }
 
-function extractAndClean(fileContent, customTag, markNumber, filePath, collapsePrequel, removeComments) {
+function extractAndClean(fileContent, customTag, filePath, collapsePrequel, removeComments) {
     const { commentSymbol, serviceSymbol } = extractLanguageSymbol(filePath);
-    const startTag = customTag ? `<start_${customTag}>` : "<start_here>";
-    const endTag = customTag ? `<end_${customTag}>` : "<end_here>";
     let lines;
-    if (fileContent.includes(startTag) && fileContent.includes(endTag)) {
-        lines = fileContent.split(startTag).pop().split(endTag).shift().split('\n').slice(1, -1)
-            .filter(line => !line.includes(`${commentSymbol} break`));
+    
+    // If custom tag is provided, use start/end tags
+    if (customTag) {
+        const startTag = `<start_${customTag}>`;
+        const endTag = `<end_${customTag}>`;
+        if (fileContent.includes(startTag) && fileContent.includes(endTag)) {
+            lines = fileContent.split(startTag).pop().split(endTag).shift().split('\n').slice(1, -1)
+                .filter(line => !line.includes(`${commentSymbol} break`));
+        } else {
+            lines = fileContent.split('\n').filter(line => !line.includes(`${commentSymbol} break`));
+        }
     } else {
+        // No custom tag, use entire file content
         lines = fileContent.split('\n').filter(line => !line.includes(`${commentSymbol} break`));
     }
+    
     if (filePath.endsWith(".go")) {
         lines = lines.map(line => line.replace(/\t/g, '  '));
     }
-    let filteredLines = [];
-    if (markNumber) {
-        const markStartTag = `${commentSymbol} <mark_${markNumber}>`;
-        const markEndTag = `${commentSymbol} </mark_${markNumber}>`;
-        let needToMark = false;
-        let marking = "";
-        lines.forEach(function (line) {
-            if (line.includes(markStartTag)) {
-                if (needToMark) throw new Error(`Mark start tag ${markStartTag} found before mark end tag in file ${filePath}`);
-                needToMark = true;
-                marking = line.replace(`<mark_${markNumber}>`, "!mark");
-            }
-            if (line.includes(markEndTag)) {
-                if (!needToMark) throw new Error(`Mark end tag ${markEndTag} found before mark start tag in file ${filePath}`);
-                needToMark = false;
-            }
-            if (!line.includes('<start_') && !line.includes('<end_') && !line.includes('<mark_') && !line.includes('</mark_')) {
-                if (needToMark) filteredLines.push(marking);
-                filteredLines.push(line);
-            }
-        });
-    } else {
-        filteredLines = lines;
-    }
+    
     const leadingWhitespace = lines[0] ? lines[0].match(/^\s*/)[0] : '';
     let inBlockComment = false;
-    let finalLines = filteredLines.filter(line => {
+    let finalLines = lines.filter(line => {
         let trimmedLine = line.trim();
         if (removeComments) {
             if (trimmedLine.startsWith('/*')) inBlockComment = true;
@@ -112,13 +96,16 @@ function extractAndClean(fileContent, customTag, markNumber, filePath, collapseP
                 return false;
             }
         }
-        let keepLine = !line.includes('<start_') && !line.includes('<end_') && !line.includes('<mark_') && !line.includes('</mark_') && !line.includes('collapse_prequel');
+        let keepLine = !line.includes('<start_') && !line.includes('<end_');
         if (removeComments) keepLine = keepLine && !trimmedLine.startsWith(commentSymbol);
         return keepLine;
     });
+    
+    console.info(collapsePrequel)
     if (collapsePrequel) {
         finalLines = collapsePrequelFn(finalLines, serviceSymbol, commentSymbol);
     }
+    
     return finalLines.map(line => line.replace(new RegExp(`^${leadingWhitespace}`), '')).join('\n');
 }
 
@@ -131,8 +118,7 @@ function collapsePrequelFn(lines, serviceSymbol, commentSymbol) {
         }
     }
     if (collapseIndex !== -1) {
-        const collapseComment = `${commentSymbol} !collapse(1:${collapseIndex + 1}) collapsed \n ${commentSymbol} Click to expand imports/comments...`;
-        return [collapseComment, ...lines];
+        return lines.slice(collapseIndex);
     } else {
         throw new Error('No service/object/workflow found in file, so cannot collapse prequel');
     }
@@ -176,7 +162,6 @@ async function updateCodeBlocksInFile(filePath) {
                 codeToInsert = extractAndClean(
                     loadedCode,
                     customTag,
-                    opts.markNumber,
                     snippetFullPath,
                     opts.collapsePrequel,
                     opts.removeComments
@@ -238,7 +223,6 @@ async function updateCodeBlocksInFile(filePath) {
             codeToInsert = extractAndClean(
                 loadedCode,
                 customTag,
-                opts.markNumber,
                 snippetFullPath,
                 opts.collapsePrequel,
                 opts.removeComments

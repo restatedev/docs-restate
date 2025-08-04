@@ -36,21 +36,40 @@ Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`,
   You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
 
   ```typescript {CODE_LOAD::ts/src/develop/retries.ts?1} 
-try {
-  const myRunRetryPolicy = {
-    initialRetryInterval: { milliseconds: 500 },
-    retryIntervalFactor: 2,
-    maxRetryInterval: { seconds: 1 },
-    maxRetryAttempts: 5,
-    maxRetryDuration: { seconds: 1 },
-  };
-  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
-} catch (e) {
-  if (e instanceof restate.TerminalError) {
-    // Undo or compensate here (see Sagas guide)
-  }
-  throw e;
+import * as restate from "@restatedev/restate-sdk";
+
+function writeToOtherSystem() {
+  return undefined;
 }
+
+const service = restate.service({
+  name: "MyService",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      try {
+        const myRunRetryPolicy = {
+          initialRetryInterval: { milliseconds: 500 },
+          retryIntervalFactor: 2,
+          maxRetryInterval: { seconds: 1 },
+          maxRetryAttempts: 5,
+          maxRetryDuration: { seconds: 1 },
+        };
+        await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
+      } catch (e) {
+        if (e instanceof restate.TerminalError) {
+          // Undo or compensate here (see Sagas guide)
+        }
+        throw e;
+      }
+    },
+  },
+});
+
+const paymentClient = {
+  call: (txId: string, amt: number) => {
+    return { error: "", isSuccess: false };
+  },
+};
 ```
 
   * You can limit retries by time or count
