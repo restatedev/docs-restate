@@ -1,0 +1,122 @@
+---
+title: "Registration & Versioning"
+description: "Understand deployments, registration, and versioning in Restate."
+---
+
+# Deployments, Registration, and Versioning in Restate
+
+Restate enables **durable execution**—the ability to reliably resume and replay in-flight requests, even after failures. To guarantee correctness, Restate must always know exactly which version of your code to use for each invocation. This is why the concepts of **deployments**, **registration**, and **versioning** are central to operating Restate applications.
+
+> **What is a Deployment?**
+> A **deployment** in Restate is a specific, versioned instance of your service code—whether running as an HTTP endpoint, a Lambda function, or another supported environment. Each deployment is immutable: once registered, its code and endpoint must not change. This ensures that in-flight requests always see the code they started with, preserving correctness and determinism. ([Learn more about the immutability problem](https://restate.dev/blog/solving-durable-executions-immutability-problem/))
+
+---
+
+## Registering a Deployment
+
+After deploying your service, you must **register** it with Restate so it can be discovered and invoked.
+
+**You can register a deployment using:**
+- The [Restate UI](/develop/local_dev#restate-ui) (recommended for most users)
+- The CLI:
+  ```bash
+  restate deployments register http://localhost:9080
+  ```
+- The Admin API:
+  ```bash
+  curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
+  ```
+
+**Example output:**
+```shell
+✔ SERVICES THAT WILL BE ADDED:
+- CheckoutService
+- CartObject
+- TicketObject
+...
+```
+
+> **Tips:**
+> - For AWS Lambda, use the function ARN instead of a URL (e.g., `arn:aws:lambda:region:account-id:function:function-name:version`).
+> - If running Restate in Docker, use `host.docker.internal` instead of `localhost`.
+
+---
+
+## Using the UI for deploying new versions
+
+The [Restate UI](http://localhost:9070) is your central hub for managing deployments, services, and versions. It provides:
+
+- **Easy registration:** Register new deployments and services with a few clicks.
+- **Version overview:** See all versions of each service and the deployments they run on.
+- **Safe removal:** Filter ongoing invocations by deployment ID to check if an old deployment has drained and can be safely removed. Only remove a deployment when all in-flight invocations have completed.
+- **Future-proofing:** Filter invocations scheduled for the future to ensure your new version can handle them.
+
+For more, see [Announcing Restate UI](https://restate.dev/blog/announcing-restate-ui/).
+
+## Updating Services and Versioning
+
+**Deployments are immutable.** Once registered, the code and endpoint for a deployment must not change. This ensures that in-flight invocations (requests that are paused, waiting, or being replayed) always run on the code they started with.
+
+**How to update a service:**
+1. Deploy your updated code to a new endpoint (e.g., `http://greeter-v2/`).
+2. Register the new deployment with Restate (via UI, CLI, or API).
+3. Restate will:
+   - Route **new invocations** to the latest deployment.
+   - Allow **existing invocations** to complete on the previous deployment.
+
+> **Why this matters:**
+> In durable execution, even small code changes can break in-flight requests if the journal (recorded execution) no longer matches the code. Immutable deployments solve this by ensuring every invocation always sees the code it started with. ([Read more](https://restate.dev/blog/solving-durable-executions-immutability-problem/))
+
+**State compatibility:**
+- When updating Virtual Objects, new revisions continue to use the same state as previous versions. Ensure your state schema is backward compatible.
+
+> **Kubernetes users:**
+> The Restate Kubernetes operator can handle registration and versioning for you automatically.
+
+---
+
+## Inspecting and Managing Deployments
+
+- **List services and deployments:**
+  ```bash
+  restate services list
+  restate deployments list
+  ```
+- **Describe a deployment:**
+  ```bash
+  restate deployment describe <deployment_id>
+  ```
+
+### Removing a Deployment
+
+**Before removing a deployment:**
+- Ensure no other handlers depend on its services.
+- If you want to keep some services, deploy them separately first.
+- Make the service [private](/operate/security#private-services) to block new requests.
+- Check for pending invocations and wait until the deployment is drained (use the UI or CLI).
+
+**Remove the deployment:**
+```bash
+restate deployments remove <deployment_id>
+```
+> **Tip:** Use `--force` to remove even if not fully drained (not recommended for production).
+
+---
+
+## Advanced: In-place Updates and Recovery
+
+In rare cases (e.g., a bug causes all in-flight invocations to fail), you may need to patch a deployment in place.
+
+You can do this by deploying the new code at the same endpoint.
+
+
+> **Caution:**
+> Only use in-place updates to fix failing invocations. Changes must be minimal and backward compatible for in-flight requests. ([See why version-aware control flow is a last resort](https://restate.dev/blog/code-that-sleeps-for-a-month/))
+
+---
+
+## Further Reading
+
+- [Solving durable execution’s immutability problem](https://restate.dev/blog/solving-durable-executions-immutability-problem/)
+- [Code that sleeps for a month](https://restate.dev/blog/code-that-sleeps-for-a-month/)
+- [Announcing Restate UI](https://restate.dev/blog/announcing-restate-ui/)
