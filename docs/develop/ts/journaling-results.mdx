@@ -1,6 +1,7 @@
 ---
-title: "Journaling Results"
+title: "Durable Steps"
 description: "Persist results of operations."
+icon: "list-check"
 ---
 
 Restate uses an execution log to replay operations after failures and suspensions. This means that non-deterministic results (such as database responses or UUID generation) need to have their results journaled (persisted) for deterministic replay.
@@ -14,57 +15,80 @@ The SDK helps with this via:
 ## Journaled actions
 Use [`ctx.run`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#run) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
-```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect}
+```typescript {CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect} 
 const result = await ctx.run<string>(async () => doDbRequest());
 ```
 
-<Note>
-Inside `ctx.run`, you **cannot use** the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
-</Note>
+Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
 
-<Note>
-By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
-</Note>
 
-<Note>
-Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
-</Note>
 
-<Accordion title="Long-running business logic: setting the abort and inacitivity timeout">
-  If Restate doesn't receive new journal entries from a service for more than one minute (by default), it will automatically abort the invocation and retry it.
+<AccordionGroup>
 
-  However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
+  <Accordion title="Serialization">
+  By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
+  </Accordion>
 
-  In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+  <Accordion title="Error handling and retry policies">
 
-  For more information, see the [error handling guide](/guides/error-handling).
-</Accordion>
+  Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
 
-### Run-block retry policies
 
-You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
+  You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
 
-```typescript  {CODE_LOAD::ts/src/develop/retries.ts?1}
-try {
-  const myRunRetryPolicy = {
-    initialRetryInterval: { milliseconds: 500 },
-    retryIntervalFactor: 2,
-    maxRetryInterval: { seconds: 1 },
-    maxRetryAttempts: 5,
-    maxRetryDuration: { seconds: 1 },
-  };
-  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
-} catch (e) {
-  if (e instanceof restate.TerminalError) {
-    // Undo or compensate here (see Sagas guide)
-  }
-  throw e;
+  ```typescript {CODE_LOAD::ts/src/develop/retries.ts?1} 
+import * as restate from "@restatedev/restate-sdk";
+
+function writeToOtherSystem() {
+  return undefined;
 }
+
+const service = restate.service({
+  name: "MyService",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      try {
+        const myRunRetryPolicy = {
+          initialRetryInterval: { milliseconds: 500 },
+          retryIntervalFactor: 2,
+          maxRetryInterval: { seconds: 1 },
+          maxRetryAttempts: 5,
+          maxRetryDuration: { seconds: 1 },
+        };
+        await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
+      } catch (e) {
+        if (e instanceof restate.TerminalError) {
+          // Undo or compensate here (see Sagas guide)
+        }
+        throw e;
+      }
+    },
+  },
+});
+
+const paymentClient = {
+  call: (txId: string, amt: number) => {
+    return { error: "", isSuccess: false };
+  },
+};
 ```
 
-* You can limit retries by time or count
-* When the policy is exhausted, a `TerminalError` is thrown
-* See [Error Handling](/develop/ts/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
+  * You can limit retries by time or count
+  * When the policy is exhausted, a `TerminalError` is thrown
+  * See [Error Handling](/develop/ts/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
+
+  </Accordion>
+  <Accordion title="Increasing timeouts">
+    If Restate doesn't receive new journal entries from a service for more than one minute (by default), it will automatically abort the invocation and retry it.
+
+    However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
+
+    In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+
+    For more information, see the [error handling guide](/guides/error-handling).
+  </Accordion>
+
+</AccordionGroup>
 
 ## Deterministic randoms
 
@@ -74,7 +98,7 @@ The SDK provides deterministic helpers for random values — seeded by the invoc
 
 Use `ctx.rand.uuidv4()` to generate stable UUIDs for things like idempotency keys:
 
-```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#uuid}
+```typescript {CODE_LOAD::ts/src/develop/journaling_results.ts#uuid} 
 const uuid = ctx.rand.uuidv4();
 ```
 
@@ -83,7 +107,7 @@ const uuid = ctx.rand.uuidv4();
 Use `ctx.rand.random()` to generate a deterministic float between `0` and `1`:
 
 
-```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb}
+```typescript {CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb} 
 const randomNumber = ctx.rand.random();
 ```
 
@@ -95,7 +119,7 @@ This behaves like `Math.random()` but is deterministically replayable.
 To run multiple operations concurrently and deterministically, use `RestatePromise` combinators.
 Restate then logs the order in which they get resolved or rejected so they are deterministic on replay.
 
-```typescript  {CODE_LOAD::ts/src/develop/journaling_results.ts#all}
+```typescript {CODE_LOAD::ts/src/develop/journaling_results.ts#all} 
 const sleepPromise = ctx.sleep({ milliseconds: 100 });
 const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
 const externalCallPromise = ctx.run(() => httpCall());
