@@ -1,0 +1,312 @@
+---
+title: "HTTP"
+description: "Learn how to invoke, monitor, and manage Restate services."
+icon: "phone"
+---
+
+An invocation is a request to execute a service handler. You can invoke handlers through:
+
+You can invoke handlers over HTTP with or without waiting for a response, and with or without an idempotency key.
+
+Make sure to first [register the handler](/operate/registration) you want to invoke.
+
+The [UI](/develop/local_dev#restate-ui) helps you with invoking your services.
+Open the UI at port 9070, register your service, click on the service, open the playground, and invoke your handlers from there.
+
+## Request-response calls over HTTP
+You can invoke services over HTTP 1.1 or higher.
+Request/response bodies should be encoded as JSON.
+
+### Invoking Services
+Invoke `myHandler` of `myService` as follows:
+
+```shell
+curl localhost:8080/MyService/myHandler \
+  --json '{"name": "Mary", "age": 25}'
+```
+
+### Invoking Virtual Objects
+Invoke `myHandler` of `myVirtualObject` for `myKey` as follows:
+
+```shell
+curl localhost:8080/MyVirtualObject/myObjectKey/myHandler \
+  --json '{"name": "Mary", "age": 25}'
+```
+
+### Invoke Workflows
+Call the `run` handler of the `MyWorkflow` as follows:
+
+```shell
+curl localhost:8080/MyWorkflow/myWorkflowId/run \
+  --json '{"name": "Mary", "age": 25}'
+```
+
+Follow the same pattern for calling the other handlers of the workflow.
+
+<Note title="Restate as proxy">
+    Note that all invocations go first via the Restate Server. The server then forwards the request to the appropriate service.
+    Therefore, `localhost:8080` refers to ingress port of the Restate Server, not the service instance.
+</Note>
+
+## Sending a message over HTTP
+If you do not want to wait for the response, you can also send a message by adding `/send` to the URL path:
+
+```shell
+curl localhost:8080/MyService/myHandler/send \
+  --json '{"name": "Mary", "age": 25}'
+```
+
+Example output:
+
+```json
+{"invocationId":"inv_1aiqX0vFEFNH1Umgre58JiCLgHfTtztYK5","status":"Accepted"}
+```
+
+The response contains the [Invocation ID](/operate/invocation#invocation-identifier).
+You can use this identifier [to cancel](/operate/invocation#cancelling-invocations) or [kill the invocation](/operate/invocation#killing-invocations).
+
+## Sending a delayed message over HTTP
+
+You can **delay the message** by adding a delay request parameter in ISO8601 notation or using [humantime format](https://docs.rs/humantime/latest/humantime/):
+
+<CodeGroup>
+
+    ```shell humantime
+    curl localhost:8080/MyService/myHandler/send?delay=10s --json '{"name": "Mary", "age": 25}'
+    ```
+
+    ```shell ISO8601
+    curl localhost:8080/MyService/myHandler/send?delay=PT10S --json '{"name": "Mary", "age": 25}'
+    ```
+
+</CodeGroup>
+
+<Note title={"Not supported for workflows"}>
+    You cannot yet use this feature for workflows.
+    Workflows can only be scheduled with a delay from within another Restate handler ([TS](/develop/ts/service-communication#delayed-calls)/[Java/Kotlin](/develop/java/service-communication#delayed-calls)).
+</Note>
+
+
+## Invoke a handler idempotently
+
+You can send requests to Restate providing an idempotency key, through the [`Idempotency-Key` header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/):
+
+```shell
+curl localhost:8080/MyService/myHandler \
+  -H 'idempotency-key: ad5472esg4dsg525dssdfa5loi' \
+  --json '{"name": "Mary", "age": 25}'
+```
+
+After the invocation completes, Restate persists the response for a retention period of one day (24 hours).
+If you re-invoke the service with the same idempotency key within 24 hours, Restate sends back the same response and doesn't re-execute the request to the service.
+
+<Tip title={"Make any service call idempotent with Restate"}>
+    With Restate and an idempotency key, you can make any service call idempotent, without any extra code or setup.
+    This is a very powerful feature to ensure that your system stays consistent and doesn't perform the same operation multiple times.
+</Tip>
+
+<Accordion title="Tuning retention time">
+
+    You can tune the retention time on a service-level by using the [Admin API](/adminapi/modify-service)):
+    ```shell
+    curl -X PATCH localhost:9070/services/MyService --json '{"idempotency_retention": "2days"}'
+    ```
+    The retention time is in [humantime format](https://docs.rs/humantime/latest/humantime/).
+</Accordion>
+
+
+## Retrieve result of invocations and workflows
+
+Restate allows you to retrieve the result of workflows and invocations with an idempotency key.
+There are two options:
+- To **attach** to an invocation or workflow and wait for it to finish, use `/attach`.
+- To **peek at the output** of an invocation or workflow, use `/output`. This will return:
+- `{"message":"not ready"}` for ongoing workflows
+- The result for finished workflows
+- `{"message":"not found"}` for non-existing workflows
+
+You can attach to a service/object invocation only if the invocation used an idempotency key:
+
+```shell
+# Via invocation ID
+curl localhost:8080/restate/invocation/myInvocationId/attach
+curl localhost:8080/restate/invocation/myInvocationId/output
+
+# For Services, via idempotency key
+curl localhost:8080/restate/invocation/MyService/myHandler/myIdempotencyKey/attach
+curl localhost:8080/restate/invocation/MyService/myHandler/myIdempotencyKey/output
+
+# For Virtual Objects, via idempotency key
+curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey/attach
+curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey/output
+
+# For Workflows, with the Workflow ID
+curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/attach
+curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/output
+```
+
+## OpenAPI support
+
+Restate exposes for every service an OpenAPI 3.1 definition, to get it:
+
+```shell
+curl localhost:9070/services/MyService/openapi > MyService_openapi.json
+```
+
+You can use this definition with any OpenAPI 3.1 compliant tool to generate clients for your service, such as [openapi-generator](https://openapi-generator.tech/).
+
+Depending on the SDKs, the rich input/output JSON schemas are included as well. At the moment, rich schemas are supported for:
+- [TypeScript SDK with Zod schemas](/develop/ts/serialization#zod-schemas)
+- [Python SDK with Pydantic](/develop/python/serialization#pydantic) models
+- Java and Kotlin SDK
+
+
+## Invocation ID
+
+Restate assigns every invocation a unique **Invocation ID** starting with `inv_`. You can find this ID in:
+
+- The [Restate UI](/develop/local_dev#restate-ui)
+- Logs and traces (`restate.invocation.id`)
+- CLI output
+
+List all invocations to see their IDs:
+
+```shell
+restate invocations list
+```
+
+## Canceling Invocations
+
+Cancel an invocation when it takes too long or is no longer needed. Cancellation:
+
+- Frees held resources
+- Rolls back any changes made so far
+- Allows proper cleanup
+
+### Cancel by Invocation ID
+
+Use the UI, CLI, or [Admin API](/category/admin-api):
+
+<CodeGroup>
+    ```shell CLI
+    restate invocations cancel inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+    ```
+    ```shell curl
+    curl -X DELETE http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+    ```
+</CodeGroup>
+
+### Cancel in Bulk
+
+Cancel multiple invocations by specifying service and handler patterns:
+
+- `serviceName` or `serviceName/handler`
+- `virtualObjectName` or `virtualObjectName/key` or `virtualObjectName/key/handler`
+- `workflowName` or `workflowName/key` or `workflowName/key/handler`
+
+**Example:** Cancel all `CartObject/add` invocations:
+```shell
+restate invocations cancel CartObject/add
+```
+
+<Note title="Rollback Requirements">
+For proper rollback, handlers must include compensation logic to maintain service state consistency. See the [sagas guide](/guides/sagas) for implementation details.
+</Note>
+
+<Note title="Non-blocking Operation">
+Cancellation is non-blocking. The API call may return before cancellation completes. In rare cases, cancellation may not take effect - retry the operation if needed.
+</Note>
+
+<Accordion title="How Cancellation Works">
+
+Cancellation follows a recursive process:
+
+1. **Cancel leaves:** Restate interrupts ongoing sleeps, awakeables, and external service calls
+2. **Throw terminal error:** A terminal error is thrown at the current execution point
+3. **Run compensation:** The handler executes its compensation logic
+4. **Propagate response:** The response propagates back through the call tree, continuing the cancellation process
+
+</Accordion>
+
+## Killing Invocations
+
+Use **kill** when cancellation fails (e.g., when endpoints are permanently unavailable).
+
+<Warning title="Inconsistent State Risk">
+Killing immediately stops all calls in the invocation tree **without executing compensation logic**. This may leave your service in an inconsistent state. Only use as a last resort after trying other fixes.
+</Warning>
+
+### Kill by Invocation ID
+
+<CodeGroup>
+    ```shell CLI
+    restate invocations cancel --kill inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+    ```
+    ```shell curl
+    curl -X DELETE http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz?mode=kill
+    ```
+</CodeGroup>
+
+### Kill in Bulk
+
+Like cancellation, you can kill multiple invocations using service/handler patterns.
+
+<Note title="One-way and Delayed Calls">
+One-way calls and delayed calls are not killed because they're detached from the originating call tree.
+</Note>
+
+## Managing Kafka Subscriptions
+
+Restate can trigger handlers via Kafka events.
+
+### Create Subscriptions
+
+Subscribe a handler to a Kafka topic:
+
+```bash
+curl localhost:9070/subscriptions --json '{
+    "source": "kafka://my-cluster/my-topic",
+    "sink": "service://MyService/Handle",
+    "options": {"auto.offset.reset": "earliest"}
+}'
+```
+
+The `options` field is optional and accepts any [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md) parameter.
+
+### List Subscriptions
+
+View current subscriptions:
+
+```bash
+curl localhost:9070/subscriptions
+```
+
+**Example response:**
+```json
+{
+    "subscriptions": [
+        {
+            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
+            "source": "kafka://my-cluster/my-topic",
+            "sink": "service://Greeter/greet",
+            "options": {
+                "auto.offset.reset": "earliest",
+                "client.id": "restate",
+                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
+            }
+        }
+    ]
+}
+```
+
+### Delete Subscriptions
+
+Remove a subscription using its ID (starts with `sub_`):
+
+```bash
+curl -X DELETE localhost:9070/subscriptions/sub_11XHoawrCiWtv8kzhEyGtsR
+```
+
+<Note title="Message Processing">
+When you delete a subscription, Restate stops the associated consumer group. Messages already enqueued by Restate will still be processed.
+</Note>
