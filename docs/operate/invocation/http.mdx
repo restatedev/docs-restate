@@ -1,7 +1,6 @@
 ---
 title: "HTTP"
 description: "Learn how to invoke, monitor, and manage Restate services."
-icon: "phone"
 ---
 
 An invocation is a request to execute a service handler. You can invoke handlers through:
@@ -13,19 +12,17 @@ Make sure to first [register the handler](/operate/registration) you want to inv
 The [UI](/develop/local_dev#restate-ui) helps you with invoking your services.
 Open the UI at port 9070, register your service, click on the service, open the playground, and invoke your handlers from there.
 
-## Request-response calls over HTTP
+## Request-response calls
 You can invoke services over HTTP 1.1 or higher.
 Request/response bodies should be encoded as JSON.
 
-### Invoking Services
-Invoke `myHandler` of `myService` as follows:
+Invoking `myHandler` of `myService` as follows:
 
 ```shell
 curl localhost:8080/MyService/myHandler \
   --json '{"name": "Mary", "age": 25}'
 ```
 
-### Invoking Virtual Objects
 Invoke `myHandler` of `myVirtualObject` for `myKey` as follows:
 
 ```shell
@@ -33,7 +30,6 @@ curl localhost:8080/MyVirtualObject/myObjectKey/myHandler \
   --json '{"name": "Mary", "age": 25}'
 ```
 
-### Invoke Workflows
 Call the `run` handler of the `MyWorkflow` as follows:
 
 ```shell
@@ -48,7 +44,7 @@ Follow the same pattern for calling the other handlers of the workflow.
     Therefore, `localhost:8080` refers to ingress port of the Restate Server, not the service instance.
 </Note>
 
-## Sending a message over HTTP
+## Sending messages
 If you do not want to wait for the response, you can also send a message by adding `/send` to the URL path:
 
 ```shell
@@ -65,7 +61,7 @@ Example output:
 The response contains the [Invocation ID](/operate/invocation#invocation-identifier).
 You can use this identifier [to cancel](/operate/invocation#cancelling-invocations) or [kill the invocation](/operate/invocation#killing-invocations).
 
-## Sending a delayed message over HTTP
+## Delayed messages
 
 You can **delay the message** by adding a delay request parameter in ISO8601 notation or using [humantime format](https://docs.rs/humantime/latest/humantime/):
 
@@ -87,7 +83,7 @@ You can **delay the message** by adding a delay request parameter in ISO8601 not
 </Note>
 
 
-## Invoke a handler idempotently
+## Using an idempotency key
 
 You can send requests to Restate providing an idempotency key, through the [`Idempotency-Key` header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/):
 
@@ -115,7 +111,7 @@ If you re-invoke the service with the same idempotency key within 24 hours, Rest
 </Accordion>
 
 
-## Retrieve result of invocations and workflows
+## Attach to an invocation
 
 Restate allows you to retrieve the result of workflows and invocations with an idempotency key.
 There are two options:
@@ -144,21 +140,6 @@ curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey
 curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/attach
 curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/output
 ```
-
-## OpenAPI support
-
-Restate exposes for every service an OpenAPI 3.1 definition, to get it:
-
-```shell
-curl localhost:9070/services/MyService/openapi > MyService_openapi.json
-```
-
-You can use this definition with any OpenAPI 3.1 compliant tool to generate clients for your service, such as [openapi-generator](https://openapi-generator.tech/).
-
-Depending on the SDKs, the rich input/output JSON schemas are included as well. At the moment, rich schemas are supported for:
-- [TypeScript SDK with Zod schemas](/develop/ts/serialization#zod-schemas)
-- [Python SDK with Pydantic](/develop/python/serialization#pydantic) models
-- Java and Kotlin SDK
 
 
 ## Invocation ID
@@ -255,58 +236,18 @@ Like cancellation, you can kill multiple invocations using service/handler patte
 One-way calls and delayed calls are not killed because they're detached from the originating call tree.
 </Note>
 
-## Managing Kafka Subscriptions
 
-Restate can trigger handlers via Kafka events.
+## OpenAPI support
 
-### Create Subscriptions
+Restate exposes for every service an OpenAPI 3.1 definition, to get it:
 
-Subscribe a handler to a Kafka topic:
-
-```bash
-curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster/my-topic",
-    "sink": "service://MyService/Handle",
-    "options": {"auto.offset.reset": "earliest"}
-}'
+```shell
+curl localhost:9070/services/MyService/openapi > MyService_openapi.json
 ```
 
-The `options` field is optional and accepts any [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md) parameter.
+You can use this definition with any OpenAPI 3.1 compliant tool to generate clients for your service, such as [openapi-generator](https://openapi-generator.tech/).
 
-### List Subscriptions
-
-View current subscriptions:
-
-```bash
-curl localhost:9070/subscriptions
-```
-
-**Example response:**
-```json
-{
-    "subscriptions": [
-        {
-            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
-            "source": "kafka://my-cluster/my-topic",
-            "sink": "service://Greeter/greet",
-            "options": {
-                "auto.offset.reset": "earliest",
-                "client.id": "restate",
-                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
-            }
-        }
-    ]
-}
-```
-
-### Delete Subscriptions
-
-Remove a subscription using its ID (starts with `sub_`):
-
-```bash
-curl -X DELETE localhost:9070/subscriptions/sub_11XHoawrCiWtv8kzhEyGtsR
-```
-
-<Note title="Message Processing">
-When you delete a subscription, Restate stops the associated consumer group. Messages already enqueued by Restate will still be processed.
-</Note>
+Depending on the SDKs, the rich input/output JSON schemas are included as well. At the moment, rich schemas are supported for:
+- [TypeScript SDK with Zod schemas](/develop/ts/serialization#zod-schemas)
+- [Python SDK with Pydantic](/develop/python/serialization#pydantic) models
+- Java and Kotlin SDK
