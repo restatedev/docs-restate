@@ -4,15 +4,20 @@ description: "Persist results of operations."
 icon: "list-check"
 ---
 
-Restate uses an execution log to replay operations after failures and suspensions. This means that non-deterministic results (such as database responses or UUID generation) need to have their results journaled (persisted) for deterministic replay.
+Restate uses an execution log to replay operations after failures and suspensions. Non-deterministic operations (database calls, HTTP requests, UUID generation) must be wrapped to ensure deterministic replay.
 
-The SDK helps with this via:
+## Why use Restate for this?
 
-1. **[Journaled actions](/develop/ts/journaling-results#journaled-actions)**: Wrap any code block in `ctx.run(...)` to persist its result.
-2. **[Deterministic randoms](/develop/ts/journaling-results#generating-randoms)**: Generate UUIDs and random numbers that are deterministic on retries.
-3. **[`RestatePromise` combinators](/develop/ts/journaling-results#combineable-promise-combinators)**: Run multiple async operations in parallel while preserving the exact order of resolution.
+Without proper journaling, non-deterministic operations cause issues on replay:
+- **Database calls** return different results
+- **HTTP requests** may have different responses or fail
+- **Random values** change between replays
+- **Timestamps** shift, breaking business logic
 
-## Journaled actions
+Restate solves this by journaling results the first time, then replaying the same values on subsequent attempts, ensuring your handlers are deterministic and reliable.
+
+## Run 
+
 Use [`ctx.run`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#run) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
 ```typescript {CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect} 
@@ -20,8 +25,6 @@ const result = await ctx.run<string>(async () => doDbRequest());
 ```
 
 Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
-
-
 
 <AccordionGroup>
 

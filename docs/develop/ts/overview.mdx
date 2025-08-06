@@ -87,11 +87,11 @@ restate.endpoint().bind(myObject).listen();
 
 * Define a Virtual Object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
 * Each instance is identified by a `key` (accessible via `ctx.key`) and can store persistent K/V state.
-* Virtual Objects can have [exclusive and shared handlers](/ts/overview#exclusive-vs-shared-handlers). 
+* Virtual Objects can have [exclusive and shared handlers](/develop/ts/overview#exclusive-vs-shared-handlers). 
 * Exclusive handlers receive an [`ObjectContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext), allowing:
   * Read/write access to object state
   * Access to the object key (`ctx.key`)
-* Only one exclusive handler runs at a time per object for consistency ([learn more](/ts/overview#exclusive-vs-shared-handlers)).
+* Only one exclusive handler runs at a time per object for consistency ([learn more](/develop/ts/overview#exclusive-vs-shared-handlers)).
 * Use [`handlers.object.shared(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.handlers.object.shared) to define **concurrent** read-only handlers with [`ObjectSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectSharedContext)
 
 
@@ -129,12 +129,12 @@ restate.endpoint().bind(myWorkflow).listen();
   * This is the main orchestration entry point
   * It runs exactly once per workflow execution and uses [`WorkflowContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowContext)
   * Use `ctx.key` to access the workflow's unique ID
-  * Compose logic from SDK actions (e.g., [`sleep`](/develop/ts/durable-timers), [`run block`](/develop/ts/journaling-results#journaled-actions), [set K/V state](/ts/state#setting-state) or service calls)
+  * Compose logic from SDK actions (e.g., [`sleep`](/develop/ts/durable-timers), [`run block`](/develop/ts/journaling-results#journaled-actions), [set K/V state](/develop/ts/state#setting-state) or service calls)
 * Additional handlers must use the [`WorkflowSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowSharedContext) and can:
 
   * Query workflow state
   * Send signals
-  * Run concurrently with the `run` handler and even after it finishes ([learn more](/ts/overview#exclusive-vs-shared-handlers))
+  * Run concurrently with the `run` handler and even after it finishes ([learn more](/develop/ts/overview#exclusive-vs-shared-handlers))
 
 Learn more in the [Workflows guide](/develop/ts/workflows).
 
@@ -148,21 +148,13 @@ Virtual Objects and Workflows can have two types of handlers: **exclusive** hand
 * Only **one exclusive handler** can run at a time per Virtual Object key or Workflow execution.
 * Calls to exclusive handlers are **queued** and executed sequentially to ensure state consistency.
 * This serialization guarantees that concurrent writes don't conflict or overwrite each other.
-
-⚠️ **Why this matters:**
-If two exclusive handlers were allowed to run concurrently, Restate couldn't safely determine which write is the final one. Serial execution avoids this race condition.
-
+  If two exclusive handlers were allowed to run concurrently, Restate couldn't safely determine which write is the final one.
 ### Shared handlers
 * Use `ObjectSharedContext` or `WorkflowSharedContext`.
 * Can **only read** state—**no write access**.
 * Do **not block** or queue—they can run concurrently with other handlers, including an ongoing exclusive handler.
-
-### When to use shared handlers
-
-Shared handlers are useful for **interacting with long-running exclusive handlers** without blocking or waiting:
-
-* Example: A long-running workflow updates a status in its state.
-* Meanwhile, a dashboard can read that status using a shared handler without interrupting or waiting on the main workflow.
+- Useful for **interacting with long-running exclusive handlers** without blocking or waiting.
+  For example, a dashboard can read the K/V state of a long-running workflow via a shared handler. 
 
 ## Configuring services
 
