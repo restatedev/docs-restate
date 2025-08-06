@@ -1,88 +1,173 @@
 ---
 title: "External Events"
-description: "Pause and resume invocations using the callback (task token) pattern."
+description: "Handle external events and human-in-the-loop patterns with durable waiting primitives."
 icon: "hourglass-start"
 ---
 
-**Awakeables** allow you to pause an invocation while waiting for another process to complete a task. This enables a handler to delegate work elsewhere and resume once the result is available. This pattern is also known as the **callback** or **task token** pattern.
+Sometimes your handlers need to pause and wait for external processes to complete. This is common in:
+
+- **Human-in-the-loop workflows** (approvals, reviews, manual steps)
+- **External system integration** (waiting for webhooks, async APIs)
+- **AI agent patterns** (tool execution, human oversight)
+
+This pattern is also known as the **callback** or **task token** pattern.
+
+## Two Approaches
+
+Restate provides two primitives for handling external events:
+
+| Primitive | Use Case | Key Feature |
+|-----------|----------|--------------|
+| **Awakeables** | Services & Virtual Objects | Unique ID-based completion |
+| **Durable Promises** | Workflows only | Named promises for simpler signaling |
+
+## Why use Restate for this?
+
+Implementing this pattern in a distributed system is tricky, since you need to ensure that the handler can recover from failures and resume waiting for the external event.
+
+Restate makes promises are durable and distributed. They survive crashes and can be resolved or rejected by any handler in the workflow.
+
+To save costs on FaaS deployments, Restate lets the handler suspend while awaiting the promise, and invokes it again when the result is available.
+
+## Awakeables
+
+**Best for:** Services and Virtual Objects where you need to coordinate with external systems.
+
+### How it works
+
+1. **Create an awakeable** - Get a unique ID and promise
+2. **Send the ID externally** - Pass the awakeable ID to your external system
+3. **Wait for completion** - Your handler suspends until the external system responds
+4. **Resume with result** - Handler continues with the returned data
+
+### Basic pattern 
+
+```ts {CODE_LOAD::ts/src/develop/awakeable.ts#here} 
+// Create awakeable and get unique ID
+const { id, promise } = ctx.awakeable<string>();
+
+// Send ID to external system (email, queue, webhook, etc.)
+await ctx.run(() => requestHumanReview(name, id));
+
+// Handler suspends here until external completion
+const review = await promise;
+
+// Continue processing with the result
+console.log("Review received:", review);
+```
+
+<Accordion title="Serialization">
+  Both awakeables and durable promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization. Complex objects are automatically serialized/deserialized. See the [serialization docs](/develop/ts/serialization) for customization options.
+</Accordion>
 
 
-## How Awakeables work
+### Completing Awakeables
 
-1. **Create an awakeable** with [`ctx.awakeable()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#awakeable)
-   This returns a unique string identifier and a Promise.
-2. **Trigger an external task**  
-   Start a task or process elsewhere, passing along the awakeable ID (e.g., via Kafka, HTTP, etc.).  
-3. **Wait for completion**  
-   The handler pauses and waits for the external process to complete the task and respond.  
-   Once the result is available, the handler resumes with the payload.
+External processes complete awakeables in two ways:
 
-```ts {CODE_LOAD::ts/src/develop/awakeable.ts} 
-import * as restate from "@restatedev/restate-sdk";
+- **Resolve** with success data → handler continues normally
+- **Reject** with error reason → throws a [terminal error](/develop/ts/error-handling) in the waiting handler
 
-const service = restate.service({
-  name: "Awakeable",
+#### Via HTTP API
+
+External systems can complete awakeables using Restate's HTTP API:
+
+**Resolve with data:**
+```shell
+curl localhost:8080/restate/awakeables/prom_1PePOqp/resolve \
+  --json '{"approved": true, "comments": "Looks good!"}'
+```
+
+**Reject with error:**
+```shell
+curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
+  -H 'content-type: text/plain' \
+  -d 'Review rejected: insufficient documentation'
+```
+
+#### Via SDK (from other handlers)
+
+**Resolve:**
+```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve} 
+// Complete with success data
+ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+```
+
+**Reject:**
+```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject} 
+// Complete with error
+ctx.rejectAwakeable(id, "Review timeout exceeded");
+```
+
+## Durable Promises
+
+**Best for:** Workflows where you need to signal between different workflow handlers.
+
+**Key differences from awakeables:**
+- No ID management - use logical names instead
+- Scoped to workflow execution lifetime
+- Perfect for coordinating workflow steps
+
+Use this for:
+- Sending data to the run handler
+- Have handlers wait for events emitted by the run handler
+
+### Creating and waiting for promises
+
+```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise} 
+// Wait for a promise by name - suspends until resolved
+const review = await ctx.promise<string>("review");
+```
+
+### Resolving/rejecting promises
+
+```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise} 
+// Resolve from any workflow handler
+ctx.promise<string>("review").resolve(review)
+```
+
+
+### Complete workflow example
+
+```ts expandable {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#review}
+// Document review workflow
+restate.workflow({
+  name: "reviewWorkflow", 
   handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      const { id, promise } = ctx.awakeable<string>();
-      await ctx.run(() => triggerTaskAndDeliverId(id));
-      const payload = await promise;
-
-      ctx.resolveAwakeable(id, "hello");
-
-      ctx.rejectAwakeable(id, "my error reason");
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+      
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+      
+      // Process the review result
+      return processReview(documentId, review);
     },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
   },
 });
-
-function triggerTaskAndDeliverId(awakeableId: string) {
-  return "123";
-}
 ```
 
-<Note>
-  The TypeScript SDK uses built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization by default. See the [serialization docs](/develop/ts/serialization) for customization options.
-</Note>
+### Two signaling patterns
 
-<Tip>
-  On Function-as-a-Service platforms like AWS Lambda, Restate suspends the handler while waiting for the awakeable. **You are only billed for active execution time, not for waiting.**
-</Tip> 
+**External → Workflow** (shown above): External handlers signal the run handler
+- Use for human approvals, external API responses, manual interventions
+- External handlers call `ctx.promise("name").resolve(data)`
 
+**Workflow → External**: Run handler signals other handlers waiting for workflow events  
+- Use for step completion notifications, status updates, result broadcasting
+- Run handler resolves promises that external handlers are awaiting
 
-## Completing Awakeables
+## Best Practices
 
-The external process completes the awakeable by either:
-
-- **Resolving** it with an optional payload, or
-- **Rejecting** it with a reason for failure.
-
-If rejected, a [terminal error](/develop/ts/error-handling) is thrown in the waiting handler.
-
-### Completing Awakeables via HTTP
-
-- **Resolve** (with ID and optional payload):
-  ```shell
-  curl localhost:8080/restate/awakeables/prom_1PePOqp/resolve \
-    --json '{"hello": "world"}'
-  ```
-
-
-- **Reject** (with ID and reason):
-  ```shell
-  curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
-    -H 'content-type: text/plain' \
-    -d 'Very bad error!'
-  ```
-
-### Completing Awakeables via the SDK
-
-- **Resolve** with [`ctx.resolveAwakeable()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#resolveawakeable):
-```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve} 
-ctx.resolveAwakeable(id, "hello");
-```
-
-- **Reject** with [`ctx.rejectAwakeable()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#rejectawakeable):
-```ts {CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject} 
-ctx.rejectAwakeable(id, "my error reason");
-```
-
+- **Use awakeables** for services/objects coordinating with external systems
+- **Use durable promises** for workflow signaling
+- **Always handle rejections** to gracefully manage failures
+- **Include timeouts** for long-running external processes
