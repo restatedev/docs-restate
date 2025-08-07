@@ -1,0 +1,209 @@
+---
+sidebar_position: 3
+description: "Invoke handlers via Kafka events."
+---
+
+Connect your Restate handlers to Kafka topics.
+Restate takes care of Kafka consumer management and pushes events to your Restate handlers.
+
+You get zero-overhead consumer management with automatic retries, durable execution, and stateful processing capabilities.
+
+## Invoking Handlers via Kafka Events
+
+You can invoke handlers via Kafka events, by doing the following:
+
+<Steps>
+
+    <Step title="Develop and register an event handler">
+
+        You can invoke any handler via Kafka events.
+        The event payload will be (de)serialized as JSON.
+
+        - When invoking **Virtual Object** or **Workflow** handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
+        The key needs to be a valid UTF-8 string.
+        The events are delivered to the subscribed handler in the order in which they arrived on the topic partition.
+        - When invoking **Virtual Object** or **Workflow** _shared_ handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
+        The key needs to be a valid UTF-8 string.
+        The events are delivered to the subscribed handler in parallel without ordering guarantees.
+        - When invoking **Service** handlers over Kafka, events are delivered in parallel without ordering guarantees.
+
+        Since you can invoke any handler via Kafka events, a single handler can be invoked both by RPC and via Kafka.
+
+    </Step>
+
+<Step title="Configure Restate to connect to a Kafka cluster">
+    Define the Kafka cluster that Restate needs to connect to in the [Restate configuration file](/operate/configuration/server#configuration-file):
+
+    ```toml restate.toml
+    [[ingress.kafka-clusters]]
+    name = "my-cluster"
+    brokers = ["PLAINTEXT://broker:9092"]
+    ```
+
+    And make sure the Restate Server uses it via `restate-server --config-file restate.toml`.
+
+    Check the [configuration docs](/operate/configuration/server) for more details.
+
+    <Accordion title="Configuring Kafka clusters via environment variables">
+
+        You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTERS` environment variable:
+
+        ```bash
+        RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker:9092"]}]
+        ```
+    </Accordion>
+</Step>
+<Step title="Register the service you want to invoke."/>
+
+<Step title="Subscribe the event handler to the Kafka topic">
+    Let Restate forward events from the Kafka topic to the event handler by creating a subscription:
+
+    ```bash
+    curl localhost:9070/subscriptions --json '{
+            "source": "kafka://my-cluster/my-topic",
+            "sink": "service://MyService/handle",
+            "options": {"auto.offset.reset": "earliest"}
+        }'
+    ```
+
+    Once you've created a subscription, Restate immediately starts consuming events from Kafka.
+    The handler will be invoked for each event received from Kafka.
+
+    The `options` field is optional and accepts any configuration parameter from [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+
+</Step>
+</Steps>
+
+<AccordionGroup>
+    <Accordion title="Kafka connection configuration">
+
+        You can pass arbitrary Kafka cluster options in the `restate.toml`, and those options will be applied for all the subscriptions to that cluster, for example:
+
+        ```toml restate.toml
+        [[ingress.kafka-clusters]]
+        name = "my-cluster"
+        brokers = ["PLAINTEXT://broker:9092"]
+        sasl.username = "me"
+        sasl.password = "pass"
+        ```
+
+        For the full list of options, check [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+    </Accordion>
+
+    <Accordion title="Multiple Kafka clusters support">
+
+        You can configure multiple kafka clusters in the `restate.toml` file:
+
+        ```toml restate.toml
+        [[ingress.kafka-clusters]]
+        name = "my-cluster-1"
+        brokers = ["PLAINTEXT://localhost:9092"]
+
+        [[ingress.kafka-clusters]]
+        name = "my-cluster-2"
+        brokers = ["PLAINTEXT://localhost:9093"]
+        ```
+
+        And then, when creating the subscriptions, you refer to the specific cluster by `name`:
+
+        ```bash
+        # Subscription to my-cluster-1
+        curl localhost:9070/subscriptions --json '{
+                "source": "kafka://my-cluster-1/topic-1",
+                "sink": "service://MyService/handleCluster1"
+            }'
+
+        # Subscription to my-cluster-2
+        curl localhost:9070/subscriptions --json '{
+                "source": "kafka://my-cluster-2/topic-2",
+                "sink": "service://MyService/handleCluster2"
+            }'
+        ```
+    </Accordion>
+
+    <Accordion title="Event metadata">
+
+        You can access the event metadata in the handler by getting the request headers map:
+
+        <CodeGroup>
+            ```ts TypeScript {CODE_LOAD::ts/src/develop/kafka.ts#headers}
+            ctx.request().headers();
+            ```
+            ```java Java {CODE_LOAD::java/src/main/java/develop/MyKafkaVirtualObject.java#headers}
+            ctx.request().headers();
+            ```
+            ```go Go {CODE_LOAD::go/develop/kafka.go#headers}
+            ctx.Request().Headers
+            ```
+            ```python Python {CODE_LOAD::python/develop/kafka.py#headers}
+            ctx.request().headers
+            ```
+        </CodeGroup>
+
+        Each event carries within this map the following entries:
+
+        * `restate.subscription.id`: The subscription identifier, as shown by the [Admin API](/category/admin-api).
+        * `kafka.offset`: The record offset.
+        * `kafka.partition`: The record partition.
+        * `kafka.timestamp`: The record timestamp.
+
+    </Accordion>
+    <Accordion title="Raw event support">
+        Check out the serialization documentation of your SDK to learn how to receive raw events in your handler.
+    </Accordion>
+</AccordionGroup>
+
+## Managing Kafka Subscriptions
+
+Restate can trigger handlers via Kafka events.
+
+### Create Subscriptions
+
+Subscribe a handler to a Kafka topic:
+
+```bash
+curl localhost:9070/subscriptions --json '{
+    "source": "kafka://my-cluster/my-topic",
+    "sink": "service://MyService/Handle",
+    "options": {"auto.offset.reset": "earliest"}
+}'
+```
+
+The `options` field is optional and accepts any [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md) parameter.
+
+### List Subscriptions
+
+View current subscriptions:
+
+```bash
+curl localhost:9070/subscriptions
+```
+
+**Example response:**
+```json
+{
+    "subscriptions": [
+        {
+            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
+            "source": "kafka://my-cluster/my-topic",
+            "sink": "service://Greeter/greet",
+            "options": {
+                "auto.offset.reset": "earliest",
+                "client.id": "restate",
+                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
+            }
+        }
+    ]
+}
+```
+
+### Delete Subscriptions
+
+Remove a subscription using its ID (starts with `sub_`):
+
+```bash
+curl -X DELETE localhost:9070/subscriptions/sub_11XHoawrCiWtv8kzhEyGtsR
+```
+
+When you delete a subscription, Restate stops the associated consumer group. Messages already enqueued by Restate will still be processed.
+

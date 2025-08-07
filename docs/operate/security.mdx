@@ -1,4 +1,83 @@
 ---
 title: "Security"
 description: "Restrict access to Restate services"
+icon: "shield"
 ---
+
+## Private services
+When registering an endpoint, every service is by default reachable via HTTP requests to the ingress.
+
+You can configure a service as `private`, via the [service configuration](/operate/configuration/services).
+
+Note that private services can still be invoked by other handlers via the SDK.
+
+## Locking down service access
+Only Restate needs to be able to make requests to your services.
+The Restate Server will proxy all requests for these services.
+
+Therefore, it is advisable to ensure that only Restate can reach your service.
+Unrestricted access to the services is dangerous. If you're working with multiple Restate instances, you also may want to check that requests are
+coming from the right instance.
+
+To make this easier, Restate has a native request identity feature which can be
+used in the SDK to cryptographically verify that requests have come from a
+particular Restate instance.
+
+To get started, you need an ED25519 private key, which you can generate using
+openssl as follows:
+```bash
+openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+```
+
+You can provide the path to the key to Restate on startup using an environment
+variable: `RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE=private.pem`.
+
+On start, Restate will log out the public key in a convenient compact
+format:
+```
+INFO restate_service_client::request_identity::v1
+  Loaded request identity key
+    kid: "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"
+    path: private.pem
+```
+
+You can also obtain the public key in this format without running Restate using
+the following script:
+
+```shell generate.sh expandable
+#!/usr/bin/env bash
+set -euo pipefail
+
+# generate private key
+openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+echo "Wrote private key to private.pem"
+
+base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+# encode public key
+encoded=$(openssl ec -in private.pem -inform pem -pubout -outform der -out /dev/stdout 2>/dev/null |
+tail -c +13 |
+basenc --base16 "${1:-/dev/stdin}" -w0 |
+if
+read
+[[ $REPLY =~ ^((00)*)(([[:xdigit:]]{2})*) ]]
+echo -n "${BASH_REMATCH[1]//00/1}" # leading 0s -> 1
+(( ${#BASH_REMATCH[3]} > 0 ))
+then
+dc -e "16i0${BASH_REMATCH[3]^^} Ai[58~rd0<x]dsxx+f" | # hex bytes to indexes into the char string
+while read -r
+do echo -n "${base58_chars:REPLY:1}"
+done
+fi)
+
+echo -n "publickeyv1_${encoded}" > public-key
+echo "Wrote publickeyv1_${encoded} to public-key"
+```
+
+The string `publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f` does not
+need to be kept secret and can be safely included in your code when providing to the
+SDK. To learn how to provide the public key to the SDK, see the serving docs of your SDK:
+([TS](/develop/ts/serving#validating-request-identity) /
+[Java](/develop/java/serving#validating-request-identity) /
+[Go](/develop/go/serving#validating-request-identity) /
+[Python](/develop/python/serving#validating-request-identity) /
+[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/http_server/index.html#validating-request-identity))

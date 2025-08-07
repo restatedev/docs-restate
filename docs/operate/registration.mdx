@@ -1,20 +1,22 @@
 ---
-title: "Registration & Versioning"
+title: "Versioning"
 description: "Understand deployments, registration, and versioning in Restate."
+icon: "send-backward"
 ---
 
-# Deployments, Registration, and Versioning in Restate
+For durable execution to work correctly, Restate must know exactly which version of your code to use for each request. This requires understanding three key concepts: **deployments**, **registration**, and **versioning**.
 
-Restate enables **durable execution**—the ability to reliably resume and replay in-flight requests, even after failures. To guarantee correctness, Restate must always know exactly which version of your code to use for each invocation. This is why the concepts of **deployments**, **registration**, and **versioning** are central to operating Restate applications.
+## What is a Deployment?
 
-> **What is a Deployment?**
-> A **deployment** in Restate is a specific, versioned instance of your service code—whether running as an HTTP endpoint, a Lambda function, or another supported environment. Each deployment is immutable: once registered, its code and endpoint must not change. This ensures that in-flight requests always see the code they started with, preserving correctness and determinism. ([Learn more about the immutability problem](https://restate.dev/blog/solving-durable-executions-immutability-problem/))
+A deployment in Restate is a specific, versioned instance of your service code—whether running as an HTTP endpoint, a Lambda function, or another supported environment.
 
----
+Each deployment is immutable: once registered, its code and endpoint must not change.
+
+An invocation is bound to a specific deployment — it starts and completes within that same deployment. This ensures that in-flight requests always see the code they started with, preserving correctness and determinism.
 
 ## Registering a Deployment
 
-After deploying your service, you must **register** it with Restate so it can be discovered and invoked.
+After deploying your service, you must register it with Restate so it can be discovered and invoked.
 
 **You can register a deployment using:**
 - The [Restate UI](/develop/local_dev#restate-ui) (recommended for most users)
@@ -27,95 +29,134 @@ After deploying your service, you must **register** it with Restate so it can be
   curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
   ```
 
-**Example output:**
-```shell
-✔ SERVICES THAT WILL BE ADDED:
-- CheckoutService
-- CartObject
-- TicketObject
-...
-```
+**Note:**
+ - For AWS Lambda, use the function ARN instead of a URL (e.g., `arn:aws:lambda:region:account-id:function:function-name:version`).
+ - If running Restate in Docker, use `host.docker.internal` instead of `localhost`.
 
-> **Tips:**
-> - For AWS Lambda, use the function ARN instead of a URL (e.g., `arn:aws:lambda:region:account-id:function:function-name:version`).
-> - If running Restate in Docker, use `host.docker.internal` instead of `localhost`.
+## Deploying new service versions
 
----
+Since deployments are immutable, updates require creating new deployments:
 
-## Using the UI for deploying new versions
+<Steps>
+    <Step title="Deploy new version">
+        Deploy your updated service code to a new endpoint (e.g., `http://greeter-v2/`).
+    </Step>
+    <Step title="Register the new deployment">
+        Then register it with Restate:
+        <CodeGroup>
+        ```shell CLI
+        restate deployments register http://greeter-v2/
+        ```
+        ```shell curl
+        curl localhost:9070/deployments --json '{"uri": "http://greeter-v2/"}'
+        ```
+        </CodeGroup>
+        Restate automatically routes new requests to the latest deployment. Existing requests continue on the original deployment.
+    </Step>
+    <Step title="Wait for old deployment to drain">
+        Ensure the old deployment remains available until all in-flight invocations complete.
 
-The [Restate UI](http://localhost:9070) is your central hub for managing deployments, services, and versions. It provides:
+        Check for in-flight invocations on this deployment [via the UI](https://restate.dev/blog/announcing-restate-ui/#an-aid-for-versioning) or CLI.
 
-- **Easy registration:** Register new deployments and services with a few clicks.
-- **Version overview:** See all versions of each service and the deployments they run on.
-- **Safe removal:** Filter ongoing invocations by deployment ID to check if an old deployment has drained and can be safely removed. Only remove a deployment when all in-flight invocations have completed.
-- **Future-proofing:** Filter invocations scheduled for the future to ensure your new version can handle them.
-
-For more, see [Announcing Restate UI](https://restate.dev/blog/announcing-restate-ui/).
-
-## Updating Services and Versioning
-
-**Deployments are immutable.** Once registered, the code and endpoint for a deployment must not change. This ensures that in-flight invocations (requests that are paused, waiting, or being replayed) always run on the code they started with.
-
-**How to update a service:**
-1. Deploy your updated code to a new endpoint (e.g., `http://greeter-v2/`).
-2. Register the new deployment with Restate (via UI, CLI, or API).
-3. Restate will:
-   - Route **new invocations** to the latest deployment.
-   - Allow **existing invocations** to complete on the previous deployment.
-
-> **Why this matters:**
-> In durable execution, even small code changes can break in-flight requests if the journal (recorded execution) no longer matches the code. Immutable deployments solve this by ensuring every invocation always sees the code it started with. ([Read more](https://restate.dev/blog/solving-durable-executions-immutability-problem/))
-
-**State compatibility:**
-- When updating Virtual Objects, new revisions continue to use the same state as previous versions. Ensure your state schema is backward compatible.
-
-> **Kubernetes users:**
-> The Restate Kubernetes operator can handle registration and versioning for you automatically.
-
----
-
-## Inspecting and Managing Deployments
-
-- **List services and deployments:**
-  ```bash
-  restate services list
-  restate deployments list
-  ```
-- **Describe a deployment:**
-  ```bash
-  restate deployment describe <deployment_id>
-  ```
-
-### Removing a Deployment
-
-**Before removing a deployment:**
-- Ensure no other handlers depend on its services.
-- If you want to keep some services, deploy them separately first.
-- Make the service [private](/operate/security#private-services) to block new requests.
-- Check for pending invocations and wait until the deployment is drained (use the UI or CLI).
-
-**Remove the deployment:**
-```bash
-restate deployments remove <deployment_id>
-```
-> **Tip:** Use `--force` to remove even if not fully drained (not recommended for production).
-
----
-
-## Advanced: In-place Updates and Recovery
-
-In rare cases (e.g., a bug causes all in-flight invocations to fail), you may need to patch a deployment in place.
-
-You can do this by deploying the new code at the same endpoint.
+        ```shell CLI
+        # Find the deployment ID of your service
+        restate services list
+        # Then, check the number of active invocations for the deployment
+        restate deployments list
+        # Or check the deployment details
+        restate deployment describe <deployment_id>
+        ```
+    </Step>
+    <Step title="Remove old deployment">
+        Once all invocations are complete, you can safely remove the old deployment.
+        Use the CLI or UI to remove it.
+        <CodeGroup>
+            ```shell CLI
+            restate deployments remove dp_14LsPzGz9HBxXIeBoH5wYUh
+            ```
+            ```bash curl
+            curl -X DELETE localhost:9070/deployments/dp_14LsPzGz9HBxXIeBoH5wYUh
+            ```
+        </CodeGroup>
+        If the deployment isn't drained yet, but you still want to remove it, use the `--force` flag in CLI, or `?force=true` for curl.
+    </Step>
+</Steps>
 
 
-> **Caution:**
-> Only use in-place updates to fix failing invocations. Changes must be minimal and backward compatible for in-flight requests. ([See why version-aware control flow is a last resort](https://restate.dev/blog/code-that-sleeps-for-a-month/))
+<Note title="State compatibility">
+    Virtual Object state persists across versions. Ensure your state schema remains backward compatible.
+</Note>
 
----
+## Removing a service
 
-## Further Reading
+Restate does not support removing individual services directly. Instead, you must remove the deployment that contains the service.
+
+To do this safely, follow the steps below:
+
+1. Ensure no other handlers or services have business logic that calls the service you're removing.
+2. If several services are bundled in the same deployment, you can't remove only one of them. You have to remove the whole deployment.
+So make sure that you first deploy the services you want to keep in a separate new deployment.
+4. [Make the service private](/operate/security#private-services) to avoid accepting new HTTP requests.
+5. Check whether the service has pending invocations by filtering the invocations on deployment ID in the [UI](/develop/local_dev#restate-ui) or via `restate services status`, and wait until the service is drained (i.e. no ongoing invocations).
+
+**When all prerequisites are fulfilled**, you can remove the deployment containing the service via the [UI](/develop/local_dev#restate-ui) or via:
+
+<CodeGroup>
+    ```shell CLI
+    restate deployments remove dp_14LsPzGz9HBxXIeBoH5wYUh
+    ```
+    ```bash curl
+    curl -X DELETE localhost:9070/deployments/dp_14LsPzGz9HBxXIeBoH5wYUh
+    ```
+</CodeGroup>
+If the deployment isn't drained yet but you still want to remove it, use the `--force` flag in CLI, or `?force=true` for curl.
+
+
+## Advanced: Updating deployments in-place
+
+While deployments should be immutable, critical bugs sometimes require updating deployed code to fix stuck invocations.
+
+### When This is Needed
+If a bug (like a null pointer exception) occurs mid-execution, registering a new deployment only fixes new invocations. Existing stuck invocations need the original deployment fixed.
+
+### Two Approaches
+
+1. **Update underlying code** at the same URI (works for K8s, not Lambda)
+2. **Update deployment endpoint** to point to a patched version:
+   ```shell
+   curl -X PUT localhost:9070/deployments/dp_14LsPzGz9HBxXIeBoH5wYUh \
+     --json '{"uri": "http://greeter-patched/"}'
+   ```
+
+### Common Scenarios
+
+<AccordionGroup>
+<Accordion title="Scenario 1: Invocations failing on the active deployment">
+
+The current deployment handling new invocations has bugs:
+
+1. Develop a fix, based on the current deployed version, that resolves the failing invocations.
+Care should be taken to ensure that the new version has the same behaviour as the old version, for any code paths that in-flight invocations have successfully completed (ie, any changes must be from the point of failure onwards).
+2. By updating the underlying code or with the update deployment API, change the active deployment to include the fix. Verify that this resolves the issue both for new invocations, and for those already failing.
+
+</Accordion>
+<Accordion title="Scenario 2: Failing invocations on a previous (draining) deployment">
+
+It's common to notice failing invocations because they are preventing an old deployment from fully draining. In this case there are several concerns; the failing invocations on deployment 1, any failing invocations on deployment 2,
+and the potential for new failing invocations to occur on deployment 2 as well. The following steps should be taken:
+1. Develop a fix as above, based on the version backing deployment 1.
+2. By updating the underlying code or with the update deployment API, change deployment 1 to include the fix. Verify that this resolves the failing invocations on this deployment.
+3. Rebase the fix onto the version backing deployment 2.
+4. By updating the underlying code or with the update deployment API, change deployment 2 to include the fix. Verify that this resolves any failing invocations, if any, new invocations.
+
+<Info title={"Updating a deployment to use a conflicting endpoint"}>
+    It is possible to use the update deployment API to give a deployment the same URI/ARN as another deployment. This is useful where the an appropriate fix for a drained deployment has already been registered as a new deployment.
+    If this is done, there will be two deployments with the same endpoint, which is otherwise not allowed. It is strongly recommended that you delete one of the two deployments when the failing invocations have been resolved.
+</Info>
+</Accordion>
+</AccordionGroup>
+
+## See also
 
 - [Solving durable execution’s immutability problem](https://restate.dev/blog/solving-durable-executions-immutability-problem/)
 - [Code that sleeps for a month](https://restate.dev/blog/code-that-sleeps-for-a-month/)
