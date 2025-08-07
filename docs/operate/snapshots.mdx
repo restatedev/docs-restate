@@ -1,0 +1,149 @@
+---
+title: "Snapshots"
+description: "Backing up and restoring the Restate data store"
+---
+
+<Info>
+    This page covers configuring a Restate cluster to share partition snapshots for fast fail-over and bootstrapping new nodes. For backup of Restate nodes, see [Data Backup](/operate/data-backup).
+</Info>
+
+<Info title="Architectural overview">
+    To understand the terminology used on this page, it might be helpful to read through the [architecture reference](/references/architecture).
+</Info>
+
+Snapshots are essential to support safe log trimming and fast partition fail-over to a different cluster node. Snapshots are optional for single-node deployments and required for multi-node clusters.
+
+Restate Partition Processors can be configured to periodically publish snapshots of their partition state to a shared destination. Snapshots are not necessarily backups though retaining these historic checkpoints in object storage provides an added layer of safety. Snapshot serve to allow nodes that do not have an up-to-date local copy of a partition's state to quickly start a processor for the given partition. Without snapshots, trimming the log is impossible as that would lead to data loss. Additionally, starting new partition processor would require the full replay of that partition's log which might take a long time.
+
+When partition processors successfully publish a snapshot, this is reflected in the archived log sequence number (LSN). This value is the safe point up to which Restate can trim the Bifrost log.
+
+## Configuring Snapshots
+
+Restate clusters should always be configured with a snapshot repository to allow nodes to efficiently share partition state, and for new nodes to be added to the cluster in the future.
+Restate currently supports using Amazon S3 (or an API-compatible object store) as a shared snapshot repository.
+To set up a snapshot destination, update your [server configuration](/operate/configuration/server) as follows:
+
+```toml
+[worker.snapshots]
+destination = "s3://snapshots-bucket/cluster-prefix"
+snapshot-interval-num-records = 10000
+```
+
+This enables automated periodic snapshots to be written to the specified bucket. You can also trigger snapshot creation manually using the [`restatectl`](/operate/clusters#controlling-clusters-with-restatectl):
+
+```shell
+restatectl snapshots create-snapshot --partition-id <PARTITION_ID>
+```
+
+We recommend testing the snapshot configuration by requesting a snapshot and examining the contents of the bucket.
+You should see a new prefix with each partition's id, and a `latest.json` file pointing to the most recent snapshot.
+
+No additional configuration is required to enable restoring snapshots.
+When partition processors first start up, and no local partition state is found, the processor will attempt to restore the latest snapshot from the repository.
+This allows for efficient bootstrapping of additional partition workers.
+
+<Info title="Experimenting with snapshots without an object store">
+    For testing purposes, you can also use the `file://` protocol to publish snapshots to a local directory. This is mostly useful when experimenting with multi-node configurations on a single machine. The `file` provider does not support conditional updates, which makes it unsuitable for potentially contended operation.
+</Info>
+
+## Object Store endpoint and access credentials
+
+Restate supports Amazon S3 and S3-compatible object stores. In typical server deployments to AWS, the configuration will be automatically inferred. Object store locations are specified in the form of a URL where the scheme is `s3://` and the authority is the name of the _bucket_. Optionally, you may supply an additional path within the bucket, which will be used as a common prefix for all operations. If you need to specify a custom endpoint for S3-compatible stores, you can override the API endpoint using the `aws-endpoint-url` config key.
+
+For typical server deployments in AWS, you might not need to set region or credentials at all when using Amazon S3 beyond setting the path. Restate's object store support uses the conventional [AWS SDKs and Tools](https://docs.aws.amazon.com/sdkref/latest/guide/file-format.html) credentials discovery. We strongly recommend against using long-lived credentials in configuration. For development, you can use short-term credentials provided by a profile.
+
+### Local development with Minio
+
+Minio is a common target while developing locally. You can configure it as follows:
+
+```toml
+[worker.snapshots]
+destination = "s3://bucket/cluster-name"
+snapshot-interval-num-records = 1000
+
+aws-region = "local"
+aws-access-key-id = "minioadmin"
+aws-secret-access-key = "minioadmin"
+aws-endpoint-url = "http://localhost:9000"
+aws-allow-http = true
+```
+
+### Local development with S3
+
+Assuming you have a profile set up to assume a specific role granted access to your bucket, you can work with S3 directly using a configuration like:
+
+```toml
+[worker.snapshots]
+destination = "s3://bucket/cluster-name"
+snapshot-interval-num-records = 1000
+aws-profile = "restate-dev"
+```
+
+This assumes that in your `~/.aws/config` you have a profile similar to:
+
+```
+[profile restate-dev]
+source_profile = ...
+region = us-east-1
+role_arn = arn:aws:iam::123456789012:role/restate-local-dev-role
+```
+
+## Log trimming and Snapshots
+
+In a distributed environment, the shared log is the mechanism for replicating partition state among nodes.
+Therefore it is critical to that all cluster members can get all the relevant events recorded in the log, even newly built nodes that will join the cluster in the future.
+This requirement is at odds with an immutable log growing unboundedly. Snapshots enable log trimming - the process of removing older segments of the log.
+
+By default, Restate will attempt to trim logs once an hour which you can override or disable in the server configuration:
+
+```toml
+[admin]
+log-trim-check-interval = "1h"
+```
+
+This interval determines only how frequently the check is performed, and does not guarantee that logs will be trimmed. Restate will automatically determine the appropriate safe trim point for each partition's log.
+
+In multi-node clusters, or any time a snapshot repository is configured, the log safe trim point is determined based on the archived LSN. If a snapshot repository is not configured, then archived LSNs are not reported. Therefore, on multi-node deployments, always make sure to configure a snapshot repository so that the log size can be kept in check. On single-node deployments without a snapshot repository, the log is trimmed based on the latest LSN durably committed to local storage. If you decide to expand a single-node into a multi-node cluster in the future, you will need to configure snapshotting for partition state transfer to the new nodes.
+
+The presence of unreachable nodes in a cluster does not affect trimming, as long as the remaining nodes continue to produce snapshots. However, active partition processors that behind the archived LSN will cause trimming to be delayed to allow them to catch up.
+
+Nodes that are temporarily down when the log is trimmed will use snapshots to fast-forward local state when they come back.
+
+<Info title="Handling log trim gap errors">
+    If you observe repeated `Shutting partition processor down because it encountered a trim gap in the log.` errors in the Restate server log, it is an indication that a processor is failing to start up due to missing log records. To recover, you must ensure that a snapshot repository is correctly configured and accessible from the node reporting errors. You can still recover even if no snapshots were taken previously as long as there is at least one healthy node with a copy of the partition data. In that case, you must first configure the existing node(s) to publish snapshots for the affected partition(s) to a shared destination. See the [Handling missing snapshots](/operate/clusters#handling-missing-snapshots) section for detailed recovery steps.
+</Info>
+
+## Observing processor persisted state
+
+You can use [`restatectl`](/operate/clusters#controlling-clusters-with-restatectl) to see the progress of partition processors with the `list` subcommand:
+
+```shell
+restatectl partitions list
+```
+
+This will produce output similar to the below:
+
+```
+Alive partition processors (nodes config v6, partition table v2)
+ ID  NODE  MODE    STATUS  EPOCH  APPLIED  DURABLE  ARCHIVED  LSN-LAG  UPDATED
+ 0   N1:4  Leader  Active  e4     121428   121343   115779    0        268 ms ago
+ 1   N1:4  Leader  Active  e4     120778   120735   116216    0        376 ms ago
+ 2   N1:4  Leader  Active  e4     121348   121303   117677    0        394 ms ago
+ 3   N1:4  Leader  Active  e4     120328   120328   117303    0        259 ms ago
+ 4   N1:4  Leader  Active  e4     121108   120989   119359    0        909 ms ago
+ 5   N1:4  Leader  Active  e4     121543   121481   119818    0        467 ms ago
+ 6   N1:4  Leader  Active  e4     121253   121194   119568    0        254 ms ago
+ 7   N1:4  Leader  Active  e4     120598   120550   118923    0        387 ms ago
+```
+
+There are three notable persistence-related attributes in `restatectl`'s partition list output:
+
+- **Applied LSN** - the latest log record record applied by this processor
+- **Durable LSN** - the log position of the latest partition store flushed to local node storage; by default processors optimize performance by relying on Bifrost for durability and only periodically flush partition store to disk
+- **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot; this determines the log safe trim point in multi-node clusters
+
+## Pruning the snapshot repository
+
+<Warning>
+    Restate does not currently support pruning older snapshots from the snapshot repository. We recommend implementing an object lifecycle policy directly in the object store to manage retention.
+</Warning>
