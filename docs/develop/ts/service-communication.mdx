@@ -5,11 +5,16 @@ description: "Call other services from your handler."
 icon: "comment"
 ---
 
-Call other handlers in three ways:
+Your Restate handler can call other handlers in three ways:
 
 - **[Request-response calls](/develop/ts/service-communication#request-response-calls)**: Call and wait for a response
 - **[One-way messages](/develop/ts/service-communication#sending-messages)**: Send a message and continue
 - **[Delayed messages](/develop/ts/service-communication#delayed-messages)**: Send a message after a delay
+
+<Info>
+    This page describes how to call a service **from within a Restate handler**, with access to the Restate Context.
+    To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
+</Info>
 
 ## Why use Restate for this?
 
@@ -30,7 +35,7 @@ Then, import this definition into the handler that will make the call.
 
 ## Request-response calls
 
-Call a handler and wait for its result.
+Call a Restate handler and wait for its result.
 
 Use [`serviceClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#serviceclient), [`objectClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#objectclient), or [`workflowClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#workflowclient). Virtual Objects and Workflows need an ID.
 
@@ -69,11 +74,11 @@ const response = await ctx.genericCall({
 
 <Accordion title={"Workflow retention"}>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
-You can configure this via the UI or [Admin API](/adminapi/modify-service) with `workflow_completion_retention`.
+Update this via the [service configuration](/operate/configuration/services).
 </Accordion>
 
 <Note>
-Request-response calls between Virtual Objects may lead to deadlocks:
+Request-response calls between [exclusive handlers](/develop/ts/overview#exclusive-vs-shared-handlers) of Virtual Objects may lead to deadlocks:
 - Cross deadlock: A → B and B → A (same keys).
 - Cycle deadlock: A → B → C → A.
 
@@ -82,7 +87,9 @@ Use the UI or CLI to [cancel](/operate/invocation#cancelling-invocations) and un
 
 ## Sending messages
 
-Send a message without waiting for a response.
+Send a message to another Restate handler without waiting for a response.
+
+Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
 
 Use [`serviceSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#servicesendclient), [`objectSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#objectsendclient), or [`workflowSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#workflowsendclient). Virtual Objects and Workflows need an ID.
 
@@ -112,7 +119,7 @@ ctx.genericSend({
 });
 ```
 
-<Note>
+<Info>
     Calls to a Virtual Object execute in order of arrival, serially.
     Example:
 
@@ -122,7 +129,7 @@ ctx.objectSendClient(MyObject, "Mary").myHandler("I'm call B");
 ```
 
     Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
-</Note>
+</Info>
 
 ## Delayed messages
 
@@ -159,6 +166,10 @@ ctx.genericSend({
   delay: { seconds: 5 },
 });
 ```
+
+<Info>
+    Learn [how this is different](/develop/ts/durable-timers#scheduling-async-tasks) from sleeping and then sending a message.
+</Info>
 
 ## Using an idempotency key
 

@@ -112,13 +112,6 @@ Configured via `docs.json` with tabbed navigation (Learn, Build, Guides) and nes
 - Alt text on all images
 - Relative paths for internal links
 
-## Git workflow
-- NEVER use --no-verify when committing
-- Ask how to handle uncommitted changes before starting
-- Create a new branch when no clear branch exists for changes
-- Commit frequently throughout development
-- NEVER skip or disable pre-commit hooks
-
 ## Do not
 - Skip frontmatter on any MDX file
 - Use absolute URLs for internal links

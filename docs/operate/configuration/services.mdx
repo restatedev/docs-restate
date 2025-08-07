@@ -43,8 +43,8 @@ Configure services directly in your code when defining them.
 Use the [`ServiceOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions) to configure your services:
 
 ```ts {CODE_LOAD::ts/src/develop/my_advanced_service.ts#options} 
-restate.service({
-  name: "MyService",
+restate.workflow({
+  name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.Context) => {},
   },
@@ -53,7 +53,9 @@ restate.service({
       inactivityTimeout: { minutes: 15 },
       idempotencyRetention: { days: 3 },
       journalRetention: { days: 7 },
-      ingressPrivate: true
+      ingressPrivate: true,
+      enableLazyState: true, // only for Virtual Objects and Workflows
+      workflowRetention: { days: 3 } // only for workflows
   }
 });
 ```
@@ -62,106 +64,144 @@ restate.service({
 
 Use the [`ServiceHandlerOpts`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceHandlerOpts) to set configuration at the handler level:
 
-```ts {CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts} 
+<CodeGroup>
+```ts service {CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_service} 
 restate.service({
     name: "MyService",
     handlers: {
-        run: restate.handlers.handler(
+        myHandler: restate.handlers.handler(
             {
                 abortTimeout: { minutes: 15 },
                 inactivityTimeout: { minutes: 15 },
                 idempotencyRetention: { days: 3 },
                 journalRetention: { days: 7 },
-                ingressPrivate: true
+                ingressPrivate: true,
             },
             async (ctx: restate.Context) => {},
         )
     }
+})
+````
+```ts virtual_object {CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_object} 
+restate.object({
+    name: "MyService",
+    handlers: {
+        myHandler: restate.handlers.object.exclusive(
+            {
+                abortTimeout: { minutes: 15 },
+                inactivityTimeout: { minutes: 15 },
+                idempotencyRetention: { days: 3 },
+                journalRetention: { days: 7 },
+                ingressPrivate: true,
+                enableLazyState: true,
+            },
+            async (ctx: restate.Context) => {},
+        ),
+        mySharedHandler: restate.handlers.object.shared(
+            { /*... my options ...*/ },
+            async (ctx: restate.Context) => {},
+        )
+    }
+})
+```
+```ts workflow {CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_workflow} 
+restate.workflow({
+    name: "MyWorkflow",
+    handlers: {
+        run: restate.handlers.workflow.workflow(
+            {
+                abortTimeout: { minutes: 15 },
+                inactivityTimeout: { minutes: 15 },
+                idempotencyRetention: { days: 3 },
+                journalRetention: { days: 7 },
+                ingressPrivate: true,
+                enableLazyState: true,
+            },
+            async (ctx: restate.Context) => {},
+        ),
+        signal: restate.handlers.workflow.shared(
+            { /*... my options ...*/ },
+            async (ctx: restate.Context) => {},
+        ),
+    }
 });
 ```
+</CodeGroup>
 
 ## Configuration options
 
 <AccordionGroup>
   <Accordion title="Timeout settings">
 
-    <h4>Inactivity timeout</h4>
-    <p>
-      The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
-      After this timeout, Restate will ask the service to suspend.
-    </p>
-    <p><strong>Default:</strong> 1 minute</p>
-    <p>
-      <strong>When to adjust:</strong> For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
-    </p>
+    #### Inactivity timeout
+    The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
+    After this timeout, Restate will ask the service to suspend.
 
-    <h4>Abort timeout</h4>
-    <p>
-        Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
-        So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
-    </p>
-    <p><strong>Default:</strong> 1 minute</p>
+    **Default**: 1 minute
 
-    <p>
-      <strong>Example:</strong> For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
-    </p>
+    **When to adjust:** For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
+
+    #### Abort timeout
+    Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
+    So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
+
+    **Default:** 1 minute
+
+    **Example:** For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
   </Accordion>
 
   <Accordion title="Retention policies">
-    <h4>Idempotency retention</h4>
-    <p>
-      How long Restate retains idempotency keys to prevent duplicate request processing.
-    </p>
-    <p><strong>Default:</strong> 24 hours</p>
+    #### Idempotency retention
+    How long Restate retains idempotency keys to prevent duplicate request processing.
 
-    <p>
-      <strong>When to adjust:</strong> For services that need longer idempotency windows, such as financial transactions or critical business operations.
-    </p>
-    
-    <h4>Journal retention</h4>
-    <p>
-      How long Restate keeps invocation journals after completion for debugging and auditing.
-    </p>
+    You can see the status of the completed invocation in the UI.
 
-    <strong>Default:</strong> Discarded immediately after completion
+    **Default:** 24 hours
+
+    **When to adjust:** For services that need longer idempotency windows, such as financial transactions or critical business operations.
+
+    #### Workflow retention
+    The workflow retention describes for how long you will be able to call the shared handlers on a workflow after the run handler has finished.
+    The retention time starts counting down from the moment the run handler completes.
+
+    After this time, the workflow's K/V state is cleared, you cannot call any shared handlers anymore, and any [Durable Promises](/develop/ts/awakeables#durable-promises) are discarded.
+
+    **Default:** 24 hours
+
+    **When to adjust:** For workflows that need longer retention windows, to retrieve state or the result of a [Durable Promise](/develop/ts/awakeables#durable-promises).
     
-    <p>
-      <strong>When to adjust:</strong> For workflows, AI agents, or any service where you need to inspect the execution history after completion.
-    </p>
+    #### Journal retention
+    How long Restate keeps invocation journals after completion for debugging and auditing.
+
+    Increase to see journals of completed invocations in the log.
+
+    For workflow executions or invocations with idempotency keys:
+    - the journal retention is capped by the workflow retention or idempotency retention time
+    - If the journal retention is set to 0, you can see completion status but not journal entries.
+
+    **Default:** Discarded immediately after completion
+    
+    **When to adjust:** For workflows, AI agents, or any service where you need to inspect the execution history after completion.
   </Accordion>
 
   <Accordion title="Privacy and access control">
-    <h4>Private services</h4>
-    <p>
-      Mark services as private to prevent external access while allowing internal service-to-service communication.
-    </p>
+    #### Private services
+    Mark services as private to prevent external access while allowing internal service-to-service communication.
     
-    <p>
-      <strong>Use cases:</strong>
-    </p>
-    <ul>
-      <li>Internal utility services that shouldn't be exposed externally</li>
-      <li>Backend services that only other Restate services should access</li>
-    </ul>
+    **Use cases:**
+    - Internal utility services that shouldn't be exposed externally
+    - Backend services that only other Restate services should access
     
-    <p>
-      <strong>Configuration:</strong> Set <code>ingressPrivate: true</code> in service options.
-    </p>
+    **Configuration:** Set `ingressPrivate: true` in service options.
   </Accordion>
 
   <Accordion title="Error handling">
-    <h4>Error mapping</h4>
-    <p>
-      Provide a function to map specific errors to terminal errors, preventing infinite retries.
-    </p>
+    #### Error mapping
+    Provide a function to map specific errors to terminal errors, preventing infinite retries.
     
-    <p>
-      <strong>Example:</strong> Map validation failures to terminal errors.
-    </p>
+    **Example:** Map validation failures to terminal errors.
     
-    <p>
-      See the <a href="/develop/ts/error-handling#mapping-errors-to-terminalerror">error handling docs</a> for detailed examples.
-    </p>
+    See the [error handling docs](/develop/ts/error-handling#mapping-errors-to-terminalerror) for detailed examples.
   </Accordion>
 </AccordionGroup>
 

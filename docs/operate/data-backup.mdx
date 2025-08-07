@@ -3,6 +3,72 @@ title: "Data Backups"
 description: "Backing up and restoring the Restate data store on single nodes"
 ---
 
+
+- What is a snapshot?
+Snapshot = internal mechanism to exchange state between nodes in a cluster.
+You need it whenever add and remove nodes and for fail-over.
+The nodes bootstrap automatically from a snapshot.
+Snapshot is always done for a specific partition. The node with the latest state for that partition takes the snapshot.
+If you take snapshots for different partitions, they are not guaranteed to be aligned in time.
+So you can't use them to restore to a specific point in time.
+
+- What is a backup?
+A full backup of all the data Restate stores.
+It's more meant for users to revert a cluster to a previous point in time.
+It involves manually copying over restate-data basically, or taking a snapshot of EBS volume.
+Restate does not let you automatcially take periodic backups, but you can write a script to do that, which would look different for each environment.
+A defined point in time to which we want to restore.
+
+Depending on the roles of a node, the backup may include different data.
+
+There is currently not a good way to create a backup of all different nodes at the exact same time.
+So mainly for single-node deployments.
+
+- When/why do I use a snapshot
+To bootstrap a new node in a cluster.
+Otherwise the node would need to replay the entire log to catch up.
+
+Snapshots also allow trimming the log.
+(If you take a snapshot, the archived LSN will then show the latest node snapshot for that partition.)
+
+When a node comes up, it will look for the latest snapshot and replay the log from that point.
+
+- vs. a backup
+- How this relates to upgrades, fail-over, scaling, etc.
+- Single node vs. multi-node deployments
+- How to create a backup
+- How to restore from a backup
+
+- How to manually take a snapshot
+- How to set up automatic snapshotting
+- How frequently should snapshot?
+Trade-off between storage and writes to S3 vs. catching up from the log after scaling/failure
+We let you set a number of records you observe for a partition before taking a snapshot.
+Estimate based on the average throughput. The records represent the number of commands in the log, not the number of invocations.
+We don't do it on a time schedule. But you can implement a cron job which takes a manual snapshot with restatectl.
+
+
+
+Message in Restate Server logs: "Processor has applied log entries beyond the log tail. This indicates data-loss in the log!"
+For example, when trying to restore a cluster from a backup, where the backup is a set of EBS snapshots of different nodes.
+And because those EBS snapshots might not be perfectly aligned in time, one node might have progressed (running the partition processor)
+further the other one (with the log server for that partition).
+In that case, you can have a bit of data loss.
+This case can happen only in the case where:
+- your persistent volumes are corrupt or crashed
+- your persistent volume is in a region or zone that is unavailable
+Tooling to accept this data loss will be provided in the next release.
+
+
+
+
+
+
+
+
+
+
+
 <Info>
     This page covers backing up individual Restate server instances. For sharing snapshots in a Restate cluster environment, see [Snapshots](/operate/snapshots).
 </Info>
