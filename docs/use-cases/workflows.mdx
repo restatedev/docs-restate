@@ -1,0 +1,156 @@
+---
+title: "Workflows"
+description: "An introduction for developers experienced with other workflow orchestrators."
+icon: "diagram-subtask"
+---
+
+This tour gives you an introduction to Restate for microservice orchestration, sagas, and workflows.
+
+## What makes Restate workflows different?
+
+If you've worked with workflow orchestrators like Temporal, AWS Step Functions, or Apache Airflow, you'll find Restate familiar but with some key differences:
+
+### **No separate workflow language**
+Unlike many orchestrators that require learning a domain-specific language (DSL), Restate workflows are written in your existing programming language. This means:
+- No context switching between languages
+- Full IDE support with autocomplete and refactoring
+- Type safety throughout your workflow
+- Easy testing with your existing testing framework
+
+### **Built-in durability and reliability**
+Restate automatically handles:
+- **Checkpointing**: Your workflow state is automatically saved at each step
+- **Retry logic**: Failed steps are automatically retried with configurable policies
+- **Error handling**: Comprehensive error handling with terminal vs retryable errors
+- **Idempotency**: Built-in idempotency keys prevent duplicate processing
+
+### **Simplified state management**
+Unlike traditional orchestrators where you need to explicitly manage workflow state, Restate provides:
+- **Automatic state persistence**: Variables are automatically saved and restored
+- **Durable timers**: Sleep and wait operations that survive restarts
+- **Awakeables**: External event integration without complex state management
+
+## Key concepts for workflow developers
+
+### Services and Handlers
+In Restate, workflows are implemented as **services** with **handlers**:
+
+```ts
+restate.service({
+  name: "OrderWorkflow",
+  handlers: {
+    processOrder: async (ctx: restate.Context, order: Order) => {
+      // Your workflow logic here
+    }
+  }
+});
+```
+
+### Context and State
+The `Context` object provides access to Restate's workflow capabilities:
+
+```ts
+async function processOrder(ctx: restate.Context, order: Order) {
+  // State is automatically persisted
+  let status = await ctx.get("status") || "pending";
+  
+  // Update state
+  await ctx.set("status", "processing");
+  
+  // Durable timers
+  await ctx.sleep({ minutes: 5 });
+  
+  // Await external events
+  const confirmation = await ctx.awakeable<string>("order-confirmation");
+}
+```
+
+### Service Communication
+Unlike traditional orchestrators that require separate orchestration and task services, Restate allows direct service-to-service communication:
+
+```ts
+// Call other services directly
+const paymentResult = await ctx.call(paymentService.pay, { amount: order.total });
+const inventoryResult = await ctx.call(inventoryService.reserve, { items: order.items });
+```
+
+## Migration from other orchestrators
+
+### From Temporal
+- **Activities** → **Service calls** or **External API calls**
+- **Workflow state** → **Context state** (automatic persistence)
+- **Signals** → **Awakeables**
+- **Queries** → **Context state reads**
+
+### From AWS Step Functions
+- **State machine definition** → **Service handler logic**
+- **States** → **Code blocks with automatic checkpointing**
+- **Choice states** → **If/else statements**
+- **Wait states** → **Sleep operations**
+
+### From Apache Airflow
+- **DAGs** → **Service handlers with sequential/parallel logic**
+- **Tasks** → **Service calls or external API calls**
+- **XCom** → **Context state**
+- **Sensors** → **Awakeables**
+
+## Example: Order processing workflow
+
+Here's a complete example showing how to implement a typical e-commerce order workflow:
+
+```ts
+restate.service({
+  name: "OrderWorkflow",
+  handlers: {
+    processOrder: async (ctx: restate.Context, order: Order) => {
+      // Step 1: Validate order
+      const validation = await ctx.call(orderService.validate, order);
+      if (!validation.valid) {
+        throw new Error("Invalid order");
+      }
+      
+      // Step 2: Reserve inventory
+      const inventoryResult = await ctx.call(inventoryService.reserve, {
+        items: order.items,
+        orderId: order.id
+      });
+      
+      if (!inventoryResult.success) {
+        // Compensate: release any reserved inventory
+        await ctx.call(inventoryService.release, { orderId: order.id });
+        throw new Error("Inventory unavailable");
+      }
+      
+      // Step 3: Process payment
+      const paymentResult = await ctx.call(paymentService.process, {
+        amount: order.total,
+        orderId: order.id
+      });
+      
+      if (!paymentResult.success) {
+        // Compensate: release inventory and cancel order
+        await ctx.call(inventoryService.release, { orderId: order.id });
+        throw new Error("Payment failed");
+      }
+      
+      // Step 4: Wait for shipping confirmation
+      const shippingConfirmation = await ctx.awakeable<string>("shipping-confirmation");
+      
+      // Step 5: Update order status
+      await ctx.call(orderService.updateStatus, {
+        orderId: order.id,
+        status: "shipped"
+      });
+      
+      return { success: true, orderId: order.id };
+    }
+  }
+});
+```
+
+## Next steps
+
+- Learn about [error handling](/develop/ts/error-handling) for robust workflows
+- Explore [awakeables](/develop/ts/awakeables) for external event integration
+- See [durable timers](/develop/ts/durable-timers) for time-based workflows
+- Understand [service communication](/develop/ts/service-communication) patterns
