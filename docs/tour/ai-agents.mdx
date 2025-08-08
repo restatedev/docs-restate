@@ -1,8 +1,1400 @@
 ---
 title: "AI Agents"
-description: "This tour gives you an introduction to Restate for AI Agents."
+description: "Learn how to build resilient, fault-tolerant AI agents with durable execution, multi-agent orchestration, and human-in-the-loop workflows."
 icon: "robot"
 ---
 
-This tour gives you an introduction to Restate for AI Agents. 
+AI agents face unique challenges in production: LLM failures, context limits, complex tool chains, and unpredictable execution times. Restate provides the primitives to build truly resilient AI systems that survive failures and scale reliably.
 
+In this guide, you'll learn how to:
+- Build fault-tolerant agents that survive LLM failures and infrastructure crashes
+- Implement durable tool execution and multi-step reasoning workflows
+- Orchestrate multi-agent systems with reliable communication patterns
+- Create human-in-the-loop workflows with approval gates and escalations
+- Manage agent sessions and long-term memory efficiently
+
+## Durable Agent Execution
+
+The core challenge with AI agents is that LLM calls are expensive, non-deterministic, and can fail. Traditional retry logic leads to wasted tokens and inconsistent behavior. Restate's durable execution ensures your agent workflows survive any failure without losing progress or duplicating expensive operations.
+
+### Key Benefits for AI Agents
+
+**LLM Call Deduplication**: Every model call is automatically cached and reused on replay. No wasted tokens from retries.
+
+**Fault-Tolerant Reasoning**: Complex multi-step reasoning workflows resume exactly where they left off after any failure.
+
+**Deterministic Replay**: Agent decision-making is consistent across retries, ensuring predictable behavior.
+
+**Cost Optimization**: Failed workflows don't repeat expensive LLM calls, significantly reducing token costs.
+
+### How It Works
+
+A Restate AI application consists of:
+- **Restate Server**: Manages durable execution and sits in front of your agents like an intelligent proxy
+- **Agent Services**: Your AI logic implemented with handlers that use the Restate SDK for durability
+
+All agent requests are proxied through Restate Server, which persists them in a durable log. When you make LLM calls or tool invocations through the Restate context, they're automatically logged and won't be repeated on replay:
+
+```typescript
+import { restate } from "@restatedev/restate-sdk";
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
+
+const aiAgent = restate.service({
+  name: "AIAgent",
+  handlers: {
+    processRequest: async (ctx, request: { prompt: string; userId: string }) => {
+      // Generate deterministic correlation ID
+      const correlationId = ctx.rand.uuidv4();
+      
+      // Durably execute LLM call - cached on replay
+      const reasoning = await ctx.run(
+        "generate-reasoning",
+        () => generateText({
+          model: openai("gpt-4o"),
+          prompt: `Analyze this request: ${request.prompt}`,
+        })
+      );
+      
+      // Durably execute tool calls based on reasoning
+      for (const action of parseActions(reasoning.text)) {
+        await ctx.run(
+          `execute-${action.type}`,
+          () => executeAction(action, request.userId)
+        );
+      }
+      
+      // Generate final response
+      const response = await ctx.run(
+        "generate-response", 
+        () => generateText({
+          model: openai("gpt-4o"),
+          prompt: `Based on this reasoning: ${reasoning.text}, provide a response to: ${request.prompt}`,
+        })
+      );
+      
+      return response.text;
+    }
+  }
+});
+```
+
+**Durable LLM Calls**: Use `ctx.run()` to wrap LLM calls, making them cacheable and replay-safe.
+
+**Deterministic Decisions**: Use `ctx.rand` for any randomness to ensure consistent replay behavior.
+
+**Automatic Recovery**: If the agent crashes after reasoning but before tool execution, it resumes with cached reasoning.
+
+**No Token Waste**: LLM calls are never repeated on retry, even for complex multi-step workflows.
+
+## LLM Resilience & Error Handling
+
+Production AI agents must gracefully handle various failure modes: model API outages, rate limits, context length exceeded, and quality issues. Restate provides sophisticated error handling patterns that go beyond simple retries.
+
+### Handling Different Error Types
+
+Not all LLM failures should be handled the same way. Some errors warrant retries, others need fallbacks, and some should fail fast:
+
+```typescript
+import { TerminalError } from "@restatedev/restate-sdk";
+
+const resilientAgent = restate.service({
+  name: "ResilientAgent", 
+  handlers: {
+    chat: async (ctx, request: { messages: Message[]; userId: string }) => {
+      try {
+        // Primary model call with automatic retries
+        return await ctx.run("primary-llm-call", async () => {
+          try {
+            return await generateText({
+              model: openai("gpt-4o"),
+              messages: request.messages,
+              maxTokens: 4096,
+            });
+          } catch (error) {
+            // Classify error and handle appropriately
+            if (isRateLimitError(error)) {
+              // Wait and retry - Restate handles this automatically
+              throw error;
+            } else if (isContextLengthError(error)) {
+              // Terminal error - don't retry, use fallback strategy
+              throw new TerminalError("Context too long, needs truncation");
+            } else if (isContentFilterError(error)) {
+              // Terminal error - content policy violation
+              throw new TerminalError("Content filtered by model");
+            }
+            throw error; // Other errors get retried
+          }
+        });
+      } catch (error) {
+        if (error instanceof TerminalError) {
+          // Use fallback strategies for terminal errors
+          return await handleFallback(ctx, request, error.message);
+        }
+        throw error;
+      }
+    }
+  }
+});
+
+async function handleFallback(
+  ctx: Context, 
+  request: { messages: Message[]; userId: string }, 
+  reason: string
+) {
+  if (reason.includes("Context too long")) {
+    // Truncate conversation and try again
+    const truncatedMessages = await ctx.run("truncate-context", 
+      () => truncateMessages(request.messages, 8000)
+    );
+    
+    return await ctx.run("fallback-llm-call", () => 
+      generateText({
+        model: openai("gpt-4o-mini"), // Cheaper model for truncated context
+        messages: truncatedMessages,
+        maxTokens: 2048,
+      })
+    );
+  } else if (reason.includes("Content filtered")) {
+    // Return safe fallback response
+    return { text: "I cannot process this request due to content policies." };
+  }
+  
+  // Default fallback to simpler model
+  return await ctx.run("simple-fallback", () =>
+    generateText({
+      model: openai("gpt-3.5-turbo"),
+      messages: request.messages.slice(-5), // Last 5 messages only
+      maxTokens: 1024,
+    })
+  );
+}
+```
+
+### Multi-Model Fallback Chains
+
+Create robust fallback chains that try multiple models in sequence:
+
+```typescript
+const modelChain = [
+  { model: openai("gpt-4o"), priority: 1, cost: "high" },
+  { model: openai("gpt-4o-mini"), priority: 2, cost: "medium" },
+  { model: openai("gpt-3.5-turbo"), priority: 3, cost: "low" },
+];
+
+async function tryModelChain(ctx: Context, prompt: string): Promise<string> {
+  for (const config of modelChain) {
+    try {
+      const result = await ctx.run(
+        `model-${config.priority}`,
+        () => generateText({
+          model: config.model,
+          prompt,
+          maxTokens: 2048,
+        })
+      );
+      
+      // Log successful model for observability
+      ctx.console.log(`Success with ${config.model.modelId} (${config.cost} cost)`);
+      return result.text;
+      
+    } catch (error) {
+      ctx.console.log(`Model ${config.model.modelId} failed: ${error.message}`);
+      
+      // Don't retry on content filter errors
+      if (isContentFilterError(error)) {
+        throw new TerminalError("Content filter error across all models");
+      }
+      
+      // Continue to next model for other errors
+      continue;
+    }
+  }
+  
+  throw new TerminalError("All models in chain failed");
+}
+```
+
+### Benefits of Restate's Error Handling
+
+**Smart Retry Logic**: Automatic retries for transient failures, with exponential backoff built-in.
+
+**Cost-Aware Fallbacks**: Failed expensive calls fall back to cheaper models without losing context.
+
+**Failure Classification**: Different error types get different handling strategies.
+
+**Observability**: Full trace of which models succeeded/failed and why.
+
+## Multi-Agent Orchestration
+
+Complex AI tasks often require coordinating multiple specialized agents: one for reasoning, another for data retrieval, and another for formatting responses. Restate makes it easy to build reliable multi-agent systems with both synchronous and asynchronous communication patterns.
+
+### Agent Communication Patterns
+
+**Request-Response for Immediate Results**: When one agent needs another agent's output to continue:
+
+```typescript
+const orchestratorAgent = restate.service({
+  name: "OrchestratorAgent",
+  handlers: {
+    handleComplexQuery: async (ctx, request: { query: string; userId: string }) => {
+      // Step 1: Have research agent gather information
+      const researchResult = await ctx.serviceCall(researchAgent)
+        .gatherInformation({ query: request.query, sources: ["web", "docs", "db"] });
+      
+      // Step 2: Have reasoning agent analyze the research
+      const analysis = await ctx.serviceCall(reasoningAgent)
+        .analyzeInformation({ 
+          data: researchResult.data,
+          context: request.query,
+          userId: request.userId
+        });
+      
+      // Step 3: Have response agent format the final answer
+      const response = await ctx.serviceCall(responseAgent)
+        .formatResponse({
+          analysis: analysis.reasoning,
+          tone: "professional",
+          audience: "technical"
+        });
+      
+      return response.formattedText;
+    }
+  }
+});
+```
+
+**Fire-and-Forget for Parallel Processing**: When agents can work independently:
+
+```typescript
+const parallelProcessingAgent = restate.service({
+  name: "ParallelAgent",
+  handlers: {
+    processDocument: async (ctx, request: { documentId: string; userId: string }) => {
+      // Start multiple agents working in parallel
+      ctx.serviceSend(summaryAgent).generateSummary({ 
+        documentId: request.documentId 
+      });
+      
+      ctx.serviceSend(keywordAgent).extractKeywords({ 
+        documentId: request.documentId 
+      });
+      
+      ctx.serviceSend(sentimentAgent).analyzeSentiment({ 
+        documentId: request.documentId 
+      });
+      
+      // Continue with main processing - other agents work in background
+      const mainProcessing = await ctx.run("main-processing", 
+        () => processDocumentMain(request.documentId)
+      );
+      
+      return { processedId: request.documentId, status: "processing" };
+    }
+  }
+});
+```
+
+### Specialized Agent Architecture
+
+Build systems where each agent has a specific role and expertise:
+
+```typescript
+// Research Agent - Handles data gathering
+const researchAgent = restate.service({
+  name: "ResearchAgent",
+  handlers: {
+    gatherInformation: async (ctx, request: { query: string; sources: string[] }) => {
+      const results = [];
+      
+      for (const source of request.sources) {
+        const data = await ctx.run(`research-${source}`, async () => {
+          switch (source) {
+            case "web":
+              return await searchWeb(request.query);
+            case "docs":
+              return await searchDocuments(request.query);
+            case "db":
+              return await queryDatabase(request.query);
+            default:
+              return null;
+          }
+        });
+        
+        if (data) results.push({ source, data });
+      }
+      
+      return { data: results, query: request.query };
+    }
+  }
+});
+
+// Reasoning Agent - Handles analysis and decision making  
+const reasoningAgent = restate.service({
+  name: "ReasoningAgent",
+  handlers: {
+    analyzeInformation: async (ctx, request: { data: any[]; context: string; userId: string }) => {
+      // Use advanced reasoning model for analysis
+      const reasoning = await ctx.run("deep-reasoning", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Analyze this information in context of: ${request.context}\n\nData: ${JSON.stringify(request.data)}`,
+          maxTokens: 4096
+        })
+      );
+      
+      // Extract key insights and recommendations
+      const insights = await ctx.run("extract-insights", () =>
+        generateText({
+          model: openai("gpt-4o"), 
+          prompt: `Extract key insights and actionable recommendations from: ${reasoning.text}`,
+          maxTokens: 2048
+        })
+      );
+      
+      return {
+        reasoning: reasoning.text,
+        insights: insights.text,
+        confidence: calculateConfidence(request.data.length)
+      };
+    }
+  }
+});
+
+// Response Agent - Handles formatting and presentation
+const responseAgent = restate.service({
+  name: "ResponseAgent", 
+  handlers: {
+    formatResponse: async (ctx, request: { analysis: string; tone: string; audience: string }) => {
+      const formattedResponse = await ctx.run("format-response", () =>
+        generateText({
+          model: openai("gpt-4o-mini"), // Cheaper model for formatting
+          prompt: `Format this analysis for ${request.audience} audience with ${request.tone} tone:\n\n${request.analysis}`,
+          maxTokens: 2048
+        })
+      );
+      
+      return {
+        formattedText: formattedResponse.text,
+        metadata: {
+          tone: request.tone,
+          audience: request.audience,
+          timestamp: new Date().toISOString()
+        }
+      };
+    }
+  }
+});
+```
+
+### Agent Workflow Coordination
+
+Complex multi-step workflows with conditional logic and loops:
+
+```typescript
+const workflowAgent = restate.service({
+  name: "WorkflowAgent",
+  handlers: {
+    contentCreationWorkflow: async (ctx, request: { topic: string; requirements: string[] }) => {
+      let currentContent = "";
+      let iterationCount = 0;
+      const maxIterations = 3;
+      
+      while (iterationCount < maxIterations) {
+        // Generate content
+        const draft = await ctx.serviceCall(contentAgent).generateContent({
+          topic: request.topic,
+          requirements: request.requirements,
+          previousAttempt: currentContent
+        });
+        
+        // Review content quality
+        const review = await ctx.serviceCall(reviewAgent).reviewContent({
+          content: draft.text,
+          criteria: request.requirements
+        });
+        
+        if (review.approved) {
+          // Content approved - finalize
+          return await ctx.serviceCall(responseAgent).formatResponse({
+            analysis: draft.text,
+            tone: "professional", 
+            audience: "general"
+          });
+        } else {
+          // Content needs improvement - iterate
+          currentContent = draft.text;
+          iterationCount++;
+          
+          ctx.console.log(`Iteration ${iterationCount}: ${review.feedback}`);
+        }
+      }
+      
+      // Fallback if max iterations reached
+      return {
+        formattedText: currentContent,
+        metadata: { 
+          status: "max_iterations_reached",
+          iterations: maxIterations 
+        }
+      };
+    }
+  }
+});
+```
+
+### Benefits of Restate's Multi-Agent Architecture
+
+**Reliable Agent Communication**: Service calls are durable and will complete even if agents crash.
+
+**Specialized Scaling**: Each agent can scale independently based on its workload.
+
+**Fault Isolation**: If one agent fails, others continue working and retry communication automatically.
+
+**Observable Workflows**: Full trace of inter-agent communication and decision points.
+
+## Human-in-the-Loop Workflows
+
+Many AI applications require human oversight, approval gates, or escalation paths. Restate's awakeables and timers make it easy to build sophisticated human-in-the-loop workflows that can wait for human input while efficiently managing timeouts and escalations.
+
+### Approval Gates and Human Review
+
+Use awakeables to pause agent execution until humans provide input:
+
+```typescript
+const approvalAgent = restate.service({
+  name: "ApprovalAgent",
+  handlers: {
+    processWithApproval: async (ctx, request: { action: string; data: any; userId: string }) => {
+      // Generate initial recommendation
+      const recommendation = await ctx.run("generate-recommendation", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Analyze this request and provide a recommendation: ${JSON.stringify(request)}`,
+          maxTokens: 2048
+        })
+      );
+      
+      // Create awakeable for human approval
+      const approvalAwakeable = ctx.awakeable<ApprovalResult>();
+      
+      // Send notification to human reviewer
+      await ctx.run("send-approval-request", () =>
+        sendApprovalNotification({
+          userId: request.userId,
+          recommendation: recommendation.text,
+          data: request.data,
+          approvalId: approvalAwakeable.id,
+          urgency: calculateUrgency(request.action)
+        })
+      );
+      
+      // Set up escalation timer (24 hours)
+      const escalationTimer = ctx.timer(Duration.ofHours(24));
+      
+      // Race between approval and timeout
+      const result = await Promise.race([
+        approvalAwakeable.promise,
+        escalationTimer.then(() => ({ type: "timeout" as const }))
+      ]);
+      
+      if (result.type === "timeout") {
+        // Escalate to manager
+        return await handleEscalation(ctx, request, recommendation.text);
+      } else if (result.approved) {
+        // Execute approved action
+        return await ctx.run("execute-approved-action", () =>
+          executeAction(request.action, request.data)
+        );
+      } else {
+        // Return rejection reason
+        return {
+          status: "rejected",
+          reason: result.reason,
+          timestamp: new Date().toISOString()
+        };
+      }
+    }
+  }
+});
+
+async function handleEscalation(ctx: Context, request: any, recommendation: string) {
+  // Create new awakeable for manager approval
+  const managerApprovalAwakeable = ctx.awakeable<ApprovalResult>();
+  
+  // Notify manager with escalation context
+  await ctx.run("send-escalation", () =>
+    sendEscalationNotification({
+      managerId: await getManagerId(request.userId),
+      originalRequest: request,
+      recommendation,
+      reason: "timeout_escalation",
+      approvalId: managerApprovalAwakeable.id
+    })
+  );
+  
+  // Shorter timeout for manager (4 hours)
+  const managerTimeout = ctx.timer(Duration.ofHours(4));
+  
+  const managerResult = await Promise.race([
+    managerApprovalAwakeable.promise,
+    managerTimeout.then(() => ({ type: "manager_timeout" as const }))
+  ]);
+  
+  if (managerResult.type === "manager_timeout") {
+    // Auto-reject after manager timeout
+    return {
+      status: "auto_rejected",
+      reason: "escalation_timeout",
+      timestamp: new Date().toISOString()
+    };
+  }
+  
+  // Process manager decision
+  return managerResult.approved 
+    ? await ctx.run("execute-manager-approved", () => executeAction(request.action, request.data))
+    : { status: "manager_rejected", reason: managerResult.reason };
+}
+```
+
+### Multi-Level Review Workflows
+
+Complex approval chains with multiple reviewers and conditional logic:
+
+```typescript
+const multiLevelReviewAgent = restate.service({
+  name: "MultiLevelReviewAgent",
+  handlers: {
+    contentReviewWorkflow: async (ctx, request: { content: string; category: string; urgency: number }) => {
+      const reviewChain = getReviewChain(request.category, request.urgency);
+      let currentContent = request.content;
+      
+      for (const [index, reviewer] of reviewChain.entries()) {
+        ctx.console.log(`Starting review level ${index + 1}: ${reviewer.role}`);
+        
+        // Generate review questions specific to this reviewer's expertise
+        const reviewQuestions = await ctx.run(`generate-questions-${index}`, () =>
+          generateText({
+            model: openai("gpt-4o-mini"),
+            prompt: `Generate specific review questions for ${reviewer.role} reviewing: ${currentContent}`,
+            maxTokens: 1024
+          })
+        );
+        
+        // Create awakeable for this reviewer
+        const reviewAwakeable = ctx.awakeable<ReviewResult>();
+        
+        // Send review request
+        await ctx.run(`send-review-${index}`, () =>
+          sendReviewRequest({
+            reviewerId: reviewer.id,
+            content: currentContent,
+            questions: reviewQuestions.text,
+            reviewId: reviewAwakeable.id,
+            deadline: new Date(Date.now() + reviewer.timeoutHours * 60 * 60 * 1000)
+          })
+        );
+        
+        // Set up timeout and reminders
+        const timeout = ctx.timer(Duration.ofHours(reviewer.timeoutHours));
+        const reminder = ctx.timer(Duration.ofHours(reviewer.timeoutHours / 2));
+        
+        // Wait for review, reminder, or timeout
+        const reviewResult = await Promise.race([
+          reviewAwakeable.promise,
+          reminder.then(() => ({ type: "reminder" as const })),
+          timeout.then(() => ({ type: "timeout" as const }))
+        ]);
+        
+        if (reviewResult.type === "reminder") {
+          // Send reminder and wait for remaining time
+          await ctx.run(`send-reminder-${index}`, () =>
+            sendReviewReminder(reviewer.id, reviewAwakeable.id)
+          );
+          
+          const finalResult = await Promise.race([
+            reviewAwakeable.promise,
+            ctx.timer(Duration.ofHours(reviewer.timeoutHours / 2)).then(() => ({ type: "final_timeout" as const }))
+          ]);
+          
+          if (finalResult.type === "final_timeout") {
+            if (reviewer.required) {
+              throw new TerminalError(`Required reviewer ${reviewer.role} did not respond in time`);
+            } else {
+              continue; // Skip optional reviewer
+            }
+          }
+          
+          // Process the review
+          currentContent = await processReview(ctx, currentContent, finalResult as ReviewResult);
+        } else if (reviewResult.type === "timeout") {
+          if (reviewer.required) {
+            throw new TerminalError(`Required reviewer ${reviewer.role} did not respond in time`);
+          } else {
+            continue; // Skip optional reviewer
+          }
+        } else {
+          // Process the review
+          currentContent = await processReview(ctx, currentContent, reviewResult as ReviewResult);
+        }
+      }
+      
+      return {
+        finalContent: currentContent,
+        reviewStatus: "approved",
+        reviewerCount: reviewChain.length,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+});
+
+async function processReview(ctx: Context, content: string, review: ReviewResult): Promise<string> {
+  if (review.approved) {
+    return review.suggestedChanges ? review.suggestedChanges : content;
+  } else {
+    // Generate revised content based on feedback
+    const revisedContent = await ctx.run("revise-content", () =>
+      generateText({
+        model: openai("gpt-4o"),
+        prompt: `Revise this content based on the feedback:\n\nOriginal: ${content}\n\nFeedback: ${review.feedback}`,
+        maxTokens: 4096
+      })
+    );
+    
+    return revisedContent.text;
+  }
+}
+```
+
+### Interactive Agent Sessions
+
+Create agents that can have ongoing conversations with humans:
+
+```typescript
+const interactiveAgent = restate.service({
+  name: "InteractiveAgent",
+  handlers: {
+    startInteractiveSession: async (ctx, request: { userId: string; initialPrompt: string }) => {
+      let conversationHistory: Message[] = [
+        { role: "user", content: request.initialPrompt }
+      ];
+      
+      // Start the conversation loop
+      while (true) {
+        // Generate agent response
+        const agentResponse = await ctx.run("agent-response", () =>
+          generateText({
+            model: openai("gpt-4o"),
+            messages: conversationHistory,
+            maxTokens: 2048
+          })
+        );
+        
+        conversationHistory.push({ role: "assistant", content: agentResponse.text });
+        
+        // Send response to user and wait for reply
+        const userInputAwakeable = ctx.awakeable<string>();
+        
+        await ctx.run("send-response", () =>
+          sendResponseToUser({
+            userId: request.userId,
+            response: agentResponse.text,
+            conversationId: userInputAwakeable.id
+          })
+        );
+        
+        // Set up session timeout (30 minutes)
+        const sessionTimeout = ctx.timer(Duration.ofMinutes(30));
+        
+        const userInput = await Promise.race([
+          userInputAwakeable.promise,
+          sessionTimeout.then(() => "SESSION_TIMEOUT")
+        ]);
+        
+        if (userInput === "SESSION_TIMEOUT") {
+          // End session gracefully
+          await ctx.run("end-session", () =>
+            sendSessionEndNotification(request.userId, "timeout")
+          );
+          break;
+        } else if (userInput.toLowerCase().includes("end") || userInput.toLowerCase().includes("goodbye")) {
+          // User wants to end session
+          await ctx.run("end-session", () =>
+            sendSessionEndNotification(request.userId, "user_ended")
+          );
+          break;
+        } else {
+          // Continue conversation
+          conversationHistory.push({ role: "user", content: userInput });
+        }
+      }
+      
+      return {
+        status: "session_ended",
+        messageCount: conversationHistory.length,
+        finalHistory: conversationHistory
+      };
+    }
+  }
+});
+```
+
+### Benefits of Restate's Human-in-the-Loop Patterns
+
+**Efficient Resource Usage**: Waiting workflows consume no compute resources while paused.
+
+**Reliable Timeouts**: Durable timers ensure escalations happen even if the system restarts.
+
+**Complex Approval Chains**: Support for multi-level reviews with conditional logic.
+
+**Session Management**: Long-running interactive sessions that survive infrastructure failures.
+
+## Agent Sessions & Memory Management
+
+AI agents need to maintain context across conversations and remember information from previous interactions. Restate's Virtual Objects provide perfect isolation and consistency for managing agent memory and session state.
+
+### Persistent Agent Sessions
+
+Use Virtual Objects to create agents with persistent memory and conversation state:
+
+```typescript
+import { restate } from "@restatedev/restate-sdk";
+
+const agentSession = restate.object({
+  name: "AgentSession",
+  handlers: {
+    // Initialize or resume a conversation
+    chat: async (ctx, request: { message: string; userId: string }) => {
+      // Get conversation history from durable state
+      let conversationHistory = await ctx.get<Message[]>("history") || [];
+      let userProfile = await ctx.get<UserProfile>("profile") || await initializeProfile(request.userId);
+      
+      // Add user message to history
+      conversationHistory.push({
+        role: "user",
+        content: request.message,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Generate contextual response using full history
+      const response = await ctx.run("generate-contextual-response", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          messages: [
+            {
+              role: "system",
+              content: `You are talking to ${userProfile.name}. Context: ${JSON.stringify(userProfile.preferences)}`
+            },
+            ...conversationHistory
+          ],
+          maxTokens: 2048
+        })
+      );
+      
+      // Add assistant response to history
+      conversationHistory.push({
+        role: "assistant", 
+        content: response.text,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Update conversation history and user insights
+      ctx.set("history", conversationHistory);
+      
+      // Extract and store new insights about the user
+      const insights = await ctx.run("extract-insights", () =>
+        generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Based on this conversation, extract key insights about user preferences: ${request.message}`,
+          maxTokens: 512
+        })
+      );
+      
+      // Update user profile with new insights
+      userProfile = await updateUserProfile(userProfile, insights.text);
+      ctx.set("profile", userProfile);
+      
+      // Manage conversation length to stay within context limits
+      if (conversationHistory.length > 50) {
+        const summarizedHistory = await ctx.run("summarize-history", () =>
+          summarizeOldMessages(conversationHistory.slice(0, 30))
+        );
+        
+        conversationHistory = [
+          { role: "system", content: summarizedHistory },
+          ...conversationHistory.slice(30)
+        ];
+        ctx.set("history", conversationHistory);
+      }
+      
+      return {
+        response: response.text,
+        messageCount: conversationHistory.length,
+        userInsights: userProfile.preferences.length
+      };
+    },
+    
+    // Get conversation summary
+    getSummary: async (ctx) => {
+      const history = await ctx.get<Message[]>("history") || [];
+      const profile = await ctx.get<UserProfile>("profile");
+      
+      if (history.length === 0) {
+        return { summary: "No conversation history", messageCount: 0 };
+      }
+      
+      const summary = await ctx.run("generate-summary", () =>
+        generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Summarize this conversation history: ${JSON.stringify(history)}`,
+          maxTokens: 1024
+        })
+      );
+      
+      return {
+        summary: summary.text,
+        messageCount: history.length,
+        userPreferences: profile?.preferences || []
+      };
+    },
+    
+    // Clear conversation but keep user profile
+    reset: async (ctx) => {
+      ctx.clear("history");
+      return { status: "conversation_reset" };
+    }
+  }
+});
+```
+
+### Multi-Agent Memory Coordination
+
+Different agents can share and update common memory:
+
+```typescript
+const sharedMemory = restate.object({
+  name: "SharedMemory",
+  handlers: {
+    // Update shared context from any agent
+    updateContext: async (ctx, update: { agentId: string; type: string; data: any; userId: string }) => {
+      let context = await ctx.get<SharedContext>("context") || { facts: [], preferences: [], goals: [] };
+      
+      // Add new information based on type
+      switch (update.type) {
+        case "fact":
+          context.facts.push({
+            content: update.data.fact,
+            source: update.agentId,
+            confidence: update.data.confidence,
+            timestamp: new Date().toISOString()
+          });
+          break;
+          
+        case "preference":
+          // Merge with existing preferences
+          const existingPref = context.preferences.find(p => p.category === update.data.category);
+          if (existingPref) {
+            existingPref.value = update.data.value;
+            existingPref.updatedBy = update.agentId;
+          } else {
+            context.preferences.push({
+              category: update.data.category,
+              value: update.data.value,
+              updatedBy: update.agentId,
+              timestamp: new Date().toISOString()
+            });
+          }
+          break;
+          
+        case "goal":
+          context.goals.push({
+            description: update.data.goal,
+            status: "active",
+            createdBy: update.agentId,
+            timestamp: new Date().toISOString()
+          });
+          break;
+      }
+      
+      // Keep memory bounded
+      if (context.facts.length > 100) {
+        context.facts = context.facts.slice(-100);
+      }
+      
+      ctx.set("context", context);
+      
+      return { 
+        status: "updated",
+        totalFacts: context.facts.length,
+        totalPreferences: context.preferences.length,
+        totalGoals: context.goals.length
+      };
+    },
+    
+    // Get relevant context for an agent
+    getRelevantContext: async (ctx, request: { agentType: string; currentTask: string }) => {
+      const context = await ctx.get<SharedContext>("context") || { facts: [], preferences: [], goals: [] };
+      
+      // Use AI to filter relevant information
+      const relevantContext = await ctx.run("filter-context", () =>
+        generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Given agent type "${request.agentType}" working on task "${request.currentTask}", extract relevant context from: ${JSON.stringify(context)}`,
+          maxTokens: 1024
+        })
+      );
+      
+      return {
+        relevantFacts: context.facts.filter(f => f.confidence > 0.7),
+        relevantPreferences: context.preferences,
+        activeGoals: context.goals.filter(g => g.status === "active"),
+        contextSummary: relevantContext.text
+      };
+    }
+  }
+});
+```
+
+### Context Window Management
+
+Intelligently manage conversation length and context to stay within model limits:
+
+```typescript
+const contextManager = restate.object({
+  name: "ContextManager",
+  handlers: {
+    optimizeContext: async (ctx, request: { 
+      messages: Message[]; 
+      maxTokens: number; 
+      preserveRecent: number 
+    }) => {
+      if (request.messages.length <= request.preserveRecent) {
+        return { optimizedMessages: request.messages, strategy: "no_optimization" };
+      }
+      
+      const recentMessages = request.messages.slice(-request.preserveRecent);
+      const oldMessages = request.messages.slice(0, -request.preserveRecent);
+      
+      // Summarize old messages
+      const summary = await ctx.run("summarize-old-messages", () =>
+        generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Summarize these conversation messages, preserving key facts and context: ${JSON.stringify(oldMessages)}`,
+          maxTokens: Math.min(1024, Math.floor(request.maxTokens * 0.3))
+        })
+      );
+      
+      // Create optimized message history
+      const optimizedMessages: Message[] = [
+        {
+          role: "system",
+          content: `Previous conversation summary: ${summary.text}`,
+          timestamp: new Date().toISOString()
+        },
+        ...recentMessages
+      ];
+      
+      // Estimate token count and further optimize if needed
+      const estimatedTokens = estimateTokenCount(optimizedMessages);
+      
+      if (estimatedTokens > request.maxTokens) {
+        // Further compress by keeping only essential recent messages
+        const essentialRecent = Math.max(5, Math.floor(request.preserveRecent * 0.6));
+        const furtherOptimized = [
+          optimizedMessages[0], // Keep summary
+          ...recentMessages.slice(-essentialRecent)
+        ];
+        
+        return { 
+          optimizedMessages: furtherOptimized, 
+          strategy: "aggressive_compression",
+          originalCount: request.messages.length,
+          finalCount: furtherOptimized.length
+        };
+      }
+      
+      return { 
+        optimizedMessages, 
+        strategy: "standard_summarization",
+        originalCount: request.messages.length,
+        finalCount: optimizedMessages.length
+      };
+    }
+  }
+});
+```
+
+### Benefits of Restate's Memory Management
+
+**Consistent State**: Each session processes messages sequentially, preventing race conditions in memory updates.
+
+**Durable Memory**: Conversation history and user profiles survive system failures and restarts.
+
+**Efficient Context Management**: Intelligent summarization keeps conversations within model context limits.
+
+**Shared Knowledge**: Multiple agents can coordinate through shared memory objects while maintaining consistency.
+
+## Tool Orchestration & Function Calling
+
+Modern AI agents rely heavily on function calling to interact with external systems. Restate makes tool execution durable and reliable, handling complex tool chains, parallel execution, and failure recovery automatically.
+
+### Durable Tool Execution
+
+Make tool calls resilient to failures and avoid duplicate execution:
+
+```typescript
+import { tool } from "ai";
+import { z } from "zod";
+
+const durableToolsAgent = restate.service({
+  name: "DurableToolsAgent",
+  handlers: {
+    executeTask: async (ctx, request: { task: string; userId: string }) => {
+      // Analyze task to determine required tools
+      const toolPlan = await ctx.run("analyze-task", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Analyze this task and create an execution plan with required tools: ${request.task}`,
+          maxTokens: 1024
+        })
+      );
+      
+      const plan = parseExecutionPlan(toolPlan.text);
+      const results = [];
+      
+      // Execute tools durably in sequence
+      for (const [index, step] of plan.steps.entries()) {
+        ctx.console.log(`Executing step ${index + 1}: ${step.description}`);
+        
+        const stepResult = await executeToolStep(ctx, step, request.userId);
+        results.push(stepResult);
+        
+        // Use results from previous steps in subsequent steps
+        step.context = results;
+      }
+      
+      // Generate final summary
+      const summary = await ctx.run("generate-summary", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Summarize the results of this task execution: ${JSON.stringify(results)}`,
+          maxTokens: 1024
+        })
+      );
+      
+      return {
+        summary: summary.text,
+        results,
+        stepsExecuted: plan.steps.length
+      };
+    }
+  }
+});
+
+async function executeToolStep(ctx: Context, step: ExecutionStep, userId: string) {
+  switch (step.toolType) {
+    case "web_search":
+      return await ctx.run(`search-${step.id}`, () =>
+        searchWeb({
+          query: step.parameters.query,
+          maxResults: step.parameters.maxResults || 5
+        })
+      );
+      
+    case "database_query":
+      return await ctx.run(`db-${step.id}`, () =>
+        queryDatabase({
+          sql: step.parameters.sql,
+          userId: userId // For access control
+        })
+      );
+      
+    case "api_call":
+      return await ctx.run(`api-${step.id}`, () =>
+        makeAPICall({
+          url: step.parameters.url,
+          method: step.parameters.method,
+          data: step.parameters.data,
+          headers: { "User-ID": userId }
+        })
+      );
+      
+    case "file_operation":
+      return await ctx.run(`file-${step.id}`, () =>
+        performFileOperation({
+          operation: step.parameters.operation,
+          path: step.parameters.path,
+          data: step.parameters.data,
+          userId: userId
+        })
+      );
+      
+    default:
+      throw new Error(`Unknown tool type: ${step.toolType}`);
+  }
+}
+```
+
+### Parallel Tool Execution
+
+Execute independent tools concurrently for better performance:
+
+```typescript
+const parallelToolsAgent = restate.service({
+  name: "ParallelToolsAgent",
+  handlers: {
+    gatherComprehensiveData: async (ctx, request: { topic: string; sources: string[] }) => {
+      // Start all data gathering operations in parallel
+      const searchFuture = ctx.run("web-search", () =>
+        searchWeb({ query: request.topic, maxResults: 10 })
+      );
+      
+      const dbFuture = ctx.run("database-search", () =>
+        queryDatabase({ 
+          sql: `SELECT * FROM articles WHERE topic LIKE '%${request.topic}%' LIMIT 20`,
+          userId: "system" 
+        })
+      );
+      
+      const apiFuture = ctx.run("external-api", () =>
+        fetchFromExternalAPI({ 
+          endpoint: "research",
+          params: { topic: request.topic, limit: 15 }
+        })
+      );
+      
+      const docsFuture = ctx.run("docs-search", () =>
+        searchDocuments({ query: request.topic, maxResults: 10 })
+      );
+      
+      // Wait for all operations to complete
+      const [webResults, dbResults, apiResults, docsResults] = await Promise.all([
+        searchFuture,
+        dbFuture, 
+        apiFuture,
+        docsFuture
+      ]);
+      
+      // Process and combine results
+      const combinedData = await ctx.run("combine-results", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Combine and synthesize these research results about ${request.topic}:
+            Web: ${JSON.stringify(webResults)}
+            Database: ${JSON.stringify(dbResults)}
+            API: ${JSON.stringify(apiResults)}
+            Docs: ${JSON.stringify(docsResults)}`,
+          maxTokens: 4096
+        })
+      );
+      
+      return {
+        synthesizedData: combinedData.text,
+        sourceCount: {
+          web: webResults.length,
+          database: dbResults.length,
+          api: apiResults.length,
+          docs: docsResults.length
+        },
+        totalSources: webResults.length + dbResults.length + apiResults.length + docsResults.length
+      };
+    }
+  }
+});
+```
+
+### Complex Tool Workflows
+
+Build sophisticated workflows that adapt based on tool results:
+
+```typescript
+const adaptiveToolAgent = restate.service({
+  name: "AdaptiveToolAgent", 
+  handlers: {
+    investigateAnomalies: async (ctx, request: { systemId: string; timeRange: string }) => {
+      let investigation = {
+        anomalies: [],
+        rootCauses: [],
+        recommendations: []
+      };
+      
+      // Step 1: Gather system metrics
+      const metrics = await ctx.run("gather-metrics", () =>
+        getSystemMetrics({
+          systemId: request.systemId,
+          timeRange: request.timeRange
+        })
+      );
+      
+      // Step 2: Analyze metrics for anomalies
+      const anomalyAnalysis = await ctx.run("detect-anomalies", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Analyze these system metrics for anomalies: ${JSON.stringify(metrics)}`,
+          maxTokens: 2048
+        })
+      );
+      
+      const detectedAnomalies = parseAnomalies(anomalyAnalysis.text);
+      investigation.anomalies = detectedAnomalies;
+      
+      // Step 3: For each anomaly, gather additional context
+      for (const anomaly of detectedAnomalies) {
+        const contextualData = await gatherAnomalyContext(ctx, anomaly, request.systemId);
+        
+        // Step 4: Determine potential root causes
+        const rootCauseAnalysis = await ctx.run(`root-cause-${anomaly.id}`, () =>
+          generateText({
+            model: openai("gpt-4o"),
+            prompt: `Given this anomaly and context, identify potential root causes:
+              Anomaly: ${JSON.stringify(anomaly)}
+              Context: ${JSON.stringify(contextualData)}`,
+            maxTokens: 1024
+          })
+        );
+        
+        const rootCauses = parseRootCauses(rootCauseAnalysis.text);
+        investigation.rootCauses.push(...rootCauses);
+        
+        // Step 5: Generate specific recommendations for each root cause
+        for (const rootCause of rootCauses) {
+          const recommendations = await ctx.run(`recommend-${rootCause.id}`, () =>
+            generateText({
+              model: openai("gpt-4o-mini"),
+              prompt: `Provide specific actionable recommendations for this root cause: ${JSON.stringify(rootCause)}`,
+              maxTokens: 512
+            })
+          );
+          
+          investigation.recommendations.push({
+            forRootCause: rootCause.id,
+            actions: parseRecommendations(recommendations.text)
+          });
+        }
+      }
+      
+      // Step 6: Prioritize recommendations
+      const prioritizedPlan = await ctx.run("prioritize-plan", () =>
+        generateText({
+          model: openai("gpt-4o"),
+          prompt: `Prioritize these recommendations by impact and urgency: ${JSON.stringify(investigation.recommendations)}`,
+          maxTokens: 1024
+        })
+      );
+      
+      return {
+        ...investigation,
+        prioritizedPlan: prioritizedPlan.text,
+        investigationComplete: true
+      };
+    }
+  }
+});
+
+async function gatherAnomalyContext(ctx: Context, anomaly: Anomaly, systemId: string) {
+  // Conditionally gather different types of context based on anomaly type
+  const contextGathering = [];
+  
+  if (anomaly.type === "performance") {
+    contextGathering.push(
+      ctx.run(`perf-logs-${anomaly.id}`, () =>
+        getPerformanceLogs({ systemId, timeRange: anomaly.timeRange })
+      )
+    );
+  }
+  
+  if (anomaly.type === "error" || anomaly.severity === "high") {
+    contextGathering.push(
+      ctx.run(`error-logs-${anomaly.id}`, () =>
+        getErrorLogs({ systemId, timeRange: anomaly.timeRange })
+      )
+    );
+  }
+  
+  if (anomaly.affectsUsers) {
+    contextGathering.push(
+      ctx.run(`user-reports-${anomaly.id}`, () =>
+        getUserReports({ systemId, timeRange: anomaly.timeRange })
+      )
+    );
+  }
+  
+  // Always gather recent deployments for context
+  contextGathering.push(
+    ctx.run(`deployments-${anomaly.id}`, () =>
+      getRecentDeployments({ systemId, timeRange: anomaly.timeRange })
+    )
+  );
+  
+  const contextResults = await Promise.all(contextGathering);
+  
+  return {
+    performanceLogs: contextResults.find(r => r.type === "performance"),
+    errorLogs: contextResults.find(r => r.type === "error"),  
+    userReports: contextResults.find(r => r.type === "user"),
+    deployments: contextResults.find(r => r.type === "deployment")
+  };
+}
+```
+
+### Benefits of Restate's Tool Orchestration
+
+**Reliable Tool Execution**: Tool calls are durable and won't be repeated on failure recovery.
+
+**Efficient Parallelism**: Independent tool calls execute concurrently, reducing overall execution time.
+
+**Complex Workflows**: Support for conditional logic, loops, and adaptive tool selection based on results.
+
+**Error Recovery**: If a tool fails, the workflow can implement fallback strategies or alternative approaches.
+
+## FAQ
+
+**How does Restate handle expensive LLM calls that fail?**
+
+Restate uses durable execution to cache LLM call results. If your agent crashes after making expensive GPT-4 calls, those results are preserved and reused when the agent restarts. You never pay twice for the same LLM operation, even during failures and retries.
+
+**What happens if my agent gets stuck in an infinite loop?**
+
+Restate provides timeout controls and deterministic execution. You can set timeouts on individual operations and use `ctx.timer()` to implement circuit breakers. Since all randomness goes through `ctx.rand`, loops behave consistently across retries.
+
+**How do I handle context window limits in long conversations?**
+
+Use Restate's Virtual Objects to implement intelligent context management. Store conversation history durably and use AI to summarize old messages when approaching context limits. The summarization only happens once and is cached for subsequent interactions.
+
+**Can multiple agents access the same user session?**
+
+Yes, using Virtual Objects with the user ID as the key ensures that only one agent can modify a user's session state at a time. This prevents race conditions while allowing different agents to access the same user's conversation history and preferences.
+
+**How does Restate handle rate limits from LLM providers?**
+
+Restate's automatic retry logic includes exponential backoff, which handles rate limit errors gracefully. You can also implement custom retry strategies and fallback to different models when primary models are rate-limited.
+
+**What happens if my agent needs human approval but no one responds?**
+
+Use Restate's timers and awakeables to implement escalation chains. After a timeout period, you can escalate to managers, send notifications, or implement fallback automatic decisions. The workflow will reliably handle timeouts even if your system restarts.
+
+**How do I prevent tool calls from being executed multiple times?**
+
+Wrap all tool calls in `ctx.run()` with unique operation names. Restate ensures that these operations are idempotent - they execute once and their results are cached. On replay, the cached result is returned without re-executing the tool.
+
+**Can I cancel a long-running agent workflow?**
+
+Yes, Restate supports workflow cancellation. You can cancel agent invocations through the API or admin interface. The agent will stop processing and clean up appropriately, even in the middle of complex multi-step operations.
+
+**How does billing work for paused agents waiting for human input?**
+
+Agents waiting on awakeables (human input, external events) consume no compute resources. You only pay for active processing time, not for time spent waiting for responses or scheduled delays.
+
+## Summary
+
+Restate transforms AI agent development by providing:
+
+- **Durable Agent Execution**: Agents that survive any failure without losing progress or repeating expensive LLM calls
+- **Resilient LLM Integration**: Smart error handling, fallback chains, and automatic retry logic for model failures  
+- **Multi-Agent Orchestration**: Reliable communication patterns for coordinating specialized agents
+- **Human-in-the-Loop Workflows**: Sophisticated approval gates and escalation patterns with timeout handling
+- **Persistent Memory Management**: Session state and conversation history that survives failures
+- **Durable Tool Orchestration**: Complex tool workflows with parallel execution and automatic error recovery
+
+With these primitives, you can build production-ready AI agents that handle real-world complexity, scale reliably, and provide the resilience that enterprise applications demand.

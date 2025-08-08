@@ -1,453 +1,679 @@
 ---
 title: "Event Processing"
-description: "An introduction to Restate for Kafka event processing and ETL workflows."
+description: "Build resilient stream processing pipelines with durable execution, stateful aggregations, and exactly-once semantics."
 icon: "wave-sine"
 ---
 
-This tour gives you an introduction to Restate for Kafka event processing and ETL-like workflows.
+Event processing with Restate transforms how you build streaming data pipelines. Rather than managing complex state stores, consumer groups, and failure recovery, you write simple event handlers that are automatically durable and fault-tolerant.
 
-## Why Restate for event processing?
+In this guide, you'll learn how to:
+- Build exactly-once event processing pipelines that survive any failure
+- Implement stateful stream aggregations without external state stores
+- Handle complex event flows with windowing and correlation patterns
+- Process high-throughput streams with automatic backpressure management
 
-If you're familiar with event processing systems like Apache Kafka Streams, Apache Flink, or AWS Kinesis, you'll find Restate offers a simpler yet powerful approach:
+## Durable Event Processing
 
-### **Simplified state management**
-Unlike traditional stream processing frameworks that require complex state management, Restate provides:
-- **Automatic state persistence**: No need to manage state stores or checkpoints
-- **Durable processing**: Events are processed exactly once, even across failures
-- **Built-in idempotency**: Automatic handling of duplicate events
-- **Stateful processing**: Maintain context across multiple events
+Durable event processing ensures your stream processing logic survives failures, restarts, and infrastructure outages. Unlike traditional stream processors that require checkpointing and state snapshots, Restate automatically handles durability at the individual event level.
 
-### **Native Kafka integration**
-Restate provides first-class support for Kafka:
-- **Direct Kafka consumption**: No need for separate consumers
-- **Automatic offset management**: Restate handles commit strategies
-- **Dead letter queues**: Built-in support for failed event handling
-- **Scalable processing**: Automatic partitioning and load balancing
+### Key Benefits for Stream Processing
 
-### **ETL workflows made simple**
-Transform complex ETL pipelines into simple, reliable services:
-- **Sequential processing**: Natural flow from one step to the next
-- **Error handling**: Automatic retries with configurable policies
-- **Data validation**: Built-in support for schema validation
-- **Aggregation**: Easy stateful aggregation across events
+**Exactly-Once Semantics**: Every event is processed exactly once, even across failures. No need to manage offsets, checkpoints, or duplicate detection - Restate handles this automatically.
 
-## Key concepts for event processing
+**Zero Consumer Management**: No Kafka consumer groups, partition assignments, or rebalancing. Restate manages all Kafka interactions and routes events directly to your handlers.
 
-### Event Handlers
-In Restate, event processing is implemented as **event handlers**:
+**Automatic Backpressure**: When downstream systems are slow, Restate automatically applies backpressure without losing events or blocking other streams.
 
-```ts
-restate.service({
-  name: "OrderEventProcessor",
+### How It Works
+
+A Restate stream processing application consists of:
+- **Restate Server**: Manages event ingestion, offset tracking, and durable execution - like a streaming engine that sits between Kafka and your processing logic
+- **Event Handlers**: Your stream processing logic implemented as simple functions that receive events and use the Restate SDK for durable operations
+
+All events flow through the Restate Server, which persists them in a durable log and ensures your handlers process each event exactly once:
+
+<img src="/img/tour/durable_execution_microservices.gif" alt="Durable event processing in Restate" />
+
+Whenever you perform an operation with the `Context`, Restate records it in the durable log. If your handler crashes, Restate replays the log to restore progress and continue processing exactly where it left off.
+
+### Implementing Durable Event Processing
+
+Here's a complete example of processing financial transactions with automatic durability:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+
+const transactionProcessor = restate.service({
+  name: "TransactionProcessor",
   handlers: {
-    processOrderEvent: async (ctx: restate.Context, event: OrderEvent) => {
-      // Process the event
-      await ctx.set("lastProcessedEvent", event.id);
+    processTransaction: async (ctx: restate.Context, txn: Transaction) => {
+      // Generate deterministic ID
+      const enrichmentId = ctx.rand.uuidv4();
       
-      // Transform and enrich data
-      const enrichedData = await enrichOrderData(event);
+      // Durably enrich transaction data
+      const enrichedTxn = await ctx.run(
+        "enrich-transaction",
+        () => enrichmentService.addCustomerData(txn, enrichmentId)
+      );
       
-      // Store or forward to other systems
-      await ctx.call(databaseService.store, enrichedData);
+      // Durably store to warehouse
+      await ctx.run(
+        "store-warehouse", 
+        () => warehouse.store(enrichedTxn)
+      );
+      
+      // Update real-time metrics
+      await ctx.run(
+        "update-metrics",
+        () => metricsService.increment("transactions.processed", enrichedTxn.amount)
+      );
     }
   }
 });
 ```
 
-### Kafka Integration
-Restate provides seamless Kafka integration through the `@restate/kafka` package:
+**Event Handler Execution**: Each event creates its own execution path with dedicated recovery logging. Restate tracks all operations and their results.
 
-```ts
-import { kafka } from "@restate/kafka";
+**Durable Side Effects**: Use `ctx.run()` to wrap external calls like database writes or API calls, making them durable. These operations are logged and won't be re-executed on replay.
 
-restate.service({
-  name: "KafkaEventProcessor",
+**Automatic Recovery**: If the handler crashes after enriching data but before storing to the warehouse, it will resume at the correct point without re-enriching.
+
+**Exactly-Once Guarantees**: External systems receive each processed event exactly once, even during failures and retries.
+
+### Try it out
+
+clone this repo
+
+run the Restate server
+
+run the service
+
+register the service
+
+send events to Kafka
+
+have a look at the UI
+
+## Stream State Management
+
+Traditional stream processors require external state stores like RocksDB or Redis for maintaining processing state. Restate provides built-in key-value state that's automatically partitioned, replicated, and consistent - eliminating the need for separate state management infrastructure.
+
+### Stateful Aggregations
+
+Build windowed aggregations and running calculations without external databases:
+
+```typescript
+const userMetrics = restate.object({
+  name: "UserMetrics",
   handlers: {
-    // Automatically consumes from Kafka topic
-    processEvent: kafka.handler({
-      topic: "orders",
-      schema: OrderEventSchema,
-      handler: async (ctx: restate.Context, event: OrderEvent) => {
-        // Process the event
-        await processOrderEvent(ctx, event);
-      }
-    })
-  }
-});
-```
-
-### Stateful Event Processing
-Maintain state across multiple events for aggregation and correlation:
-
-```ts
-async function processOrderEvent(ctx: restate.Context, event: OrderEvent) {
-  // Get existing state
-  const orderHistory = await ctx.get("orderHistory") || [];
-  const totalSpent = await ctx.get("totalSpent") || 0;
-  
-  // Update state
-  orderHistory.push(event);
-  const newTotal = totalSpent + event.amount;
-  
-  // Persist state
-  await ctx.set("orderHistory", orderHistory);
-  await ctx.set("totalSpent", newTotal);
-  
-  // Trigger actions based on state
-  if (newTotal > 1000) {
-    await ctx.call(loyaltyService.upgradeTier, { customerId: event.customerId });
-  }
-}
-```
-
-## Event processing patterns
-
-### **Simple Event Processing**
-Process events one by one with basic transformation:
-
-```ts
-restate.service({
-  name: "SimpleEventProcessor",
-  handlers: {
-    processEvent: kafka.handler({
-      topic: "raw-events",
-      handler: async (ctx: restate.Context, event: RawEvent) => {
-        // Transform event
-        const transformedEvent = {
-          id: event.id,
-          timestamp: new Date().toISOString(),
-          data: event.data,
-          processed: true
-        };
-        
-        // Forward to next topic
-        await ctx.call(kafkaService.publish, {
-          topic: "transformed-events",
-          message: transformedEvent
+    updateSpending: async (ctx: restate.ObjectContext, event: PurchaseEvent) => {
+      // Get current totals
+      const dailyTotal = await ctx.get("dailySpending") || 0;
+      const monthlyTotal = await ctx.get("monthlySpending") || 0;
+      
+      // Update aggregations
+      await ctx.set("dailySpending", dailyTotal + event.amount);
+      await ctx.set("monthlySpending", monthlyTotal + event.amount);
+      
+      // Trigger alerts for high spending
+      if (dailyTotal + event.amount > 1000) {
+        await ctx.send(alertService).highSpendingAlert({
+          userId: event.userId,
+          amount: dailyTotal + event.amount
         });
       }
-    })
+    }
   }
 });
 ```
 
-### **Event Aggregation**
-Aggregate events over time windows:
+### Event Enrichment
 
-```ts
-restate.service({
-  name: "OrderAggregator",
+Enrich streaming data with contextual information stored in Restate's state:
+
+```typescript
+const eventEnricher = restate.service({
+  name: "EventEnricher",
   handlers: {
-    aggregateOrders: kafka.handler({
-      topic: "orders",
-      handler: async (ctx: restate.Context, event: OrderEvent) => {
-        const customerId = event.customerId;
-        
-        // Get existing aggregation
-        const dailyOrders = await ctx.get(`daily_${customerId}`) || [];
-        const monthlyTotal = await ctx.get(`monthly_${customerId}`) || 0;
-        
-        // Add new order
-        dailyOrders.push(event);
-        const newMonthlyTotal = monthlyTotal + event.amount;
-        
-        // Update state
-        await ctx.set(`daily_${customerId}`, dailyOrders);
-        await ctx.set(`monthly_${customerId}`, newMonthlyTotal);
-        
-        // Generate daily summary at end of day
-        if (isEndOfDay(event.timestamp)) {
-          await ctx.call(reportingService.sendDailySummary, {
-            customerId,
-            orders: dailyOrders,
-            total: dailyOrders.reduce((sum, order) => sum + order.amount, 0)
-          });
-          
-          // Reset daily state
-          await ctx.set(`daily_${customerId}`, []);
-        }
-      }
-    })
+    enrichEvent: async (ctx: restate.Context, event: RawEvent) => {
+      // Get user profile from state or external service
+      const userProfile = await ctx.run(
+        "get-user-profile",
+        () => userService.getProfile(event.userId)
+      );
+      
+      // Enrich event with profile data
+      const enrichedEvent = {
+        ...event,
+        userSegment: userProfile.segment,
+        userTier: userProfile.tier,
+        enrichedAt: Date.now()
+      };
+      
+      // Forward to downstream processors
+      await ctx.send(analyticsService).processEnrichedEvent(enrichedEvent);
+    }
   }
 });
 ```
 
-### **Event Correlation**
-Correlate events from multiple sources:
+### Session Management
 
-```ts
-restate.service({
-  name: "OrderCorrelator",
+Track user sessions and behavior patterns across multiple events:
+
+```typescript
+const sessionTracker = restate.object({
+  name: "SessionTracker",
   handlers: {
-    processOrderEvent: kafka.handler({
-      topic: "orders",
-      handler: async (ctx: restate.Context, event: OrderEvent) => {
-        const orderId = event.orderId;
-        
-        // Store order event
-        await ctx.set(`order_${orderId}`, event);
-        
-        // Check if we have all related events
-        await checkOrderCompletion(ctx, orderId);
+    trackActivity: async (ctx: restate.ObjectContext, activity: UserActivity) => {
+      const session = await ctx.get("currentSession") || {
+        startTime: activity.timestamp,
+        events: [],
+        totalDuration: 0
+      };
+      
+      // Add activity to session
+      session.events.push(activity);
+      session.lastActivity = activity.timestamp;
+      
+      // Check for session timeout (30 minutes)
+      const timeSinceStart = activity.timestamp - session.startTime;
+      if (timeSinceStart > 30 * 60 * 1000) {
+        // Session expired, start new one
+        await ctx.send(analyticsService).recordSession(session);
+        await ctx.set("currentSession", {
+          startTime: activity.timestamp,
+          events: [activity],
+          totalDuration: 0
+        });
+      } else {
+        await ctx.set("currentSession", session);
       }
-    }),
+    }
+  }
+});
+```
+
+### Benefits of Built-in State
+
+**No External Dependencies**: State is co-located with your processing logic, eliminating network overhead and operational complexity.
+
+**Automatic Partitioning**: State is automatically partitioned by key, enabling horizontal scaling while maintaining consistency.
+
+**Transactional Updates**: State changes are part of the same transaction as event processing, ensuring consistency.
+
+**Fault Tolerance**: State is automatically replicated and survives failures without manual backup/restore procedures.
+
+## Stream Processing Patterns
+
+### Stream Transformations
+
+Implement ETL transformations with automatic error handling and retry logic:
+
+```typescript
+const dataTransformer = restate.service({
+  name: "DataTransformer",
+  handlers: {
+    transformEvent: async (ctx: restate.Context, rawEvent: RawEvent) => {
+      // Validate event structure
+      const isValid = await ctx.run(
+        "validate-event",
+        () => validator.validateSchema(rawEvent)
+      );
+      
+      if (!isValid) {
+        await ctx.send(deadLetterQueue).store(rawEvent, "invalid_schema");
+        return;
+      }
+      
+      // Transform to standard format
+      const transformed = {
+        id: rawEvent.id,
+        timestamp: new Date(rawEvent.timestamp).toISOString(),
+        eventType: rawEvent.type.toLowerCase(),
+        payload: rawEvent.data,
+        source: rawEvent.source || "unknown",
+        version: "1.0"
+      };
+      
+      // Send to next stage
+      await ctx.send(eventRouter).routeEvent(transformed);
+    }
+  }
+});
+```
+
+### Windowed Aggregations
+
+Perform time-based aggregations with automatic window management:
+
+```typescript
+const windowedAggregator = restate.object({
+  name: "WindowedAggregator",
+  handlers: {
+    addToWindow: async (ctx: restate.ObjectContext, event: MetricEvent) => {
+      const windowKey = Math.floor(event.timestamp / (5 * 60 * 1000)); // 5-minute windows
+      const window = await ctx.get(`window_${windowKey}`) || {
+        start: windowKey * 5 * 60 * 1000,
+        count: 0,
+        sum: 0,
+        events: []
+      };
+      
+      // Add event to window
+      window.count++;
+      window.sum += event.value;
+      window.events.push(event);
+      
+      await ctx.set(`window_${windowKey}`, window);
+      
+      // Check if window should be closed (events from next window arrived)
+      const currentWindow = Math.floor(Date.now() / (5 * 60 * 1000));
+      if (windowKey < currentWindow - 1) {
+        // Close and emit window results
+        await ctx.send(reportingService).recordWindowMetrics({
+          windowStart: window.start,
+          count: window.count,
+          average: window.sum / window.count,
+          total: window.sum
+        });
+        
+        // Clean up old window
+        await ctx.del(`window_${windowKey}`);
+      }
+    }
+  }
+});
+```
+
+### Event Correlation
+
+Correlate events from multiple streams with automatic cleanup:
+
+```typescript
+const orderProcessor = restate.object({
+  name: "OrderProcessor", 
+  handlers: {
+    onOrderCreated: async (ctx: restate.ObjectContext, event: OrderEvent) => {
+      await ctx.set("order", event);
+      await checkCompletion(ctx);
+    },
     
-    processPaymentEvent: kafka.handler({
-      topic: "payments",
-      handler: async (ctx: restate.Context, event: PaymentEvent) => {
-        const orderId = event.orderId;
-        
-        // Store payment event
-        await ctx.set(`payment_${orderId}`, event);
-        
-        // Check if we have all related events
-        await checkOrderCompletion(ctx, orderId);
-      }
-    }),
+    onPaymentProcessed: async (ctx: restate.ObjectContext, event: PaymentEvent) => {
+      await ctx.set("payment", event);
+      await checkCompletion(ctx);
+    },
     
-    processShippingEvent: kafka.handler({
-      topic: "shipping",
-      handler: async (ctx: restate.Context, event: ShippingEvent) => {
-        const orderId = event.orderId;
-        
-        // Store shipping event
-        await ctx.set(`shipping_${orderId}`, event);
-        
-        // Check if we have all related events
-        await checkOrderCompletion(ctx, orderId);
-      }
-    })
+    onInventoryReserved: async (ctx: restate.ObjectContext, event: InventoryEvent) => {
+      await ctx.set("inventory", event);
+      await checkCompletion(ctx);
+    }
   }
 });
 
-async function checkOrderCompletion(ctx: restate.Context, orderId: string) {
-  const order = await ctx.get(`order_${orderId}`);
-  const payment = await ctx.get(`payment_${orderId}`);
-  const shipping = await ctx.get(`shipping_${orderId}`);
+async function checkCompletion(ctx: restate.ObjectContext) {
+  const [order, payment, inventory] = await Promise.all([
+    ctx.get("order"), ctx.get("payment"), ctx.get("inventory")
+  ]);
   
-  if (order && payment && shipping) {
-    // All events received, process complete order
-    await ctx.call(orderService.completeOrder, {
-      orderId,
-      order,
-      payment,
-      shipping
+  if (order && payment && inventory) {
+    // All events received - complete the order
+    await ctx.send(fulfillmentService).fulfillOrder({
+      orderId: order.id,
+      items: inventory.items,
+      paymentId: payment.id
     });
     
     // Clean up state
-    await ctx.del(`order_${orderId}`);
-    await ctx.del(`payment_${orderId}`);
-    await ctx.del(`shipping_${orderId}`);
+    await ctx.clear();
   }
 }
 ```
 
-### **Dead Letter Queue Processing**
-Handle failed events with retry logic:
+### Try it out
 
-```ts
-restate.service({
-  name: "DeadLetterProcessor",
+Publish events to multiple topics
+
+Observe correlation in the UI
+
+Watch automatic cleanup
+
+## Event Communication
+
+Build complex stream topologies by connecting multiple event handlers. Unlike rigid DAG-based stream processors, Restate allows dynamic, conditional routing and multi-stage processing pipelines.
+
+### Request-Response Event Processing
+
+Synchronously call downstream processors when you need immediate results:
+
+```typescript
+const syncProcessor = restate.service({
+  name: "SyncProcessor",
   handlers: {
-    processFailedEvent: kafka.handler({
-      topic: "dead-letter-queue",
-      handler: async (ctx: restate.Context, event: FailedEvent) => {
-        const retryCount = await ctx.get(`retry_${event.id}`) || 0;
-        
-        if (retryCount >= 3) {
-          // Max retries reached, send to final failure topic
-          await ctx.call(kafkaService.publish, {
-            topic: "permanent-failures",
-            message: {
-              ...event,
-              finalFailure: true,
-              retryCount
-            }
-          });
-          return;
-        }
-        
-        try {
-          // Attempt to process again
-          await ctx.call(originalService.process, event.data);
-          
-          // Success, clean up retry count
-          await ctx.del(`retry_${event.id}`);
-        } catch (error) {
-          // Increment retry count
-          await ctx.set(`retry_${event.id}`, retryCount + 1);
-          
-          // Re-queue with exponential backoff
-          const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
-          await ctx.sleep({ milliseconds: delay });
-          
-          await ctx.call(kafkaService.publish, {
-            topic: "dead-letter-queue",
-            message: event
-          });
-        }
+    processWithValidation: async (ctx: restate.Context, event: Event) => {
+      // Synchronously validate with external service
+      const validationResult = await ctx.run(
+        "validate-event",
+        () => validationService.validate(event)
+      );
+      
+      if (!validationResult.isValid) {
+        throw new Error(`Validation failed: ${validationResult.reason}`);
       }
-    })
+      
+      // Process the validated event
+      const result = await ctx.run(
+        "process-event",
+        () => businessLogic.process(event, validationResult.metadata)
+      );
+      
+      return result;
+    }
   }
 });
 ```
 
-## ETL workflow example
+### Asynchronous Event Forwarding
 
-Here's a complete ETL pipeline that processes customer events:
+Forward events to downstream processors without waiting for completion:
 
-```ts
-restate.service({
-  name: "CustomerETL",
+```typescript
+const eventRouter = restate.service({
+  name: "EventRouter",
   handlers: {
-    processCustomerEvent: kafka.handler({
-      topic: "customer-events",
-      handler: async (ctx: restate.Context, event: CustomerEvent) => {
-        // Step 1: Validate and clean data
-        const cleanedEvent = await validateAndClean(event);
-        if (!cleanedEvent) {
-          await ctx.call(kafkaService.publish, {
-            topic: "invalid-events",
-            message: { original: event, reason: "validation_failed" }
-          });
-          return;
-        }
-        
-        // Step 2: Enrich with external data
-        const enrichedEvent = await ctx.call(customerService.enrich, {
-          customerId: cleanedEvent.customerId,
-          data: cleanedEvent
-        });
-        
-        // Step 3: Transform for analytics
-        const analyticsEvent = {
-          customerId: enrichedEvent.customerId,
-          timestamp: enrichedEvent.timestamp,
-          eventType: enrichedEvent.type,
-          segment: enrichedEvent.segment,
-          value: enrichedEvent.value,
-          processedAt: new Date().toISOString()
-        };
-        
-        // Step 4: Store in data warehouse
-        await ctx.call(warehouseService.store, analyticsEvent);
-        
-        // Step 5: Update real-time dashboard
-        await ctx.call(dashboardService.update, {
-          customerId: enrichedEvent.customerId,
-          event: analyticsEvent
-        });
-        
-        // Step 6: Trigger downstream processes
-        if (enrichedEvent.type === "purchase") {
-          await ctx.call(loyaltyService.updatePoints, {
-            customerId: enrichedEvent.customerId,
-            purchaseAmount: enrichedEvent.value
-          });
-        }
+    routeEvent: async (ctx: restate.Context, event: ProcessedEvent) => {
+      // Route to multiple downstream services asynchronously
+      switch (event.eventType) {
+        case "user_signup":
+          await ctx.send(emailService).sendWelcomeEmail(event.payload);
+          await ctx.send(analyticsService).trackSignup(event);
+          await ctx.send(crmService).createLead(event.payload);
+          break;
+          
+        case "purchase":
+          await ctx.send(inventoryService).updateStock(event.payload);
+          await ctx.send(recommendationService).updatePreferences(event);
+          await ctx.send(loyaltyService).awardPoints(event.payload);
+          break;
+          
+        default:
+          await ctx.send(defaultHandler).processGeneric(event);
       }
-    })
+    }
   }
 });
 ```
 
-## Configuration for event processing
+### Multi-Stage Pipelines
 
-### **Kafka Configuration**
-Configure Kafka connection and consumer settings:
+Build complex multi-step processing pipelines with error handling:
 
-```ts
-restate.service({
-  name: "ConfiguredEventProcessor",
+```typescript
+const dataProcessor = restate.service({
+  name: "DataProcessor",
   handlers: {
-    processEvents: kafka.handler({
-      topic: "events",
-      groupId: "my-consumer-group",
-      autoCommit: false, // Manual offset management
-      maxPollRecords: 100,
-      handler: async (ctx: restate.Context, event: Event) => {
-        // Process event
-        await processEvent(ctx, event);
-        
-        // Manually commit offset
-        await ctx.commit();
+    processRawEvent: async (ctx: restate.Context, event: RawEvent) => {
+      // Stage 1: Validate
+      const isValid = await ctx.run(
+        "validate",
+        () => validator.check(event)
+      );
+      
+      if (!isValid) {
+        await ctx.send(deadLetterQueue).store(event);
+        return;
       }
-    })
+      
+      // Stage 2: Enrich
+      const enriched = await ctx.run(
+        "enrich", 
+        () => enrichmentService.addMetadata(event)
+      );
+      
+      // Stage 3: Route based on event type
+      switch (enriched.type) {
+        case "user_action":
+          await ctx.send(analyticsService).trackUserBehavior(enriched);
+          break;
+        case "system_event":
+          await ctx.send(monitoringService).recordMetric(enriched);
+          break;
+        case "business_event":
+          await ctx.send(reportingService).updateDashboard(enriched);
+          break;
+      }
+    }
   }
 });
 ```
 
-### **Error Handling**
-Configure retry policies and error handling:
+## Complex Event Flows
 
-```ts
-restate.service({
-  name: "RobustEventProcessor",
+Restate enables sophisticated stream processing patterns that go beyond simple transformations. Build event-driven workflows with timing requirements, conditional logic, and long-running processes.
+
+### Event Scheduling and Delays
+
+Schedule future event processing and implement time-based triggers:
+
+```typescript
+const scheduledProcessor = restate.service({
+  name: "ScheduledProcessor",
   handlers: {
-    processEvents: kafka.handler({
-      topic: "events",
-      handler: restate.handlers.handler(
-        {
-          maxRetries: 3,
-          retryDelay: { seconds: 5 }
-        },
-        async (ctx: restate.Context, event: Event) => {
-          try {
-            await processEvent(ctx, event);
-          } catch (error) {
-            // Log error and send to dead letter queue
-            await ctx.call(loggingService.log, {
-              level: "error",
-              message: "Event processing failed",
-              event,
-              error: error.message
-            });
-            
-            await ctx.call(kafkaService.publish, {
-              topic: "dead-letter-queue",
-              message: { event, error: error.message }
-            });
-            
-            throw error; // Retry
-          }
-        }
-      )
-    })
+    scheduleReminder: async (ctx: restate.Context, request: ReminderRequest) => {
+      // Schedule reminder for future execution
+      await ctx.sleep(request.delayMs);
+      
+      // Send reminder after delay
+      await ctx.run(
+        "send-reminder",
+        () => notificationService.send({
+          userId: request.userId,
+          message: request.message,
+          type: "reminder"
+        })
+      );
+    },
+    
+    processWithTimeout: async (ctx: restate.Context, task: ProcessingTask) => {
+      // Race between processing and timeout
+      const timeoutPromise = ctx.sleep(30000); // 30 second timeout
+      const processingPromise = ctx.run(
+        "process-task",
+        () => heavyProcessingService.process(task)
+      );
+      
+      const result = await Promise.race([
+        processingPromise.then(r => ({ success: true, result: r })),
+        timeoutPromise.then(() => ({ success: false, error: "timeout" }))
+      ]);
+      
+      if (!result.success) {
+        await ctx.send(retryQueue).scheduleRetry(task);
+      }
+      
+      return result;
+    }
   }
 });
 ```
 
-## Best practices
+### Event Timeouts and SLAs
 
-### **Event Design**
-- Use schemas for event validation
-- Include correlation IDs for event tracing
-- Design events to be idempotent
-- Keep events focused and single-purpose
+Implement processing timeouts and SLA monitoring:
 
-### **State Management**
-- Use meaningful key names for state
-- Clean up state when no longer needed
-- Consider state size and retention policies
-- Use state for correlation, not as a database
+```typescript
+const slaMonitor = restate.service({
+  name: "SLAMonitor",
+  handlers: {
+    monitorProcessing: async (ctx: restate.Context, task: MonitoredTask) => {
+      const startTime = Date.now();
+      
+      // Set SLA timeout
+      const slaTimeout = ctx.sleep(task.slaMs);
+      const processingComplete = ctx.awakeable<ProcessingResult>();
+      
+      // Race between completion and SLA breach
+      const result = await Promise.race([
+        processingComplete.promise.then(r => ({ type: "completed", result: r })),
+        slaTimeout.then(() => ({ type: "sla_breach", duration: Date.now() - startTime }))
+      ]);
+      
+      if (result.type === "sla_breach") {
+        // SLA breached - alert and escalate
+        await ctx.run(
+          "alert-sla-breach",
+          () => alertService.sendSLAAlert({
+            taskId: task.id,
+            expectedMs: task.slaMs,
+            actualMs: result.duration
+          })
+        );
+      }
+      
+      return result;
+    }
+  }
+});
+```
 
-### **Performance**
-- Process events in batches when possible
-- Use appropriate Kafka partition strategies
-- Monitor processing latency and throughput
-- Configure appropriate timeouts for external calls
+### Parallel Stream Processing
 
-### **Reliability**
-- Implement proper error handling
-- Use dead letter queues for failed events
-- Configure appropriate retry policies
-- Monitor and alert on processing failures
+Process multiple event streams concurrently with coordination:
 
-## Next steps
+```typescript
+const parallelProcessor = restate.service({
+  name: "ParallelProcessor",
+  handlers: {
+    processInParallel: async (ctx: restate.Context, batch: EventBatch) => {
+      // Start multiple processing tasks concurrently
+      const processingTasks = batch.events.map(event => 
+        ctx.run(
+          `process-${event.id}`,
+          () => eventProcessor.processEvent(event)
+        )
+      );
+      
+      // Wait for all tasks to complete
+      const results = await Promise.all(processingTasks);
+      
+      // Aggregate results
+      const summary = {
+        totalProcessed: results.length,
+        successful: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        processingTime: Date.now() - batch.timestamp
+      };
+      
+      // Report batch completion
+      await ctx.run(
+        "report-batch-completion",
+        () => metricsService.recordBatchMetrics(summary)
+      );
+      
+      return summary;
+    }
+  }
+});
+```
 
-- Learn about [Kafka integration](/develop/ts/kafka) for detailed setup
-- Explore [error handling](/develop/ts/error-handling) for robust event processing
-- See [state management](/develop/ts/state) for advanced patterns
-- Understand [service communication](/develop/ts/service-communication) for microservice integration
+### Complete Example: Real-Time Fraud Detection
 
+Here's a complex fraud detection pipeline that combines multiple patterns:
 
+```typescript
+const fraudDetector = restate.service({
+  name: "FraudDetector",
+  handlers: {
+    checkTransaction: async (ctx: restate.Context, txn: Transaction) => {
+      // Calculate risk score
+      const riskScore = await ctx.run(
+        "calculate-risk",
+        () => riskEngine.calculateScore(txn)
+      );
+      
+      if (riskScore > 0.8) {
+        // High risk - require manual review
+        const timeout = ctx.sleep(5 * 60 * 1000); // 5-minute timeout
+        const reviewComplete = ctx.awakeable<boolean>();
+        
+        // Notify fraud team
+        await ctx.run(
+          "notify-fraud-team",
+          () => fraudTeam.requestReview(txn.id, reviewComplete.id)
+        );
+        
+        // Race between timeout and manual review
+        const result = await Promise.race([
+          timeout.then(() => "timeout"),
+          reviewComplete.promise.then(() => "reviewed")
+        ]);
+        
+        if (result === "timeout") {
+          // Auto-decline after timeout
+          await ctx.run(
+            "auto-decline",
+            () => transactionService.decline(txn.id, "fraud_timeout")
+          );
+        }
+      } else if (riskScore > 0.5) {
+        // Medium risk - additional verification
+        await ctx.run(
+          "request-2fa",
+          () => authService.requestTwoFactor(txn.userId)
+        );
+      } else {
+        // Low risk - auto-approve
+        await ctx.run(
+          "auto-approve",
+          () => transactionService.approve(txn.id)
+        );
+      }
+    }
+  }
+});
+```
+
+### Benefits of Restate's Event Flow Model
+
+**Flexible Control Flow**: No DAG restrictions - use loops, conditionals, and dynamic routing as needed
+
+**Durable Long-Running Processes**: Complex workflows survive failures and infrastructure changes
+
+**Efficient Resource Usage**: Sleeping processes consume no compute resources until awakened
+
+**Deterministic Execution**: All timing and randomness is handled deterministically for reliable replays
+
+### Try it out
+
+Send transaction events
+
+Trigger fraud detection rules
+
+Observe correlation and scoring
+
+Watch alerts and processing flows
+
+## FAQ
+
+How does Restate handle resilience against...
+
+create an accordion group with the following items:
+- **Event loss during failures**: Restate's durable log ensures no events are lost. Each event is persisted before processing begins, and processing resumes exactly where it left off after any failure.
+- **Duplicate event processing**: Built-in exactly-once semantics prevent duplicate processing. Each event gets a unique execution ID that prevents re-execution of completed operations.
+- **Partition rebalancing**: Unlike traditional consumer groups, Restate eliminates rebalancing issues. Events are routed by key directly to handlers without complex partition assignment protocols.
+- **Processing lag and backpressure**: Automatic backpressure prevents overwhelming downstream systems. When handlers can't keep up, Restate throttles ingestion while preserving event order.
+- **State corruption**: Transactional state updates ensure consistency. State changes are atomic with event processing, preventing partial updates during failures.
+- **Network partitions**: Handlers continue processing available events. When network connectivity is restored, processing resumes automatically without manual intervention.
+- **Slow downstream dependencies**: Failed external calls are automatically retried with exponential backoff. Long-running operations don't block processing of other events.
+
+## Summary
+
+Restate transforms stream processing by providing:
+
+- **Durable Event Processing**: Events processed exactly once with automatic failure recovery
+- **Built-in State Management**: Stateful aggregations without external state stores
+- **Flexible Stream Topologies**: Dynamic routing and conditional processing beyond DAG limitations  
+- **Advanced Event Flows**: Scheduling, timeouts, and correlation patterns for complex workflows
+- **Zero Infrastructure Overhead**: No consumer groups, state stores, or checkpoint management
+
+With these primitives, data engineers can build sophisticated, fault-tolerant streaming systems without the operational complexity of traditional stream processing frameworks.
