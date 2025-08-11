@@ -9,22 +9,81 @@ Workflows orchestrate complex business processes that span multiple steps, servi
 In this guide, you'll learn how to:
 - Write workflows as regular functions with automatic durability
 - Handle long-running processes with state and event patterns
-- Deploy workflows inline or as separate services
+- Deploy steps inline or services that can scale independently
 - Build resilient, observable workflows without external dependencies
 
 ## Durable Execution
 
-Restate workflows use durable execution to ensure your business logic survives any failure and resumes exactly where it left off. Unlike traditional workflow systems that require separate orchestrator infrastructure and worker management, Restate makes every function call automatically durable.
+Restate workflows use durable execution to ensure your business logic survives any failure and resumes exactly where it left off. Unlike traditional workflow systems that require separate orchestrator infrastructure and worker management, Restate lets you deploy your workflows the same way you deploy your application code.
 
 ### How It Works
+A Restate application is composed of two main components:
+- **Restate Server**: The core engine that manages durable execution and orchestrates services. It acts as a message broker or reverse proxy in front of your services.
+- **Your Services**: Your workflows and business logic, implemented as service handlers using the Restate SDK to perform durable operations.
 
-When you write a workflow as a regular function, Restate automatically journals every operation. If your workflow crashes or restarts, the execution replays from the journal to restore state and continue processing:
+You write a workflow as a regular function. You use the Restate SDK to persist the steps your workflow completes in the Restate Server.
+
+If your workflow crashes or restarts, the execution replays from the journal to restore state and continue processing:
 
 <img src="/img/tour/durable_execution_workflows.gif" alt="Durable Workflow Execution" />
 
-### User Signup Workflow Example
+### Implementing Workflows with Durable Execution
 
-Here's a complete signup workflow that demonstrates durable execution with external events:
+Here's a minimal workflow that we will gradually enhance to demonstrate the features of Restate workflows:
+
+```ts
+const signupWorkflow = restate.workflow({
+  name: "user-signup",
+  handlers: {
+    run: async (
+      ctx: restate.WorkflowContext,
+      user: { name: string; email: string }
+    ) => {
+      // workflow ID = user ID; workflow runs once per user
+      const userId = ctx.key;
+
+      await ctx.run(() => createUserEntry(user));
+      await ctx.run(() => sendEmail({ userId, user }));
+    },
+  },
+});
+```
+
+The example shows a user signup workflow that creates a user entry and then sends an email.
+
+Restate workflows have a name, a handler called `run`, and optionally a set of other handler to interact with the workflow. An execution of the workflow is identified by a unique key (in this case, the user ID).
+
+The workflow can be submitted over HTTP, Kafka or programmatically.
+
+The `WorkflowContext` object is provided by the Restate SDK and provides methods to perform durable operations:
+- **Durable Steps**: `ctx.run()` ensures non-deterministic operations like database writes or external API calls are persisted
+- **Progress Recovery**: If the workflow crashes after user creation, it resumes at the email step
+- Full execution traces for debugging and monitoring
+
+## Submitting Workflows
+You can submit workflows to the Restate Server using HTTP:
+```shell
+curl -X POST http://localhost:8080/workflows/user-signup \
+  --json '{"name": "John Doe", "email": "me@email.com"}
+```
+
+Restate will deduplicate workflow executions based on the key.
+
+Or programmatically with the Restate SDK from other Restate services:
+```ts
+```
+
+If a workflow is already ongoing, you can also attach to it:
+```ts
+```
+
+## Workflow Patterns
+
+Restate provides powerful patterns for building complex workflows using familiar programming constructs.
+
+### Signaling
+
+Workflows can pause execution waiting for external events:
 
 ```ts
 const signupWorkflow = restate.workflow({
@@ -56,76 +115,142 @@ const signupWorkflow = restate.workflow({
 });
 ```
 
-**Key Features:**
-- **Deterministic Operations**: `ctx.random()` generates the same UUID on replay
-- **Durable External Calls**: `ctx.run()` ensures external systems are called exactly once
-- **Automatic State Persistence**: `ctx.set()` changes survive crashes
-- **Event Integration**: Promises pause execution until external events occur
+In this example, the workflow creates a user entry and sends an email with a link. It then waits for the user to click the link, which resolves the promise and allows the workflow to continue.
 
-This approach eliminates the need for explicit checkpointing, state machines, or complex retry logic that traditional workflow systems require.
+The `ctx.promise()` method creates a **Durable Promise** that can be resolved via other handlers of the workflow. This allows you to handle asynchronous events without complex message queues or external state management.
 
-## Workflow Patterns
+The `click` handler can be called by any service to resolve the promise, allowing the workflow to continue once the user clicks the link.
 
-Restate provides powerful patterns for building complex workflows using familiar programming constructs.
+### Workflow Events
 
-### Signaling
+In the previous section, we used a promise to send a signal to the workflow. But you can also use promises the other way around: to send events from the workflow and wait on them in one of the other handlers.
 
-Workflows maintain durable state and can pause execution waiting for external events:
+```ts
+const signupWorkflow = restate.workflow({
+  name: "user-signup",
+  handlers: {
+    run: async (
+      ctx: restate.WorkflowContext,
+      user: { name: string; email: string }
+    ) => {
+      // workflow ID = user ID; workflow runs once per user
+      const userId = ctx.key;
 
-```python
-{CODE_LOAD::python/src/develop/workflows/signup.py#mark_3}
+      await ctx.run(() => createUserEntry(user));
+      await ctx.promise<string>("entry-created").resolve("User entry created");
+
+      await ctx.run(() => sendEmail({ userId, user }));
+    },
+
+    entryCreated: async (
+      ctx: restate.WorkflowSharedContext
+    ) => {
+      await ctx.promise<string>("entry-created");
+    },
+  },
+});
 ```
 
-**Durable Promises** let you handle external events without complex message correlation or state management systems. Each workflow instance automatically receives events targeted to its unique ID.
+An external client can now call the `entryCreated` handler to wait for the user entry to be created before proceeding with other operations.
 
-### Querying the workflow
 
-Events with promise
+### Querying Workflow K/V State
+An alternative way of getting data out of the workflow is by querying the key-value state of the workflow.
+The workflow's run handler can store state in Restate's K/V store. The other handlers can then query that state:
 
-or K/V state
+```ts
+const signupWorkflow = restate.workflow({
+  name: "user-signup",
+  handlers: {
+    run: async (
+      ctx: restate.WorkflowContext,
+      user: { name: string; email: string }
+    ) => {
+      // workflow ID = user ID; workflow runs once per user
+      const userId = ctx.key;
+
+      await ctx.run(() => createUserEntry(user));
+      await ctx.set("current-status", "User entry created");
+
+      await ctx.run(() => sendEmail({ userId, user }));
+      await ctx.set("current-status", "Email sent");
+    },
+
+    getStatus: async (
+      ctx: restate.WorkflowSharedContext
+    ) => {
+      await ctx.get("current-status");
+    },
+  },
+});
+```
+
+This state is also queryable from the Restate UI.
 
 ### Timers and Scheduling
 
-Built-in durable timers survive crashes and restarts:
+Restate supports long-running workflows (days, weeks,... ) that wait for specific durations or timeouts using built-in durable timers.
+
+Built-in durable timers survive crashes and restarts.
+
+For example, we can let our workflow send reminders every 4 hours, and wait for at most 24 hours on the user to click the link, and then time out if the user does not respond:
 
 ```java
-// Wait for a duration
-ctx.timer(Duration.ofHours(24)).await();
+  @Handler
+  public String verifyEmail(Context ctx, VerifyEmailRequest req) {
+    var confirmationFuture = ctx.awakeable(Boolean.class);
+    ctx.run(
+        "send email",
+        () -> emailClient.sendVerificationEmail(req.email(), confirmationFuture.id()));
 
-// Timeout pattern
-var approval = ctx.promise("user-approval", String.class);
-var timeout = ctx.timer(Duration.ofDays(7));
+    var verificationTimeout = ctx.timer(Duration.ofDays(1));
 
-var result = Select.select()
-    .when(approval, approved -> "Approved: " + approved)
-    .when(timeout, unused -> "Timed out")
-    .await();
+    while (true) {
+      var reminderTimer = ctx.timer(Duration.ofSeconds(10));
+
+      var selected =
+          Select.<String>select()
+              .when(confirmationFuture, res -> res ? "success" : "failure")
+              .when(reminderTimer, unused -> "reminder")
+              .when(verificationTimeout, unused -> "timeout")
+              .await();
+
+      switch (selected) {
+        case "success":
+          return "Email verified";
+        case "failure":
+          return "Email rejected";
+        case "reminder":
+            ctx.run(
+                "send reminder",
+                () -> emailClient.sendReminder(req.email(), confirmationFuture.id()));
+            break;
+        case "timeout":
+            throw new TerminalException("Verification timed out");
+      }
+    }
+  }
 ```
 
-Unlike external scheduler systems, these timers are part of your workflow's execution and automatically cleaned up when workflows complete.
+Because Restate lets you write workflows as regular functions, you can use your language's native constructs like `while` loops, `if` statements, and `switch` cases to control flow.
+This makes it easy to implement complex logic with timers, loops, and conditional execution.
 
 ### Parallel Execution
 
-Execute multiple operations concurrently using your language's native patterns:
+You can use a similar pattern to run multiple activities in parallel:
 
 ```typescript
 // Start operations in parallel
-const [payment, inventory, shipping] = await Promise.all([
-  ctx.run(() => paymentService.charge(order.total)),
-  ctx.run(() => inventoryService.reserve(order.items)),
-  ctx.run(() => shippingService.schedule(order.address))
+await Promise.all([
+  ctx.run(() => task1()),
+  ctx.run(() => task2()),
+  ctx.run(() => task3())
 ]);
-
-// Process results
-return {
-  success: payment.success && inventory.success,
-  trackingId: shipping.trackingId
-};
 ```
 
-This provides the benefits of parallel execution without the complexity of managing task queues or worker coordination.
+Restate ensures that all operations complete successfully before proceeding.
 
-## Service Integration
+## Workflow Steps
 
 Restate workflows can execute operations inline or delegate to separate services, giving you flexibility in how you structure your applications.
 
@@ -150,6 +275,12 @@ const paymentResult = await ctx.serviceClient(PaymentService)
 
 This flexibility allows you to optimize for different scenarios - inline for simple operations, separate services for compute-intensive tasks or independent scaling requirements.
 
+<Card href={"/tour/microservice-orchestration"}>
+    Restate can be used for more than just workflows.
+    You can implement any service as a Restate service.
+    Have a look at the Microservice Orchestration Tour to learn how to build microservices with Restate.
+</Card>
+
 ### Workflow Composition
 
 Workflows can call other workflows to compose complex business processes:
@@ -165,46 +296,37 @@ if (!userVerified) {
 }
 ```
 
-## Deployment and Observability
-
-Restate workflows are designed for modern deployment patterns with built-in observability.
-
-### Serverless Deployment
-
-Workflows run naturally on serverless platforms without cold start penalties or state loss:
+## Cancellation and Rollback
+You can cancel workflows at any time, allowing you to handle user cancellations or system shutdowns gracefully:
 
 ```typescript
-// Deploy to AWS Lambda, Google Cloud Functions, etc.
-export const handler = restate.lambdaHandler([
-  signupWorkflow,
-  orderWorkflow
-]);
 ```
 
-The durable execution model means workflows can pause and resume across function invocations without losing state, making serverless an ideal deployment target.
+In order to have your system in a consistent state, you can also implement rollback logic in your workflows. For example, if an order payment fails, you can roll back the order creation:
 
-### Built-in Observability
-
-Every workflow execution is automatically traced and observable:
-
-- **Execution History**: Step-by-step replay of workflow operations
-- **State Inspection**: View workflow state at any point in time  
-- **Error Tracking**: Complete stack traces with failure context
-- **Performance Metrics**: Timing data for each workflow step
-
-This eliminates the need for external observability infrastructure or custom instrumentation that many workflow systems require.
-
-### Single Binary Architecture
-
-Unlike systems that require orchestrator servers, worker clusters, and external databases, Restate workflows run in a single binary alongside your application code:
-
-```bash
-# Simple deployment
-./restate-server &
-java -jar my-workflows.jar
+```java
 ```
 
-This simplified architecture reduces operational complexity while providing enterprise-grade durability and reliability.
+
+## Serverless Deployment
+
+Restate lets you run your workflows and services on serverless platforms like AWS Lambda or Google Cloud Run.
+
+Restate automatically suspends workflows when they are waiting for events or timers, and resumes them when the event occurs or the timer expires.
+This means you can run long-running workflows on function-as-a-service platforms without paying for the wait time.
+
+Turning your workflow into a serverless function is as simple as adapting the endpoint you create for it:
+```typescript
+// Deploy to AWS Lambda
+export const handler = restate.endpoint()
+    .bind(signupWorkflow)
+    .bind(orderWorkflow)
+    .handler();
+```
+
+The durable execution model means workflows can pause and resume across function invocations without losing progress, making serverless an ideal deployment target.
+
+Learn more from the [serving section](/develop/ts/serving).
 
 ## Summary
 
@@ -213,6 +335,6 @@ Restate workflows provide:
 - **Natural Programming**: Write workflows as regular functions in your preferred language
 - **Automatic Durability**: Built-in resilience without infrastructure complexity
 - **Flexible Patterns**: State management, events, timers, and parallel execution
-- **Modern Deployment**: Serverless-ready with built-in observability
+- **Modern Deployment**: Strong serverless support and simple single-binary deployment
 
-With Restate, you can build complex, long-running workflows using familiar programming patterns while getting enterprise-grade durability automatically.
+With Restate, you can build complex, long-running workflows using familiar programming patterns while getting the durability you need.

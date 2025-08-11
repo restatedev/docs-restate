@@ -27,7 +27,7 @@ Durable execution ensures your orchestration logic survives failures and restart
 ### How It Works
 A Restate application is composed of two main components:
 - **Restate Server**: The core engine that manages durable execution and orchestrates services. It acts as a message broker or reverse proxy in front of your services.
-- **Restate Services**: Your business logic, implemented as service handlers using the Restate SDK to perform durable operations.
+- **Your Services**: Your business logic, implemented as service handlers using the Restate SDK to perform durable operations.
 
 You don't need to run your services in any special way—Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda. Simply add the Restate SDK to your application.
 
@@ -64,6 +64,8 @@ public class SubscriptionService {
   }
 }
 ```
+
+To implement a Restate service, you define a class annotated with `@Service` and implement handlers for your business logic. Each handler can be called over HTTP and receives a `Context` object that provides methods for durable execution.
 
 **Key Benefits:**
 - `ctx.run()` makes external calls durable - they won't be re-executed on replay
@@ -329,7 +331,7 @@ curl -X POST localhost:8080/ConcertTicketingService/buy \
 
 Notice how doing the same request with the same idempotency key will return the same response without re-executing the handler.
 
-### Awakeables for External Events
+## External Events
 
 Until now we showed either synchronous API calls via `ctx.run` or calls to other Restate services.
 
@@ -348,60 +350,42 @@ public String verifyEmail(Context ctx, VerifyEmailRequest req) {
 }
 ```
 
+## Durable Timers
+
+Durable timers let you add timeouts and scheduling to your workflows. They survive crashes and resume exactly when scheduled.
+
+```java
+    @Handler
+    public String verifyEmail(Context ctx, VerifyEmailRequest req) {
+        var confirmationFuture = ctx.awakeable(boolean.class);
+        ctx.run("send email", () -> sendVerificationEmail(req.email(), confirmationFuture.id()));
+        try {
+            boolean confirmed = confirmationFuture.withTimeout(Duration.ofDays(1)).await();
+            return confirmed ? "Email confirmed" : "Email rejected";
+        } catch (TimeoutException e) {
+            return "Email confirmation timed out";
+        }
+    }
+```
+
+For more complex timer patterns like recurring reminders, see the [Timers Guide](/develop/java/timers).
 
 ## Advanced Patterns
 
-### Timers and Scheduling
-
-Use durable timers for complex timing logic:
-
-```java
-@RestateService
-public class EmailVerification {
-  @Handler
-  public String verifyEmail(Context ctx, VerifyEmailRequest req) {
-    // Send initial email
-    var confirmationFuture = ctx.awakeable(Boolean.class);
-    ctx.run("send-email", 
-      () -> emailClient.sendVerificationEmail(req.email(), confirmationFuture.id()));
-
-    // Race between confirmation, reminders, and timeout
-    var timeout = ctx.timer(Duration.ofDays(1));
-    
-    while (true) {
-      var reminderTimer = ctx.timer(Duration.ofHours(1));
-      
-      var selected = ctx.select(confirmationFuture, reminderTimer, timeout);
-      
-      if (selected == confirmationFuture) {
-        return confirmationFuture.await() ? "success" : "failed";
-      } else if (selected == timeout) {
-        throw new TerminalException("Email verification timed out");
-      } else {
-        // Send reminder and continue
-        ctx.run("send-reminder", 
-          () -> emailClient.sendReminder(req.email()));
-      }
-    }
-  }
-}
-```
-
-
-### Parallel Execution
-
-Run multiple operations concurrently:
-
-```java
-    CompletableFuture<?>[] futures = new CompletableFuture[req.subscriptions().size()];
-    for (String subscription : req.subscriptions()) {
-        futures[i] = SubscriptionServiceClient.fromContext(ctx)
-            .send()
-            .createSubscription(req.userId(), subscription);
-    }
-
-    CompletableFuture.allOf(futures).join();
-```
+<CardGroup title="Advanced Patterns">
+<Card title="Timers and Scheduling" icon="clock">
+  Use durable timers for complex timing logic, such as sending reminders or handling timeouts.
+</Card>
+<Card title="Parallelize Work" icon="arrows-right-left">
+  Run multiple operations concurrently, such as creating multiple subscriptions in parallel.
+</Card>
+<Card title="Cron Jobs" icon="arrows-right-left">
+    Implement durable cron jobs that run at specific intervals, such as daily reports or periodic data processing.
+</Card>
+<Card title="Webhook Processing" icon="arrows-right-left">
+    Point your webhooks to Restate handlers, which can then handle incoming requests with durable execution.
+</Card>
+</CardGroup>
 
 ## Summary
 

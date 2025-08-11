@@ -3,3 +3,525 @@ title: "Quickstart"
 description: "Develop and run your first Restate service"
 icon: "rocket-launch"
 ---
+
+import InstallRestateSnippet from '/snippets/quickstart/install-server.mdx';
+import RegisterService from '/snippets/quickstart/register-service.mdx';
+import RegisterHTTP1Service from '/snippets/quickstart/register-service-http1-1.mdx';
+import SendRequest from '/snippets/quickstart/send-request.mdx';
+import DurableExecutionPre from '/snippets/quickstart/durable-execution-explanation-pre.mdx';
+import DurableExecutionPost from '/snippets/quickstart/durable-execution-explanation-post.mdx';
+
+SDK:
+<Tabs>
+    <Tab title={"TypeScript"}>
+        Select your favorite runtime:
+        <Tabs>
+            <Tab title={"Node.js"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example typescript-hello-world &&
+                            cd typescript-hello-world &&
+                            npm install
+                            ```
+
+                            ```shell npx
+                            npx -y @restatedev/create-app@latest && cd restate-node-template &&
+                            npm install
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run app-dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/node/src/app.ts"} 
+import * as restate from "@restatedev/restate-sdk";
+import { serde } from "@restatedev/restate-sdk-zod";
+import { sendNotification, sendReminder } from "./utils";
+
+import { z } from "zod";
+
+const Greeting = z.object({
+  name: z.string(),
+});
+
+const GreetingResponse = z.object({
+  result: z.string(),
+});
+
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+      async (ctx: restate.Context, { name }) => {
+        // Durably execute a set of steps; resilient against failures
+        const greetingId = ctx.rand.uuidv4();
+        await ctx.run("Notification", () => sendNotification(greetingId, name));
+        await ctx.sleep({ seconds: 1 });
+        await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+        // Respond to caller
+        return { result: `You said hi to ${name}!` };
+      },
+    ),
+  },
+});
+
+restate.endpoint().bind(greeter).listen(9080);
+```
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Bun"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-bun-hello-world &&
+                        cd typescript-bun-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+                        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/bun/src/index.ts"}
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Deno"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-deno-hello-world &&
+                        cd typescript-deno-hello-world
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        deno task dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+                        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/deno/main.ts"}
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Cloudflare Workers"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-cloudflare-worker-hello-world &&
+                        cd typescript-cloudflare-worker-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterHTTP1Service runtime="The local Workers dev server"/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+                        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/cloudflare-worker/src/index.ts"}
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Next.js"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-nextjs-hello-world &&
+                        cd typescript-nextjs-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate deployments register http://localhost:3000/restate/v1 --use-http1.1
+                            ```
+                            ```shell curl
+                            curl localhost:9070/deployments --json '{"uri": "http://localhost:3000/restate/v1", "use_http_11": true}'
+                            ```
+                        </CodeGroup>
+                        <CodeGroup>
+                            ```shell CLI
+                            ❯ SERVICES THAT WILL BE ADDED:
+                            - Greeter
+                            Type: Service
+                            HANDLER  INPUT                                     OUTPUT
+                            greet    value of content-type 'application/json'  value of content-type 'application/json'
+
+
+                            ✔ Are you sure you want to apply those changes? · yes
+                            ✅ DEPLOYMENT:
+                            SERVICE  REV
+                            Greeter  1
+                            ```
+
+                            ```shell curl
+                            {
+                                "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                                "services": [
+                                    {
+                                        "name": "Greeter",
+                                        "handlers": [
+                                    {
+                                        "name": "greet",
+                                        "ty": "Shared",
+                                        "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
+                                        "output_description": "value of content-type 'application/json'"
+                                    }
+                                        ],
+                                        "ty": "Service",
+                                        "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                                        "revision": 1,
+                                        "public": true,
+                                        "idempotency_retention": "1day"
+                                    }
+                                ]
+                            }
+                            ```
+                        </CodeGroup>
+                        If you run Restate with Docker, use `http://host.docker.internal:3000/restate/v1` instead of `http://localhost:3000/restate/v1`.
+
+                        <Info title="Restate Cloud">
+                            When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+                            If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+                        </Info>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+                        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/nextjs/restate/services/greeter.ts"}
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Java"}>
+        Select your favorite build tool and framework:
+        <Tabs>
+            <Tab title={"Maven + Spring Boot"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Maven + Quarkus"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Maven"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Gradle"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Kotlin"}>
+        Select your favorite framework:
+        <Tabs>
+            <Tab title={"Spring Boot"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Vanilla"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Go"}>
+        <Steps>
+            <Step title={"Install Restate Server & CLI"}>
+                <InstallRestateSnippet/>
+            </Step>
+            <Step title={"Get the Greeter service template"}>
+
+            </Step>
+            <Step title={"Run the Greeter service"}>
+
+            </Step>
+            <Step title={"Register the service"}>
+                <RegisterService/>
+            </Step>
+            <Step title={"Send a request to the Greeter service"}>
+                <SendRequest/>
+            </Step>
+            <Step title="Congratulations, you just ran Durable Execution!">
+                <DurableExecutionPre/>
+
+                <DurableExecutionPost/>
+            </Step>
+        </Steps>
+
+    </Tab>
+    <Tab title={"Python"}>
+
+        <Steps>
+            <Step title={"Install Restate Server & CLI"}>
+                <InstallRestateSnippet/>
+            </Step>
+            <Step title={"Get the Greeter service template"}>
+
+            </Step>
+            <Step title={"Run the Greeter service"}>
+
+            </Step>
+            <Step title={"Register the service"}>
+                <RegisterService/>
+            </Step>
+            <Step title={"Send a request to the Greeter service"}>
+                <SendRequest/>
+            </Step>
+            <Step title="Congratulations, you just ran Durable Execution!">
+                <DurableExecutionPre/>
+
+                <DurableExecutionPost/>
+            </Step>
+        </Steps>
+    </Tab>
+    <Tab title={"Rust"}>
+        Select your favorite runtime:
+        <Tabs>
+            <Tab title={"Tokio"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Shuttle"}>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+</Tabs>

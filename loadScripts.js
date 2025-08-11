@@ -48,7 +48,7 @@ function extractLanguageSymbol(filePath) {
 }
 
 // Enhanced CODE_BLOCK_REGEX to capture CODE_LOAD with options
-const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{CODE_LOAD::([^#?\}]+)(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
+const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{["']?CODE_LOAD::([^#?\}"']+)["']?(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
 
 function parseOptions(optionsStr) {
     // optionsStr: collapse_prequel&remove_comments
@@ -169,7 +169,7 @@ async function updateCodeBlocksInFile(filePath) {
                 console.warn(`❌ Error processing snippet: ${loadPath}: ${e.message}`);
                 return match;
             }
-            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}}\n${codeToInsert}\n\`\`\``;
+            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"}\n${codeToInsert}\n\`\`\``;
 
         }
     );
@@ -231,7 +231,7 @@ async function updateCodeBlocksInFile(filePath) {
             continue;
         }
         
-        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}} \n${codeToInsert}\n\`\`\``;
+        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"} \n${codeToInsert}\n\`\`\``;
         updatedContent = updatedContent.replace(fullMatch, replacement);
     }
     
