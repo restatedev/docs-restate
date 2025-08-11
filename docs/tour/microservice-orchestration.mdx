@@ -1,5 +1,400 @@
 ---
 title: "Microservice Orchestration"
-description: "An introduction to service communication, sagas, and ..."
+description: "Learn how to orchestrate microservices with durable execution, sagas, and async communication patterns."
 icon: "circle-nodes"
 ---
+
+Microservice orchestration is about coordinating multiple services to complete complex business workflows. Restate provides powerful primitives for building resilient, observable orchestration patterns.
+
+In this guide, you'll learn how to:
+- Build durable, fault-tolerant service orchestrations
+- Implement saga patterns for distributed transactions
+- Use async communication for scalable architectures
+- Manage state and concurrency in distributed workflows
+
+## Durable Execution
+
+Durable execution ensures your orchestration logic survives failures and restarts. With Restate, your service handlers are automatically resilient to crashes, network partitions, and infrastructure failures.
+
+### Key Benefits
+
+**Automatic Resilience**: Your orchestration logic resumes exactly where it left off after any failure. No need to manually track progress or implement complex retry logic.
+
+**Built-in Idempotency**: Add an idempotency key to your request header, and Restate ensures that requests are deduplicated across retries.
+
+**Observability**: Full execution traces show you exactly what happened during orchestration, making debugging and monitoring straightforward.
+
+### How It Works
+A Restate application is composed of two main components:
+- **Restate Server**: The core engine that manages durable execution and orchestrates services. It acts as a message broker or reverse proxy in front of your services.
+- **Your Services**: Your business logic, implemented as service handlers using the Restate SDK to perform durable operations.
+
+You don't need to run your services in any special way—Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda. Simply add the Restate SDK to your application.
+
+All service requests are routed through the Restate Server, which durably logs them and invokes the appropriate service handler.
+
+<img src="/img/tour/durable_execution_microservices.gif" alt="Context in Restate" />
+
+Service handlers receive a `Context` object that provides durable execution primitives. Any action performed with the Context is automatically recorded in the Restate Server's log. If a service crashes, Restate replays the log to restore state and resume execution—continuing until the handler completes all operations successfully.
+
+### Implementing Durable Execution
+
+```java
+@Service
+public class SubscriptionService {
+
+  public record SubscriptionRequest(String userId, String creditCard, String[] subscriptions) {}
+
+  @Handler
+  public void add(Context ctx, SubscriptionRequest req) {
+    // Generate deterministic ID
+    var paymentId = ctx.random().nextUUID().toString();
+
+    // Create payment durably
+    ctx.run(() -> PaymentClient.createRecurringPayment(req.creditCard(), paymentId));
+
+    // Create subscriptions durably
+    for (String subscription : req.subscriptions()) {
+      ctx.run(() -> SubscriptionClient.createSubscription(req.userId(), subscription));
+    }
+  }
+
+  public static void main(String[] args) {
+    RestateHttpServer.listen(Endpoint.bind(new SubscriptionService()));
+  }
+}
+```
+
+To implement a Restate service, you define a class annotated with `@Service` and implement handlers for your business logic. Each handler can be called over HTTP and receives a `Context` object that provides methods for durable execution.
+
+**Key Benefits:**
+- `ctx.run()` makes external calls durable - they won't be re-executed on replay
+- If the service crashes after payment creation, it resumes at the subscription step
+- Deterministic IDs from `ctx.random()` ensure operations are idempotent
+- Full execution traces for debugging and monitoring
+
+<Accordion title={"Try it out yourself!"}>
+<Steps>
+    <Step title="Download and Run the Example">
+        Download the example and run locally with an IDE:
+        <CodeGroup>
+            ```shell CLI
+            restate example typescript-tour-of-restate && cd typescript-tour-of-restate
+            ```
+
+            ```shell wget
+            wget https://github.com/restatedev/examples/releases/latest/download/typescript-tour-of-restate.zip &&
+            unzip typescript-tour-of-restate.zip -d typescript-tour-of-restate &&
+            rm typescript-tour-of-restate.zip
+            ```
+        </CodeGroup>
+
+        Install the dependencies and build the app:
+        ```shell
+        npm install && npm run build
+        ```
+
+        Run the services
+
+        ```shell
+        npm run app-dev
+        ```
+
+        This [GitHub repository](https://github.com/restatedev/examples/tree/main/typescript/tutorials/tour-of-restate-typescript) contains the basic skeleton of the TypeScript services that you develop in this tutorial.
+    </Step>
+    <Step title="Launch Restate">
+
+        Restate is a single self-contained binary. No external dependencies needed. Check out the [installation docs](https://docs.restate.dev/develop/local_dev#running-restate-server--cli-locally) for instructions on how to install Restate Server, then do:
+
+        ```shell
+        restate-server
+        ```
+
+        You can find the Restate UI running on port 9070 (`http://localhost:9070`) after starting the Restate Server.
+
+    </Step>
+    <Step title="Register the services with Restate">
+
+        Now, we need to tell Restate where our services are running.
+        You can register services via the UI (`http://localhost:9070`), the CLI or the Restate Admin API and supplying it the service endpoint URI:
+
+        <CodeGroup>
+            ```shell CLI
+            restate deployments register http://localhost:9080
+            ```
+            ```shell curl
+            curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
+            ```
+        </CodeGroup>
+
+        If you run Restate with Docker, replace `http://localhost:9080` by `http://host.docker.internal:9080`.
+    </Step>
+    <Step title={"Send an Invocation"}>
+        Now that the service is registered, you can send an invocation to it.
+        You can do this via the UI or the CLI:
+
+        <CodeGroup>
+            ```shell CLI
+            restate invoke SubscriptionService.add --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["premium", "news"]}'
+            ```
+            ```shell curl
+            curl -X POST localhost:9070/invoke/SubscriptionService.add --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["premium", "news"]}'
+            ```
+        </CodeGroup>
+    </Step>
+    <Step title={"View what happened"}>
+        You should see the invocation in the Restate UI under the `Invocations` tab.
+    </Step>
+</Steps>
+</Accordion>
+
+## Sagas
+
+One of the most challenging aspects of microservice orchestration is managing distributed transactions.
+Each service which needs to interact with a set of external systems (e.g. DB, payment API, etc.), is in fact doing a distributed transaction.
+
+When a service fails halfway through a transaction, you need a way to ensure that the system remains consistent, by rolling back the actions that were already performed.
+This is where sagas come in.
+
+### Sagas and Durable Execution
+
+A saga breaks distributed transactions into steps with compensating actions. If any step fails, compensations run in reverse order.
+
+**Benefits with Restate:**
+- Compensations are durable and survive crashes
+- Sagas always complete fully (success or rollback)
+- Full trace of all operations and compensations
+- No complex state machines needed
+
+<Info>
+    **Why do I need sagas if Restate retries failed operations?**
+
+    Durable Execution takes care of retrying failed operations until they succeed.
+    However, for some failures, you do not want to infinitely retry, but rather roll back the operations that were already performed.
+
+    **Example**: if you can't create the user subscription because it is not available in their region, you want to roll back the payment creation as well.
+
+</Info>
+
+### Implementing Sagas
+
+```java
+@RestateService
+public class SubscriptionSaga {
+  @Handler
+  public void add(Context ctx, SubscriptionRequest req) {
+    List<Runnable> compensations = new ArrayList<>();
+    
+    try {
+      // Step 1: Create payment
+      var paymentId = ctx.random().nextUUID().toString();
+      compensations.add(() -> 
+        ctx.run("remove-payment", 
+          () -> paymentClient.removeRecurringPayment(paymentId)));
+      
+      ctx.run("create-payment", String.class,
+        () -> paymentClient.createRecurringPayment(req.creditCard(), paymentId));
+
+      // Step 2: Create subscriptions
+      for (String subscription : req.subscriptions()) {
+        compensations.add(() -> 
+          ctx.run("remove-" + subscription,
+            () -> subscriptionClient.removeSubscription(req.userId(), subscription)));
+        
+        ctx.run("subscribe-" + subscription,
+          () -> subscriptionClient.createSubscription(req.userId(), subscription));
+      }
+    } catch (TerminalException e) {
+      // Run compensations in reverse order
+      compensations.reversed().forEach(Runnable::run);
+      throw e;
+    }
+  }
+}
+```
+
+**How it works:** Each step adds its compensation to a list. On failure, compensations run in reverse order.
+
+<Accordion title={"Try it out yourself!"}>
+```bash
+# Test the saga pattern
+restate invoke SubscriptionSaga.add --json '{"userId": "user-456", "creditCard": "4111111111111111", "subscriptions": ["premium", "sports"]}'
+
+# View execution in UI
+open http://localhost:9070
+```
+The UI shows each saga step, results, and any compensations that ran.
+</Accordion>
+
+Learn more about sagas in the [Sagas Guide](/guides/sagas).
+
+
+## Virtual Objects
+
+Virtual Objects provide stateful, single-threaded execution contexts. They're perfect for managing entity state and ensuring consistency without complex locking mechanisms.
+
+Each Virtual Object instance maintains isolated state:
+
+```java
+@RestateObject
+public class UserSubscriptions {
+  @Handler
+  public void addSubscription(ObjectContext ctx, String subscription) {
+    // Get current subscriptions
+    Set<String> subscriptions = ctx.get("subscriptions",
+      TypeUtil.setOf(String.class)).orElse(new HashSet<>());
+
+    // Add new subscription
+    subscriptions.add(subscription);
+    ctx.set("subscriptions", subscriptions);
+
+    // Update metrics
+    ctx.set("lastUpdated", Instant.now());
+  }
+
+  @Handler
+  public Set<String> getSubscriptions(ObjectContext ctx) {
+    return ctx.get("subscriptions", TypeUtil.setOf(String.class))
+        .orElse(Set.of());
+  }
+}
+```
+
+**Consistency Guarantees:**
+- Each object key processes requests sequentially (no race conditions)
+- Only one handler can modify state at a time
+- State changes are durable and survive failures
+- Different keys can be processed in parallel
+
+Virtual Objects are ideal for implementing shopping carts, AI agents, state machines, or any entity with mutable state.
+
+## Resilient Communication
+
+Rather than executing all logic in a single service, you can decompose workflows into separate services and handlers. This enables microservice architectures where each service focuses on a specific domain and can scale separately.
+
+### Service-to-Service Communication
+
+Restate supports three communication patterns:
+- **Request-Response**: Wait for a response
+- **One-Way Messages**: Fire-and-forget
+- **Delayed Messages**: Schedule for later
+
+All communication is durably logged and guaranteed to complete.
+
+Imagine a handler which processes a concert ticket purchase, and calls multiple services to handle payment, ticket delivery, and reminders:
+
+```java
+@Handler
+public String buy(Context ctx, PurchaseTicketRequest req) {
+
+    // Request-response call - wait for payment to complete
+    String paymentRef = PaymentServiceClient.fromContext(ctx).processPayment(req).await();
+
+    // One-way message - fire and forget ticket delivery
+    NotificationServiceClient.fromContext(ctx).send().emailTicket(req);
+
+    // Delayed message - schedule reminder for day before concert
+    Duration reminderDelay = Duration.ofMillis(req.millisUntilConcert() - Duration.ofDays(1).toMillis());
+    NotificationServiceClient.fromContext(ctx).send().sendReminder(req, reminderDelay);
+
+    return "Ticket purchased successfully with payment reference: " + paymentRef;
+}
+```
+
+Each of these calls is durable and will be retried upon failures.
+The handler can finish execution without waiting for the ticket delivery or reminder to complete.
+And each service can scale independently.
+
+<Accordion title={"Try it out yourself!"}>
+```bash
+# Test service communication
+restate invoke SubscriptionService.add --json '{"userId": "user-789", "creditCard": "4111111111111111", "subscriptions": ["basic"]}'
+
+# Watch the flow in UI
+open http://localhost:9070
+```
+</Accordion>
+
+### Idempotency
+
+Restate allows adding an idempotency header to your requests. It will then deduplicate requests with the same idempotency key, ensuring that they only execute once.
+
+This can help us prevent duplicate calls the concert ticketing service if the user accidentally clicks "buy" multiple times.
+
+Add an idempotency header to your request:
+
+```shell
+curl -X POST localhost:8080/ConcertTicketingService/buy \
+  -H 'Idempotency-Key: unique-key-123' \
+  --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+```
+
+Notice how doing the same request with the same idempotency key will return the same response without re-executing the handler.
+
+## External Events
+
+Until now we showed either synchronous API calls via `ctx.run` or calls to other Restate services.
+
+But some API calls may respond asynchronously, such as waiting for a user confirmation or an external system to complete an operation (e.g. payment).
+
+For this, you can use `awakeable`. It allows you to pause execution until an external system completes an operation, such as waiting for a user confirmation or a task completion.
+
+Let's implement an email verification flow where we send a verification email and wait for the user to confirm:
+```java
+@Handler
+public String verifyEmail(Context ctx, VerifyEmailRequest req) {
+    var confirmationFuture = ctx.awakeable(boolean.class);
+    ctx.run("send email", () -> sendVerificationEmail(req.email(), confirmationFuture.id()));
+    boolean confirmed = confirmationFuture.await();
+    return confirmed ? "Email confirmed" : "Email rejected";
+}
+```
+
+## Durable Timers
+
+Durable timers let you add timeouts and scheduling to your workflows. They survive crashes and resume exactly when scheduled.
+
+```java
+    @Handler
+    public String verifyEmail(Context ctx, VerifyEmailRequest req) {
+        var confirmationFuture = ctx.awakeable(boolean.class);
+        ctx.run("send email", () -> sendVerificationEmail(req.email(), confirmationFuture.id()));
+        try {
+            boolean confirmed = confirmationFuture.withTimeout(Duration.ofDays(1)).await();
+            return confirmed ? "Email confirmed" : "Email rejected";
+        } catch (TimeoutException e) {
+            return "Email confirmation timed out";
+        }
+    }
+```
+
+For more complex timer patterns like recurring reminders, see the [Timers Guide](/develop/java/timers).
+
+## Advanced Patterns
+
+<CardGroup title="Advanced Patterns">
+<Card title="Timers and Scheduling" icon="clock">
+  Use durable timers for complex timing logic, such as sending reminders or handling timeouts.
+</Card>
+<Card title="Parallelize Work" icon="arrows-right-left">
+  Run multiple operations concurrently, such as creating multiple subscriptions in parallel.
+</Card>
+<Card title="Cron Jobs" icon="arrows-right-left">
+    Implement durable cron jobs that run at specific intervals, such as daily reports or periodic data processing.
+</Card>
+<Card title="Webhook Processing" icon="arrows-right-left">
+    Point your webhooks to Restate handlers, which can then handle incoming requests with durable execution.
+</Card>
+</CardGroup>
+
+## Summary
+
+Restate simplifies microservice orchestration with:
+
+- **Durable Execution**: Automatic failure recovery without complex retry logic
+- **Sagas**: Distributed transactions with resilient compensation
+- **Service Communication**: Reliable RPC and messaging between services  
+- **Stateful Processing**: Consistent state management without external stores
+- **Advanced Patterns**: Fault-tolerant timers, awakeables, and parallel execution
+
+Build resilient distributed systems without the typical complexity.

@@ -1,129 +1,107 @@
 ---
 title: "Overview"
-description: "Welcome to the new home for your documentation"
+description: "Build reliable apps that handle failures automatically"
+icon: "book-open"
 ---
 
-## Setting up
+Restate provides durable building blocks that makes building resilient applications simple. Write normal code while Restate handles failures, coordination, and state consistency automatically.
 
-Get your documentation site up and running in minutes.
+## What is Restate?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+Restate is a system that makes your functions durable, reliable, and stateful. It turns regular functions into fault-tolerant building blocks that can survive failures, restarts, and infrastructure issues while maintaining exactly-once execution guarantees.
 
-## Code snippet from file
+Instead of building complex retry logic, state management, and coordination mechanisms, you write straightforward business logic. Restate handles all the reliability concerns behind the scenes.
 
-```java RpcCalls.java {CODE_LOAD::../snippets/RpcCalls.java} 
-package concepts.invocations;
+## Key capabilities
 
-import dev.restate.client.Client;
-import dev.restate.sdk.Context;
-import dev.restate.sdk.annotation.Handler;
-import dev.restate.sdk.annotation.Service;
+**Durable execution**: Functions automatically retry and resume from exactly where they left off after failures, without re-executing completed work.
 
-@Service
-public class RpcCalls {
+**Built-in state**: Store and retrieve data directly in your functions without external databases, with strong consistency guarantees.
 
-  @Handler
-  public void myRestaaateHandler(Context ctx) {
-    // !focus(1:2)
-    // From a Java Restate service
-    String nik = "aaaa";
-    String greet = GreeterServiceClient.fromContext(ctx).greet("Hey").await();
-  }
+**Reliable communication**: Call functions across services with automatic retries, exactly-once delivery, and durable execution.
 
+**Time-based coordination**: Sleep, schedule, and wait for external events with durable timers that survive restarts.
 
-  public void myJavaHandler() {
-    // !focus(1:3)
-    // Or from any other Java program
-    Client restateClient = Client.connect("http://localhost:8080");
-    String greet = GreeterServiceClient.fromClient(restateClient).greet("Hi");
-  }
+**Workflows**: Coordinate long-running processes, human approvals, and external system integrations with ease.
 
+## How it works
+
+Restate tracks every operation your functions perform in a durable log. When failures occur, functions resume using this log to skip already-completed work and continue from the exact failure point.
+
+<CodeGroup>
+```typescript TypeScript
+    export const processOrder = async (ctx: Context, order: Order) => {
+    // This validation runs once, even on retry
+    const validation = await ctx.run("validate", () => validateOrder(order));
+
+    // This call happens once, even on retry
+    const payment = await ctx.serviceCall(PaymentService).charge(order.total);
+
+    // This completes the order
+    return { orderId: order.id, paymentId: payment.id };
+};
+```
+
+```java Java
+@Handler
+public OrderResult processOrder(Context ctx, Order order) {
+    // This validation runs once, even on retry
+    ValidationResult validation = ctx.run("validate", () -> validateOrder(order));
+
+    // This call happens once, even on retry
+    PaymentResult payment = PaymentServiceClient.fromContext(ctx)
+    .charge(order.getTotal()).await();
+
+    // This completes the order
+    return new OrderResult(order.getId(), payment.getId());
 }
 ```
 
-## Make it yours
+```python Python
+@order_service.handler()
+async def process_order(ctx: Context, order: Order):
+    # This validation runs once, even on retry
+    validation = await ctx.run("validate", lambda: validate_order(order))
 
-Design a docs site that looks great and empowers your users.
+    # This call happens once, even on retry
+    payment = await PaymentServiceClient.from_context(ctx).charge(order.total)
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+    # This completes the order
+    return {"order_id": order.id, "payment_id": payment.id}
+```
+</CodeGroup>
 
-## Create beautiful pages
+If the payment service call fails, Restate automatically retries the function but skips the validation step since it already completed successfully.
 
-Everything you need to create world-class documentation.
+## Service types
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+Restate supports three types of services, each optimized for different use cases:
 
-## Need inspiration?
+**[Basic Services](/build/services/basic-service)**: Stateless functions that process requests independently. Perfect for data processing, validation, and external API calls.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+**[Virtual Objects](/build/services/virtual-object)**: Stateful functions with per-key storage and single-writer semantics. Ideal for user accounts, shopping carts, and entity management.
+
+**[Workflows](/build/services/workflow)**: Long-running coordination processes that can wait for external events and human input. Great for approval processes, multi-step operations, and complex business logic.
+
+## Common use cases
+
+**Microservice orchestration**: Coordinate calls across multiple services with automatic retries and failure handling.
+
+**Workflow automation**: Build approval processes, multi-step operations, and business workflows that survive failures.
+
+**Event processing**: Process events with exactly-once guarantees and automatic retry handling.
+
+**AI agent coordination**: Manage stateful AI agents with reliable tool usage and long-running conversations.
+
+**Payment processing**: Handle complex payment flows with automatic retries and consistency guarantees.
+
+**User onboarding**: Create multi-step onboarding sequences with delays, notifications, and conditional logic.
+
+## Getting started
+
+1. **[Quickstart](/quickstart)**: Build your first Restate service in minutes
+2. **[Concepts](/concepts)**: Understand core Restate concepts and terminology
+3. **[Architecture](/architecture)**: Learn how Restate works under the hood
+4. **[Use Cases](/use-cases/payment-processing)**: Explore real-world examples and patterns
+
+Restate transforms distributed system complexity into simple, reliable code that just works.

@@ -3,3 +3,1203 @@ title: "Quickstart"
 description: "Develop and run your first Restate service"
 icon: "rocket-launch"
 ---
+
+import InstallRestateSnippet from '/snippets/quickstart/install-server.mdx';
+import RegisterService from '/snippets/quickstart/register-service.mdx';
+import RegisterHTTP1Service from '/snippets/quickstart/register-service-http1-1.mdx';
+import SendRequest from '/snippets/quickstart/send-request.mdx';
+import DurableExecutionPre from '/snippets/quickstart/durable-execution-explanation-pre.mdx';
+import DurableExecutionRequest from '/snippets/quickstart/durable-execution-explanation-request.mdx';
+import DurableExecutionPost from '/snippets/quickstart/durable-execution-explanation-post.mdx';
+
+This guide takes you through your first steps with Restate.
+
+We will run a simple Restate Greeter service that listens on port `9080` and responds with `You said hi to <name>!` to a `greet` request.
+
+<img src="/img/quickstart/overview.svg" alt="Quickstart" width="400rem"/>
+
+Select your SDK:
+<Tabs>
+    <Tab title={"TypeScript"} icon={"/img/languages/typescript.svg"}>
+        Select your favorite runtime:
+        <Tabs>
+            <Tab title={"Node.js"} icon={"/img/quickstart/nodejs.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [NodeJS](https://nodejs.org/en/) >= v18.17.1
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example typescript-hello-world &&
+                            cd typescript-hello-world &&
+                            npm install
+                            ```
+
+                            ```shell npx
+                            npx -y @restatedev/create-app@latest && cd restate-node-template &&
+                            npm install
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run app-dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/node/src/app.ts?collapse_prequel"} 
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+      async (ctx: restate.Context, { name }) => {
+        // Durably execute a set of steps; resilient against failures
+        const greetingId = ctx.rand.uuidv4();
+        await ctx.run("Notification", () => sendNotification(greetingId, name));
+        await ctx.sleep({ seconds: 1 });
+        await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+        // Respond to caller
+        return { result: `You said hi to ${name}!` };
+      },
+    ),
+  },
+});
+
+restate.endpoint().bind(greeter).listen(9080);
+```
+
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Bun"} icon={"/img/quickstart/bun.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [Bun](https://bun.sh/docs/installation)
+                    - [npm CLI](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) >= 9.6.7
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-bun-hello-world &&
+                        cd typescript-bun-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/bun/src/index.ts?collapse_prequel"} 
+const greeter = restate.service({
+    name: "Greeter",
+    handlers: {
+      greet: restate.handlers.handler(
+        { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+        async (ctx: restate.Context, { name }) => {
+          // Durably execute a set of steps; resilient against failures
+          const greetingId = ctx.rand.uuidv4();
+          await ctx.run("Notification", () => sendNotification(greetingId, name));
+          await ctx.sleep({ seconds: 1 });
+          await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+          // Respond to caller
+          return { result: `You said hi to ${name}!` };
+        }
+      ),
+    },
+  })
+
+restate
+  .endpoint()
+  .bind(greeter)
+  .listen(9080);
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Deno"} icon={"/img/quickstart/deno.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [Deno](https://deno.land/#installation)
+                    - [npm CLI](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) >= 9.6.7
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-deno-hello-world &&
+                        cd typescript-deno-hello-world
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        deno task dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/deno/main.ts?collapse_prequel"} 
+export const greeter = restate.service({
+    name: "Greeter",
+    handlers: {
+        greet: restate.handlers.handler(
+            { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+            async (ctx: restate.Context, { name }) => {
+                // Durably execute a set of steps; resilient against failures
+                const greetingId = ctx.rand.uuidv4();
+                await ctx.run("Notification", () => sendNotification(greetingId, name));
+                await ctx.sleep({ seconds: 1 });
+                await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+                // Respond to caller
+                return { result: `You said hi to ${name}!` };
+            },
+        ),
+    },
+});
+
+const handler = restate
+  .endpoint()
+  .bind(greeter)
+  .bidirectional()
+  .handler();
+
+Deno.serve({ port: 9080 }, handler.fetch);
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Cloudflare Workers"} icon={"/img/quickstart/cloudflare_workers.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [NodeJS](https://nodejs.org/en/) >= v18.17.1
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-cloudflare-worker-hello-world &&
+                        cd typescript-cloudflare-worker-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterHTTP1Service runtime="The local Workers dev server"/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/cloudflare-worker/src/index.ts?collapse_prequel"} 
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+      async (ctx: restate.Context, { name }) => {
+        // Durably execute a set of steps; resilient against failures
+        const greetingId = ctx.rand.uuidv4();
+        await ctx.run("Notification", () => sendNotification(greetingId, name));
+        await ctx.sleep({ seconds: 1 });
+        await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+        // Respond to caller
+        return { result: `You said hi to ${name}!` };
+      },
+    ),
+  },
+});
+
+export default restate.endpoint().bind(greeter).handler();
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Next.js"} icon={"/img/quickstart/nextjs.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [NodeJS](https://nodejs.org/en/) >= v18.18
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        ```shell
+                        restate example typescript-nextjs-hello-world &&
+                        cd typescript-nextjs-hello-world &&
+                        npm install
+                        ```
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        npm run dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate deployments register http://localhost:3000/restate/v1 --use-http1.1
+                            ```
+                            ```shell curl
+                            curl localhost:9070/deployments --json '{"uri": "http://localhost:3000/restate/v1", "use_http_11": true}'
+                            ```
+                        </CodeGroup>
+                        <CodeGroup>
+                            ```shell CLI
+                            ❯ SERVICES THAT WILL BE ADDED:
+                            - Greeter
+                            Type: Service
+                            HANDLER  INPUT                                     OUTPUT
+                            greet    value of content-type 'application/json'  value of content-type 'application/json'
+
+
+                            ✔ Are you sure you want to apply those changes? · yes
+                            ✅ DEPLOYMENT:
+                            SERVICE  REV
+                            Greeter  1
+                            ```
+
+                            ```shell curl
+                            {
+                                "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                                "services": [
+                                    {
+                                        "name": "Greeter",
+                                        "handlers": [
+                                    {
+                                        "name": "greet",
+                                        "ty": "Shared",
+                                        "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
+                                        "output_description": "value of content-type 'application/json'"
+                                    }
+                                        ],
+                                        "ty": "Service",
+                                        "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                                        "revision": 1,
+                                        "public": true,
+                                        "idempotency_retention": "1day"
+                                    }
+                                ]
+                            }
+                            ```
+                        </CodeGroup>
+                        If you run Restate with Docker, use `http://host.docker.internal:3000/restate/v1` instead of `http://localhost:3000/restate/v1`.
+
+                        <Info title="Restate Cloud">
+                            When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+                            If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+                        </Info>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/nextjs/restate/services/greeter.ts?collapse_prequel"} 
+export const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+        { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+        async (ctx: restate.Context, { name }) => {
+          // Durably execute a set of steps; resilient against failures
+          const greetingId = ctx.rand.uuidv4();
+          await ctx.run("Notification", () => sendNotification(greetingId, name));
+          await ctx.sleep({ seconds: 1 });
+          await ctx.run("Reminder", () => sendReminder(greetingId, name));
+
+          // Respond to caller
+          return { result: `You said hi to ${name}!` };
+        },
+    ),
+  },
+});
+
+export type Greeter = typeof greeter;
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Java"} icon={"/img/languages/java.svg"}>
+
+        Select your favorite build tool and framework:
+        <Tabs>
+            <Tab title={"Maven + Spring Boot"} icon={"/img/quickstart/spring.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example java-hello-world-maven-spring-boot &&
+                            cd java-hello-world-maven-spring-boot
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/java-hello-world-maven-spring-boot.zip &&
+                            unzip java-hello-world-maven-spring-boot.zip -d java-hello-world-maven-spring-boot &&
+                            rm java-hello-world-maven-spring-boot.zip && cd java-hello-world-maven-spring-boot
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE, run your service and let it listen on port `9080` for requests:
+
+                        ```shell
+                        mvn compile spring-boot:run
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven-spring-boot/src/main/java/com/example/restatestarter/Greeter.java?collapse_prequel"} 
+@RestateService
+public class Greeter {
+
+  @Value("${greetingPrefix}")
+  private String greetingPrefix;
+
+  record Greeting(String name) {}
+  record GreetingResponse(String message) {}
+
+  @Handler
+  public GreetingResponse greet(Context ctx, Greeting req) {
+    // Durably execute a set of steps; resilient against failures
+    String greetingId = ctx.random().nextUUID().toString();
+    ctx.run("Notification", () -> sendNotification(greetingId, req.name));
+    ctx.sleep(Duration.ofSeconds(1));
+    ctx.run("Reminder", () -> sendReminder(greetingId, req.name));
+
+    // Respond to caller
+    return new GreetingResponse("You said " + greetingPrefix + " to " + req.name + "!");
+  }
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Maven + Quarkus"} icon={"/img/quickstart/quarkus.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example java-hello-world-maven-quarkus &&
+                            cd java-hello-world-maven-quarkus
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/java-hello-world-maven-quarkus.zip &&
+                            unzip java-hello-world-maven-quarkus.zip -d java-hello-world-maven-quarkus &&
+                            rm java-hello-world-maven-quarkus.zip && cd java-hello-world-maven-quarkus
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE, run your service and let it listen on port `9080` for requests:
+
+                        ```shell
+                        quarkus dev
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven-quarkus/src/main/java/org/acme/Greeter.java?collapse_prequel"} 
+@Service
+public class Greeter {
+
+  @ConfigProperty(name = "greetingPrefix") String greetingPrefix;
+
+  record Greeting(String name) {}
+  record GreetingResponse(String message) {}
+
+  @Handler
+  public GreetingResponse greet(Context ctx, Greeting req) {
+    // Durably execute a set of steps; resilient against failures
+    String greetingId = ctx.random().nextUUID().toString();
+    ctx.run("Notification", () -> sendNotification(greetingId, req.name));
+    ctx.sleep(Duration.ofSeconds(1));
+    ctx.run("Reminder", () -> sendReminder(greetingId, req.name));
+
+    // Respond to caller
+    return new GreetingResponse("You said hi to " + req.name + "!");
+  }
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Maven"} icon={"/img/quickstart/maven.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example java-hello-world-maven &&
+                            cd java-hello-world-maven
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/java-hello-world-maven.zip &&
+                            unzip java-hello-world-maven.zip -d java-hello-world-maven &&
+                            rm java-hello-world-maven.zip && cd java-hello-world-maven
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE, run your service and let it listen on port `9080` for requests:
+
+                        ```shell
+                        mvn compile exec:java
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven/src/main/java/my/example/Greeter.java?collapse_prequel"} 
+@Service
+public class Greeter {
+  
+  record Greeting(String name) {}
+  record GreetingResponse(String message) {}
+
+  @Handler
+  public GreetingResponse greet(Context ctx, Greeting req) {
+    // Durably execute a set of steps; resilient against failures
+    String greetingId = ctx.random().nextUUID().toString();
+    ctx.run("Notification", () -> sendNotification(greetingId, req.name));
+    ctx.sleep(Duration.ofSeconds(1));
+    ctx.run("Reminder", () -> sendReminder(greetingId, req.name));
+
+    // Respond to caller
+    return new GreetingResponse("You said hi to " + req.name + "!");
+  }
+
+  public static void main(String[] args) {
+    RestateHttpServer.listen(Endpoint.bind(new Greeter()));
+  }
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Gradle"} icon={"/img/quickstart/gradle.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example java-hello-world-gradle &&
+                            cd java-hello-world-gradle
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/java-hello-world-gradle.zip &&
+                            unzip java-hello-world-gradle.zip -d java-hello-world-gradle &&
+                            rm java-hello-world-gradle.zip && cd java-hello-world-gradle
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE, run your service and let it listen on port `9080` for requests:
+
+                        ```shell
+                        ./gradlew run
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-gradle/src/main/java/my/example/Greeter.java?collapse_prequel"} 
+@Service
+public class Greeter {
+
+    record Greeting(String name) {}
+    record GreetingResponse(String message) {}
+
+    @Handler
+    public GreetingResponse greet(Context ctx, Greeting req) {
+        // Durably execute a set of steps; resilient against failures
+        String greetingId = ctx.random().nextUUID().toString();
+        ctx.run("Notification", () -> sendNotification(greetingId, req.name));
+        ctx.sleep(Duration.ofSeconds(1));
+        ctx.run("Reminder", () -> sendReminder(greetingId, req.name));
+
+        // Respond to caller
+        return new GreetingResponse("You said hi to " + req.name + "!");
+    }
+
+    public static void main(String[] args) {
+        RestateHttpServer.listen(Endpoint.bind(new Greeter()));
+    }
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Kotlin"} icon={"/img/languages/kotlin.svg"}>
+
+        Select your favorite framework:
+        <Tabs>
+            <Tab title={"Gradle + Spring Boot"} icon={"/img/quickstart/spring.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example kotlin-hello-world-gradle-spring-boot &&
+                            cd kotlin-hello-world-gradle-spring-boot
+                            ```
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/kotlin-hello-world-gradle-spring-boot.zip &&
+                            unzip kotlin-hello-world-gradle-spring-boot.zip -d kotlin-hello-world-gradle-spring-boot &&
+                            rm kotlin-hello-world-gradle-spring-boot.zip && cd kotlin-hello-world-gradle-spring-boot
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE and configure it to build with Gradle.
+                        Run your service and let it listen on port `9080` for requests:
+                        ```shell
+                        ./gradlew bootRun
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```kotlin {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/kotlin/templates/kotlin-gradle-spring-boot/src/main/kotlin/com/example/restatestarter/Greeter.kt?collapse_prequel"} 
+@RestateService
+class Greeter {
+
+  @Value("\${greetingPrefix}")
+  lateinit var greetingPrefix: String
+
+  @Serializable
+  data class Greeting(val name: String)
+  @Serializable
+  data class GreetingResponse(val message: String)
+
+  @Handler
+  suspend fun greet(ctx: Context, req: Greeting): GreetingResponse {
+    // Durably execute a set of steps; resilient against failures
+    val greetingId = ctx.random().nextUUID().toString()
+    ctx.runBlock("Notification") { sendNotification(greetingId, req.name) }
+    ctx.sleep(1.seconds)
+    ctx.runBlock("Reminder") { sendReminder(greetingId, req.name) }
+
+    // Respond to caller
+    return GreetingResponse("You said $greetingPrefix to ${req.name}!")
+  }
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Gradle"} icon={"/img/quickstart/gradle.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [JDK](https://whichjdk.com/) >= 17
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+
+                            ```shell CLI
+                            restate example kotlin-hello-world-gradle &&
+                            cd kotlin-hello-world-gradle
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/kotlin-hello-world-gradle.zip &&
+                            unzip kotlin-hello-world-gradle.zip -d kotlin-hello-world-gradle &&
+                            rm kotlin-hello-world-gradle.zip && cd kotlin-hello-world-gradle
+                            ```
+                        </CodeGroup>
+
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        You are all set to start developing your service.
+                        Open the project in an IDE and configure it to build with Gradle.
+                        Run your service and let it listen on port `9080` for requests:
+                        ```shell
+                        ./gradlew run
+                        ```
+
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+```kotlin {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/kotlin/templates/kotlin-gradle/src/main/kotlin/my/example/Greeter.kt?collapse_prequel"} 
+@Service
+class Greeter {
+
+  @Serializable
+  data class Greeting(val name: String)
+  @Serializable
+  data class GreetingResponse(val message: String)
+
+  @Handler
+  suspend fun greet(ctx: Context, req: Greeting): GreetingResponse {
+    // Durably execute a set of steps; resilient against failures
+    val greetingId = ctx.random().nextUUID().toString()
+    ctx.runBlock("Notification") { sendNotification(greetingId, req.name) }
+    ctx.sleep(1.seconds)
+    ctx.runBlock("Reminder") { sendReminder(greetingId, req.name) }
+
+    // Respond to caller
+    return GreetingResponse("You said hi to ${req.name}!")
+  }
+}
+
+fun main() {
+  RestateHttpServer.listen(endpoint {
+    bind(Greeter())
+  })
+}
+```
+                        <DurableExecutionRequest/>
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+    <Tab title={"Go"} icon={"/img/languages/go.svg"}>
+        <Info>
+            **Prerequisites**:
+            - Go: >= 1.21.0
+        </Info>
+        <Steps>
+            <Step title={"Install Restate Server & CLI"}>
+                <InstallRestateSnippet/>
+            </Step>
+            <Step title={"Get the Greeter service template"}>
+                <CodeGroup>
+
+                    ```shell CLI
+                    restate example go-hello-world &&
+                    cd go-hello-world
+                    ```
+
+                    ```shell wget
+                    wget https://github.com/restatedev/examples/releases/latest/download/go-hello-world.zip &&
+                    unzip go-hello-world.zip -d go-hello-world &&
+                    rm go-hello-world.zip && cd go-hello-world
+                    ```
+
+                </CodeGroup>
+            </Step>
+            <Step title={"Run the Greeter service"}>
+                Now, start developing your service in `greeter.go`. Run it with:
+                ```shell
+                go run .
+                ```
+                it will listen on port 9080 for requests.
+            </Step>
+            <Step title={"Register the service"}>
+
+                Tell Restate where the service is running, so Restate can discover and register the services and handlers behind this endpoint.
+                You can do this via the UI (`http://localhost:9070`) or via:
+
+                <CodeGroup>
+                    ```shell CLI
+                    restate deployments register http://localhost:9080
+                    ```
+                    ```shell curl
+                    curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
+                    ```
+                </CodeGroup>
+
+                Expected output:
+                <CodeGroup>
+                    ```shell CLI
+                    ❯ SERVICES THAT WILL BE ADDED:
+                    - Greeter
+                    Type: Service
+                    HANDLER  INPUT                                     OUTPUT
+                    Greet    value of content-type 'application/json'  value of content-type 'application/json'
+
+
+                    ✔ Are you sure you want to apply those changes? · yes
+                    ✅ DEPLOYMENT:
+                    SERVICE  REV
+                    Greeter  1
+                    ```
+
+                    ```shell curl
+                    {
+                        "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                        "services": [
+                    {
+                        "name": "Greeter",
+                        "handlers": [
+                    {
+                        "name": "Greet",
+                        "ty": "Shared",
+                        "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
+                        "output_description": "value of content-type 'application/json'"
+                    }
+                        ],
+                        "ty": "Service",
+                        "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+                        "revision": 1,
+                        "public": true,
+                        "idempotency_retention": "1day"
+                    }
+                        ]
+                    }
+                    ```
+                </CodeGroup>
+
+                If you run Restate with Docker, use `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+            </Step>
+            <Step title={"Send a request to the Greeter service"}>
+                Invoke the service via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+                <img src={"/img/quickstart/playground.png"} alt="Restate UI Playground" width="800rem"/>
+
+                Or invoke via `curl`:
+
+                ```shell
+                curl localhost:8080/Greeter/Greet --json '"Sarah"'
+                ```
+
+                Expected output:
+
+                ```shell
+                You said hi to Sarah!
+                ```
+
+            </Step>
+            <Step title="Congratulations, you just ran Durable Execution!">
+                <DurableExecutionPre/>
+```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/templates/go/greeter.go?collapse_prequel"} 
+type Greeter struct{}
+
+func (Greeter) Greet(ctx restate.Context, name string) (string, error) {
+  //  Durably execute a set of steps; resilient against failures
+  greetingId := restate.Rand(ctx).UUID().String()
+
+  if _, err := restate.Run(ctx,
+    func(ctx restate.RunContext) (restate.Void, error) {
+      return SendNotification(greetingId, name)
+    },
+    restate.WithName("Notification"),
+  ); err != nil {
+    return "", err
+  }
+
+  if err := restate.Sleep(ctx, 1*time.Second); err != nil {
+    return "", err
+  }
+
+  if _, err := restate.Run(ctx,
+    func(ctx restate.RunContext) (restate.Void, error) {
+      return SendReminder(greetingId, name)
+    },
+    restate.WithName("Reminder"),
+  ); err != nil {
+    return "", err
+  }
+
+  // Respond to caller
+  return "You said hi to " + name + "!", nil
+}
+```
+
+                Send a request for `Alice` to see how the service behaves when it occasionally fails to send the reminder and notification:
+                ```shell
+                curl localhost:8080/Greeter/Greet --json '"Alice"'
+                ```
+                Expected output:
+                ```shell
+                You said hi to Alice!
+                ```
+
+                <DurableExecutionPost/>
+            </Step>
+        </Steps>
+
+    </Tab>
+    <Tab title={"Python"} icon={"/img/languages/python.svg"}>
+        <Info>
+            **Prerequisites**:
+            - Python >= v3.11
+            - [uv](https://docs.astral.sh/uv/getting-started/installation/)
+        </Info>
+        <Steps>
+            <Step title={"Install Restate Server & CLI"}>
+                <InstallRestateSnippet/>
+            </Step>
+            <Step title={"Get the Greeter service template"}>
+                <CodeGroup>
+                    ```shell CLI
+                    restate example python-hello-world &&
+                    cd python-hello-world
+                    ```
+
+                    ```shell wget
+                    wget https://github.com/restatedev/examples/releases/latest/download/python-hello-world.zip &&
+                    unzip python-hello-world.zip -d python-hello-world &&
+                    rm python-hello-world.zip && cd python-hello-world
+                    ```
+
+                </CodeGroup>
+            </Step>
+            <Step title={"Run the Greeter service"}>
+                Run it and let it listen on port 9080 for requests:
+
+                ```shell
+                uv run .
+                ```
+            </Step>
+            <Step title={"Register the service"}>
+                <RegisterService/>
+            </Step>
+            <Step title={"Send a request to the Greeter service"}>
+                <SendRequest/>
+            </Step>
+            <Step title="Congratulations, you just ran Durable Execution!">
+                <DurableExecutionPre/>
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/python/templates/python/app/greeter.py?collapse_prequel"} 
+greeter = restate.Service("Greeter")
+
+
+@greeter.handler()
+async def greet(ctx: restate.Context, req: GreetingRequest) -> Greeting:
+    # Durably execute a set of steps; resilient against failures
+    greeting_id = await ctx.run("generate UUID", lambda: str(uuid.uuid4()))
+    await ctx.run("notification", send_notification, args=(greeting_id, req.name))
+    await ctx.sleep(timedelta(seconds=1))
+    await ctx.run("reminder", send_reminder, args=(greeting_id, req.name))
+
+    # Respond to caller
+    return Greeting(message=f"You said hi to {req.name}!")
+```
+                <DurableExecutionRequest/>
+                <DurableExecutionPost/>
+            </Step>
+        </Steps>
+    </Tab>
+    <Tab title={"Rust"} icon={"/img/languages/rust.svg"}>
+        Select your favorite runtime:
+        <Tabs>
+            <Tab title={"Tokio"} icon={"/img/quickstart/tokio.svg"}>
+                <Info>
+                    **Prerequisites**:
+                    - [Rust](https://rustup.rs/)
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example rust-hello-world &&
+                            cd rust-hello-world
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/rust-hello-world.zip &&
+                            unzip rust-hello-world.zip -d rust-hello-world &&
+                            rm rust-hello-world.zip && cd rust-hello-world
+                            ```
+
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        cargo run
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterService/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        Invoke the service via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+                        <img src={"/img/quickstart/playground.png"} alt="Restate UI Playground" width="800rem"/>
+
+                        Or invoke via `curl`:
+                        ```shell
+                        curl localhost:8080/Greeter/greet --json '"Sarah"'
+                        ```
+
+                        Expected output:
+
+                        ```log !output
+                        You said hi to Sarah!
+                        ```
+
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+```rust {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/rust/templates/rust/src/main.rs?collapse_prequel"} 
+#[restate_sdk::service]
+trait Greeter {
+    async fn greet(name: String) -> Result<String, HandlerError>;
+}
+
+struct GreeterImpl;
+
+impl Greeter for GreeterImpl {
+    async fn greet(&self, mut ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+        // Durably execute a set of steps; resilient against failures
+        let greeting_id = ctx.rand_uuid().to_string();
+        ctx.run(|| send_notification(&greeting_id, &name))
+            .name("notification")
+            .await?;
+        ctx.sleep(Duration::from_secs(1)).await?;
+        ctx.run(|| send_reminder(&greeting_id, &name))
+            .name("reminder")
+            .await?;
+
+        // Respond to caller
+        Ok(format!("You said hi to {name}"))
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    // To enable logging
+    tracing_subscriber::fmt::init();
+
+    HttpServer::new(Endpoint::builder().bind(GreeterImpl.serve()).build())
+        .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+        .await;
+}
+```
+                        Send a request for `Alice` to see how the service behaves when it occasionally fails to send the reminder and notification:
+                        ```shell
+                        curl localhost:8080/Greeter/greet --json '"Alice"'
+                        ```
+                        Example output:
+                        ```shell
+                        You said hi to Alice!
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+            <Tab title={"Shuttle"} icon={"/img/quickstart/shuttle-rust.png"}>
+                <Info>
+                    **Prerequisites**:
+                    - [Rust](https://rustup.rs/)
+                    - [Shuttle](https://docs.shuttle.dev/getting-started/installation)
+                </Info>
+                <Steps>
+                    <Step title={"Install Restate Server & CLI"}>
+                        <InstallRestateSnippet/>
+                    </Step>
+                    <Step title={"Get the Greeter service template"}>
+                        <CodeGroup>
+                            ```shell CLI
+                            restate example rust-shuttle-hello-world &&
+                            cd rust-shuttle-hello-world
+                            ```
+
+                            ```shell wget
+                            wget https://github.com/restatedev/examples/releases/latest/download/rust-shuttle-hello-world.zip &&
+                            unzip rust-shuttle-hello-world.zip -d rust-shuttle-hello-world &&
+                            rm rust-shuttle-hello-world.zip && cd rust-shuttle-hello-world
+                            ```
+                        </CodeGroup>
+                    </Step>
+                    <Step title={"Run the Greeter service"}>
+                        ```shell
+                        cargo shuttle run --port 9080
+                        ```
+                    </Step>
+                    <Step title={"Register the service"}>
+                        <RegisterHTTP1Service runtime={"Shuttle"}/>
+                    </Step>
+                    <Step title={"Send a request to the Greeter service"}>
+                        <SendRequest/>
+                    </Step>
+                    <Step title="Congratulations, you just ran Durable Execution!">
+                        <DurableExecutionPre/>
+
+```rust {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/rust/templates/rust-shuttle/src/main.rs?collapse_prequel"} 
+#[restate_sdk::service]
+trait Greeter {
+    async fn greet(name: String) -> Result<String, HandlerError>;
+}
+
+struct GreeterImpl;
+
+impl Greeter for GreeterImpl {
+    async fn greet(&self, mut ctx: Context<'_>, name: String) -> Result<String, HandlerError> {
+        // Durably execute a set of steps; resilient against failures
+        let greeting_id = ctx.rand_uuid().to_string();
+        ctx.run(|| send_notification(&greeting_id, &name))
+            .name("notification")
+            .await?;
+        ctx.sleep(Duration::from_secs(1)).await?;
+        ctx.run(|| send_reminder(&greeting_id, &name))
+            .name("reminder")
+            .await?;
+
+        // Respond to caller
+        Ok(format!("You said hi to {name}"))
+    }
+}
+
+#[shuttle_runtime::main]
+async fn main() -> Result<RestateShuttleEndpoint, shuttle_runtime::Error> {
+    Ok(RestateShuttleEndpoint::new(
+        Endpoint::builder().bind(GreeterImpl.serve()).build(),
+    ))
+}
+```
+
+                        Send a request for `Alice` to see how the service behaves when it occasionally fails to send the reminder and notification:
+                        ```shell
+                        curl localhost:8080/Greeter/greet --json '"Alice"'
+                        ```
+                        Example output:
+                        ```shell
+                        You said hi to Alice!
+                        ```
+                        <DurableExecutionPost/>
+                    </Step>
+                </Steps>
+            </Tab>
+        </Tabs>
+    </Tab>
+</Tabs>
