@@ -169,7 +169,7 @@ async function updateCodeBlocksInFile(filePath) {
                 console.warn(`❌ Error processing snippet: ${loadPath}: ${e.message}`);
                 return match;
             }
-            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"}\n${codeToInsert}\n\`\`\``;
+            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr.replace('"', '') : ''}"}\n${codeToInsert.trimEnd()}\n\`\`\``;
 
         }
     );
@@ -231,7 +231,7 @@ async function updateCodeBlocksInFile(filePath) {
             continue;
         }
         
-        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"} \n${codeToInsert}\n\`\`\``;
+        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr.replace('"', '') : ''}"} \n${codeToInsert.trimEnd()}\n\`\`\``;
         updatedContent = updatedContent.replace(fullMatch, replacement);
     }
     

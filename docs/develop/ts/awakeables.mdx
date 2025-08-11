@@ -46,18 +46,82 @@ Note that if you wait for an awakeable in an [exclusive handler](/develop/ts/ove
 
 ### Basic pattern 
 
-```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"} 
-// Create awakeable and get unique ID
-const { id, promise } = ctx.awakeable<string>();
+```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
 
-// Send ID to external system (email, queue, webhook, etc.)
-await ctx.run(() => requestHumanReview(name, id));
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
 
-// Handler suspends here until external completion
-const review = await promise;
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
 
-// Continue processing with the result
-console.log("Review received:", review);
+      // Handler suspends here until external completion
+      const review = await promise;
+
+      // Continue processing with the result
+      console.log("Review received:", review);
+
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
+
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
+
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+
+      // Process the review result
+      return processReview(documentId, review);
+    },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
+  },
+});
+
+function askReview(email: string) {
+  return "123";
+}
 ```
 
 <Accordion title="Serialization">
@@ -92,53 +156,56 @@ curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
 #### Via SDK (from other handlers)
 
 **Resolve:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve"} 
-// Complete with success data
-ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
-```
+```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
 
-**Reject:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject"} 
-// Complete with error
-ctx.rejectAwakeable(id, "Review timeout exceeded");
-```
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
 
-## Durable Promises
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
 
-**Best for:** Workflows where you need to signal between different workflow handlers.
+      // Handler suspends here until external completion
+      const review = await promise;
 
-**Key differences from awakeables:**
-- No ID management - use logical names instead
-- Scoped to workflow execution lifetime
+      // Continue processing with the result
+      console.log("Review received:", review);
 
-Use this for:
-- Sending data to the run handler
-- Have handlers wait for events emitted by the run handler
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
 
-<Info>
-After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
-The results of resolved Durable Promises remain available during this time.
-Update the retention time via the [service configuration](/operate/configuration/services).
-</Info>
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
 
-### Creating and waiting for promises
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
 
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"} 
-// Wait for a promise by name - suspends until resolved
-const review = await ctx.promise<string>("review");
-```
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
 
-### Resolving/rejecting promises
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
 
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"} 
-// Resolve from any workflow handler
-ctx.promise<string>("review").resolve(review)
-```
-
-
-### Complete workflow example
-
-```ts expandable {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#review"} 
 restate.workflow({
   name: "reviewWorkflow",
   handlers: {
@@ -161,6 +228,348 @@ restate.workflow({
     }
   },
 });
+
+function askReview(email: string) {
+  return "123";
+}
+```
+
+**Reject:**
+```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
+
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
+
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
+
+      // Handler suspends here until external completion
+      const review = await promise;
+
+      // Continue processing with the result
+      console.log("Review received:", review);
+
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
+
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
+
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+
+      // Process the review result
+      return processReview(documentId, review);
+    },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
+  },
+});
+
+function askReview(email: string) {
+  return "123";
+}
+```
+
+## Durable Promises
+
+**Best for:** Workflows where you need to signal between different workflow handlers.
+
+**Key differences from awakeables:**
+- No ID management - use logical names instead
+- Scoped to workflow execution lifetime
+
+Use this for:
+- Sending data to the run handler
+- Have handlers wait for events emitted by the run handler
+
+<Info>
+After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
+The results of resolved Durable Promises remain available during this time.
+Update the retention time via the [service configuration](/operate/configuration/services).
+</Info>
+
+### Creating and waiting for promises
+
+```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
+
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
+
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
+
+      // Handler suspends here until external completion
+      const review = await promise;
+
+      // Continue processing with the result
+      console.log("Review received:", review);
+
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
+
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
+
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+
+      // Process the review result
+      return processReview(documentId, review);
+    },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
+  },
+});
+
+function askReview(email: string) {
+  return "123";
+}
+```
+
+### Resolving/rejecting promises
+
+```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
+
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
+
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
+
+      // Handler suspends here until external completion
+      const review = await promise;
+
+      // Continue processing with the result
+      console.log("Review received:", review);
+
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
+
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
+
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+
+      // Process the review result
+      return processReview(documentId, review);
+    },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
+  },
+});
+
+function askReview(email: string) {
+  return "123";
+}
+```
+
+
+### Complete workflow example
+
+```ts expandable {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#review"""""""""} 
+import * as restate from "@restatedev/restate-sdk";
+import {WorkflowContext} from "@restatedev/restate-sdk";
+
+const service = restate.service({
+  name: "Awakeable",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Create awakeable and get unique ID
+      const { id, promise } = ctx.awakeable<string>();
+
+      // Send ID to external system (email, queue, webhook, etc.)
+      await ctx.run(() => requestHumanReview(name, id));
+
+      // Handler suspends here until external completion
+      const review = await promise;
+
+      // Continue processing with the result
+      console.log("Review received:", review);
+
+      // Complete with success data
+      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+
+      // Complete with error
+      ctx.rejectAwakeable(id, "Review timeout exceeded");
+    },
+  },
+});
+
+function requestHumanReview(name: string, awakeableId: string) {
+  return "123";
+}
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    run: async (ctx: WorkflowContext, name: string) => {
+      await ctx.run(() => askReview(name));
+      // Wait for a promise by name - suspends until resolved
+      const review = await ctx.promise<string>("review");
+      // ... do something with review
+    },
+
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Resolve from any workflow handler
+      ctx.promise<string>("review").resolve(review)
+    }
+  },
+});
+
+restate.workflow({
+  name: "reviewWorkflow",
+  handlers: {
+    // Main workflow execution
+    run: async (ctx: WorkflowContext, documentId: string) => {
+      // Send document for review
+      await ctx.run(() => askReview(documentId));
+
+      // Wait for external review submission
+      const review = await ctx.promise<string>("review");
+
+      // Process the review result
+      return processReview(documentId, review);
+    },
+
+    // External endpoint to submit reviews
+    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+      // Signal the waiting run handler
+      ctx.promise<string>("review").resolve(review);
+    }
+  },
+});
+
+function askReview(email: string) {
+  return "123";
+}
 ```
 
 ### Two signaling patterns
