@@ -19,9 +19,7 @@ Make sure to install the extra dependency for zod integration: [`@restatedev/res
 
 Then do the following:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#zod""""""""""""""} 
-import { Context, WorkflowContext } from "@restatedev/restate-sdk";
-
+```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#zod"} 
 import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
 import { serde } from "@restatedev/restate-sdk-zod";
@@ -45,46 +43,6 @@ const greeter = restate.service({
         ),
     },
 });
-
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.handler(
-      {
-        // Set the input serde here
-        input: restate.serde.binary,
-        // Set the output serde here
-        output: restate.serde.binary,
-      },
-      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-        // Process the request
-        return data;
-      }
-    ),
-  },
-});
-
-let ctx: WorkflowContext = undefined as unknown as WorkflowContext;
-let input = new Uint8Array();
-
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
-
-async function tryOut(ctx: restate.ObjectContext){
-    ctx.get("my-binary-data", restate.serde.binary);
-    ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
-
-    ctx.awakeable(restate.serde.binary);
-
-    await ctx.run("my-side-effect", () => new Uint8Array(), {
-        serde: restate.serde.binary,
-    });
-}
 ```
 
 ## Custom serialization
@@ -93,33 +51,7 @@ It is possible to implement customized serialization using the `Serde` interface
 
 For example, to implement custom serializers for the handler input and output:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#service_definition""""""""""""""} 
-import { Context, WorkflowContext } from "@restatedev/restate-sdk";
-
-import * as restate from "@restatedev/restate-sdk";
-import { z } from "zod";
-import { serde } from "@restatedev/restate-sdk-zod";
-
-const Greeting = z.object({
-    name: z.string(),
-});
-
-const GreetingResponse = z.object({
-    result: z.string(),
-});
-
-const greeter = restate.service({
-    name: "Greeter",
-    handlers: {
-        greet: restate.handlers.handler(
-            { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
-            async (ctx: restate.Context, { name }) => {
-                return { result: `You said hi to ${name}!` };
-            },
-        ),
-    },
-});
-
+```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#service_definition"} 
 const myService = restate.service({
   name: "MyService",
   handlers: {
@@ -137,81 +69,12 @@ const myService = restate.service({
     ),
   },
 });
-
-let ctx: WorkflowContext = undefined as unknown as WorkflowContext;
-let input = new Uint8Array();
-
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
-
-async function tryOut(ctx: restate.ObjectContext){
-    ctx.get("my-binary-data", restate.serde.binary);
-    ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
-
-    ctx.awakeable(restate.serde.binary);
-
-    await ctx.run("my-side-effect", () => new Uint8Array(), {
-        serde: restate.serde.binary,
-    });
-}
 ```
 
 When sending a request to a handler configured with custom serde(s) you always need to manually specify them, because the client does not automatically infer what serde(s) should be used.
 To customize the serde to use on requests:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#client""""""""""""""} 
-import { Context, WorkflowContext } from "@restatedev/restate-sdk";
-
-import * as restate from "@restatedev/restate-sdk";
-import { z } from "zod";
-import { serde } from "@restatedev/restate-sdk-zod";
-
-const Greeting = z.object({
-    name: z.string(),
-});
-
-const GreetingResponse = z.object({
-    result: z.string(),
-});
-
-const greeter = restate.service({
-    name: "Greeter",
-    handlers: {
-        greet: restate.handlers.handler(
-            { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
-            async (ctx: restate.Context, { name }) => {
-                return { result: `You said hi to ${name}!` };
-            },
-        ),
-    },
-});
-
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.handler(
-      {
-        // Set the input serde here
-        input: restate.serde.binary,
-        // Set the output serde here
-        output: restate.serde.binary,
-      },
-      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-        // Process the request
-        return data;
-      }
-    ),
-  },
-});
-
-let ctx: WorkflowContext = undefined as unknown as WorkflowContext;
-let input = new Uint8Array();
-
+```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#client"} 
 ctx.serviceClient(myService).myHandler(
   input,
   restate.rpc.opts({
@@ -219,85 +82,17 @@ ctx.serviceClient(myService).myHandler(
     output: restate.serde.binary,
   })
 );
-
-async function tryOut(ctx: restate.ObjectContext){
-    ctx.get("my-binary-data", restate.serde.binary);
-    ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
-
-    ctx.awakeable(restate.serde.binary);
-
-    await ctx.run("my-side-effect", () => new Uint8Array(), {
-        serde: restate.serde.binary,
-    });
-}
 ```
 
 To customize the serde for other actions on the context:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#actions""""""""""""""} 
-import { Context, WorkflowContext } from "@restatedev/restate-sdk";
+```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#actions"} 
+ctx.get("my-binary-data", restate.serde.binary);
+ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
 
-import * as restate from "@restatedev/restate-sdk";
-import { z } from "zod";
-import { serde } from "@restatedev/restate-sdk-zod";
+ctx.awakeable(restate.serde.binary);
 
-const Greeting = z.object({
-    name: z.string(),
+await ctx.run("my-side-effect", () => new Uint8Array(), {
+    serde: restate.serde.binary,
 });
-
-const GreetingResponse = z.object({
-    result: z.string(),
-});
-
-const greeter = restate.service({
-    name: "Greeter",
-    handlers: {
-        greet: restate.handlers.handler(
-            { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
-            async (ctx: restate.Context, { name }) => {
-                return { result: `You said hi to ${name}!` };
-            },
-        ),
-    },
-});
-
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.handler(
-      {
-        // Set the input serde here
-        input: restate.serde.binary,
-        // Set the output serde here
-        output: restate.serde.binary,
-      },
-      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-        // Process the request
-        return data;
-      }
-    ),
-  },
-});
-
-let ctx: WorkflowContext = undefined as unknown as WorkflowContext;
-let input = new Uint8Array();
-
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
-
-async function tryOut(ctx: restate.ObjectContext){
-    ctx.get("my-binary-data", restate.serde.binary);
-    ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
-
-    ctx.awakeable(restate.serde.binary);
-
-    await ctx.run("my-side-effect", () => new Uint8Array(), {
-        serde: restate.serde.binary,
-    });
-}
 ```

@@ -48,7 +48,7 @@ function extractLanguageSymbol(filePath) {
 }
 
 // Enhanced CODE_BLOCK_REGEX to capture CODE_LOAD with options
-const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{["']?CODE_LOAD::([^#?\}"']+)["']?(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
+const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{["']?CODE_LOAD::([^#?\}]+)(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
 
 function parseOptions(optionsStr) {
     // optionsStr: collapse_prequel&remove_comments
@@ -169,7 +169,7 @@ async function updateCodeBlocksInFile(filePath) {
                 console.warn(`❌ Error processing snippet: ${loadPath}: ${e.message}`);
                 return match;
             }
-            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr.replace('"', '') : ''}"}\n${codeToInsert.trimEnd()}\n\`\`\``;
+            return `\`\`\`${lang} ${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"}\n${codeToInsert.trimEnd()}\n\`\`\``;
 
         }
     );
@@ -191,8 +191,11 @@ async function updateCodeBlocksInFile(filePath) {
     // Process each match asynchronously
     let updatedContent = fileContent;
     for (const match of matches) {
-        const [fullMatch, lang, metaBefore, loadPath, customTag, optionsStr, metaAfter, oldCode] = match;
+        const [fullMatch, lang, metaBefore, loadPath, customTagRaw, optionsStrRaw, metaAfter, oldCode] = match;
         const fullMeta = (metaBefore + (metaAfter || "")).trim();
+        const customTag = customTagRaw ? customTagRaw.replace(/"/g, '') : '';
+        const optionsStr = optionsStrRaw ? optionsStrRaw.replace(/"/g, '') : '';
+
         
         let loadedCode;
         if (loadPath.startsWith('https://raw.githubusercontent.com/')) {
@@ -231,7 +234,7 @@ async function updateCodeBlocksInFile(filePath) {
             continue;
         }
         
-        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr.replace('"', '') : ''}"} \n${codeToInsert.trimEnd()}\n\`\`\``;
+        const replacement = `\`\`\`${lang}${fullMeta ? ' ' + fullMeta : ''} {"CODE_LOAD::${loadPath}${customTag ? '#' + customTag : ''}${optionsStr ? '?' + optionsStr : ''}"} \n${codeToInsert.trimEnd()}\n\`\`\``;
         updatedContent = updatedContent.replace(fullMatch, replacement);
     }
     

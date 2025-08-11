@@ -20,43 +20,8 @@ Restate solves this by journaling results the first time, then replaying the sam
 
 Use [`ctx.run`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#run) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect""""""""""""""} 
-import * as restate from "@restatedev/restate-sdk";
-import { RestatePromise } from "@restatedev/restate-sdk";
-import { MyService } from "./my_service";
-
-const service = restate.service({
-  name: "SideEffects",
-  handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      const result = await ctx.run<string>(async () => doDbRequest());
-    },
-
-    promiseCombinators: async (ctx: restate.Context, name: string) => {
-      const sleepPromise = ctx.sleep({ milliseconds: 100 });
-      const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
-      const externalCallPromise = ctx.run(() => httpCall());
-      
-      const resultArray = await RestatePromise.all([
-        sleepPromise,
-        callPromise,
-        externalCallPromise,
-      ]);
-
-      const uuid = ctx.rand.uuidv4();
-
-      const randomNumber = ctx.rand.random();
-    },
-  },
-});
-
-function doDbRequest() {
-  return "";
-}
-
-async function httpCall() {
-  return "";
-}
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect"} 
+const result = await ctx.run<string>(async () => doDbRequest());
 ```
 
 Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
@@ -74,7 +39,7 @@ Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`,
 
   You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
 
-  ```typescript {"CODE_LOAD::ts/src/develop/retries.ts?1"""""} 
+  ```typescript {"CODE_LOAD::ts/src/develop/retries.ts?1"} 
 import * as restate from "@restatedev/restate-sdk";
 
 function writeToOtherSystem() {
@@ -136,43 +101,8 @@ The SDK provides deterministic helpers for random values — seeded by the invoc
 
 Use `ctx.rand.uuidv4()` to generate stable UUIDs for things like idempotency keys:
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#uuid""""""""""""""} 
-import * as restate from "@restatedev/restate-sdk";
-import { RestatePromise } from "@restatedev/restate-sdk";
-import { MyService } from "./my_service";
-
-const service = restate.service({
-  name: "SideEffects",
-  handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      const result = await ctx.run<string>(async () => doDbRequest());
-    },
-
-    promiseCombinators: async (ctx: restate.Context, name: string) => {
-      const sleepPromise = ctx.sleep({ milliseconds: 100 });
-      const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
-      const externalCallPromise = ctx.run(() => httpCall());
-      
-      const resultArray = await RestatePromise.all([
-        sleepPromise,
-        callPromise,
-        externalCallPromise,
-      ]);
-
-      const uuid = ctx.rand.uuidv4();
-
-      const randomNumber = ctx.rand.random();
-    },
-  },
-});
-
-function doDbRequest() {
-  return "";
-}
-
-async function httpCall() {
-  return "";
-}
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#uuid"} 
+const uuid = ctx.rand.uuidv4();
 ```
 
 ### Random numbers
@@ -180,43 +110,8 @@ async function httpCall() {
 Use `ctx.rand.random()` to generate a deterministic float between `0` and `1`:
 
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb""""""""""""""} 
-import * as restate from "@restatedev/restate-sdk";
-import { RestatePromise } from "@restatedev/restate-sdk";
-import { MyService } from "./my_service";
-
-const service = restate.service({
-  name: "SideEffects",
-  handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      const result = await ctx.run<string>(async () => doDbRequest());
-    },
-
-    promiseCombinators: async (ctx: restate.Context, name: string) => {
-      const sleepPromise = ctx.sleep({ milliseconds: 100 });
-      const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
-      const externalCallPromise = ctx.run(() => httpCall());
-      
-      const resultArray = await RestatePromise.all([
-        sleepPromise,
-        callPromise,
-        externalCallPromise,
-      ]);
-
-      const uuid = ctx.rand.uuidv4();
-
-      const randomNumber = ctx.rand.random();
-    },
-  },
-});
-
-function doDbRequest() {
-  return "";
-}
-
-async function httpCall() {
-  return "";
-}
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb"} 
+const randomNumber = ctx.rand.random();
 ```
 
 This behaves like `Math.random()` but is deterministically replayable.
@@ -227,43 +122,16 @@ This behaves like `Math.random()` but is deterministically replayable.
 To run multiple operations concurrently and deterministically, use `RestatePromise` combinators.
 Restate then logs the order in which they get resolved or rejected so they are deterministic on replay.
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#all""""""""""""""} 
-import * as restate from "@restatedev/restate-sdk";
-import { RestatePromise } from "@restatedev/restate-sdk";
-import { MyService } from "./my_service";
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#all"} 
+const sleepPromise = ctx.sleep({ milliseconds: 100 });
+const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
+const externalCallPromise = ctx.run(() => httpCall());
 
-const service = restate.service({
-  name: "SideEffects",
-  handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      const result = await ctx.run<string>(async () => doDbRequest());
-    },
-
-    promiseCombinators: async (ctx: restate.Context, name: string) => {
-      const sleepPromise = ctx.sleep({ milliseconds: 100 });
-      const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
-      const externalCallPromise = ctx.run(() => httpCall());
-      
-      const resultArray = await RestatePromise.all([
-        sleepPromise,
-        callPromise,
-        externalCallPromise,
-      ]);
-
-      const uuid = ctx.rand.uuidv4();
-
-      const randomNumber = ctx.rand.random();
-    },
-  },
-});
-
-function doDbRequest() {
-  return "";
-}
-
-async function httpCall() {
-  return "";
-}
+const resultArray = await RestatePromise.all([
+  sleepPromise,
+  callPromise,
+  externalCallPromise,
+]);
 ```
 
 Restate provides the following deterministic combinators:

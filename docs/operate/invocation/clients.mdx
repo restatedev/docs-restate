@@ -30,344 +30,73 @@ Finally, connect to Restate and invoke the handler with your preferred semantics
 
 - **Request-response invocations** allow you to wait on a response from the handler.
 
-```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#rpc_call_node""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
+```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#rpc_call_node"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+const restateClient = clients.connect({ url: "http://localhost:8080" });
 
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
+// To call a service
+const greet = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet({ greeting: "Hi" });
 
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
+// To call an object
+const count = await restateClient
+  .objectClient<MyObject>({name: "MyObject"}, "Mary")
+  .greet({ greeting: "Hi" });
 
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
+// To call a workflow
+const handle = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" });
+const result = await restateClient.result(handle);
 
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+const status = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .myOtherHandler();
 ```
 
 - **One-way invocations** allow you to send a message without waiting for a response.
 
-```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#one_way_call_node""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
+```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#one_way_call_node"} 
+// import * as clients from "@restatedev/restateClient-sdk-clients";
+const restateClient = clients.connect({ url: "http://localhost:8080" });
 
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
+// To send a message to a service
+await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
 
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
+// To send a message to an object
+await restateClient
+  .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
+  .greet({ greeting: "Hi" });
 
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+// To send a message to a workflow
+const handle = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" });
+// You cannot send a message to a shared handler in a workflow
 ```
 
 - **Delayed invocations** allow you to schedule an invocation for a later point in time.
 
-```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#delayed_call_node""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
+```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#delayed_call_node"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+const restateClient = clients.connect({ url: "http://localhost:8080" });
 
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
+// To send a delayed message to a service
+await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
 
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
+// To send a delayed message to an object
+await restateClient
+  .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
+  .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
 
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+// To send a delayed message to a workflow
+const handle = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
+// You cannot send a delayed message to a shared handler in a workflow
 ```
 
 ## Invoke a handler idempotently
@@ -377,116 +106,10 @@ By using Restate and an idempotency key, you can make any service call idempoten
 To make a service call idempotent, you can use the idempotency key feature.
 Add the idempotency key [to the header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) via:
 
-```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#service_idempotent""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
-
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
-
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#service_idempotent"} 
+await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
 ```
 
 After the invocation completes, Restate persists the response for a retention period of one day (24 hours).
@@ -506,229 +129,37 @@ You can use the client library to retrieve the results of invocations **with an 
 ### Attach to an invocation with an idempotency key
 For invocations with an idempotency key, you can attach to the invocation and wait for it to finish:
 
-```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#service_attach""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#service_attach"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+const restateClient = clients.connect({ url: "http://localhost:8080" });
+// To send a message
+const handle = await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
 
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
+// ... do something else ...
 
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
-
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+// Attach later to retrieve the result
+const response = await restateClient.result(handle);
 ```
 
 ### Attach/peek at a workflow execution
 For workflows, you can attach to the workflow execution and wait for it to finish or peek at the output:
 
-```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#workflow_attach""""""""""""""} 
-import { MyService, MyObject, MyWorkflow } from "./utils";
-import * as clients from "@restatedev/restate-sdk-clients";
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#workflow_attach"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+const restateClient = clients.connect({ url: "http://localhost:8080" });
 
-const myPlainTSFunction = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
+// Option 1: attach and wait for result with workflow ID
+const result = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowAttach();
 
-  // To call a service
-  const greet = await restateClient
-    .serviceClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
-
-  // To call an object
-  const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To call a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  const result = await restateClient.result(handle);
-
-  const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
-};
-
-const myPlainTSFunction2 = async () => {
-  // import * as clients from "@restatedev/restateClient-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
-
-  // To send a message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" });
-
-  // To send a message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
-  // You cannot send a message to a shared handler in a workflow
-};
-
-const myPlainTSFunction3 = async () => {
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // To send a delayed message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to an object
-  await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
-    .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-
-  // To send a delayed message to a workflow
-  const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
-  // You cannot send a delayed message to a shared handler in a workflow
-};
-
-const servicesIdempotent = async () => {
-  const request = { greeting: "Hi" };
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-};
-
-const servicesAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-  // To send a message
-  const handle = await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet(request, clients.rpc.sendOpts({ idempotencyKey: "abcde" }));
-
-  // ... do something else ...
-
-  // Attach later to retrieve the result
-  const response = await restateClient.result(handle);
-};
-
-const workflowAttach = async () => {
-  const request = { greeting: "Hi" };
-  // import * as clients from "@restatedev/restate-sdk-clients";
-  const restateClient = clients.connect({ url: "http://localhost:8080" });
-
-  // Option 1: attach and wait for result with workflow ID
-  const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
-
-  // Option 2: peek to check if ready with workflow ID
-  const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
-  if (peekOutput.ready) {
-    const result2 = peekOutput.result;
-  }
-};
+// Option 2: peek to check if ready with workflow ID
+const peekOutput = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowOutput();
+if (peekOutput.ready) {
+  const result2 = peekOutput.result;
+}
 ```
