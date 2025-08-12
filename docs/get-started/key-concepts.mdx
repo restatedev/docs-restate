@@ -4,7 +4,7 @@ description: Core concepts of Restate applications
 icon: "cube"
 ---
 
-Restate gives applications innate resiliency.
+This page explains the key concepts and architecture that make Restate applications reliable and resilient.
 
 ## Application Structure
 
@@ -17,8 +17,7 @@ A Restate application consists of the following components:
 Your business logic lives in **services**: regular applications that embed the Restate SDK. Services contain **functions** (called handlers) that process requests and execute business logic.
 
 - **Deploy anywhere**: Services run in your infrastructure as containers, serverless functions, VMs, or Kubernetes pods
-- **Standard patterns**: Services look and feel like normal applications with added reliability by using the Restate SDK. Restate has SDKs for TypeScript, Java, Kotlin, Python, Go, and Rust.
-- **Invoke over HTTP, Kafka, or programmatically**: You can also invoke handlers via Kafka or directly through the SDK.
+- **Familiar programming model**: Services look and feel like normal applications with added reliability by using the Restate SDK. Restate has SDKs for TypeScript, Java, Kotlin, Python, Go, and Rust.
 - **Stateless executor**: The Restate Server stores all state and execution history, so services are stateless and can be scaled horizontally.
 
 ### Restate Server
@@ -37,6 +36,7 @@ It can be deployed in a high-availability cluster or as a single-node instance.
 
 An **invocation** represents a request to execute a handler. Restate tracks each invocation through completion, ensuring it runs exactly once regardless of failures.
 
+You can invoke Restate handlers over HTTP, Kafka, or programmatically.
 
 ## Durable Execution
 
@@ -50,8 +50,9 @@ Restate tracks every step of your code execution in a **journal**. When you call
 
 In this example, if sending the receipt fails, Restate automatically retries the function but skips the payment processing since it already completed successfully. Each step is recorded in the journal and won't repeat on retry.
 
-For a detailed technical walkthrough of the lifecycle of a request, see the **[guide](/guides/request-lifecycle)**.
-
+<Info>
+For a detailed technical walkthrough of the lifecycle of a request, read this **[guide](/guides/request-lifecycle)**.
+</Info>
 
 ### What it covers
 
@@ -99,26 +100,21 @@ The Restate UI gives you an introspection tool to see chains of calls and their 
 
 ## Consistent State
 
-In addition to reliable execution and communication, Restate provides built-in state management to ensure your application state remains consistent.
+The Restate Server includes a **key-value store** for persisting application state. Use it for user sessions, transactional state machines, agent memory, and other application state.
 
-The Restate Server embeds a **key-value (K/V) store** that allows you to persist application state.
 
-You can use this store for:
-- Transactional state machines (payment status, order status…)
-- Session state (shopping cart, ongoing orders, LLM context, AI agent context, …)
-- State that is part of distributed orchestration and coordination (e.g., versions/life-cycle of shared resources, transaction IDs, reference counts, distributed locks/semaphores/leases, …)
-- Agent memory and context
-- State in event processing pipelines (aggregates, joins)
+### How it works
 
-You can use Restate's K/V store from Virtual Objects and Workflows.
-Restate journals all state updates alongside other context actions (e.g., run, calls) in the same execution log.
-This ensures strong consistency: your state is always in sync with the exact point of execution, making it safe to use in distributed or failure-prone environments.
+- **Scoped per entity**: Virtual Objects and Workflows each get their own isolated state
+- **Automatically journaled**: State updates are recorded alongside execution steps for consistency
+- **Single-writer guarantee**: Only one handler can modify state at a time, preventing race conditions
+- **Stateless services**: State is injected on each request, so your services remain horizontally scalable
 
-This model turns your service into a stateless executor: The state is injected on every request, allowing handlers to operate without maintaining any in-memory or external persistence.
+State is retained indefinitely for Virtual Objects, or for the configured retention period for Workflows.
 
-Restate ensures only one handler can modify a piece of state at a time, preventing lost updates or other concurrency issues.
-
-You can query state from the Restate UI.
+<Info>
+    Learn more about when to store state in Restate vs. in a database with [this guide](/guides/databases).
+</Info>
 
 ## Suspensions on FaaS
 
@@ -126,7 +122,7 @@ When running handlers on function-as-a-service platforms (FaaS), like AWS Lambda
 
 For example, if a handler needs to wait for a user to approve an order, Restate can suspend the function until the user responds.
 
-This lets you run long-running workflows on FaaS platforms without paying for idle time.
+This lets you run long-running workflows on FaaS platforms **without paying for wait time**.
 
 ## Next Steps
 
