@@ -1,5 +1,339 @@
 ---
-title: "Services"
-description: "Learn how to create and use services in Restate."
+title: Services
+description: Understanding Restate's three service types and when to use each
 icon: "box"
 ---
+
+Restate provides three service types, each optimized for different use cases. Choose the right type based on what your application needs to do.
+
+## Service types comparison
+
+| | **Basic Service** | **Virtual Object** | **Workflow** |
+|---|---|---|---|
+| **State** | Stateless | Stateful per key | Stateful per workflow |
+| **Concurrency** | High parallelism | Single writer per key | Single instance per key |
+| **Key Features** | Durable execution, service calls | Built-in state, consistency | Promises, signals, durable sleep |
+| **Best For** | Data processing, validations, API calls | User accounts, shopping carts, entities | Approvals, orchestration, multi-step flows |
+
+## Basic Service
+
+Stateless functions that process requests without storing data between calls. Perfect for data processing, API integrations, and business logic that doesn't need to remember previous requests.
+
+<CodeGroup>
+    ```typescript TypeScript
+    const validationService = service({
+    name: "ValidationService",
+    handlers: {
+    validateOrder: async (ctx: Context, order: Order) => {
+    // Load validation rules
+    const rules = await ctx.run("load-rules", () => loadValidationRules());
+
+    // Apply validation
+    const result = await ctx.run("validate", () => applyRules(order, rules));
+
+    return { valid: result.isValid, errors: result.errors };
+}
+}
+});
+    ```
+
+    ```java Java
+    @Service
+    public class ValidationService {
+
+@Handler
+    public ValidationResult validateOrder(Context ctx, Order order) {
+    // Load validation rules
+    Rules rules = ctx.run("load-rules", () -> loadValidationRules());
+
+    // Apply validation
+    ValidationResult result = ctx.run("validate", () -> applyRules(order, rules));
+
+    return new ValidationResult(result.isValid(), result.getErrors());
+}
+}
+    ```
+
+    ```python Python
+    validation_service = Service("ValidationService")
+
+    @validation_service.handler()
+    async def validate_order(ctx: Context, order: Order):
+    # Load validation rules
+    rules = await ctx.run("load-rules", lambda: load_validation_rules())
+
+    # Apply validation
+    result = await ctx.run("validate", lambda: apply_rules(order, rules))
+
+    return {"valid": result.is_valid, "errors": result.errors}
+    ```
+</CodeGroup>
+
+**Characteristics:**
+- No persistent state between requests
+- Horizontal scaling without coordination
+- High throughput and fast processing
+- Simple to develop, test, and deploy
+
+**Use for:** Data transformations, API calls, validations, calculations, ETL operations.
+
+## Virtual Object
+
+Stateful functions identified by a unique key. Each object has its own consistent key-value storage that survives failures. Only one function runs per key at a time, preventing race conditions.
+
+<CodeGroup>
+    ```typescript TypeScript
+    const userAccount = object({
+    name: "UserAccount",
+    handlers: {
+    updateBalance: async (ctx: ObjectContext, amount: number) => {
+    // Get current balance from object state
+    const currentBalance = (await ctx.get<number>("balance")) ?? 0;
+
+    // Update balance atomically
+    const newBalance = currentBalance + amount;
+    ctx.set("balance", newBalance);
+    ctx.set("lastUpdated", new Date().toISOString());
+
+    return { balance: newBalance, previous: currentBalance };
+},
+
+    getProfile: async (ctx: ObjectContext) => {
+    const profile = await ctx.get<UserProfile>("profile");
+    const balance = await ctx.get<number>("balance");
+
+    return { profile, balance: balance ?? 0 };
+}
+}
+});
+    ```
+
+    ```java Java
+    @VirtualObject
+    public class UserAccount {
+
+@Handler
+    public BalanceResult updateBalance(ObjectContext ctx, Integer amount) {
+    // Get current balance from object state
+    Integer currentBalance = ctx.get("balance", Integer.class).orElse(0);
+
+    // Update balance atomically
+    Integer newBalance = currentBalance + amount;
+    ctx.set("balance", newBalance);
+    ctx.set("lastUpdated", Instant.now().toString());
+
+    return new BalanceResult(newBalance, currentBalance);
+}
+
+    @Handler
+    public ProfileResult getProfile(ObjectContext ctx) {
+    UserProfile profile = ctx.get("profile", UserProfile.class);
+    Integer balance = ctx.get("balance", Integer.class).orElse(0);
+
+    return new ProfileResult(profile, balance);
+}
+}
+    ```
+
+    ```python Python
+    user_account = VirtualObject("UserAccount")
+
+    @user_account.handler()
+    async def update_balance(ctx: ObjectContext, amount: int):
+    # Get current balance from object state
+    current_balance = await ctx.get("balance", int) or 0
+
+    # Update balance atomically
+    new_balance = current_balance + amount
+    await ctx.set("balance", new_balance)
+    await ctx.set("lastUpdated", datetime.now().isoformat())
+
+    return {"balance": new_balance, "previous": current_balance}
+
+    @user_account.handler()
+    async def get_profile(ctx: ObjectContext):
+    profile = await ctx.get("profile", UserProfile)
+    balance = await ctx.get("balance", int) or 0
+
+    return {"profile": profile, "balance": balance}
+    ```
+</CodeGroup>
+
+**Characteristics:**
+- Consistent state with built-in key-value storage
+- Single-writer guarantee per key
+- Automatic recovery of state across failures
+- Per-key isolation
+
+**Use for:** User accounts, shopping carts, game entities, any business entity that needs persistent state.
+
+**Calling Virtual Objects:**
+```bash
+# Call with specific key
+curl localhost:8080/UserAccount/user123/updateBalance --json '{"amount": 100}'
+curl localhost:8080/UserAccount/user123/getProfile
+```
+
+## Workflow
+
+Long-running functions that coordinate complex processes over extended periods. They can sleep for hours or days, wait for external events, and handle human interactions while consuming no resources during idle periods.
+
+<CodeGroup>
+    ```typescript TypeScript
+    const approvalWorkflow = workflow({
+    name: "ApprovalWorkflow",
+    handlers: {
+    processApproval: async (ctx: WorkflowContext, request: ApprovalRequest) => {
+    ctx.set("status", "pending");
+    ctx.set("submittedAt", new Date().toISOString());
+
+    // Wait for external approval decision (could be hours/days)
+    const decision = await ctx.promise<ApprovalDecision>("approval-decision");
+
+    if (decision.approved) {
+    ctx.set("status", "approved");
+    ctx.set("approvedBy", decision.approver);
+
+    // Process the approved request
+    const result = await ctx.run("process", () => processApprovedRequest(request));
+    return { status: "approved", result };
+} else {
+    ctx.set("status", "rejected");
+    ctx.set("rejectedBy", decision.approver);
+
+    return { status: "rejected", reason: decision.reason };
+}
+},
+
+    // Signal function to provide approval
+    approve: async (ctx: WorkflowSharedContext, decision: ApprovalDecision) => {
+    ctx.promise("approval-decision").resolve(decision);
+},
+
+    // Query function to check status
+    getStatus: async (ctx: WorkflowSharedContext) => {
+    const status = await ctx.get<string>("status");
+    return { status: status ?? "pending" };
+}
+}
+});
+    ```
+
+    ```java Java
+    @Workflow
+    public class ApprovalWorkflow {
+
+@Handler
+    public ApprovalResult processApproval(WorkflowContext ctx, ApprovalRequest request) {
+    ctx.set("status", "pending");
+    ctx.set("submittedAt", Instant.now().toString());
+
+    // Wait for external approval decision
+    ApprovalDecision decision = ctx.promise("approval-decision", ApprovalDecision.class).await();
+
+    if (decision.isApproved()) {
+    ctx.set("status", "approved");
+    ctx.set("approvedBy", decision.getApprover());
+
+    ProcessResult result = ctx.run("process", () -> processApprovedRequest(request));
+    return new ApprovalResult("approved", result);
+} else {
+    ctx.set("status", "rejected");
+    ctx.set("rejectedBy", decision.getApprover());
+
+    return new ApprovalResult("rejected", decision.getReason());
+}
+}
+
+    @Handler
+    public void approve(WorkflowSharedContext ctx, ApprovalDecision decision) {
+    ctx.promise("approval-decision").resolve(decision);
+}
+
+    @Handler
+    public StatusResult getStatus(WorkflowSharedContext ctx) {
+    String status = ctx.get("status", String.class).orElse("pending");
+    return new StatusResult(status);
+}
+}
+    ```
+
+    ```python Python
+    approval_workflow = Workflow("ApprovalWorkflow")
+
+    @approval_workflow.handler()
+    async def process_approval(ctx: WorkflowContext, request: ApprovalRequest):
+    await ctx.set("status", "pending")
+    await ctx.set("submittedAt", datetime.now().isoformat())
+
+    # Wait for external approval decision
+    decision = await ctx.promise("approval-decision", ApprovalDecision)
+
+    if decision.approved:
+    await ctx.set("status", "approved")
+    await ctx.set("approvedBy", decision.approver)
+
+    result = await ctx.run("process", lambda: process_approved_request(request))
+    return {"status": "approved", "result": result}
+    else:
+    await ctx.set("status", "rejected")
+    await ctx.set("rejectedBy", decision.approver)
+
+    return {"status": "rejected", "reason": decision.reason}
+
+    @approval_workflow.handler()
+    async def approve(ctx: WorkflowSharedContext, decision: ApprovalDecision):
+    ctx.promise("approval-decision").resolve(decision)
+
+    @approval_workflow.handler()
+    async def get_status(ctx: WorkflowSharedContext):
+    status = await ctx.get("status", str) or "pending"
+    return {"status": status}
+    ```
+</CodeGroup>
+
+**Characteristics:**
+- Long-running execution without resource consumption while waiting
+- Durable orchestration across multiple services
+- Event-driven with signals and queries
+- Failure resilient coordination
+
+**Use for:** Approval processes, multi-step transactions, user onboarding flows, complex orchestration scenarios.
+
+**Interacting with Workflows:**
+```bash
+# Start workflow
+curl localhost:8080/ApprovalWorkflow/req123/processApproval --json '{"title": "Budget Request"}'
+
+# Send signal (approval)
+curl localhost:8080/ApprovalWorkflow/req123/approve --json '{"approved": true, "approver": "manager@company.com"}'
+
+# Query status
+curl localhost:8080/ApprovalWorkflow/req123/getStatus
+```
+
+## Choosing the right service type
+
+**Start with Basic Services** for most business logic, data processing, and API integrations.
+
+**Use Virtual Objects** when you need to maintain state for specific entities (users, orders, sessions).
+
+**Use Workflows** for complex multi-step processes that involve coordination, human input, or long delays.
+
+You can mix and match these service types within the same application - they work together seamlessly to handle different aspects of your business logic.
+
+## Service registration
+
+When you register your service with Restate, all exported functions become available as HTTP endpoints automatically:
+
+```bash
+# Register your service
+restate deployments register http://localhost:9080
+
+# Functions become endpoints:
+# /ServiceName/functionName
+# /ObjectName/key/functionName
+# /WorkflowName/key/functionName
+```
+
+Each service type provides different capabilities through their context objects, but all share the same fundamental durable execution guarantees that make your applications reliable by default.

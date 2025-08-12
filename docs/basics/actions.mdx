@@ -1,362 +1,309 @@
 ---
-title: "Actions"
-description: "A comprehensive guide to all actions and capabilities available through the Restate context."
-icon: "forward-step"
+title: Actions
+description: Essential context actions for building reliable functions
+icon: "gear"
 ---
 
-The Restate context (`ctx`) provides a rich set of actions for building resilient applications. This guide covers all the key capabilities you can use to develop your applications.
+Context helpers are methods available on the context object (`ctx`) that provide Restate's core capabilities. These helpers enable durable execution, state management, service communication, and timing control.
 
-## State Management
+## Durable steps
 
-### **ctx.set(key, value)**
-Store data in the service's durable state:
+### Run
 
-```ts
-// Store simple values
-await ctx.set("userId", "user123");
-await ctx.set("orderStatus", "processing");
+The foundation of reliable external system integration. Wraps non-deterministic operations to make them safe for retries.
 
-// Store complex objects
-await ctx.set("orderDetails", {
-  id: "order456",
-  items: ["item1", "item2"],
-  total: 99.99
+<CodeGroup>
+
+```typescript TypeScript
+// External API call
+const apiResult = await ctx.run("fetch-data", async () => {
+  const response = await fetch("https://api.example.com/data");
+  return response.json();
 });
 
-// Store arrays
-await ctx.set("orderHistory", [
-  { id: "order1", amount: 50 },
-  { id: "order2", amount: 75 }
+// Database operation
+const dbResult = await ctx.run("update-user", () => {
+  return database.users.update(userId, { name: "John" });
+});
+
+// Random value generation
+const randomId = await ctx.run("generate-id", () => {
+  return Math.random().toString(36);
+});
+```
+
+```java Java
+// External API call
+ApiResponse apiResult = ctx.run("fetch-data", () -> {
+    HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+    return objectMapper.readValue(response.body(), ApiResponse.class);
+});
+
+// Database operation
+UserResult dbResult = ctx.run("update-user", () -> {
+    return database.users().update(userId).setName("John").execute();
+});
+```
+
+```python Python
+# External API call
+api_result = await ctx.run("fetch-data", lambda: requests.get("https://api.example.com/data").json())
+
+# Database operation
+db_result = await ctx.run("update-user", lambda: database.users.update(user_id, {"name": "John"}))
+```
+</CodeGroup>
+
+Without `ctx.run()`, these operations would produce different results during replay, breaking consistency.
+
+## State management
+
+Available in Virtual Object and Workflow functions for persistent key-value storage.
+
+### Get
+
+Retrieve stored state by key.
+
+<CodeGroup>
+
+```typescript TypeScript
+// Get with type and default value
+const profile = await ctx.get<UserProfile>("profile");
+const count = (await ctx.get<number>("count")) ?? 0;
+const settings = await ctx.get<Settings>("settings") ?? defaultSettings;
+```
+
+```java Java
+// Get with optional handling
+UserProfile profile = ctx.get("profile", UserProfile.class);
+Integer count = ctx.get("count", Integer.class).orElse(0);
+Settings settings = ctx.get("settings", Settings.class).orElse(defaultSettings);
+```
+
+```python Python
+# Get with default values
+profile = await ctx.get("profile", UserProfile)
+count = await ctx.get("count", int) or 0
+settings = await ctx.get("settings", Settings) or default_settings
+```
+</CodeGroup>
+
+### Set
+
+Store state that persists across function invocations.
+
+<CodeGroup>
+
+```typescript TypeScript
+// Store simple values
+ctx.set("lastLogin", new Date().toISOString());
+ctx.set("loginCount", loginCount + 1);
+
+// Store complex objects
+ctx.set("profile", {
+  name: "John Doe",
+  email: "john@example.com",
+  preferences: { theme: "dark" }
+});
+```
+
+```java Java
+// Store values
+ctx.set("lastLogin", Instant.now().toString());
+ctx.set("loginCount", loginCount + 1);
+ctx.set("profile", userProfile);
+```
+
+```python Python
+# Store values
+await ctx.set("lastLogin", datetime.now().isoformat())
+await ctx.set("loginCount", login_count + 1)
+await ctx.set("profile", user_profile)
+```
+</CodeGroup>
+
+### Clear
+
+Remove state keys completely.
+
+<CodeGroup>
+```typescript TypeScript
+// Clear specific keys
+ctx.clear("tempData");
+ctx.clear("sessionToken");
+
+// Clear all user data
+ctx.clearAll();
+```
+
+</CodeGroup>
+
+State changes are atomic - either all changes in a function are applied when it completes, or none are if it fails.
+
+## Service communication
+
+### Request-response calls
+
+Make request-response calls to other services. Your function waits for the result.
+
+<CodeGroup>
+
+```typescript TypeScript
+// Call another service
+const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+
+// Call Virtual Object function
+const profile = await ctx.objectCall(UserAccount, userId).getProfile();
+
+// Call Workflow function
+const status = await ctx.workflowCall(OrderWorkflow, orderId).getStatus();
+```
+
+```java Java
+// Call another service
+ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+    .validateOrder(order).await();
+
+// Call Virtual Object function
+ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
+    .getProfile().await();
+```
+
+```python Python
+# Call another service
+validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+
+# Call Virtual Object function
+profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
+```
+</CodeGroup>
+
+
+### Sending messages
+
+Make one-way calls that don't return results. Your function continues immediately.
+
+<CodeGroup>
+
+```typescript TypeScript
+// Fire-and-forget notification
+ctx.serviceSend(NotificationService).sendEmail(userId, "Welcome!");
+
+// Background analytics
+ctx.serviceSend(AnalyticsService).recordEvent("user_signup", { userId });
+
+// Cleanup task
+ctx.serviceSend(CleanupService).deleteExpiredData();
+```
+
+```java Java
+// Fire-and-forget calls
+NotificationServiceClient.fromContext(ctx).send()
+    .sendEmail(userId, "Welcome!");
+
+AnalyticsServiceClient.fromContext(ctx).send()
+    .recordEvent("user_signup", eventData);
+```
+</CodeGroup>
+
+### Delayed messages
+
+Schedule functions to run in the future.
+
+```typescript TypeScript
+// Schedule reminder for tomorrow
+ctx.serviceCall(ReminderService).sendReminder(userId, message, {
+  delay: 24 * 60 * 60 * 1000 // 24 hours
+});
+
+// Schedule timeout check
+ctx.serviceCall(TimeoutService).checkTimeout(requestId, {
+  delay: 5 * 60 * 1000 // 5 minutes
+});
+```
+
+## Durable timers
+
+### Sleep
+
+Pause function execution for a specific duration.
+
+<CodeGroup>
+
+```typescript TypeScript
+// Sleep for 30 seconds
+await ctx.sleep(30 * 1000);
+
+// Sleep for specific duration
+await ctx.sleep(5 * 60 * 1000); // 5 minutes
+
+// Sleep until specific time
+const targetTime = new Date('2024-12-25T09:00:00Z');
+const delay = targetTime.getTime() - Date.now();
+await ctx.sleep(delay);
+```
+
+```java Java
+// Sleep for durations
+ctx.sleep(Duration.ofSeconds(30));
+ctx.sleep(Duration.ofMinutes(5));
+ctx.sleep(Duration.ofHours(1));
+```
+
+```python Python
+# Sleep with timedelta
+await ctx.sleep(timedelta(seconds=30))
+await ctx.sleep(timedelta(minutes=5))
+await ctx.sleep(timedelta(hours=1))
+```
+</CodeGroup>
+
+
+Functions consume no resources while sleeping and resume at exactly the right time, even across restarts.
+
+## Workflow-specific actions
+
+Available only in Workflow functions for coordination and external communication.
+
+### Create Durable Promises
+
+Create promises that external systems can resolve to send data to your workflow.
+
+```typescript TypeScript
+// Wait for external event
+const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
+
+// Wait for human approval
+const approved = await ctx.promise<boolean>("manager-approval");
+
+// Wait for multiple events
+const [payment, inventory] = await Promise.all([
+  ctx.promise<PaymentResult>("payment"),
+  ctx.promise<InventoryResult>("inventory")
 ]);
 ```
 
-### **ctx.get(key)**
-Retrieve data from durable state:
+### Resolve Durable Promises
 
-```ts
-// Get simple values
-const userId = await ctx.get("userId");
-const status = await ctx.get("orderStatus");
+Resolve promises from signal functions.
 
-// Get complex objects
-const orderDetails = await ctx.get("orderDetails");
-const orderHistory = await ctx.get("orderHistory") || [];
+```typescript TypeScript
+// In a signal function
+export const confirmPayment = async (ctx: WorkflowSharedContext, result: PaymentResult) => {
+  ctx.promise("payment-completed").resolve(result);
+};
 
-// Type-safe retrieval
-const user: User | null = await ctx.get("user");
+// In a signal function
+export const approveRequest = async (ctx: WorkflowSharedContext, approved: boolean) => {
+  ctx.promise("manager-approval").resolve(approved);
+};
 ```
 
-### **ctx.del(key)**
-Remove data from durable state:
+## Context types summary
 
-```ts
-// Delete specific keys
-await ctx.del("temporaryData");
-await ctx.del("sessionToken");
+- **`Context`**: Service functions - stateless processing
+- **`ObjectContext`**: Virtual Object functions - stateful with per-key storage
+- **`WorkflowContext`**: Main workflow functions - long-running coordination
+- **`WorkflowSharedContext`**: Workflow signals and queries - external interaction
 
-// Clean up after processing
-await ctx.del("order_123");
-await ctx.del("payment_123");
-```
-
-## Service Communication
-
-### **ctx.call(service, method, input)**
-Invoke other services synchronously:
-
-```ts
-// Call other Restate services
-const paymentResult = await ctx.call(paymentService.process, {
-  amount: 100,
-  currency: "USD"
-});
-
-const inventoryResult = await ctx.call(inventoryService.reserve, {
-  items: ["item1", "item2"],
-  orderId: "order123"
-});
-
-// Call with complex inputs
-const enrichedData = await ctx.call(customerService.enrich, {
-  customerId: "cust123",
-  profile: customerProfile,
-  preferences: userPreferences
-});
-```
-
-### **ctx.run(service, method, input)**
-Invoke other services asynchronously (fire-and-forget):
-
-```ts
-// Fire-and-forget notifications
-await ctx.run(notificationService.sendEmail, {
-  to: "user@example.com",
-  subject: "Order Confirmed",
-  template: "order-confirmation"
-});
-
-// Background processing
-await ctx.run(analyticsService.track, {
-  event: "purchase_completed",
-  userId: "user123",
-  data: purchaseData
-});
-```
-
-## Time and Scheduling
-
-### **ctx.sleep(duration)**
-Pause execution for a specified duration:
-
-```ts
-// Sleep for specific time periods
-await ctx.sleep({ seconds: 30 });
-await ctx.sleep({ minutes: 5 });
-await ctx.sleep({ hours: 2 });
-await ctx.sleep({ days: 1 });
-
-// Wait before retrying
-await ctx.sleep({ milliseconds: 1000 });
-
-// Exponential backoff
-const delay = Math.pow(2, retryCount) * 1000;
-await ctx.sleep({ milliseconds: delay });
-```
-
-### **ctx.awakeable&lt;T&gt;(id)**
-Wait for external events or signals:
-
-```ts
-// Wait for external confirmation
-const confirmation = await ctx.awakeable<string>("order-confirmation");
-
-// Wait for user approval
-const approval = await ctx.awakeable<ApprovalData>("user-approval");
-
-// Wait for payment confirmation
-const paymentResult = await ctx.awakeable<PaymentResult>("payment-confirmation");
-
-// Type-safe awakeables
-interface OrderConfirmation {
-  orderId: string;
-  status: "approved" | "rejected";
-  reason?: string;
-}
-
-const confirmation: OrderConfirmation = await ctx.awakeable<OrderConfirmation>("order-confirmation");
-```
-
-## Error Handling and Control Flow
-
-### **ctx.retry(promise, options?)**
-Retry operations with configurable policies:
-
-```ts
-// Simple retry
-const result = await ctx.retry(
-  externalApi.call(),
-  { maxRetries: 3 }
-);
-
-// Retry with custom delay
-const result = await ctx.retry(
-  paymentService.process(payment),
-  {
-    maxRetries: 5,
-    delay: { seconds: 2 }
-  }
-);
-
-// Retry with exponential backoff
-const result = await ctx.retry(
-  inventoryService.reserve(items),
-  {
-    maxRetries: 3,
-    backoff: "exponential"
-  }
-);
-```
-
-### **ctx.oneWayCall(service, method, input)**
-Make one-way calls that don't return results:
-
-```ts
-// Send notifications without waiting
-await ctx.oneWayCall(notificationService.sendSMS, {
-  phone: "+1234567890",
-  message: "Your order is ready!"
-});
-
-// Log events
-await ctx.oneWayCall(loggingService.log, {
-  level: "info",
-  message: "Order processed successfully",
-  orderId: "order123"
-});
-```
-
-## Data Processing and Transformation
-
-### **ctx.map(array, callback)**
-Process arrays with automatic checkpointing:
-
-```ts
-// Process items in parallel
-const results = await ctx.map(orderItems, async (item) => {
-  return await ctx.call(inventoryService.checkAvailability, item);
-});
-
-// Transform data
-const transformedData = await ctx.map(rawData, async (item) => {
-  return {
-    id: item.id,
-    processed: true,
-    timestamp: new Date().toISOString()
-  };
-});
-```
-
-### **ctx.forEach(array, callback)**
-Execute side effects for each array element:
-
-```ts
-// Send notifications to multiple users
-await ctx.forEach(users, async (user) => {
-  await ctx.run(notificationService.sendEmail, {
-    to: user.email,
-    subject: "System Update",
-    template: "system-notification"
-  });
-});
-
-// Process items sequentially
-await ctx.forEach(items, async (item) => {
-  await ctx.call(processorService.process, item);
-});
-```
-
-## Advanced Patterns
-
-### **Conditional Execution**
-```ts
-// Conditional service calls
-if (order.amount > 1000) {
-  await ctx.call(approvalService.requireApproval, order);
-}
-
-// Conditional state updates
-const status = await ctx.get("status");
-if (status === "pending") {
-  await ctx.set("status", "processing");
-  await ctx.call(processorService.start, order);
-}
-```
-
-### **State Machines**
-```js
-// Implement state machines
-const currentState = await ctx.get("state") || "initial";
-
-switch (currentState) {
-  case "initial":
-    await ctx.set("state", "processing");
-    await ctx.call(processorService.start, data);
-    break;
-    
-  case "processing":
-    const result = await ctx.call(processorService.check, data);
-    if (result.complete) {
-      await ctx.set("state", "completed");
-      await ctx.call(notificationService.notify, result);
-    }
-    break;
-    
-  case "completed":
-    // Final state, no further actions
-    break;
-}
-```
-
-### **Saga Pattern**
-```js
-// Implement saga pattern with compensation
-try {
-  // Step 1: Reserve inventory
-  await ctx.call(inventoryService.reserve, { items: order.items });
-  
-  // Step 2: Process payment
-  await ctx.call(paymentService.process, { amount: order.total });
-  
-  // Step 3: Confirm order
-  await ctx.call(orderService.confirm, { orderId: order.id });
-  
-} catch (error) {
-  // Compensation: Release inventory
-  await ctx.call(inventoryService.release, { orderId: order.id });
-  
-  // Compensation: Refund payment
-  await ctx.call(paymentService.refund, { orderId: order.id });
-  
-  throw error;
-}
-```
-
-### **Event Sourcing**
-```js
-// Record events in state
-const events = await ctx.get("events") || [];
-events.push({
-  type: "order_created",
-  timestamp: new Date().toISOString(),
-  data: order
-});
-await ctx.set("events", events);
-
-// Rebuild state from events
-const events = await ctx.get("events") || [];
-const orderState = events.reduce((state, event) => {
-  switch (event.type) {
-    case "order_created":
-      return { ...state, status: "created", ...event.data };
-    case "payment_processed":
-      return { ...state, status: "paid", paymentId: event.data.paymentId };
-    case "shipped":
-      return { ...state, status: "shipped", trackingId: event.data.trackingId };
-    default:
-      return state;
-  }
-}, {});
-```
-
-## Best Practices
-
-### **State Management**
-- Use descriptive key names for state
-- Clean up temporary state when no longer needed
-- Consider state size and retention policies
-- Use state for correlation, not as a primary database
-
-### **Service Communication**
-- Use `ctx.call` for synchronous operations that need results
-- Use `ctx.run` for fire-and-forget operations
-- Use `ctx.oneWayCall` for logging and notifications
-- Handle errors appropriately in service calls
-
-### **Error Handling**
-- Use `ctx.retry` for transient failures
-- Implement proper compensation logic
-- Log errors for debugging
-- Use appropriate retry policies
-
-### **Performance**
-- Batch operations when possible
-- Use appropriate timeouts for external calls
-- Monitor execution times and optimize slow operations
-- Consider using `ctx.run` for non-critical operations
-
-## Next Steps
-
-- Learn about [state management](/develop/ts/state) for advanced patterns
-- Explore [error handling](/develop/ts/error-handling) for robust applications
-- See [service communication](/develop/ts/service-communication) for microservice integration
-- Understand [awakeables](/develop/ts/awakeables) for external event integration
+Each context type provides the appropriate helpers for its service pattern, ensuring you have the right tools for building reliable, distributed applications.

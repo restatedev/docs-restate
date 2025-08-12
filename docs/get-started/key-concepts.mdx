@@ -1,23 +1,175 @@
 ---
-title: "Key Concepts"
-description: "Learn the key concepts of Restate, including services, handlers, and invocations."
+title: Key Concepts
+description: Core concepts that make Restate applications resilient and reliable
 icon: "cube"
 ---
 
-Form Factor
+Restate makes distributed applications reliable through durable execution. When failures happen, Restate replays your code execution to restore exactly where it left off - no duplicate work, no lost progress.
 
-Durable Execution
+## Durable Execution
 
-Suspensions
+Restate tracks every step of your code execution in a journal. This lets you write simple, sequential code that automatically survives crashes, network failures, and infrastructure problems.
 
-How does this make my services resilient against...
+<CodeGroup>
+```typescript TypeScript
+export const processPayment = async (ctx: Context, payment: Payment) => {
+    // Step 1: Validate payment - journaled
+    const validation = await ctx.run("validate", () => validatePayment(payment));
 
-- service crashes:
-- failures of Restate itself:
-- network failures:
-- zombie processes:
-- network partitions:
-- state inconsistencies:
-- concurrency issues:
+    // Step 2: Charge payment - journaled
+    const charge = await ctx.serviceCall(PaymentService).charge(payment.amount);
 
-How to handle versioning
+    // Step 3: Send receipt - journaled
+    await ctx.serviceSend(EmailService).sendReceipt(payment.userId, charge.id);
+
+    return { success: true, chargeId: charge.id };
+};
+```
+
+```java Java
+@Handler
+public PaymentResult processPayment(Context ctx, Payment payment) {
+    // Step 1: Validate payment - journaled
+    ValidationResult validation = ctx.run("validate", () -> validatePayment(payment));
+
+    // Step 2: Charge payment - journaled
+    ChargeResult charge = PaymentServiceClient.fromContext(ctx)
+    .charge(payment.getAmount()).await();
+
+    // Step 3: Send receipt - journaled
+    EmailServiceClient.fromContext(ctx).send()
+    .sendReceipt(payment.getUserId(), charge.getId());
+
+    return new PaymentResult(true, charge.getId());
+}
+```
+
+```python Python
+async def process_payment(ctx: Context, payment: Payment):
+    # Step 1: Validate payment - journaled
+    validation = await ctx.run("validate", lambda: validate_payment(payment))
+
+    # Step 2: Charge payment - journaled
+    charge = await PaymentServiceClient.from_context(ctx).charge(payment.amount)
+
+    # Step 3: Send receipt - journaled
+    await EmailServiceClient.from_context(ctx).send().send_receipt(payment.user_id, charge.id)
+
+    return {"success": True, "charge_id": charge.id}
+```
+</CodeGroup>
+
+If the payment service call fails, Restate automatically retries the function but skips the validation step since it already completed successfully. Each step is recorded in the journal and won't repeat on retry.
+
+## Service Types
+
+Restate provides three service patterns for different use cases:
+
+### Basic Services
+Stateless functions that process requests without storing state between calls. Perfect for data transformations, API integrations, and business logic that doesn't need to remember previous requests.
+
+<CodeGroup>
+```typescript TypeScript
+export const validateOrder = async (ctx: Context, order: Order) => {
+    // Stateless validation logic
+    const rules = await ctx.run("load-rules", () => loadValidationRules());
+    const result = await ctx.run("validate", () => applyRules(order, rules));
+
+    return { valid: result.isValid, errors: result.errors };
+};
+```
+</CodeGroup>
+
+### Virtual Objects
+Stateful functions identified by a unique key. Each object has its own consistent key-value storage that survives failures. Only one function runs per key at a time, preventing race conditions.
+
+<CodeGroup>
+```typescript TypeScript
+export const updateBalance = async (ctx: ObjectContext, amount: number) => {
+    // Get current balance from object state
+    const currentBalance = (await ctx.get<number>("balance")) ?? 0;
+
+    // Update balance atomically
+    const newBalance = currentBalance + amount;
+    ctx.set("balance", newBalance);
+
+    return { balance: newBalance, previous: currentBalance };
+};
+```
+</CodeGroup>
+
+Perfect for user accounts, shopping carts, or any entity that needs persistent state with consistency guarantees.
+
+### Workflows
+Coordinate long-running processes that span extended periods. They can sleep for hours or days, wait for external events, and handle human interactions while consuming no resources.
+
+<CodeGroup>
+```typescript TypeScript
+export const processApproval = async (ctx: WorkflowContext, request: ApprovalRequest) => {
+    ctx.set("status", "pending");
+
+    // Wait for external approval (could be hours/days)
+    const decision = await ctx.promise<ApprovalDecision>("approval-decision");
+
+    if (decision.approved) {
+        ctx.set("status", "approved");
+        await ctx.run("process", () => processApprovedRequest(request));
+    } else {
+        ctx.set("status", "rejected");
+    }
+
+        return { approved: decision.approved };
+    };
+
+    // Signal function to provide approval
+    export const approve = async (ctx: WorkflowSharedContext, decision: ApprovalDecision) => {
+    ctx.promise("approval-decision").resolve(decision);
+};
+```
+</CodeGroup>
+
+Perfect for approval processes, multi-step transactions, or complex orchestration scenarios.
+
+## Functions and Context
+
+Functions are the building blocks of Restate services. Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+
+Every function receives a context object (`ctx`) that provides access to Restate's capabilities:
+
+- **Basic Services** use `Context` for durable execution and service calls
+- **Virtual Objects** use `ObjectContext` which adds state management (`get`, `set`, `clear`)
+- **Workflows** use `WorkflowContext` for coordination and `WorkflowSharedContext` for signals/queries
+
+## Data Storage
+
+Restate stores three types of data to enable reliability:
+
+**Execution Journals**: Track every operation in your code execution - API calls, database queries, state changes, and timing operations. This enables deterministic replay during failures.
+
+**Virtual Object State**: Stored per object key with strong consistency. Only one writer per key at a time prevents race conditions, and state is automatically persisted when functions complete.
+
+**Invocation Metadata**: Service definitions, deployment information, and invocation tracking needed for routing and coordination.
+
+## System Architecture
+
+Restate separates reliability concerns from your business logic. Your services run independently and communicate with Restate via HTTP or gRPC.
+
+**Restate Server**: Handles durable execution, state management, and request routing. It persists execution journals, stores Virtual Object state, and manages service coordination.
+
+**Your Services**: Run separately from Restate in any language. They don't need to manage persistent state themselves - Restate handles durability through the SDK patterns you use.
+
+**Request Flow**: When a request arrives, Restate loads any existing execution journal, replays completed operations to restore state, then executes new code while journaling each operation.
+
+## Key Benefits
+
+**Exactly-once execution**: Operations execute exactly once, even during failures and retries.
+
+**Automatic retries**: Failed operations retry with exponential backoff without re-executing completed work.
+
+**Built-in state**: Store data directly in your functions with strong consistency, no external databases needed.
+
+**Durable timers**: Sleep and schedule operations that survive service restarts.
+
+**Service communication**: Call functions across services with reliability guarantees.
+
+You can mix service types within the same application - they work together seamlessly to handle different aspects of your business logic while Restate ensures everything remains reliable and consistent.
