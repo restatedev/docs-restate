@@ -1,0 +1,54 @@
+---
+title: Request Lifecycle
+description: Deep dive into the lifecycle of a request in Restate
+icon: "arrow-right-arrow-left"
+---
+
+This guide provides a detailed technical walkthrough of how Restate processes requests from start to finish, including the mechanisms that enable durable execution and failure recovery.
+
+## Request Processing Lifecycle
+
+When Restate receives a request to invoke a handler, it follows this detailed process:
+
+### 1. Persist Request
+
+Restate persists the request and creates a new execution journal for this invocation. From this point, Restate guarantees that it will process the request to completion, even in the face of failures.
+
+### 2. Forward to Service
+
+Restate opens a bidirectional streaming connection (HTTP2) to the service for which the request is meant. This connection will be used to stream messages back and forth between the Server and the SDK. It then forwards the request to the service.
+
+### 3. Invoke Handler
+
+The Restate SDK, embedded in the service, calls the handler with the request data and a context object that provides access to Restate features like state management, service calls, and timers.
+
+### 4. Track Execution
+
+As the handler runs, it uses the Restate Context to call other services, update state, or perform side effects. The Restate SDK under-the-hood sends a message to the Restate server for each Context operation. The Restate Server then records it in the execution journal.
+
+### 5. Handle Failures
+
+If the handler crashes or fails, Restate either loses the connection or receives an error message. In this case, the Restate Server will send a retry request to the service, including the latest journal.
+
+Failure detection mechanisms:
+- Connection between Server and service dropped
+- Explicit error messages (not terminal errors)
+- Inactivity timeouts reached
+
+### 6. Replay Journal
+
+The service receives the retry request and restarts the execution of the handler. Whenever the handler performs an action on the Restate context (like calling another service, updating state, or setting a timer), the SDK checks the journal for the last recorded result. If it finds a previous result, it skips executing that action and uses the recorded result instead. This way, the handler resumes from exactly where it left off.
+
+### 7. Complete Execution
+
+Once the handler completes successfully, the Restate SDK proxies the result back to the client via the Restate Server. The server then marks the invocation as complete in the journal.
+
+## Request-response Deployment Targets
+
+Some deployment targets don't support bidirectional streaming connections, such as AWS Lambda. In these cases, the Restate SDK uses a request-response pattern instead of streaming.
+
+In this case, the SDK will try to make as much progress as possible.
+When it hits a point where it needs to wait for a response (like a service call, sleep, or run action), it will send the new journal entries to the Restate Server and suspend the execution.
+The server will send a retry request once the response is available.
+Execution then resumes by replaying the journal up to the suspension point.
+

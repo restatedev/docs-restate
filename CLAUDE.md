@@ -111,6 +111,7 @@ Configured via `docs.json` with tabbed navigation (Learn, Build, Guides) and nes
 - Language tags on all code blocks
 - Alt text on all images
 - Relative paths for internal links
+- Don't use dashes
 
 ## Do not
 - Skip frontmatter on any MDX file
