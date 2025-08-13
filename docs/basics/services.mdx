@@ -4,21 +4,20 @@ description: Understanding Restate's three service types and when to use each
 icon: "box"
 ---
 
-Restate provides three service types, each optimized for different use cases. Choose the right type based on what your application needs to do.
+Restate provides three service types optimized for different use cases.
 
 ## Service types comparison
 
-| | **Basic Service** | **Virtual Object** | **Workflow** |
-|---|---|---|---|
-|**What**| Independent stateless handlers | Stateful entity with a unique key | Long-running process with lifecycle |
-| **State** | None | Isolated per object key | Isolated per workflow instance |
+| | **Basic Service** | **Virtual Object** | **Workflow**                                              |
+|---|---|---|-----------------------------------------------------------|
+|**What**| Independent stateless handlers | Stateful entity with a unique key | Multi-step process with once-per-ID execution                                       |
+| **State** | None | Isolated per object key | Isolated per workflow instance                            |
 | **Concurrency** | Unlimited parallel execution | Single writer per key (+ concurrent readers) | Single main handler per ID (+ concurrent signals/queries) |
-| **Key Features** | Durable execution, service calls | Built-in K/V state, single-writer consistency | Durable promises, signals, lifecycle management |
-| **Best For** | ETL, sagas, parallelization, background jobs | User accounts, shopping carts, agents, state machines, stateful event processing | Approvals, onboarding workflows, multi-step flows |
+| **Key Features** | Durable execution, service calls | Built-in K/V state, single-writer consistency | Durable promises, signals, lifecycle management           |
+| **Best For** | ETL, sagas, parallelization, background jobs | User accounts, shopping carts, agents, state machines, stateful event processing | Approvals, onboarding workflows, multi-step flows         |
 
 ## Basic Service
-
-Stateless functions that process requests without storing data between calls. Perfect for data processing, API integrations, and business logic that doesn't need to remember previous requests.
+Basic Services group related handlers as callable endpoints.
 
 <CodeGroup>
 ```typescript TypeScript
@@ -71,15 +70,15 @@ const validationService = service({
 </CodeGroup>
 
 **Characteristics:**
-- No persistent state between requests
-- Horizontal scaling without coordination
-- High throughput and fast processing
+- Use Durable Execution to run requests to completion
+- Scale horizontally with high concurrency
+- No shared state between requests
 
-**Use for:** Data transformations, API calls, validations, calculations, ETL operations.
+**Use for:** API calls, sagas, background jobs, task parallelization, ETL operations.
 
 ## Virtual Object
 
-Stateful functions identified by a unique key. Each object has its own consistent key-value storage that survives failures. Only one handler with write access runs per object at a time, preventing race conditions.
+Stateful entities identified by a unique key.
 
 <CodeGroup>
 ```typescript TypeScript
@@ -160,23 +159,18 @@ const userAccount = object({
 </CodeGroup>
 
 **Characteristics:**
-- Consistent state with built-in key-value storage
-- Single-writer guarantee per key
-- Automatic recovery of state across failures
-- Per-key isolation
+- Use Durable Execution to run requests to completion
+- Consistent state retained indefinitely and shared across requests
+- Horizontal scaling with state consistency:
+    - Single-writer concurrency per object (exclusive handlers)
+    - Concurrent execution across different object keys
+    - Concurrent execution of shared handlers (read-only)
 
-**Use for:** Agents, user accounts, shopping carts, state machines, game entities, any business entity that needs persistent state.
-
-**Calling Virtual Objects:**
-```bash
-# Call with specific key
-curl localhost:8080/UserAccount/user123/updateBalance --json '{"amount": 100}'
-curl localhost:8080/UserAccount/user123/getProfile
-```
+**Use for:** Modeling entities like user accounts, shopping carts, chat sessions, AI agents, state machines, or any business entity needing persistent state.
 
 ## Workflow
 
-Long-running functions that coordinate complex processes over extended periods. They can sleep for hours or days, wait for external events, and handle human interactions while consuming no resources during idle periods.
+Workflows orchestrate multi-step processes with guaranteed once-per-ID execution.
 
 <CodeGroup>
     ```typescript TypeScript
@@ -293,38 +287,27 @@ Long-running functions that coordinate complex processes over extended periods. 
 </CodeGroup>
 
 **Characteristics:**
-- Long-running execution without resource consumption while waiting
-- Durable orchestration across multiple services
-- Event-driven with signals and queries
-- Failure resilient coordination
+- Use Durable Execution to run requests to completion
+- The `run` handler executes exactly once per ID
+- Other handlers run concurrently with the `run` handler to signal, query state, or wait for events
+- Optimized APIs for workflow interaction patterns
 
-**Use for:** Approval processes, multi-step transactions, user onboarding flows, complex orchestration scenarios.
+**Use for:** Processes requiring interaction capabilities like approval flows, user onboarding, multi-step transactions, and complex orchestration.
 
-**Interacting with Workflows:**
-```bash
-# Start workflow
-curl localhost:8080/ApprovalWorkflow/req123/processApproval --json '{"title": "Budget Request"}'
-
-# Send signal (approval)
-curl localhost:8080/ApprovalWorkflow/req123/approve --json '{"approved": true, "approver": "manager@company.com"}'
-
-# Query status
-curl localhost:8080/ApprovalWorkflow/req123/getStatus
-```
 
 ## Choosing the right service type
 
 **Start with Basic Services** for most business logic, data processing, and API integrations.
 
-**Use Virtual Objects** when you need to maintain state for specific entities (users, orders, sessions).
+**Use Virtual Objects** to model stateful entities.
 
-**Use Workflows** for complex multi-step processes that involve coordination, human input, or long delays.
+**Use Workflows** for multi-step processes that execute exactly-once and require interaction.
 
-You can mix and match these service types within the same application, to handle different aspects of your business logic.
+You can combine these service types within the same application for different aspects of your business logic.
 
-## Deployment
+## Deployments, Endpoints, and Versions
 
-Restate services get deployed behind an endpoint. One or more services can be bound to the same endpoint.
+Services deploy behind endpoints. Multiple services can bind to the same endpoint.
 
 ```ts
 restate.endpoint()
@@ -334,6 +317,16 @@ restate.endpoint()
     .listen(9080);
 ```
 
-Your services can run where you prefer, whether on a serverless platform like AWS Lambda, in containers on Kubernetes, or on dedicated servers.
+Services run on your preferred platform: serverless (AWS Lambda), containers (Kubernetes), or dedicated servers.
 
-Learn more from the [deployment](/deploy/services/kubernetes) and [versioning](/operate/registration) documentation.
+Restate handles versioning through immutable deployments where each deployment represents a specific, unchangeable version of your service code. After deploying your
+services to an endpoint, you must register that endpoint with Restate so it can discover and route requests to it:
+
+```shell
+restate deployments register http://my-service:9080
+```
+
+When you update your services, you deploy the new version to a new endpoint and register it with Restate, which automatically routes new requests to the latest version while existing requests continue on their
+original deployment until completion.
+
+See [deployment](/deploy/services/kubernetes) and [versioning](/operate/registration) docs for details.
