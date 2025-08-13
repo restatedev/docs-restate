@@ -8,7 +8,7 @@ Functions are the building blocks of Restate services. Export a function and Res
 
 ## Writing functions
 
-Functions receive a context (`ctx`) and optional input:
+Functions receive a Restate context object (`ctx`) and a single, optional input:
 
 <CodeGroup>
 ```typescript TypeScript
@@ -33,94 +33,312 @@ async def my_function(ctx: Context, input: MyInput):
 ```
 </CodeGroup>
 
-### Context types
+<Info>
+    The input and output can be any JSON-serializable type. For other types, consult the [Serialization](/develop/serialization) documentation.
+</Info>
 
-The context type depends on your service type:
+## Context types
 
-- **`Context`** - Services (stateless)
-- **`ObjectContext`** - Virtual Objects (stateful, exclusive access)
-- **`ObjectSharedContext`** - Virtual Objects (read-only, concurrent)
-- **`WorkflowContext`** - Workflows (main handler)
-- **`WorkflowSharedContext`** - Workflows (signals/queries)
+The context type you use depends on your service type:
+
+- **`Context`** - Basic Services (stateless functions)
+- **`ObjectContext`** - Virtual Objects (exclusive handlers with state access)
+- **`ObjectSharedContext`** - Virtual Objects (concurrent read-only handlers)
+- **`WorkflowContext`** - Workflows (main run handler)
+- **`WorkflowSharedContext`** - Workflows (signal/query handlers)
 
 
+## Handler behavior
 
-## Invoking functions
+Virtual Objects and Workflows support two handler types:
 
-### Over HTTP
+**Exclusive handlers** (`ObjectContext`, `WorkflowContext`) can read and write state but only one runs at a time per key to prevent conflicts.
 
-```typescript TypeScript
-export const getUserProfile = async (ctx: ObjectContext) => { /* ... */ };
-export const processPayment = async (ctx: Context, payment: Payment) => { /* ... */ };
-export const sendWelcomeEmail = async (ctx: Context, userId: string) => { /* ... */ };
-```
+**Shared handlers** (`ObjectSharedContext`, `WorkflowSharedContext`) can only read state but run concurrently without blocking—useful for querying status during long-running operations.
 
-When you register your service with Restate, these function names become the endpoints:
-    - `POST /MyService/getUserProfile`
-    - `POST /PaymentService/processPayment`
-    - `POST /NotificationService/sendWelcomeEmail`
+## Context Actions
 
-### Using typed clients
+Context actions are methods available on the Restate Context object (`ctx`) that provide Restate's core capabilities.
+These actions enable durable execution, state management, service communication, and timing control.
 
-Functions can call other functions within the same service or across different services.
+### Durable steps
+
+Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate persist its result.
 
 <CodeGroup>
-```typescript TypeScript
-export const processOrder = async (ctx: Context, order: Order) => {
-    // Call function in same service
-    const validation = await ctx.serviceCall(OrderService).validateOrder(order);
 
-    // Call function in different service
-    const inventory = await ctx.serviceCall(InventoryService).reserveItems(order.items);
+    ```typescript TypeScript
+    // External API call
+    const apiResult = await ctx.run("fetch-data", async () => {
+    const response = await fetch("https://api.example.com/data");
+    return response.json();
+});
 
-    // Call Virtual Object function
-    const profile = await ctx.objectCall(UserAccount, order.customerId).getProfile();
-};
-```
+    // Database operation
+    const dbResult = await ctx.run("update-user", () => {
+    return database.users.update(userId, { name: "John" });
+});
 
-```java Java
-@Handler
-public OrderResult processOrder(Context ctx, Order order) {
-    ValidationResult validation = OrderServiceClient.fromContext(ctx)
-    .validateOrder(order).await();
+    // Random value generation
+    const randomId = await ctx.run("generate-id", () => {
+    return Math.random().toString(36);
+});
+    ```
 
-    InventoryResult inventory = InventoryServiceClient.fromContext(ctx)
-    .reserveItems(order.getItems()).await();
+    ```java Java
+    // External API call
+    ApiResponse apiResult = ctx.run("fetch-data", () -> {
+    HttpResponse<String> response = httpClient.send(request, BodyHandlers.ofString());
+    return objectMapper.readValue(response.body(), ApiResponse.class);
+});
 
-    ProfileResult profile = UserAccountClient.fromContext(ctx, order.getCustomerId())
-    .getProfile().await();
-}
-```
+    // Database operation
+    UserResult dbResult = ctx.run("update-user", () -> {
+    return database.users().update(userId).setName("John").execute();
+});
+    ```
 
-```python Python
-async def process_order(ctx: Context, order: Order):
-    validation = await OrderServiceClient.from_context(ctx).validate_order(order)
+    ```python Python
+    # External API call
+    api_result = await ctx.run("fetch-data", lambda: requests.get("https://api.example.com/data").json())
 
-    inventory = await InventoryServiceClient.from_context(ctx).reserve_items(order.items)
-
-    profile = await UserAccountClient.from_context(ctx, order.customer_id).get_profile()
-```
+    # Database operation
+    db_result = await ctx.run("update-user", lambda: database.users.update(user_id, {"name": "John"}))
+    ```
 </CodeGroup>
 
-[Learn more from the actions page](/basics/actions#service-communication)
+Without `ctx.run()`, these operations would produce different results during replay, breaking consistency.
 
-## Exclusive vs. shared handlers
+### State management
 
-Virtual Objects and Workflows can have two types of handlers:
+Available in Virtual Object and Workflow functions for persistent key-value storage.
 
-### Exclusive handlers
-* Use `ObjectContext` or `WorkflowContext`
-* Can **read and write** state (`ctx.set`, `ctx.clear`, etc.)
+#### Get
 
-For Virtual Objects:
-* Only **one exclusive handler** runs at a time per object key
-* Calls are queued and executed sequentially to ensure consistency
+Retrieve stored state by key.
 
-### Shared handlers
-* Use `ObjectSharedContext` or `WorkflowSharedContext`
-* Can **only read** state—**no write access**
-* Run concurrently without blocking other handlers
-* Useful for interacting with long-running exclusive handlers without waiting
+<CodeGroup>
 
-**Why both?** Exclusive handlers prevent concurrent writes from corrupting state, while shared handlers allow non-blocking read access during long-running operations. For example, a dashboard can query a workflow's status via a shared handler while the main exclusive handler is still processing.
+    ```typescript TypeScript
+    // Get with type and default value
+    const profile = await ctx.get<UserProfile>("profile");
+    const count = (await ctx.get<number>("count")) ?? 0;
+        const settings = await ctx.get<Settings>("settings") ?? defaultSettings;
+            ```
 
+            ```java Java
+            // Get with optional handling
+            UserProfile profile = ctx.get("profile", UserProfile.class);
+            Integer count = ctx.get("count", Integer.class).orElse(0);
+            Settings settings = ctx.get("settings", Settings.class).orElse(defaultSettings);
+            ```
+
+            ```python Python
+            # Get with default values
+            profile = await ctx.get("profile", UserProfile)
+            count = await ctx.get("count", int) or 0
+            settings = await ctx.get("settings", Settings) or default_settings
+            ```
+</CodeGroup>
+
+#### Set
+
+Store state that persists across function invocations.
+
+<CodeGroup>
+
+    ```typescript TypeScript
+    // Store simple values
+    ctx.set("lastLogin", new Date().toISOString());
+    ctx.set("loginCount", loginCount + 1);
+
+    // Store complex objects
+    ctx.set("profile", {
+    name: "John Doe",
+    email: "john@example.com",
+    preferences: { theme: "dark" }
+});
+    ```
+
+    ```java Java
+    // Store values
+    ctx.set("lastLogin", Instant.now().toString());
+    ctx.set("loginCount", loginCount + 1);
+    ctx.set("profile", userProfile);
+    ```
+
+    ```python Python
+    # Store values
+    await ctx.set("lastLogin", datetime.now().isoformat())
+    await ctx.set("loginCount", login_count + 1)
+    await ctx.set("profile", user_profile)
+    ```
+</CodeGroup>
+
+#### Clear
+
+Remove state keys completely.
+
+<CodeGroup>
+    ```typescript TypeScript
+    // Clear specific keys
+    ctx.clear("tempData");
+    ctx.clear("sessionToken");
+
+    // Clear all user data
+    ctx.clearAll();
+    ```
+
+</CodeGroup>
+
+State changes are atomic - either all changes in a function are applied when it completes, or none are if it fails.
+
+###  Service communication
+
+#### Request-response calls
+
+Make request-response calls to other services. Your function waits for the result.
+
+<CodeGroup>
+
+    ```typescript TypeScript
+    // Call another service
+    const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+
+    // Call Virtual Object function
+    const profile = await ctx.objectCall(UserAccount, userId).getProfile();
+
+    // Call Workflow function
+    const status = await ctx.workflowCall(OrderWorkflow, orderId).getStatus();
+    ```
+
+    ```java Java
+    // Call another service
+    ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+    .validateOrder(order).await();
+
+    // Call Virtual Object function
+    ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
+    .getProfile().await();
+    ```
+
+    ```python Python
+    # Call another service
+    validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+
+    # Call Virtual Object function
+    profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
+    ```
+</CodeGroup>
+
+
+#### Sending messages
+
+Make one-way calls that don't return results. Your function continues immediately.
+
+<CodeGroup>
+
+    ```typescript TypeScript
+    // Fire-and-forget notification
+    ctx.serviceSend(NotificationService).sendEmail(userId, "Welcome!");
+
+    // Background analytics
+    ctx.serviceSend(AnalyticsService).recordEvent({ kind: "user_signup", userId });
+
+    // Cleanup task
+    ctx.serviceSend(CleanupService).deleteExpiredData();
+    ```
+
+    ```java Java
+    // Fire-and-forget calls
+    NotificationServiceClient.fromContext(ctx).send()
+    .sendEmail(userId, "Welcome!");
+
+    AnalyticsServiceClient.fromContext(ctx).send()
+    .recordEvent("user_signup", eventData);
+    ```
+</CodeGroup>
+
+#### Delayed messages
+
+Schedule functions to run in the future.
+
+```typescript TypeScript
+// Schedule reminder for tomorrow
+ctx.serviceCall(ReminderService).sendReminder(userId, message, {
+delay: 24 * 60 * 60 * 1000 // 24 hours
+});
+```
+
+###  Durable timers
+
+Pause function execution for a specific duration.
+
+<CodeGroup>
+
+    ```typescript TypeScript
+    // Sleep for 30 seconds
+    await ctx.sleep(30 * 1000);
+
+    // Sleep for specific duration
+    await ctx.sleep(5 * 60 * 1000); // 5 minutes
+
+    // Sleep until specific time
+    const targetTime = new Date('2024-12-25T09:00:00Z');
+    const delay = targetTime.getTime() - Date.now();
+    await ctx.sleep(delay);
+    ```
+
+    ```java Java
+    // Sleep for durations
+    ctx.sleep(Duration.ofSeconds(30));
+    ctx.sleep(Duration.ofMinutes(5));
+    ctx.sleep(Duration.ofHours(1));
+    ```
+
+    ```python Python
+    # Sleep with timedelta
+    await ctx.sleep(timedelta(seconds=30))
+    await ctx.sleep(timedelta(minutes=5))
+    await ctx.sleep(timedelta(hours=1))
+    ```
+</CodeGroup>
+
+
+Functions consume no resources while sleeping and resume at exactly the right time, even across restarts ([see suspensions](/basics/key-concepts#suspensions-on-faas)).
+
+### Workflow events
+
+Use durable promises to wait for external events or human input in your workflows.
+
+Create promises that external systems can resolve to send data to your workflow.
+
+```typescript TypeScript
+// Wait for external event
+const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
+
+    // Wait for human approval
+    const approved = await ctx.promise<boolean>("manager-approval");
+
+    // Wait for multiple events
+    const [payment, inventory] = await Promise.all([
+    ctx.promise<PaymentResult>("payment"),
+    ctx.promise<InventoryResult>("inventory")
+    ]);
+    ```
+
+    Resolve promises from signal functions.
+
+    ```typescript TypeScript
+    // In a signal function
+    export const confirmPayment = async (ctx: WorkflowSharedContext, result: PaymentResult) => {
+        ctx.promise("payment-completed").resolve(result);
+    };
+
+    // In a signal function
+    export const approveRequest = async (ctx: WorkflowSharedContext, approved: boolean) => {
+        ctx.promise("manager-approval").resolve(approved);
+    };
+    ```
+
+    <Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at [awakeables](/awakeables).</Info>

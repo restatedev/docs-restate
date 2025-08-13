@@ -1,0 +1,122 @@
+---
+title: Invocations
+icon: "play"
+description: "Invoke functions in Restate services over HTTP, Kafka or with typed clients."
+---
+
+An invocation is a request to execute a handler that is part of a Restate service.
+
+There are three ways to invoke a handler: over HTTP, using typed clients, or through Kafka topics.
+
+## HTTP invocations
+
+To call a function over HTTP, send a request to the Restate Server, specifying the service and the function you want to invoke.
+
+For example, to call the `processPayment` function of the `PaymentService`:
+```bash
+curl -X POST localhost:8080/PaymentService/processPayment \
+  --json '{"amount": 100, "currency": "USD"}'
+```
+
+The Restate Server ingress endpoint is here hosted at `localhost:8080`.
+
+To call Virtual Objects or Workflows, you need to specify the object key or workflow ID in the URL.
+
+For example, to call `updateBalance` of the `UserAccount` object with key `user123`:
+
+```bash
+curl -X POST localhost:8080/UserAccount/user123/updateBalance \
+  --json '{"amount": 50}'
+```
+
+Check out the [HTTP invocation](/operate/invocation/http) docs to learn more.
+
+## Typed client invocations
+
+Use typed clients from external applications to invoke Restate functions:
+
+<CodeGroup>
+
+    ```typescript TypeScript
+    // import * as clients from "@restatedev/restate-sdk-clients";
+    const restateClient = clients.connect({ url: "http://localhost:8080" });
+
+    // To call a service
+    const greet = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet({ greeting: "Hi" });
+    ```
+
+    ```java Java
+    // Call another service
+    ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+    .validateOrder(order).await();
+
+    // Call Virtual Object function
+    ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
+    .getProfile().await();
+    ```
+</CodeGroup>
+
+For service-to-service calls within handlers, see [Service Communication](/basics/functions#service-communication).
+
+## Kafka invocations
+
+You can connect your Restate handlers to Kafka topics, to let Restate invoke them for each message.
+
+Consult the [Kafka Quickstart](/guides/kafka-quickstart) to get started.
+
+## Idempotency
+
+Add an idempotency key to your request header to let Restate deduplicate retries:
+
+```bash
+curl -X POST localhost:8080/PaymentService/processPayment \
+  -H 'idempotency-key: payment-123' \
+  --json '{"amount": 100, "currency": "USD"}'
+```
+
+On retry, Restate returns the first invocation’s result or lets you attach to it if still running.
+
+## Inspecting invocations
+
+Use the Restate UI to monitor and troubleshoot invocations:
+
+ADD UI SCREENSHOTS
+
+## Attaching to invocations
+
+Attach to ongoing invocations to retrieve their results:
+
+```bash
+curl -X GET localhost:8080/restate/invocations/inv_1234567890abcdef/attach
+```
+
+This is useful when another process needs the result of an ongoing operation or wants to check whether it has completed.
+
+## Cancelling invocations
+
+Cancel running invocations when they're no longer needed:
+
+<CodeGroup>
+
+```bash CLI
+restate invocations cancel inv_1234567890abcdef
+```
+
+```bash HTTP
+curl -X DELETE http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+```
+</CodeGroup>
+
+Or programmatically:
+
+```typescript TypeScript
+const handle = ctx.serviceSendClient(MyService).myHandler("Hi");
+const invocationId = await handle.invocationId;
+
+// Cancel the invocation
+ctx.cancel(invocationId);
+```
+
+To roll back the actions the handler already completed before cancellation, check out at the [sagas guide](/guides/sagas).
