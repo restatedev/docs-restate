@@ -10,10 +10,11 @@ Restate provides three service types, each optimized for different use cases. Ch
 
 | | **Basic Service** | **Virtual Object** | **Workflow** |
 |---|---|---|---|
-| **State** | Stateless | Stateful per key | Stateful per workflow |
-| **Concurrency** | High parallelism | Single writer per key | Single instance per key |
-| **Key Features** | Durable execution, service calls | Built-in state, consistency | Promises, signals, durable sleep |
-| **Best For** | Data processing, validations, API calls | User accounts, shopping carts, entities | Approvals, orchestration, multi-step flows |
+|**What**| Independent stateless handlers | Stateful entity with a unique key | Long-running process with lifecycle |
+| **State** | None | Isolated per object key | Isolated per workflow instance |
+| **Concurrency** | Unlimited parallel execution | Single writer per key (+ concurrent readers) | Single main handler per ID (+ concurrent signals/queries) |
+| **Key Features** | Durable execution, service calls | Built-in K/V state, single-writer consistency | Durable promises, signals, lifecycle management |
+| **Best For** | ETL, sagas, parallelization, background jobs | User accounts, shopping carts, agents, state machines, stateful event processing | Approvals, onboarding workflows, multi-step flows |
 
 ## Basic Service
 
@@ -73,38 +74,37 @@ const validationService = service({
 - No persistent state between requests
 - Horizontal scaling without coordination
 - High throughput and fast processing
-- Simple to develop, test, and deploy
 
 **Use for:** Data transformations, API calls, validations, calculations, ETL operations.
 
 ## Virtual Object
 
-Stateful functions identified by a unique key. Each object has its own consistent key-value storage that survives failures. Only one function runs per key at a time, preventing race conditions.
+Stateful functions identified by a unique key. Each object has its own consistent key-value storage that survives failures. Only one handler with write access runs per object at a time, preventing race conditions.
 
 <CodeGroup>
-    ```typescript TypeScript
-    const userAccount = object({
+```typescript TypeScript
+const userAccount = object({
     name: "UserAccount",
     handlers: {
-    updateBalance: async (ctx: ObjectContext, amount: number) => {
-    // Get current balance from object state
-    const currentBalance = (await ctx.get<number>("balance")) ?? 0;
+        updateBalance: async (ctx: ObjectContext, amount: number) => {
+            // Get current balance from object state
+            const currentBalance = (await ctx.get<number>("balance")) ?? 0;
 
-    // Update balance atomically
-    const newBalance = currentBalance + amount;
-    ctx.set("balance", newBalance);
-    ctx.set("lastUpdated", new Date().toISOString());
+            // Update balance atomically
+            const newBalance = currentBalance + amount;
+            ctx.set("balance", newBalance);
+            ctx.set("lastUpdated", new Date().toISOString());
 
-    return { balance: newBalance, previous: currentBalance };
-},
+            return { balance: newBalance, previous: currentBalance };
+        },
 
-    getProfile: async (ctx: ObjectContext) => {
-    const profile = await ctx.get<UserProfile>("profile");
-    const balance = await ctx.get<number>("balance");
+        getProfile: async (ctx: ObjectContext) => {
+            const profile = await ctx.get<UserProfile>("profile");
+            const balance = await ctx.get<number>("balance");
 
-    return { profile, balance: balance ?? 0 };
-}
-}
+            return { profile, balance: balance ?? 0 };
+        }
+    }
 });
     ```
 
@@ -165,7 +165,7 @@ Stateful functions identified by a unique key. Each object has its own consisten
 - Automatic recovery of state across failures
 - Per-key isolation
 
-**Use for:** User accounts, shopping carts, game entities, any business entity that needs persistent state.
+**Use for:** Agents, user accounts, shopping carts, state machines, game entities, any business entity that needs persistent state.
 
 **Calling Virtual Objects:**
 ```bash
@@ -320,7 +320,7 @@ curl localhost:8080/ApprovalWorkflow/req123/getStatus
 
 **Use Workflows** for complex multi-step processes that involve coordination, human input, or long delays.
 
-You can mix and match these service types within the same application - they work together seamlessly to handle different aspects of your business logic.
+You can mix and match these service types within the same application, to handle different aspects of your business logic.
 
 ## Service registration
 

@@ -4,266 +4,69 @@ description: Learn how to create, invoke and manage functions in Restate service
 icon: "brackets-curly"
 ---
 
-Functions are the core building blocks of Restate services. Under the hood, Restate marks each function you export as a handler—i.e. the code that actually executes when a request comes in.
+Functions are the building blocks of Restate services. Export a function and Restate automatically makes it a durable handler.
 
-## Function basics
+## Writing functions
 
-Every Restate function receives a context object (`ctx`) as its first parameter, followed by the input data. The context provides access to Restate's durable execution capabilities.
-
-<CodeGroup>
-    ```typescript TypeScript
-    export const myFunction = async (ctx: Context, input: MyInput) => {
-    // Your business logic here
-    const result = await ctx.run("process", () => processData(input));
-
-    return { success: true, result };
-};
-    ```
-
-    ```java Java
-    @Handler
-    public MyResult myFunction(Context ctx, MyInput input) {
-    // Your business logic here
-    String result = ctx.run("process", () -> processData(input));
-
-    return new MyResult(true, result);
-}
-    ```
-
-    ```python Python
-    async def my_function(ctx: Context, input: MyInput):
-    # Your business logic here
-    result = await ctx.run("process", lambda: process_data(input))
-
-    return {"success": True, "result": result}
-    ```
-</CodeGroup>
-
-Functions are automatically durable - they survive failures, retries, and restarts while maintaining exactly-once execution guarantees.
-
-## Function types by service
-
-Different service types provide different context objects with specialized capabilities:
-
-### Basic Service functions
-
-Basic Service functions use `Context` and are stateless. They process requests independently without storing data between calls.
+Functions receive a context (`ctx`) and optional input:
 
 <CodeGroup>
-    ```typescript TypeScript
-    export const processOrder = async (ctx: Context, order: Order) => {
-    // Validate the order
-    const validation = await ctx.run("validate", () => validateOrder(order));
-
-    // Call payment service
-    const payment = await ctx.serviceCall(PaymentService).processPayment(order.total);
-
-    return { orderId: order.id, paymentId: payment.id };
+```typescript TypeScript
+export const myFunction = async (ctx: Context, input: MyInput) => {
+  const result = await ctx.run("process", () => processData(input));
+  return { success: true, result };
 };
-    ```
+```
 
-    ```java Java
-    @Handler
-    public OrderResult processOrder(Context ctx, Order order) {
-    ValidationResult validation = ctx.run("validate", () -> validateOrder(order));
-
-    PaymentResult payment = PaymentServiceClient.fromContext(ctx)
-    .processPayment(order.getTotal()).await();
-
-    return new OrderResult(order.getId(), payment.getId());
+```java Java
+@Handler
+public MyResult myFunction(Context ctx, MyInput input) {
+  String result = ctx.run("process", () -> processData(input));
+  return new MyResult(true, result);
 }
-    ```
+```
 
-    ```python Python
-    async def process_order(ctx: Context, order: Order):
-    validation = await ctx.run("validate", lambda: validate_order(order))
-
-    payment = await PaymentServiceClient.from_context(ctx).process_payment(order.total)
-
-    return {"order_id": order.id, "payment_id": payment.id}
-    ```
+```python Python
+async def my_function(ctx: Context, input: MyInput):
+  result = await ctx.run("process", lambda: process_data(input))
+  return {"success": True, "result": result}
+```
 </CodeGroup>
 
-### Virtual Object functions
+### Context types
 
-Virtual Object functions use `ObjectContext` and can store state per object key. Each object key processes requests sequentially.
+The context type depends on your service type:
 
-<CodeGroup>
-    ```typescript TypeScript
-    export const updateBalance = async (ctx: ObjectContext, amount: number) => {
-    // Get current balance
-    const currentBalance = (await ctx.get<number>("balance")) ?? 0;
+- **`Context`** - Services (stateless)
+- **`ObjectContext`** - Virtual Objects (stateful, exclusive access)
+- **`ObjectSharedContext`** - Virtual Objects (read-only, concurrent)
+- **`WorkflowContext`** - Workflows (main handler)
+- **`WorkflowSharedContext`** - Workflows (signals/queries)
 
-    // Update balance
-    const newBalance = currentBalance + amount;
-    ctx.set("balance", newBalance);
 
-    return { balance: newBalance };
-};
-    ```
 
-    ```java Java
-    @Handler
-    public BalanceResult updateBalance(ObjectContext ctx, Integer amount) {
-    Integer currentBalance = ctx.get("balance", Integer.class).orElse(0);
+## Invoking functions
 
-    Integer newBalance = currentBalance + amount;
-    ctx.set("balance", newBalance);
-
-    return new BalanceResult(newBalance);
-}
-    ```
-
-    ```python Python
-    async def update_balance(ctx: ObjectContext, amount: int):
-    current_balance = await ctx.get("balance", int) or 0
-
-    new_balance = current_balance + amount
-    await ctx.set("balance", new_balance)
-
-    return {"balance": new_balance}
-    ```
-</CodeGroup>
-
-### Workflow functions
-
-Workflow functions use `WorkflowContext` for the main workflow, `WorkflowSharedContext` for signals and queries.
-
-<CodeGroup>
-    ```typescript TypeScript
-    // Main workflow function
-    export const processApproval = async (ctx: WorkflowContext, request: ApprovalRequest) => {
-    ctx.set("status", "pending");
-
-    // Wait for approval decision
-    const approved = await ctx.promise<boolean>("approval-decision");
-
-    ctx.set("status", approved ? "approved" : "rejected");
-    return { approved };
-};
-
-    // Signal function
-    export const approve = async (ctx: WorkflowSharedContext, decision: boolean) => {
-    ctx.promise("approval-decision").resolve(decision);
-};
-
-    // Query function
-    export const getStatus = async (ctx: WorkflowSharedContext) => {
-    const status = await ctx.get<string>("status");
-    return { status: status ?? "pending" };
-};
-    ```
-
-    ```java Java
-    // Main workflow function
-    @Handler
-    public ApprovalResult processApproval(WorkflowContext ctx, ApprovalRequest request) {
-    ctx.set("status", "pending");
-
-    Boolean approved = ctx.promise("approval-decision", Boolean.class).await();
-
-    ctx.set("status", approved ? "approved" : "rejected");
-    return new ApprovalResult(approved);
-}
-
-    // Signal function
-    @Handler
-    public void approve(WorkflowSharedContext ctx, Boolean decision) {
-    ctx.promise("approval-decision").resolve(decision);
-}
-
-    // Query function
-    @Handler
-    public StatusResult getStatus(WorkflowSharedContext ctx) {
-    String status = ctx.get("status", String.class).orElse("pending");
-    return new StatusResult(status);
-}
-    ```
-
-    ```python Python
-    # Main workflow function
-    async def process_approval(ctx: WorkflowContext, request: ApprovalRequest):
-    await ctx.set("status", "pending")
-
-    approved = await ctx.promise("approval-decision", bool)
-
-    await ctx.set("status", "approved" if approved else "rejected")
-    return {"approved": approved}
-
-    # Signal function
-    async def approve(ctx: WorkflowSharedContext, decision: bool):
-    ctx.promise("approval-decision").resolve(decision)
-
-    # Query function
-    async def get_status(ctx: WorkflowSharedContext):
-    status = await ctx.get("status", str) or "pending"
-    return {"status": status}
-    ```
-</CodeGroup>
-
-## Function naming and registration
-
-Function names become part of your service's API. Choose descriptive names that clearly indicate what the function does.
+### Over HTTP
 
 ```typescript TypeScript
-// Good function names
 export const getUserProfile = async (ctx: ObjectContext) => { /* ... */ };
 export const processPayment = async (ctx: Context, payment: Payment) => { /* ... */ };
 export const sendWelcomeEmail = async (ctx: Context, userId: string) => { /* ... */ };
-
-// Less clear function names
-export const handle = async (ctx: Context, data: any) => { /* ... */ };
-export const process = async (ctx: Context, input: any) => { /* ... */ };
 ```
 
 When you register your service with Restate, these function names become the endpoints:
-    - `GET/POST /MyService/getUserProfile`
+    - `POST /MyService/getUserProfile`
     - `POST /PaymentService/processPayment`
     - `POST /NotificationService/sendWelcomeEmail`
 
-## Input and output
-
-Functions can accept any JSON-serializable input and return any JSON-serializable output.
-
-```typescript TypeScript
-// Simple input/output
-export const add = async (ctx: Context, numbers: { a: number, b: number }) => {
-  return { sum: numbers.a + numbers.b };
-};
-
-// Complex objects
-export const createUser = async (ctx: ObjectContext, user: {
-  name: string;
-  email: string;
-  preferences: {
-    theme: "light" | "dark";
-    notifications: boolean;
-  };
-}) => {
-  ctx.set("user", user);
-  ctx.set("createdAt", new Date().toISOString());
-
-  return {
-    userId: ctx.key,
-    user,
-    createdAt: new Date().toISOString()
-  };
-};
-
-// No input
-export const generateReport = async (ctx: Context) => {
-  const report = await ctx.run("generate", () => createReport());
-  return { reportId: report.id, generatedAt: new Date().toISOString() };
-};
-```
-
-## Function composition
+### Using typed clients
 
 Functions can call other functions within the same service or across different services.
 
 <CodeGroup>
-    ```typescript TypeScript
-    export const processOrder = async (ctx: Context, order: Order) => {
+```typescript TypeScript
+export const processOrder = async (ctx: Context, order: Order) => {
     // Call function in same service
     const validation = await ctx.serviceCall(OrderService).validateOrder(order);
 
@@ -272,19 +75,12 @@ Functions can call other functions within the same service or across different s
 
     // Call Virtual Object function
     const profile = await ctx.objectCall(UserAccount, order.customerId).getProfile();
-
-    return {
-    orderId: order.id,
-    validated: validation.isValid,
-    reserved: inventory.reserved,
-    customer: profile.name
 };
-};
-    ```
+```
 
-    ```java Java
-    @Handler
-    public OrderResult processOrder(Context ctx, Order order) {
+```java Java
+@Handler
+public OrderResult processOrder(Context ctx, Order order) {
     ValidationResult validation = OrderServiceClient.fromContext(ctx)
     .validateOrder(order).await();
 
@@ -293,31 +89,38 @@ Functions can call other functions within the same service or across different s
 
     ProfileResult profile = UserAccountClient.fromContext(ctx, order.getCustomerId())
     .getProfile().await();
-
-    return new OrderResult(order.getId(), validation.isValid(),
-    inventory.isReserved(), profile.getName());
 }
-    ```
+```
 
-    ```python Python
-    async def process_order(ctx: Context, order: Order):
+```python Python
+async def process_order(ctx: Context, order: Order):
     validation = await OrderServiceClient.from_context(ctx).validate_order(order)
 
     inventory = await InventoryServiceClient.from_context(ctx).reserve_items(order.items)
 
     profile = await UserAccountClient.from_context(ctx, order.customer_id).get_profile()
-
-    return {
-    "order_id": order.id,
-    "validated": validation.is_valid,
-    "reserved": inventory.reserved,
-    "customer": profile.name
-}
-    ```
+```
 </CodeGroup>
 
-Functions provide the fundamental building blocks for building reliable, distributed applications with Restate's durable execution guarantees.
+[Learn more from the actions page](/basics/actions#service-communication)
 
-For implementation patterns and advanced features, explore:
-- **[Helpers](/build/helpers)**: Durable execution, state management, service communication, and timing patterns
-- **[Error Handling](/build/error-handling)**: Terminal vs retryable errors, timeouts, and failure patterns
+## Exclusive vs. shared handlers
+
+Virtual Objects and Workflows can have two types of handlers:
+
+### Exclusive handlers
+* Use `ObjectContext` or `WorkflowContext`
+* Can **read and write** state (`ctx.set`, `ctx.clear`, etc.)
+
+For Virtual Objects:
+* Only **one exclusive handler** runs at a time per object key
+* Calls are queued and executed sequentially to ensure consistency
+
+### Shared handlers
+* Use `ObjectSharedContext` or `WorkflowSharedContext`
+* Can **only read** state—**no write access**
+* Run concurrently without blocking other handlers
+* Useful for interacting with long-running exclusive handlers without waiting
+
+**Why both?** Exclusive handlers prevent concurrent writes from corrupting state, while shared handlers allow non-blocking read access during long-running operations. For example, a dashboard can query a workflow's status via a shared handler while the main exclusive handler is still processing.
+

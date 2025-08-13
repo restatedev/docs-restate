@@ -4,7 +4,10 @@ description: Essential context actions for building reliable functions
 icon: "gear"
 ---
 
-Context helpers are methods available on the context object (`ctx`) that provide Restate's core capabilities. These helpers enable durable execution, state management, service communication, and timing control.
+Context actions are methods available on the Restate Context object (`ctx`) that provide Restate's core capabilities.
+These actions enable durable execution, state management, service communication, and timing control.
+
+Each Restate handler has the `ctx` object provided as the first argument.
 
 ## Durable steps
 
@@ -190,7 +193,7 @@ Make one-way calls that don't return results. Your function continues immediatel
 ctx.serviceSend(NotificationService).sendEmail(userId, "Welcome!");
 
 // Background analytics
-ctx.serviceSend(AnalyticsService).recordEvent("user_signup", { userId });
+ctx.serviceSend(AnalyticsService).recordEvent({ kind: "user_signup", userId });
 
 // Cleanup task
 ctx.serviceSend(CleanupService).deleteExpiredData();
@@ -214,11 +217,6 @@ Schedule functions to run in the future.
 // Schedule reminder for tomorrow
 ctx.serviceCall(ReminderService).sendReminder(userId, message, {
   delay: 24 * 60 * 60 * 1000 // 24 hours
-});
-
-// Schedule timeout check
-ctx.serviceCall(TimeoutService).checkTimeout(requestId, {
-  delay: 5 * 60 * 1000 // 5 minutes
 });
 ```
 
@@ -259,13 +257,11 @@ await ctx.sleep(timedelta(hours=1))
 </CodeGroup>
 
 
-Functions consume no resources while sleeping and resume at exactly the right time, even across restarts.
+Functions consume no resources while sleeping and resume at exactly the right time, even across restarts ([see suspensions](/basics/key-concepts#suspensions-on-faas)).
 
-## Workflow-specific actions
+## Workflow events
 
-Available only in Workflow functions for coordination and external communication.
-
-### Create Durable Promises
+Use durable promises to wait for external events or human input in your workflows.
 
 Create promises that external systems can resolve to send data to your workflow.
 
@@ -283,8 +279,6 @@ const [payment, inventory] = await Promise.all([
 ]);
 ```
 
-### Resolve Durable Promises
-
 Resolve promises from signal functions.
 
 ```typescript TypeScript
@@ -299,11 +293,4 @@ export const approveRequest = async (ctx: WorkflowSharedContext, approved: boole
 };
 ```
 
-## Context types summary
-
-- **`Context`**: Service functions - stateless processing
-- **`ObjectContext`**: Virtual Object functions - stateful with per-key storage
-- **`WorkflowContext`**: Main workflow functions - long-running coordination
-- **`WorkflowSharedContext`**: Workflow signals and queries - external interaction
-
-Each context type provides the appropriate helpers for its service pattern, ensuring you have the right tools for building reliable, distributed applications.
+<Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at [awakeables](/awakeables).</Info>
