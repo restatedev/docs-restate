@@ -10,9 +10,9 @@ Restate provides three service types optimized for different use cases.
 
 | | **Basic Service** | **Virtual Object** | **Workflow**                                              |
 |---|---|---|-----------------------------------------------------------|
-|**What**| Independent stateless handlers | Stateful entity with a unique key | Multi-step process with once-per-ID execution                                       |
+|**What**| Independent stateless handlers | Stateful entity with a unique key | Multi-step processes that execute exactly-once per ID                                       |
 | **State** | None | Isolated per object key | Isolated per workflow instance                            |
-| **Concurrency** | Unlimited parallel execution | Single writer per key (+ concurrent readers) | Single main handler per ID (+ concurrent signals/queries) |
+| **Concurrency** | Unlimited parallel execution | Single writer per key (+ concurrent readers) | Single `run` handler per ID (+ concurrent signals/queries) |
 | **Key Features** | Durable execution, service calls | Built-in K/V state, single-writer consistency | Durable promises, signals, lifecycle management           |
 | **Best For** | ETL, sagas, parallelization, background jobs | User accounts, shopping carts, agents, state machines, stateful event processing | Approvals, onboarding workflows, multi-step flows         |
 
@@ -21,52 +21,26 @@ Basic Services group related handlers as callable endpoints.
 
 <CodeGroup>
 ```typescript TypeScript
-const validationService = service({
-    name: "ValidationService",
-    handlers: {
-        validateOrder: async (ctx: Context, order: Order) => {
-            // Load validation rules
-            const rules = await ctx.run("load-rules", () => loadValidationRules());
+const subscriptionService = restate.service({
+  name: "SubscriptionService",
+  handlers: {
+    add: async (ctx: restate.Context, req: SubscriptionRequest) => {
+      const paymentId = ctx.rand.uuidv4();
 
-            // Apply validation
-            const result = await ctx.run("validate", () => applyRules(order, rules));
+      const payRef = await ctx.run(() =>
+        createRecurringPayment(req.creditCard, paymentId)
+      );
 
-            return { valid: result.isValid, errors: result.errors };
-        }
-    }
+      for (const subscription of req.subscriptions) {
+        await ctx.run(() =>
+          createSubscription(req.userId, subscription, payRef)
+        );
+      }
+    },
+  },
 });
 ```
 
-    ```java Java
-    @Service
-    public class ValidationService {
-
-@Handler
-    public ValidationResult validateOrder(Context ctx, Order order) {
-    // Load validation rules
-    Rules rules = ctx.run("load-rules", () -> loadValidationRules());
-
-    // Apply validation
-    ValidationResult result = ctx.run("validate", () -> applyRules(order, rules));
-
-    return new ValidationResult(result.isValid(), result.getErrors());
-}
-}
-    ```
-
-    ```python Python
-    validation_service = Service("ValidationService")
-
-    @validation_service.handler()
-    async def validate_order(ctx: Context, order: Order):
-    # Load validation rules
-    rules = await ctx.run("load-rules", lambda: load_validation_rules())
-
-    # Apply validation
-    result = await ctx.run("validate", lambda: apply_rules(order, rules))
-
-    return {"valid": result.is_valid, "errors": result.errors}
-    ```
 </CodeGroup>
 
 **Characteristics:**
@@ -82,87 +56,42 @@ Stateful entities identified by a unique key.
 
 <CodeGroup>
 ```typescript TypeScript
-const userAccount = object({
-    name: "UserAccount",
-    handlers: {
-        updateBalance: async (ctx: ObjectContext, amount: number) => {
-            // Get current balance from object state
-            const currentBalance = (await ctx.get<number>("balance")) ?? 0;
+export const greeterObject = restate.object({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.ObjectContext, req: { greeting: string }) => {
+      const name = ctx.key;
+      let count = (await ctx.get<number>("count")) ?? 0;
+      count++;
+      ctx.set("count", count);
+      return `${req.greeting} ${name} for the ${count}-th time.`;
+    },
 
-            // Update balance atomically
-            const newBalance = currentBalance + amount;
-            ctx.set("balance", newBalance);
-            ctx.set("lastUpdated", new Date().toISOString());
+    ungreet: async (ctx: restate.ObjectContext) => {
+      const name = ctx.key;
+      let count = (await ctx.get<number>("count")) ?? 0;
+      if (count > 0) {
+        count--;
+      }
+      ctx.set("count", count);
+      return `Dear ${name}, taking one greeting back: ${count}.`;
+    },
 
-            return { balance: newBalance, previous: currentBalance };
-        },
-
-        getProfile: async (ctx: ObjectContext) => {
-            const profile = await ctx.get<UserProfile>("profile");
-            const balance = await ctx.get<number>("balance");
-
-            return { profile, balance: balance ?? 0 };
-        }
-    }
+    getGreetCount: handlers.object.shared(
+      async (ctx: restate.ObjectSharedContext) => {
+        return ctx.get<number>("count");
+      }
+    ),
+  },
 });
-    ```
-
-    ```java Java
-    @VirtualObject
-    public class UserAccount {
-
-@Handler
-    public BalanceResult updateBalance(ObjectContext ctx, Integer amount) {
-    // Get current balance from object state
-    Integer currentBalance = ctx.get("balance", Integer.class).orElse(0);
-
-    // Update balance atomically
-    Integer newBalance = currentBalance + amount;
-    ctx.set("balance", newBalance);
-    ctx.set("lastUpdated", Instant.now().toString());
-
-    return new BalanceResult(newBalance, currentBalance);
-}
-
-    @Handler
-    public ProfileResult getProfile(ObjectContext ctx) {
-    UserProfile profile = ctx.get("profile", UserProfile.class);
-    Integer balance = ctx.get("balance", Integer.class).orElse(0);
-
-    return new ProfileResult(profile, balance);
-}
-}
-    ```
-
-    ```python Python
-    user_account = VirtualObject("UserAccount")
-
-    @user_account.handler()
-    async def update_balance(ctx: ObjectContext, amount: int):
-    # Get current balance from object state
-    current_balance = await ctx.get("balance", int) or 0
-
-    # Update balance atomically
-    new_balance = current_balance + amount
-    await ctx.set("balance", new_balance)
-    await ctx.set("lastUpdated", datetime.now().isoformat())
-
-    return {"balance": new_balance, "previous": current_balance}
-
-    @user_account.handler()
-    async def get_profile(ctx: ObjectContext):
-    profile = await ctx.get("profile", UserProfile)
-    balance = await ctx.get("balance", int) or 0
-
-    return {"profile": profile, "balance": balance}
-    ```
+```
 </CodeGroup>
 
 **Characteristics:**
 - Use Durable Execution to run requests to completion
-- Consistent state retained indefinitely and shared across requests
+- K/V state retained indefinitely and shared across requests
 - Horizontal scaling with state consistency:
-    - Single-writer concurrency per object (exclusive handlers)
+    - At most one handler with write access can run at a time per object key
     - Concurrent execution across different object keys
     - Concurrent execution of shared handlers (read-only)
 
@@ -173,122 +102,40 @@ const userAccount = object({
 Workflows orchestrate multi-step processes with guaranteed once-per-ID execution.
 
 <CodeGroup>
-    ```typescript TypeScript
-    const approvalWorkflow = workflow({
-    name: "ApprovalWorkflow",
+```typescript TypeScript
+const signupWorkflow = restate.workflow({
+    name: "user-signup",
     handlers: {
-    processApproval: async (ctx: WorkflowContext, request: ApprovalRequest) => {
-    ctx.set("status", "pending");
-    ctx.set("submittedAt", new Date().toISOString());
+        run: async (
+            ctx: restate.WorkflowContext,
+            user: { name: string; email: string }
+            ) => {
+            // workflow ID = user ID; workflow runs once per user
+            const userId = ctx.key;
 
-    // Wait for external approval decision (could be hours/days)
-    const decision = await ctx.promise<ApprovalDecision>("approval-decision");
+            await ctx.run(() => createUserEntry(user));
 
-    if (decision.approved) {
-    ctx.set("status", "approved");
-    ctx.set("approvedBy", decision.approver);
+            const secret = ctx.rand.uuidv4();
+            await ctx.run(() => sendEmailWithLink({ userId, user, secret }));
 
-    // Process the approved request
-    const result = await ctx.run("process", () => processApprovedRequest(request));
-    return { status: "approved", result };
-} else {
-    ctx.set("status", "rejected");
-    ctx.set("rejectedBy", decision.approver);
+            const clickSecret = await ctx.promise<string>("link-clicked");
+            return clickSecret === secret;
+        },
 
-    return { status: "rejected", reason: decision.reason };
-}
-},
-
-    // Signal function to provide approval
-    approve: async (ctx: WorkflowSharedContext, decision: ApprovalDecision) => {
-    ctx.promise("approval-decision").resolve(decision);
-},
-
-    // Query function to check status
-    getStatus: async (ctx: WorkflowSharedContext) => {
-    const status = await ctx.get<string>("status");
-    return { status: status ?? "pending" };
-}
-}
+        click: async (
+            ctx: restate.WorkflowSharedContext,
+            request: { secret: string }
+            ) => {
+            await ctx.promise<string>("link-clicked").resolve(request.secret);
+        },
+    },
 });
-    ```
-
-    ```java Java
-    @Workflow
-    public class ApprovalWorkflow {
-
-@Handler
-    public ApprovalResult processApproval(WorkflowContext ctx, ApprovalRequest request) {
-    ctx.set("status", "pending");
-    ctx.set("submittedAt", Instant.now().toString());
-
-    // Wait for external approval decision
-    ApprovalDecision decision = ctx.promise("approval-decision", ApprovalDecision.class).await();
-
-    if (decision.isApproved()) {
-    ctx.set("status", "approved");
-    ctx.set("approvedBy", decision.getApprover());
-
-    ProcessResult result = ctx.run("process", () -> processApprovedRequest(request));
-    return new ApprovalResult("approved", result);
-} else {
-    ctx.set("status", "rejected");
-    ctx.set("rejectedBy", decision.getApprover());
-
-    return new ApprovalResult("rejected", decision.getReason());
-}
-}
-
-    @Handler
-    public void approve(WorkflowSharedContext ctx, ApprovalDecision decision) {
-    ctx.promise("approval-decision").resolve(decision);
-}
-
-    @Handler
-    public StatusResult getStatus(WorkflowSharedContext ctx) {
-    String status = ctx.get("status", String.class).orElse("pending");
-    return new StatusResult(status);
-}
-}
-    ```
-
-    ```python Python
-    approval_workflow = Workflow("ApprovalWorkflow")
-
-    @approval_workflow.handler()
-    async def process_approval(ctx: WorkflowContext, request: ApprovalRequest):
-    await ctx.set("status", "pending")
-    await ctx.set("submittedAt", datetime.now().isoformat())
-
-    # Wait for external approval decision
-    decision = await ctx.promise("approval-decision", ApprovalDecision)
-
-    if decision.approved:
-    await ctx.set("status", "approved")
-    await ctx.set("approvedBy", decision.approver)
-
-    result = await ctx.run("process", lambda: process_approved_request(request))
-    return {"status": "approved", "result": result}
-    else:
-    await ctx.set("status", "rejected")
-    await ctx.set("rejectedBy", decision.approver)
-
-    return {"status": "rejected", "reason": decision.reason}
-
-    @approval_workflow.handler()
-    async def approve(ctx: WorkflowSharedContext, decision: ApprovalDecision):
-    ctx.promise("approval-decision").resolve(decision)
-
-    @approval_workflow.handler()
-    async def get_status(ctx: WorkflowSharedContext):
-    status = await ctx.get("status", str) or "pending"
-    return {"status": status}
-    ```
+```
 </CodeGroup>
 
 **Characteristics:**
 - Use Durable Execution to run requests to completion
-- The `run` handler executes exactly once per ID
+- The `run` handler executes exactly once per workflow ID
 - Other handlers run concurrently with the `run` handler to signal, query state, or wait for events
 - Optimized APIs for workflow interaction and lifecycle management
 
