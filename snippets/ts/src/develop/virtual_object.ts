@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 
-const myObject = restate.object({
+export const myObject = restate.object({
   name: "MyObject",
   handlers: {
     myHandler: async (ctx: restate.ObjectContext, greeting: string) => {
@@ -13,7 +13,5 @@ const myObject = restate.object({
     ),
   },
 });
-
-export const MyObject: typeof myObject = { name: "MyObject" };
 
 restate.endpoint().bind(myObject).listen();

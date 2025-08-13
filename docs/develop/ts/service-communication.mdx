@@ -12,26 +12,11 @@ Your Restate handler can call other handlers in three ways:
 - **[Delayed messages](/develop/ts/service-communication#delayed-messages)**: Send a message after a delay
 
 <Info>
-    This page describes how to call a service **from within a Restate handler**, with access to the Restate Context.
     To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
 </Info>
 
-## Why use Restate for this?
+<Tip>[Why use Restate for service communication?](/basics/key-concepts#resilient-communication)</Tip>
 
-Restate makes service calls reliable without extra infrastructure:
-
-- **Automatic retries**: Failed calls are retried until they succeed
-- **No duplicates**: Same call won't execute twice  
-- **Survives failures**: Calls continue after crashes or restarts
-- **Full observability**: See all calls in the UI
-- **No queues needed**: Restate handles message delivery
-
-## Export service definition
-To call a service, ensure [its definition is exported](/develop/ts/overview#services):
- ```typescript {"CODE_LOAD::ts/src/develop/my_service.ts#api_export"} 
-export const MyService: typeof myService = { name: "MyService" };
-```
-Then, import this definition into the handler that will make the call.
 
 ## Request-response calls
 
@@ -41,21 +26,21 @@ Use [`serviceClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_res
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#request_response"} 
 // To call a Service:
-const svcResponse = await ctx.serviceClient(MyService).myHandler("Hi");
+const svcResponse = await ctx.serviceClient(myService).myHandler("Hi");
 
 // To call a Virtual Object:
 const objResponse = await ctx
-  .objectClient(MyObject, "Mary")
+  .objectClient(myObject, "Mary")
   .myHandler("Hi");
-  
+
 // To call a Workflow:
 // `run` handler — can only be called once per workflow ID
 const wfResponse = await ctx
-  .workflowClient(MyWorkflow, "wf-id")
+  .workflowClient(myWorkflow, "wf-id")
   .run("Hi");
 // Other handlers can be called anytime within workflow retention
 const result = await ctx
-  .workflowClient(MyWorkflow, "wf-id")
+  .workflowClient(myWorkflow, "wf-id")
   .interactWithWorkflow();
 ```
 
@@ -95,16 +80,16 @@ Use [`serviceSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#one_way"} 
 // To message a Service:
-ctx.serviceSendClient(MyService).myHandler("Hi");
+ctx.serviceSendClient(myService).myHandler("Hi");
 
 // To message a Virtual Object:
-ctx.objectSendClient(MyObject, "Mary").myHandler("Hi");
+ctx.objectSendClient(myObject, "Mary").myHandler("Hi");
 
 // To message a Workflow:
 // `run` handler — can only be called once per workflow ID
-ctx.workflowSendClient(MyWorkflow, "wf-id").run("Hi");
+ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
 // Other handlers can be called anytime within workflow retention
-ctx.workflowSendClient(MyWorkflow, "wf-id").interactWithWorkflow();
+ctx.workflowSendClient(myWorkflow, "wf-id").interactWithWorkflow();
 ```
 
 
@@ -124,8 +109,8 @@ ctx.genericSend({
     Example:
 
     ```typescript {"CODE_LOAD::ts/src/develop/service_communication.ts#ordering"} 
-ctx.objectSendClient(MyObject, "Mary").myHandler("I'm call A");
-ctx.objectSendClient(MyObject, "Mary").myHandler("I'm call B");
+ctx.objectSendClient(myObject, "Mary").myHandler("I'm call A");
+ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
 ```
 
     Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
@@ -141,17 +126,17 @@ Use the same send methods with a delay option in [`sendOpts`](https://docs.resta
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#delayed"} 
 // To message a Service with a delay:
 ctx
-  .serviceSendClient(MyService)
+  .serviceSendClient(myService)
   .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
 
 // To message a Virtual Object with a delay:
 ctx
-  .objectSendClient(MyObject, "Mary")
+  .objectSendClient(myObject, "Mary")
   .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
 
 // To message a Workflow with a delay:
 ctx
-  .workflowSendClient(MyWorkflow, "Mary")
+  .workflowSendClient(myWorkflow, "Mary")
   .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
 ```
 
@@ -179,14 +164,14 @@ Add an idempotency key via [`restate.rpc.opts`](https://docs.restate.dev/tsdocs/
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#idempotency_key"} 
 // For request-response
-const response = await ctx.serviceClient(MyService).myHandler(
+const response = await ctx.serviceClient(myService).myHandler(
   "Hi",
   restate.rpc.opts({
     idempotencyKey: "my-idempotency-key",
   })
 );
 // For sending a message
-ctx.serviceSendClient(MyService).myHandler(
+ctx.serviceSendClient(myService).myHandler(
   "Hi",
   restate.rpc.sendOpts({
     idempotencyKey: "my-idempotency-key",
@@ -204,7 +189,7 @@ Wait for or get the result of a previously sent message.
 Use [`ctx.attach`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#attach) with the invocation ID.
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#attach"} 
-const handle = ctx.serviceSendClient(MyService).myHandler(
+const handle = ctx.serviceSendClient(myService).myHandler(
   "Hi",
   restate.rpc.sendOpts({
     idempotencyKey: "my-idempotency-key",
@@ -227,12 +212,68 @@ Cancel a running handler.
 Use [`ctx.cancel`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#cancel) with the invocation ID:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#cancel"} 
-const handle = ctx.serviceSendClient(MyService).myHandler("Hi");
+const handle = ctx.serviceSendClient(myService).myHandler("Hi");
 const invocationId = await handle.invocationId;
 
 // Cancel the invocation
 ctx.cancel(invocationId);
 ```
+
+## Advanced: sharing service type definitions
+When calling services, you need access to their type definitions for type safety. Here are four approaches to share service definitions without exposing implementation details:
+
+<AccordionGroup>
+    <Accordion title={"Option 1: Export type-only service definition"}>
+
+        Export only the service type information from where you define your service:
+
+```typescript {"CODE_LOAD::ts/src/develop/my_service.ts#api_export"} 
+export const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, greeting: string) => {
+      return `${greeting}!`;
+    },
+  },
+});
+
+export type MyService = typeof myService;
+```
+
+        Import and use this definition in calling handlers:
+```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#export_definition"} 
+const response = await ctx
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler("Hi");
+```
+    </Accordion>
+    <Accordion title={"Option 2: Define service interface manually"}>
+        Create a TypeScript interface matching the service's handler signatures. Useful when the service is in a different language or when you can't import the type definition:
+
+```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#interface"} 
+interface MyService {
+  myHandler(ctx: unknown, greeting: string): Promise<string>;
+}
+const response = await ctx
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler("Hi");
+```
+
+    </Accordion>
+    <Accordion title={"Option 3: Import as dev dependency"}>
+        When your service is published as a separate package, import it as a dev dependency to access its types:
+
+```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#dev_dependency"} 
+// import type { MyService } from "my-service-package";
+
+const response = await ctx
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler("Hi");
+```
+
+    </Accordion>
+</AccordionGroup>
+
 
 ## See also
 

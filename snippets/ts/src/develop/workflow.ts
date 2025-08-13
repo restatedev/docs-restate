@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 
-const myWorkflow = restate.workflow({
+export const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.WorkflowContext, req: string) => {
@@ -15,7 +15,5 @@ const myWorkflow = restate.workflow({
     },
   },
 });
-
-export const MyWorkflow: typeof myWorkflow = { name: "MyWorkflow" };
 
 restate.endpoint().bind(myWorkflow).listen();

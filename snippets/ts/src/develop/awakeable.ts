@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
-import {WorkflowContext} from "@restatedev/restate-sdk";
+import { WorkflowContext } from "@restatedev/restate-sdk";
 
 const service = restate.service({
   name: "Awakeable",
@@ -21,7 +21,7 @@ const service = restate.service({
 
       // <start_resolve>
       // Complete with success data
-      ctx.resolveAwakeable(id, {approved: true, comments: "Looks good!"});
+      ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
       // <end_resolve>
 
       // <start_reject>
@@ -51,9 +51,9 @@ restate.workflow({
     submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
       // <start_resolve_promise>
       // Resolve from any workflow handler
-      ctx.promise<string>("review").resolve(review)
+      ctx.promise<string>("review").resolve(review);
       // <end_resolve_promise>
-    }
+    },
   },
 });
 
@@ -77,7 +77,7 @@ restate.workflow({
     submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
       // Signal the waiting run handler
       ctx.promise<string>("review").resolve(review);
-    }
+    },
   },
 });
 // <end_review>

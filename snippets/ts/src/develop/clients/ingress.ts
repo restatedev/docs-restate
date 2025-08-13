@@ -13,18 +13,18 @@ const myPlainTSFunction = async () => {
 
   // To call an object
   const count = await restateClient
-    .objectClient<MyObject>({name: "MyObject"}, "Mary")
+    .objectClient<MyObject>({ name: "MyObject" }, "Mary")
     .greet({ greeting: "Hi" });
 
   // To call a workflow
   const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" });
   const result = await restateClient.result(handle);
 
   const status = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .myOtherHandler();
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .myOtherHandler();
   // <end_rpc_call_node>
 };
 
@@ -34,17 +34,19 @@ const myPlainTSFunction2 = async () => {
   const restateClient = clients.connect({ url: "http://localhost:8080" });
 
   // To send a message to a service
-  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
+  await restateClient
+    .serviceSendClient<MyService>({ name: "MyService" })
+    .greet({ greeting: "Hi" });
 
   // To send a message to an object
   await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
+    .objectSendClient<MyObject>({ name: "MyObject" }, "Mary")
     .greet({ greeting: "Hi" });
 
   // To send a message to a workflow
   const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" });
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" });
   // You cannot send a message to a shared handler in a workflow
   // <end_one_way_call_node>
 };
@@ -61,13 +63,16 @@ const myPlainTSFunction3 = async () => {
 
   // To send a delayed message to an object
   await restateClient
-    .objectSendClient<MyObject>({name: "MyObject"}, "Mary")
+    .objectSendClient<MyObject>({ name: "MyObject" }, "Mary")
     .greet({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
 
   // To send a delayed message to a workflow
   const handle = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit(
+      { greeting: "Hi" },
+      clients.rpc.sendOpts({ delay: { seconds: 1 } })
+    );
   // You cannot send a delayed message to a shared handler in a workflow
   // <end_delayed_call_node>
 };
@@ -107,13 +112,13 @@ const workflowAttach = async () => {
 
   // Option 1: attach and wait for result with workflow ID
   const result = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowAttach();
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowAttach();
 
   // Option 2: peek to check if ready with workflow ID
   const peekOutput = await restateClient
-      .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-      .workflowOutput();
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowOutput();
   if (peekOutput.ready) {
     const result2 = peekOutput.result;
   }

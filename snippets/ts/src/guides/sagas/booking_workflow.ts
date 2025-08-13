@@ -11,7 +11,7 @@ const bookingWorkflow = restate.service({
   name: "BookingWorkflow",
   handlers: {
     run: async (ctx: restate.Context, req: BookingRequest) => {
-      const {customerId, flight, paymentInfo} = req;
+      const { customerId, flight, paymentInfo } = req;
 
       // create a list of undo actions
       const compensations = [];
@@ -20,9 +20,7 @@ const bookingWorkflow = restate.service({
       const bookingId = await ctx.run(() =>
         flightClient.reserve(customerId, flight)
       );
-      compensations.push(() =>
-        ctx.run(() => flightClient.cancel(bookingId))
-      );
+      compensations.push(() => ctx.run(() => flightClient.cancel(bookingId)));
 
       // ... do other work, like reserving a car, etc. ...
 
@@ -31,9 +29,7 @@ const bookingWorkflow = restate.service({
 
       // <start_idempotency>
       const paymentId = ctx.rand.uuidv4();
-      compensations.push(() =>
-        ctx.run(() => paymentClient.refund(paymentId))
-      );
+      compensations.push(() => ctx.run(() => paymentClient.refund(paymentId)));
       await ctx.run(() => paymentClient.charge(paymentInfo, paymentId));
       // <end_idempotency>
     },

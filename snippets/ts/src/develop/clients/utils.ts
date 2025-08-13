@@ -43,4 +43,4 @@ const myWorkflow = restate.workflow({
   },
 });
 
-export type MyWorkflow = typeof myWorkflow
+export type MyWorkflow = typeof myWorkflow;

@@ -60,10 +60,7 @@ const service = restate.service({
       try {
         // If the timeout hits first, it throws a `TimeoutError`.
         // If you do not catch it, it will lead to a retry.
-        await ctx
-          .serviceClient(MyService)
-          .myHandler("hello")
-          .orTimeout(5000);
+        await ctx.serviceClient(MyService).myHandler("hello").orTimeout(5000);
 
         const { id, promise } = ctx.awakeable();
         // do something that will trigger the awakeable

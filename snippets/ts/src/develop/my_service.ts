@@ -1,6 +1,7 @@
 import * as restate from "@restatedev/restate-sdk";
 
-const myService = restate.service({
+// <start_api_export>
+export const myService = restate.service({
   name: "MyService",
   handlers: {
     myHandler: async (ctx: restate.Context, greeting: string) => {
@@ -9,8 +10,7 @@ const myService = restate.service({
   },
 });
 
-// <start_api_export>
-export const MyService: typeof myService = { name: "MyService" };
+export type MyService = typeof myService;
 // <end_api_export>
 
 restate.endpoint().bind(myService).listen();
