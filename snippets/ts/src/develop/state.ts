@@ -1,4 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
+import {aw} from "vitest/dist/chunks/reporters.nr4dxCkA";
 
 export const router = restate.object({
   name: "State",
@@ -27,3 +28,23 @@ export const router = restate.object({
     },
   },
 });
+
+
+// <start_typed_state>
+type GreeterContext = restate.ObjectContext<{
+  name: string;
+  count: number;
+}>
+
+export const greeter = restate.object({
+  name: "Greeter",
+  handlers: {
+    greet: async (ctx: GreeterContext, name: string) => {
+      // <start_greet>
+      const count: number = await ctx.get("count") ?? 0;
+      ctx.set("name", name);
+      // <end_greet>
+    },
+  },
+});
+// <end_typed_state>

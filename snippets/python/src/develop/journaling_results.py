@@ -35,16 +35,16 @@ async def my_handler(ctx: Context, arg):
         # ... implement ...
         return "llm response"
 
+    # specify the (async) function to call and its arguments
     result = await ctx.run_typed("LLM call", call_llm, prompt="What is the weather?")
+
+    # or use a lambda to capture a single value
+    my_number = await ctx.run_typed("generate number", lambda: random.randint(0, 10))
     # <end_side_effect>
 
     # <start_uuid>
     my_uuid = await ctx.run_typed("generate UUID", lambda: str(uuid.uuid4()))
     # <end_uuid>
-
-    # <start_random_nb>
-    my_number = await ctx.run_typed("generate number", lambda: random.randint(0, 10))
-    # <end_random_nb>
 
     # <start_parallel>
     # Start operations concurrently
