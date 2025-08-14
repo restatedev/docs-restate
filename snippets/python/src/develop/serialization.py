@@ -61,6 +61,7 @@ async def my_handler(ctx: ObjectContext, greeting: str) -> str:
 def some_task() -> MyData:
     return MyData(some_value="value", my_number=123)
 
+
 # <start_using_pydantic>
 class Delivery(BaseModel):
     timestamp: datetime

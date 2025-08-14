@@ -1,7 +1,7 @@
 package develop;
 
-import static develop.Utils.askReview;
-import static develop.Utils.processReview;
+import static develop.utils.Utils.askReview;
+import static develop.utils.Utils.processReview;
 
 import dev.restate.sdk.SharedWorkflowContext;
 import dev.restate.sdk.WorkflowContext;

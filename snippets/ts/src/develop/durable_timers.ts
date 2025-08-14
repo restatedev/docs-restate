@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
-import { MyService } from "./my_service";
+import { myService } from "./my_service";
 
 const service = restate.service({
   name: "DurableTimers",
@@ -12,7 +12,7 @@ const service = restate.service({
       // <start_timer>
       try {
         await ctx
-          .serviceClient(MyService)
+          .serviceClient(myService)
           .myHandler("Hi")
           .orTimeout({ seconds: 5 });
       } catch (error) {

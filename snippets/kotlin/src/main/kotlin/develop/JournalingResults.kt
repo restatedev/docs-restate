@@ -1,5 +1,7 @@
 package develop
 
+import dev.restate.sdk.annotation.Handler
+import dev.restate.sdk.annotation.Service
 import dev.restate.sdk.kotlin.*
 import java.util.UUID
 
@@ -20,6 +22,17 @@ internal class SideEffects {
     val a1 = ctx.awakeable<Boolean>()
     val a2 = ctx.awakeable<Boolean>()
     val a3 = ctx.awakeable<Boolean>()
+
+    // <start_parallel>
+    val call1 = ctx.runAsync<UserData> { fetchUserData(123) }
+    val call2 = ctx.runAsync<OrderHistory> { fetchOrderHistory(123) }
+    val call3 = AnalyticsServiceClient.fromContext(ctx).calculateMetric(123)
+
+    // Now wait for results as needed
+    val user: UserData = call1.await()
+    val orders: OrderHistory = call2.await()
+    val metric: Int = call3.await()
+    // <end_parallel>
 
     // <start_combine_all>
     listOf(a1, a2, a3).awaitAll()
@@ -53,8 +66,30 @@ internal class SideEffects {
   }
 }
 
+data class UserData(val name: String, val email: String)
+
+data class OrderHistory(val orders: List<String>)
+
+data class Metrics(val value: Double)
+
+private fun SideEffects.fetchOrderHistory(i: Int): OrderHistory {
+  TODO("Not yet implemented")
+}
+
+private fun SideEffects.fetchUserData(i: Int): UserData {
+  TODO("Not yet implemented")
+}
+
 internal class PaymentClient {
   fun call(txId: String?, amount: Int): Boolean {
     return true
+  }
+}
+
+@Service
+class AnalyticsService {
+  @Handler
+  suspend fun calculateMetric(ctx: Context, metric: Int): Int {
+    return 500
   }
 }

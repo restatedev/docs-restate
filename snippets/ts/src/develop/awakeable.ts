@@ -58,6 +58,8 @@ restate.workflow({
       // <start_resolve_promise>
       ctx.promise<string>("review").resolve(review);
       // <end_resolve_promise>
+
+      ctx.promise<string>("review")
     },
   },
 });

@@ -7,92 +7,105 @@ icon: "file-code"
 Restate sends data over the network for storing state, journaling actions, awakeables, etc.
 Therefore, Restate needs to serialize and deserialize the journal entries.
 
-## Default serialization
+## Default Serialization
+By default, the SDK serializes the journal entry with the [`json`](https://docs.python.org/3/library/json.html#) library.
+If this does not work for your data type, then you need to specify a custom serializer, as shown below.
 
-By default, Typescript SDK uses the built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) support to perform (de)serialization.
+## Pydantic
 
-## Zod schemas
+[Pydantic](https://docs.pydantic.dev/latest/) is a data validation and parsing library for Python.
+You can use Pydantic models to define the structure of your data: handler input/output, state, etc.
 
-You can use [Zod](https://zod.dev/) to define the schema of your handler input/output.
-
-Make sure to install the extra dependency for zod integration: [`@restatedev/restate-sdk-zod`](https://www.npmjs.com/package/@restatedev/restate-sdk-zod).
+Make sure to install the optional `serde` dependency of the Restate SDK: `restate-sdk[serde]`.
 
 Then do the following:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#zod"} 
-import * as restate from "@restatedev/restate-sdk";
-import { z } from "zod";
-import { serde } from "@restatedev/restate-sdk-zod";
+```python {"CODE_LOAD::python/src/develop/serialization.py#using_pydantic"} 
+class Delivery(BaseModel):
+    timestamp: datetime
+    dimensions: tuple[int, int]
 
-const Greeting = z.object({
-  name: z.string(),
-});
 
-const GreetingResponse = z.object({
-  result: z.string(),
-});
+class CompletedDelivery(BaseModel):
+    status: str
+    timestamp: datetime
 
-const greeter = restate.service({
-  name: "Greeter",
-  handlers: {
-    greet: restate.handlers.handler(
-      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
-      async (ctx: restate.Context, { name }) => {
-        return { result: `You said hi to ${name}!` };
-      }
-    ),
-  },
-});
+
+# For the input/output serialization of your handlers
+@my_object.handler()
+async def deliver(ctx: ObjectContext, delivery: Delivery) -> CompletedDelivery:
+
+    # To get state
+    await ctx.get("delivery", type_hint=Delivery)
+
+    # To serialize awakeable payloads
+    ctx.awakeable(type_hint=Delivery)
+
+    # To serialize the results of actions
+    await ctx.run("some-task", do_something, type_hint=Delivery)
+
+    return CompletedDelivery(status="delivered", timestamp=datetime.now())
 ```
 
-## Custom serialization
+<Admonition type="tip" title={"Pydantic & OpenAPI"}>
+    Pydantic integrates well with [OpenAPI](https://www.openapis.org/). Restate generates the OpenAPI specifications for you.
+    If you use Pydantic, you can use the OpenAPI-generated clients to interact with your services.
+    You can find example clients in the UI playground (click on your service in the overview and then on playground).
+</Admonition>
 
-It is possible to implement customized serialization using the `Serde` interface.
+## Dataclasses
 
-For example, to implement custom serializers for the handler input and output:
+You can also use Python's built-in `dataclasses` to define the structure of your data.
+Make sure to install the optional `serde` dependency of the Restate SDK `restate-sdk[serde]`.
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#service_definition"} 
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.handler(
-      {
-        // Set the input serde here
-        input: restate.serde.binary,
-        // Set the output serde here
-        output: restate.serde.binary,
-      },
-      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-        // Process the request
-        return data;
-      }
-    ),
-  },
-});
+Then add a type hint in a similar way as you would with Pydantic.
+
+## Custom Serialization
+
+To write a custom serializer, you implement the `Serde` interface.
+
+For example a custom JSON serializer could look like this:
+
+```python {"CODE_LOAD::python/src/develop/serialization.py#custom"} 
+class MyData(typing.TypedDict):
+    """Represents a response from the GPT model."""
+
+    some_value: str
+    my_number: int
+
+
+class MySerde(Serde[MyData]):
+    def deserialize(self, buf: bytes) -> typing.Optional[MyData]:
+        if not buf:
+            return None
+        data = json.loads(buf)
+        return MyData(some_value=data["some_value"], my_number=data["some_number"])
+
+    def serialize(self, obj: typing.Optional[MyData]) -> bytes:
+        if obj is None:
+            return bytes()
+        data = {"some_value": obj["some_value"], "some_number": obj["my_number"]}
+        return bytes(json.dumps(data), "utf-8")
 ```
 
-When sending a request to a handler configured with custom serde(s) you always need to manually specify them, because the client does not automatically infer what serde(s) should be used.
-To customize the serde to use on requests:
+You then use this serializer in your handlers, as follows:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#client"} 
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
-```
+```python {"CODE_LOAD::python/src/develop/serialization.py#using_custom_serde"} 
+# For the input/output serialization of your handlers
+@my_object.handler(input_serde=MySerde(), output_serde=MySerde())
+async def my_handler(ctx: ObjectContext, greeting: str) -> str:
 
-To customize the serde for other actions on the context:
+    # To serialize state
+    await ctx.get("my_state", serde=MySerde())
+    ctx.set("my_state", MyData(some_value="Hi", my_number=15), serde=MySerde())
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#actions"} 
-ctx.get("my-binary-data", restate.serde.binary);
-ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
+    # To serialize awakeable payloads
+    ctx.awakeable(serde=MySerde())
 
-ctx.awakeable(restate.serde.binary);
+    # To serialize the results of actions
+    await ctx.run("some-task", some_task, serde=MySerde())
 
-await ctx.run("my-side-effect", () => new Uint8Array(), {
-  serde: restate.serde.binary,
-});
+    # etc.
+
+    return "some-output"
 ```

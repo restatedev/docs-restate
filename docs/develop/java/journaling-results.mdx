@@ -26,10 +26,10 @@ Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`,
     <Accordion title="Asynchronous run actions">
         To run an action asynchronously, use `ctx.runAsync`:
         <CodeGroup>
-```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#async_side_effect"}
+```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#async_side_effect"} 
 DurableFuture<String> myRunFuture = ctx.runAsync(String.class, () -> doSomethingSlow());
 ```
-```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#async_side_effect"}
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#async_side_effect"} 
 val myRunFuture: DurableFuture<String> = ctx.runAsync { doSomethingSlow() }
 ```
         </CodeGroup>
@@ -46,7 +46,7 @@ val myRunFuture: DurableFuture<String> = ctx.runAsync { doSomethingSlow() }
 
     <Accordion title="Error handling and retry policies">
 
-        Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
+        Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalException`](/develop/java/error-handling) is thrown.
 
 
         You can customize how `ctx.run` retries via:
@@ -88,7 +88,7 @@ try {
         </CodeGroup>
 
         * You can limit retries by time or count
-        * When the policy is exhausted, a `TerminalError` is thrown
+        * When the policy is exhausted, a `TerminalException` is thrown
         * See the [Error Handling Guide](/guides/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
 
     </Accordion>
@@ -97,7 +97,7 @@ try {
 
         However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
 
-        In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+        In such cases, you can adjust the service’s [abort timeout and inactivity timeout](/operate/configuration/services) accommodate longer execution times.
 
         For more information, see the [error handling guide](/guides/error-handling).
     </Accordion>
@@ -140,36 +140,3 @@ val value: Int = ctx.random().nextInt()
 This behaves like `Math.random()` but is deterministically replayable.
 
 ## `DurableFuture` combinators
-
-To run multiple operations concurrently and deterministically, use `DurableFuture` combinators.
-Restate then logs the order in which they get resolved or rejected so they are deterministic on replay.
-
-**Await all** creates a `DurableFuture` that awaits for all the provided DurableFutures to resolve.
-The semantics are similar to [`CompleteableFuture.allOf()`](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/CompletableFuture.html#allOf(java.util.concurrent.CompletableFuture...)), but the outcome is stored in the Restate journal to be deterministically replayable.
-
-<CodeGroup>
-    ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#combine_all"} 
-DurableFuture.all(a1, a2, a3).await();
-```
-    ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#combine_all"} 
-listOf(a1, a2, a3).awaitAll()
-```
-</CodeGroup>
-
-**Select** creates a `DurableFuture` that returns on the first completed `DurableFuture` of the provided ones.
-The semantics are similar to [`CompleteableFuture.anyOf()`](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/CompletableFuture.html#anyOf(java.util.concurrent.CompletableFuture...)), but the outcome is stored in the Restate journal to be deterministically replayable.
-
-<CodeGroup>
-    ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#combine_any"} 
-boolean res = Select.<Boolean>select().or(a1).or(a2).or(a3).await();
-```
-    ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#combine_any"} 
-val resSelect =
-    select {
-          a1.onAwait { it }
-          a2.onAwait { it }
-          a3.onAwait { it }
-        }
-        .await()
-```
-</CodeGroup>

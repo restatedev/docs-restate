@@ -11,8 +11,8 @@ import TimersIntro from "/snippets/sdk/timers-intro.mdx";
 ## Durable sleep
 To pause a handler for a set duration:
 
-```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#sleep"} 
-await ctx.sleep({ seconds: 10 });
+```python {"CODE_LOAD::python/src/develop/durable_timers.py#here"} 
+await ctx.sleep(delta=timedelta(seconds=10))
 ```
 
 <Info>
@@ -29,7 +29,7 @@ await ctx.sleep({ seconds: 10 });
 
 ## Scheduling async tasks
 
-To invoke a handler at a later time, use [delayed messages](/develop/ts/service-communication#delayed-messages).
+To invoke a handler at a later time, use [delayed messages](/develop/python/service-communication#delayed-messages).
 
 <Accordion title={"Delayed messages vs. sleep and send"}>
 
@@ -47,28 +47,24 @@ However, we recommend to use delayed messages for the following reasons:
 
 ## Timers and timeouts
 
-Most context actions are async actions that return a `RestatePromise`.
+Most context actions are async actions that return a `RestateDurableFuture`.
 
-`RestatePromise` supports setting timeouts, allowing you to bound how long your code waits for an operation.
+You can race these against a timer to bound how long your code waits for an operation.
 
-When an operation times out, it throws a `TimeoutError`.
+For example, to either wait for the greeting or for the timeout:
 
-```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#timer"} 
-try {
-  await ctx
-    .serviceClient(MyService)
-    .myHandler("Hi")
-    .orTimeout({ seconds: 5 });
-} catch (error) {
-  if (error instanceof restate.TimeoutError) {
-    console.error("Operation timed out:", error);
-  } else {
-    throw error; // Re-throw other errors
-  }
-}
+```py {"CODE_LOAD::python/src/develop/durable_timers.py#timer"} 
+match await restate.select(
+    greeting=ctx.service_call(my_service.my_handler, "Hi"),
+    timeout=ctx.sleep(timedelta(seconds=5)),
+):
+    case ["greeting", greeting]:
+        print("Greeting:", greeting)
+    case ["timeout", _]:
+        print("Timeout occurred")
 ```
 
-For alternative ways of racing async operations, have a look at the [`RestatePromise` Combinator docs](/develop/ts/journaling-results#restatepromise-combinators).
+For alternative ways of racing async operations, have a look at the [`RestateDurableFuture` Combinators](/develop/python/journaling-results#restatedurablefuture-combinators).
 
 ## Cron jobs
 

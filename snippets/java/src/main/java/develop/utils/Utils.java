@@ -1,4 +1,4 @@
-package develop;
+package develop.utils;
 
 public class Utils {
   public static void askReview(String documentId) {}

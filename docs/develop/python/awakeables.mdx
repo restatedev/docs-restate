@@ -14,19 +14,17 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 2. **Send the ID externally** - Pass the awakeable ID to your external system
 3. **Wait for result** - Your handler [suspends](/basics/key-concepts#suspensions-on-faas) until the external system responds
 
-```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"} 
-// Create awakeable and get unique ID
-const { id, promise } = ctx.awakeable<string>();
+```py {"CODE_LOAD::python/src/develop/awakeables.py#here"} 
+id, promise = ctx.awakeable(type_hint=str)
 
-// Send ID to external system (email, queue, webhook, etc.)
-await ctx.run(() => requestHumanReview(name, id));
+await ctx.run("trigger task", request_human_review, args=(name, id))
 
-// Handler suspends here until external completion
-const review = await promise;
+review = await promise
 ```
 
 <Accordion title="Serialization">
-  Both awakeables and durable promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization. Complex objects are automatically serialized/deserialized. See the [serialization docs](/develop/ts/serialization) for customization options.
+    By default, the SDK serializes the journal entry with the [`json`](https://docs.python.org/3/library/json.html#) library.
+    Alternatively, you can specify a [Pydantic model](/develop/python/serialization#pydantic) or [custom serializer](/develop/python/serialization#custom-serialization).
 </Accordion>
 
 <Info>
@@ -38,7 +36,7 @@ const review = await promise;
 External processes complete awakeables in two ways:
 
 - **Resolve** with success data → handler continues normally
-- **Reject** with error reason → throws a [terminal error](/develop/ts/error-handling) in the waiting handler
+- **Reject** with error reason → throws a [terminal error](/develop/python/error-handling) in the waiting handler
 
 #### Via HTTP API
 
@@ -60,15 +58,13 @@ curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
 #### Via SDK (from other handlers)
 
 **Resolve:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve"} 
-// Complete with success data
-ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
+```python {"CODE_LOAD::python/src/develop/awakeables.py#resolve"} 
+ctx.resolve_awakeable(name, review)
 ```
 
 **Reject:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject"} 
-// Complete with error
-ctx.rejectAwakeable(id, "This cannot be reviewed.");
+```python {"CODE_LOAD::python/src/develop/awakeables.py#reject"} 
+ctx.reject_awakeable(name, "Cannot be reviewed")
 ```
 
 ## Durable Promises
@@ -93,42 +89,42 @@ Update the retention time via the [service configuration](/operate/configuration
 
 Wait for a promise by name:
 
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"} 
-const review = await ctx.promise<string>("review");
+```py {"CODE_LOAD::python/src/develop/durable_promise.py#promise"} 
+review = await ctx.promise("review").value()
 ```
 
 ### Resolving/rejecting promises
 
 Resolve/reject from any workflow handler:
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"} 
-ctx.promise<string>("review").resolve(review);
+```py {"CODE_LOAD::python/src/develop/durable_promise.py#resolve_promise"} 
+await ctx.promise("review").resolve(review)
 ```
 
 ### Complete workflow example
 
-```ts expandable {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#review"} 
-restate.workflow({
-  name: "reviewWorkflow",
-  handlers: {
-    // Main workflow execution
-    run: async (ctx: WorkflowContext, documentId: string) => {
-      // Send document for review
-      await ctx.run(() => askReview(documentId));
+```py expandable {"CODE_LOAD::python/src/develop/durable_promise.py#review"} 
+review_workflow = restate.Workflow("ReviewWorkflow")
 
-      // Wait for external review submission
-      const review = await ctx.promise<string>("review");
 
-      // Process the review result
-      return processReview(documentId, review);
-    },
+@review_workflow.main()
+async def run(ctx: restate.WorkflowContext, document_id: str):
+    # Send document for review
+    await ctx.run_typed("ask review", ask_review, document_id=document_id)
 
-    // External endpoint to submit reviews
-    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
-      // Signal the waiting run handler
-      ctx.promise<string>("review").resolve(review);
-    },
-  },
-});
+    # Wait for external review submission
+    review = await ctx.promise("review").value()
+
+    # Process the review result
+    return process_review(document_id, review)
+
+
+@review_workflow.handler()
+async def submit_review(ctx: restate.WorkflowSharedContext, review: str):
+    # Signal the waiting run handler
+    await ctx.promise("review").resolve(review)
+
+
+app = restate.app([review_workflow])
 ```
 
 <AwakeablesOutro/>

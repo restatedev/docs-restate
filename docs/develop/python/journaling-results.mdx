@@ -10,8 +10,12 @@ Restate uses an execution log to replay operations after failures and suspension
 
 Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect"} 
-const result = await ctx.run<string>(async () => doDbRequest());
+```python {"CODE_LOAD::python/src/develop/journaling_results.py#side_effect"} 
+async def call_llm(prompt: str) -> str:
+    # ... implement ...
+    return "llm response"
+
+result = await ctx.run_typed("LLM call", call_llm, prompt="What is the weather?")
 ```
 
 Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run`).
@@ -19,32 +23,27 @@ Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`,
 <AccordionGroup>
 
   <Accordion title="Serialization">
-  By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
+      By default, the SDK serializes the journal entry with the [`json`](https://docs.python.org/3/library/json.html#) library.
+      Alternatively, you can specify a [Pydantic model](/develop/python/serialization#pydantic) or [custom serializer](/develop/python/serialization#custom-serialization).
   </Accordion>
 
   <Accordion title="Error handling and retry policies">
 
-  Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
-
+  Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/python/error-handling) is thrown.
 
   You can customize how `ctx.run` retries via:
 
-```typescript {"CODE_LOAD::ts/src/develop/retries.ts#here"} 
-try {
-  const myRunRetryPolicy = {
-    initialRetryInterval: { milliseconds: 500 },
-    retryIntervalFactor: 2,
-    maxRetryInterval: { seconds: 1 },
-    maxRetryAttempts: 5,
-    maxRetryDuration: { seconds: 1 },
-  };
-  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
-} catch (e) {
-  if (e instanceof restate.TerminalError) {
-    // Undo or compensate here (see Sagas guide)
-  }
-  throw e;
-}
+```py {"CODE_LOAD::python/src/develop/retries.py#here"} 
+try:
+    retry_opts = restate.RunOptions(
+        max_attempts=10, max_retry_duration=timedelta(seconds=30)
+    )
+    await ctx.run_typed("write", write_to_other_system, retry_opts)
+except TerminalError as err:
+    # Handle the terminal error after retries exhausted
+    # For example, undo previous actions (see sagas guide) and
+    # propagate the error back to the caller
+    raise err
 ```
 
   * You can limit retries by time or count
@@ -57,7 +56,7 @@ try {
 
     However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
 
-    In such cases, you can adjust the service’s [abort timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#aborttimeout) and [inactivity timeout](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ServiceOptions#inactivitytimeout) settings to accommodate longer execution times.
+    In such cases, you can adjust the service’s [abort timeout and inactivity timeout](/operate/configuration/services) settings to accommodate longer execution times.
 
     For more information, see the [error handling guide](/guides/error-handling).
   </Accordion>
@@ -66,49 +65,21 @@ try {
 
 ## Deterministic randoms
 
-The SDK provides deterministic helpers for random values — seeded by the invocation ID — so they return the **same result on retries**.
+When you do non-deterministic operations, like generating UUIDs or random numbers, you must ensure that the results are deterministic on replay.
 
 ### UUIDs
 
 To generate stable UUIDs for things like idempotency keys:
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#uuid"} 
-const uuid = ctx.rand.uuidv4();
+```python {"CODE_LOAD::python/src/develop/journaling_results.py#uuid"} 
+my_uuid = await ctx.run_typed("generate UUID", lambda: str(uuid.uuid4()))
 ```
-
-Do not use this in cryptographic contexts.
 
 ### Random numbers
 
-To generate a deterministic float between `0` and `1`:
+To generate a deterministic integer between `0` and `10`:
 
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb"} 
-const randomNumber = ctx.rand.random();
+```python {"CODE_LOAD::python/src/develop/journaling_results.py#random_nb"} 
+my_number = await ctx.run_typed("generate number", lambda: random.randint(0, 10))
 ```
-
-This behaves like `Math.random()` but is deterministically replayable.
-
-
-## `RestatePromise` combinators
-
-To run multiple operations concurrently and deterministically, use `RestatePromise` combinators.
-Restate then logs the order in which they get resolved or rejected so they are deterministic on replay.
-
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#all"} 
-const sleepPromise = ctx.sleep({ milliseconds: 100 });
-const callPromise = ctx.serviceClient(MyService).myHandler("Hi");
-const externalCallPromise = ctx.run(() => httpCall());
-
-const resultArray = await RestatePromise.all([
-  sleepPromise,
-  callPromise,
-  externalCallPromise,
-]);
-```
-
-Restate provides the following deterministic combinators:
-- [`RestatePromise.all`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#all): similar to [`Promise.all`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all)
-- [`RestatePromise.any`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#any): similar to [`Promise.any`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any)
-- [`RestatePromise.race`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#race): similar to [`Promise.race`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race)
-- [`RestatePromise.allSettled`](https://docs.restate.dev/tsdocs/variables/_restatedev_restate-sdk.RestatePromise#allsettled): similar to [`Promise.allSettled`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled)

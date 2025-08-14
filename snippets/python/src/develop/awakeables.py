@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from restate import Service, Context
 
 my_service = Service("MyService")
@@ -5,31 +7,26 @@ my_service = Service("MyService")
 
 @my_service.handler()
 async def my_handler(ctx: Context, arg):
+    name = "Pete"
 
     # <start_here>
-    # <mark_1>
-    name, promise = ctx.awakeable(type_hint=str)
-    # </mark_1>
+    id, promise = ctx.awakeable(type_hint=str)
 
-    # <mark_2>
-    await ctx.run("trigger task", trigger_task_and_deliver_id(name))
-    # </mark_2>
+    await ctx.run("trigger task", request_human_review, args=(name, id))
 
-    # <mark_3>
-    payload = await promise
-    # </mark_3>
+    review = await promise
     # <end_here>
 
     # <start_resolve>
-    ctx.resolve_awakeable(name, payload)
+    ctx.resolve_awakeable(name, review)
     # <end_resolve>
 
     # <start_reject>
-    ctx.reject_awakeable(name, "My error reason")
+    ctx.reject_awakeable(name, "Cannot be reviewed")
     # <end_reject>
 
     return arg
 
 
-def trigger_task_and_deliver_id(awakeable_id):
+def request_human_review(name, awakeable_id):
     return "123"
