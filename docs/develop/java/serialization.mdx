@@ -9,90 +9,81 @@ Therefore, Restate needs to serialize and deserialize the journal entries.
 
 ## Default serialization
 
-By default, Typescript SDK uses the built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) support to perform (de)serialization.
+The SDK uses by default [Jackson Databind](https://github.com/FasterXML/jackson) for the Java API, and [Kotlinx serialization](https://kotlinlang.org/docs/serialization.html) for the Kotlin API.
 
-## Zod schemas
+## Customizing serialization
 
-You can use [Zod](https://zod.dev/) to define the schema of your handler input/output.
+There are different entrypoints in the SDK to customize (de)serialization, depending on your needs.
 
-Make sure to install the extra dependency for zod integration: [`@restatedev/restate-sdk-zod`](https://www.npmjs.com/package/@restatedev/restate-sdk-zod).
+### Custom Jackson `ObjectMapper`
 
-Then do the following:
+You can customize the Jackson's [`ObjectMapper`](https://javadoc.io/doc/com.fasterxml.jackson.core/jackson-databind/latest/com/fasterxml/jackson/databind/ObjectMapper.html) by subclassing the [`JacksonSerdeFactory`](https://docs.restate.dev/javadocs/dev/restate/sdk/serde/jackson/JacksonSerdeFactory) class:
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#zod"} 
-import * as restate from "@restatedev/restate-sdk";
-import { z } from "zod";
-import { serde } from "@restatedev/restate-sdk-zod";
-
-const Greeting = z.object({
-  name: z.string(),
-});
-
-const GreetingResponse = z.object({
-  result: z.string(),
-});
-
-const greeter = restate.service({
-  name: "Greeter",
-  handlers: {
-    greet: restate.handlers.handler(
-      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
-      async (ctx: restate.Context, { name }) => {
-        return { result: `You said hi to ${name}!` };
-      }
-    ),
-  },
-});
+```java {"CODE_LOAD::java/src/main/java/develop/SerializationExample.java#custom_jackson"} 
+class MyJacksonSerdeFactory extends JacksonSerdeFactory {
+  public MyJacksonSerdeFactory() {
+    super(new ObjectMapper().configure(SerializationFeature.INDENT_OUTPUT, true));
+  }
+}
 ```
 
-## Custom serialization
+And annotating your services with [`@CustomSerdeFactory`](https://docs.restate.dev/javadocs/dev/restate/sdk/annotation/CustomSerdeFactory):
 
-It is possible to implement customized serialization using the `Serde` interface.
-
-For example, to implement custom serializers for the handler input and output:
-
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#service_definition"} 
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.handler(
-      {
-        // Set the input serde here
-        input: restate.serde.binary,
-        // Set the output serde here
-        output: restate.serde.binary,
-      },
-      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-        // Process the request
-        return data;
-      }
-    ),
-  },
-});
+```java {"CODE_LOAD::java/src/main/java/develop/SerializationExample.java#custom_jackson_service"} 
+@CustomSerdeFactory(MyJacksonSerdeFactory.class)
+@Service
+class ServiceWithCustomJacksonObjectMapper {
+  @Handler
+  public String greet(Context context) {
+    return "Hello world";
+  }
+}
 ```
 
-When sending a request to a handler configured with custom serde(s) you always need to manually specify them, because the client does not automatically infer what serde(s) should be used.
-To customize the serde to use on requests:
+### Custom Kotlinx Serialization `Json`
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#client"} 
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
+You can customize the Kotlinx Serialization [`Json`](https://kotlinlang.org/api/kotlinx.serialization/kotlinx-serialization-json/kotlinx.serialization.json/-json/) by subclassing the [`KotlinSerializationSerdeFactory`](https://docs.restate.dev/ktdocs/sdk-api-kotlin/dev.restate.sdk.kotlin.serialization/-kotlin-serialization-serde-factory/) class:
+
+```kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/SerializationExample.kt#custom"} 
+class MyJsonSerdeFactory : KotlinSerializationSerdeFactory(json = Json { prettyPrint = true })
 ```
 
-To customize the serde for other actions on the context:
+And annotating your services with [`@CustomSerdeFactory`](https://docs.restate.dev/ktdocs/sdk-common/dev.restate.sdk.annotation/-custom-serde-factory/):
 
-```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#actions"} 
-ctx.get("my-binary-data", restate.serde.binary);
-ctx.set("my-binary-data", new Uint8Array(), restate.serde.binary);
-
-ctx.awakeable(restate.serde.binary);
-
-await ctx.run("my-side-effect", () => new Uint8Array(), {
-  serde: restate.serde.binary,
-});
+```kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/SerializationExample.kt#custom_service"} 
+@CustomSerdeFactory(MyJsonSerdeFactory::class)
+@Service
+class ServiceWithCustomSerdeFactory {
+  @Handler suspend fun greet(ctx: Context) = "Hello world!"
+}
 ```
+
+### Use custom serializer for a specific operation
+
+If you need for a specific operation (e.g. for `Context.run` or `Context.Awakeable`) a custom (de)serializer, you can implement one using the interface [`Serde`](https://docs.restate.dev/javadocs/dev/restate/serde/Serde):
+
+```java {"CODE_LOAD::java/src/main/java/develop/SerializationExample.java#customserdes"} 
+class MyPersonSerde implements Serde<Person> {
+  @Override
+  public Slice serialize(Person person) {
+    // convert value to a byte array, then wrap in a Slice
+    return Slice.wrap(person.toBytes());
+  }
+
+  @Override
+  public Person deserialize(Slice slice) {
+    // convert value to Person
+    return Person.fromBytes(slice.toByteArray());
+  }
+}
+```
+
+And then use it, for example, in combination with `ctx.run`:
+
+```java {"CODE_LOAD::java/src/main/java/develop/SerializationExample.java#use_person_serde"} 
+ctx.run(new MyPersonSerde(), () -> new Person());
+```
+
+### Use another serialization library
+
+If you want to use a different serialization library throughout your service, we suggest implementing [`SerdeFactory`](https://docs.restate.dev/javadocs/dev/restate/serde/SerdeFactory) and annotating the service class with [`@CustomSerdeFactory`](https://docs.restate.dev/javadocs/dev/restate/sdk/annotation/CustomSerdeFactory). Refer to the Javadocs for more details.

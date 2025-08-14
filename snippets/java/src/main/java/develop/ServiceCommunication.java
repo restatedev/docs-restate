@@ -10,32 +10,23 @@ public class ServiceCommunication {
 
   private void requestResponseService(Context ctx) {
     String request = "";
-
-    // <start_request_response_service>
-    String response = MyServiceClient.fromContext(ctx).myHandler(request).await();
-    // <end_request_response_service>
-  }
-
-  private void requestResponseVirtualObject(Context ctx) {
-    String objectKey = "";
-    String request = "";
-
-    // <start_request_response_virtual_object>
-    String response = MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
-    // <end_request_response_virtual_object>
-  }
-
-  private void requestResponseWorkflow(Context ctx) {
     String workflowId = "";
-    String request = "";
+    String objectKey = "";
 
-    // <start_request_response_workflow>
-    // Call the `run` handler of the workflow
-    String response = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await();
+    // <start_request_response>
+    // To call a Service:
+    String svcResponse = MyServiceClient.fromContext(ctx).myHandler(request).await();
 
-    // Calling some other `interactWithWorkflow` handler of the workflow
+    // To call a Virtual Object:
+    String objResponse =
+        MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
+
+    // To call a Workflow:
+    // `run` handler — can only be called once per workflow ID
+    String wfResponse = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await();
+    // Other handlers can be called anytime within workflow retention
     MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await();
-    // <end_request_response_workflow>
+    // <end_request_response>
   }
 
   private void genericCall(Context ctx) {
@@ -81,13 +72,10 @@ public class ServiceCommunication {
     String request = "";
 
     // <start_idempotency_key>
-    // For a regular call
-    MyServiceClient.fromContext(ctx)
-        .myHandler(request, req -> req.idempotencyKey("my-idempotency-key"));
-    // For a one way call
-    MyServiceClient.fromContext(ctx)
-        .send()
-        .myHandler(request, req -> req.idempotencyKey("my-idempotency-key"));
+    // For a request-response call
+    MyServiceClient.fromContext(ctx).myHandler(request, req -> req.idempotencyKey("abc123"));
+    // For a message
+    MyServiceClient.fromContext(ctx).send().myHandler(request, req -> req.idempotencyKey("abc123"));
     // <end_idempotency_key>
   }
 
@@ -98,10 +86,7 @@ public class ServiceCommunication {
     var handle =
         MyServiceClient.fromContext(ctx)
             .send()
-            .myHandler(
-                request,
-                // Optional: send attaching idempotency key
-                req -> req.idempotencyKey("my-idempotency-key"));
+            .myHandler(request, req -> req.idempotencyKey("abc123"));
     var response = handle.attach().await();
     // <end_attach>
   }

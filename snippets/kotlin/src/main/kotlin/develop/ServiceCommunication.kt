@@ -9,33 +9,23 @@ import kotlin.time.Duration.Companion.days
 class ServiceCommunication {
   suspend fun requestResponseService(ctx: Context) {
     val request = ""
-
-    // <start_request_response_service>
-    val response: String = MyServiceClient.fromContext(ctx).myHandler(request).await()
-    // <end_request_response_service>
-  }
-
-  suspend fun requestResponseVirtualObject(ctx: Context) {
     val objectKey = ""
-    val request = ""
-
-    // <start_request_response_virtual_object>
-    val response: String =
-        MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await()
-    // <end_request_response_virtual_object>
-  }
-
-  suspend fun requestResponseWorkflow(ctx: Context) {
     val workflowId = ""
-    val request = ""
 
-    // <start_request_response_workflow>
-    // Call the `run` handler of the workflow
-    val response: String = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await()
+    // <start_request_response>
+    // To call a Service:
+    val svcResponse: String = MyServiceClient.fromContext(ctx).myHandler(request).await()
 
-    // Call some other `interactWithWorkflow` handler of the workflow.
+    // To call a Virtual Object:
+    val objResponse: String =
+        MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await()
+
+    // To call a Workflow:
+    // `run` handler — can only be called once per workflow ID
+    val wfResponse: String = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await()
+    // Other handlers can be called anytime within workflow retention
     MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await()
-    // <end_request_response_workflow>
+    // <end_request_response>
   }
 
   suspend fun oneWay(ctx: Context) {
@@ -51,11 +41,9 @@ class ServiceCommunication {
 
     // <start_idempotency_key>
     // For a regular call
-    MyServiceClient.fromContext(ctx).myHandler(request) { idempotencyKey = "my-idempotency-key" }
+    MyServiceClient.fromContext(ctx).myHandler(request) { idempotencyKey = "abc123" }
     // For a one way call
-    MyServiceClient.fromContext(ctx).send().myHandler(request) {
-      idempotencyKey = "my-idempotency-key"
-    }
+    MyServiceClient.fromContext(ctx).send().myHandler(request) { idempotencyKey = "abc123" }
     // <end_idempotency_key>
   }
 
@@ -64,9 +52,7 @@ class ServiceCommunication {
 
     // <start_attach>
     val handle =
-        MyServiceClient.fromContext(ctx).send().myHandler(request) {
-          idempotencyKey = "my-idempotency-key"
-        }
+        MyServiceClient.fromContext(ctx).send().myHandler(request) { idempotencyKey = "abc123" }
     val response = handle.attach().await()
     // <end_attach>
   }

@@ -7,22 +7,20 @@ icon: "comment"
 
 Your Restate handler can call other handlers in three ways:
 
-- **[Request-response calls](/develop/ts/service-communication#request-response-calls)**: Call and wait for a response
-- **[One-way messages](/develop/ts/service-communication#sending-messages)**: Send a message and continue
-- **[Delayed messages](/develop/ts/service-communication#delayed-messages)**: Send a message after a delay
+- **[Request-response calls](#request-response-calls)**: Call and wait for a response
+- **[One-way messages](#sending-messages)**: Send a message and continue
+- **[Delayed messages](#delayed-messages)**: Send a message after a delay
 
 <Info>
     To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
 </Info>
 
-<Tip>[Why use Restate for service communication?](/basics/key-concepts#resilient-communication)</Tip>
+<Info>[Learn how Restate how it works](/basics/key-concepts#resilient-communication)</Info>
 
 
 ## Request-response calls
 
-Call a Restate handler and wait for its result.
-
-Use [`serviceClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#serviceclient), [`objectClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#objectclient), or [`workflowClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#workflowclient). Virtual Objects and Workflows need an ID.
+To call a Restate handler and wait for its result:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#request_response"} 
 // To call a Service:
@@ -44,7 +42,7 @@ const result = await ctx
   .interactWithWorkflow();
 ```
 
-Use [`ctx.genericCall`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#genericcall) when you don't have the service definition or need dynamic service names:
+Use generic calls when you don't have the service definition or need dynamic service names:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_call"} 
 const response = await ctx.genericCall({
@@ -62,21 +60,17 @@ After a workflow's run handler completes, other handlers can still be called for
 Update this via the [service configuration](/operate/configuration/services).
 </Accordion>
 
-<Note>
+<Info>
 Request-response calls between [exclusive handlers](/develop/ts/overview#exclusive-vs-shared-handlers) of Virtual Objects may lead to deadlocks:
 - Cross deadlock: A → B and B → A (same keys).
 - Cycle deadlock: A → B → C → A.
 
 Use the UI or CLI to [cancel](/operate/invocation#cancelling-invocations) and unblock deadlocked invocations.
-</Note>
+</Info>
 
 ## Sending messages
 
-Send a message to another Restate handler without waiting for a response.
-
-Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
-
-Use [`serviceSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#servicesendclient), [`objectSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#objectsendclient), or [`workflowSendClient`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#workflowsendclient). Virtual Objects and Workflows need an ID.
+To send a message to another Restate handler without waiting for a response:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#one_way"} 
 // To message a Service:
@@ -91,9 +85,10 @@ ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
 // Other handlers can be called anytime within workflow retention
 ctx.workflowSendClient(myWorkflow, "wf-id").interactWithWorkflow();
 ```
+Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
 
 
-Use [`ctx.genericSend`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#genericsend) when you don't have the service definition:
+Use generic send when you don't have the service definition:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_send"} 
 ctx.genericSend({
@@ -108,7 +103,7 @@ ctx.genericSend({
     Calls to a Virtual Object execute in order of arrival, serially.
     Example:
 
-    ```typescript {"CODE_LOAD::ts/src/develop/service_communication.ts#ordering"} 
+```typescript {"CODE_LOAD::ts/src/develop/service_communication.ts#ordering"} 
 ctx.objectSendClient(myObject, "Mary").myHandler("I'm call A");
 ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
 ```
@@ -118,10 +113,7 @@ ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
 
 ## Delayed messages
 
-Send a message after a delay.
-
-Use the same send methods with a delay option in [`sendOpts`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.ClientSendOptions).
-
+To send a message after a delay:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#delayed"} 
 // To message a Service with a delay:
@@ -140,7 +132,7 @@ ctx
   .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
 ```
 
-Use [`ctx.genericSend`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#genericsend) with a delay when you don't have the service definition:
+Use generic send with a delay when you don't have the service definition:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_delayed"} 
 ctx.genericSend({
@@ -158,9 +150,7 @@ ctx.genericSend({
 
 ## Using an idempotency key
 
-Prevent duplicate executions of the same call.
-
-Add an idempotency key via [`restate.rpc.opts`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.rpc.opts) or [`restate.rpc.sendOpts`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.rpc.sendOpts).
+To prevent duplicate executions of the same call, add an idempotency key:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#idempotency_key"} 
 // For request-response
@@ -179,14 +169,12 @@ ctx.serviceSendClient(myService).myHandler(
 );
 ```
 
-Note: Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
+Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
 However, if multiple handlers might call the same service independently, you can use an idempotency key to ensure deduplication across those calls.
 
 ## Attach to an invocation
 
-Wait for or get the result of a previously sent message.
-
-Use [`ctx.attach`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#attach) with the invocation ID.
+To wait for or get the result of a previously sent message:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#attach"} 
 const handle = ctx.serviceSendClient(myService).myHandler(
@@ -207,9 +195,7 @@ const response = ctx.attach(invocationId);
 
 ## Cancel an invocation
 
-Cancel a running handler.
-
-Use [`ctx.cancel`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#cancel) with the invocation ID:
+To cancel a running handler:
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#cancel"} 
 const handle = ctx.serviceSendClient(myService).myHandler("Hi");
