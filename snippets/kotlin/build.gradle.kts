@@ -12,11 +12,8 @@ dependencies {
   ksp(libs.restate.sdk.api.kotlin.gen)
 
   // Restate SDK
-  implementation(libs.restate.sdk.api.kotlin)
-  implementation(libs.restate.client.kotlin)
-  implementation(libs.restate.sdk.common)
-  implementation(libs.restate.sdk.http.vertx)
-  implementation(libs.restate.sdk.lambda)
+  implementation(libs.restate.sdk.http.kotlin)
+  implementation(libs.restate.sdk.lambda.kotlin)
   implementation(libs.restate.sdk.request.identity)
   implementation(libs.restate.sdk.testing)
 

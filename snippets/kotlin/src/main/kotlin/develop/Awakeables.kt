@@ -27,5 +27,7 @@ class Awakeables {
     // <end_reject>
   }
 
-  private fun requestHumanReview(awakeableId: String): String { return "hello" }
+  private fun requestHumanReview(awakeableId: String): String {
+    return "hello"
+  }
 }

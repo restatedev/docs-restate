@@ -69,7 +69,7 @@ val review: String = awakeable.await()
 </Accordion>
 
 <Info>
-    Note that if you wait for an awakeable in an [exclusive handler](/develop/ts/overview#exclusive-vs-shared-handlers) in a Virtual Object, all other calls to this object will be queued.
+    Note that if you wait for an awakeable in an [exclusive handler](/basics/functions#handler-behavior) in a Virtual Object, all other calls to this object will be queued.
 </Info>
 
 ### Resolving/rejecting Awakeables
@@ -145,10 +145,10 @@ Create a promise key:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#promise_key"} 
 private static final DurablePromiseKey<String> REVIEW_PROMISE =
-        DurablePromiseKey.of("review", String.class);
+    DurablePromiseKey.of("review", String.class);
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ReviewWorkflow.kt#promise_key"} 
-private val REVIEW_PROMISE = durablePromiseKey<String>("review")
+val REVIEW_PROMISE = durablePromiseKey<String>("review")
 ```
 </CodeGroup>
 
@@ -182,53 +182,54 @@ ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#here"} 
 @Workflow
 public class ReviewWorkflow {
-    private static final DurablePromiseKey<String> REVIEW_PROMISE =
-            DurablePromiseKey.of("review", String.class);
+  private static final DurablePromiseKey<String> REVIEW_PROMISE =
+      DurablePromiseKey.of("review", String.class);
 
-    @Workflow
-    public String run(WorkflowContext ctx, String documentId) {
-        // Send document for review
-        ctx.run(() -> askReview(documentId));
 
-        // Wait for external review submission
-        String review = ctx.promise(REVIEW_PROMISE).future().await();
+  @Workflow
+  public String run(WorkflowContext ctx, String documentId) {
+    // Send document for review
+    ctx.run(() -> askReview(documentId));
 
-        // Process the review result
-        return processReview(documentId, review);
-    }
+    // Wait for external review submission
+    String review = ctx.promise(REVIEW_PROMISE).future().await();
 
-    @Shared
-    public void submitReview(SharedWorkflowContext ctx, String review) {
-        // Signal the waiting run handler
-        ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
-    }
+    // Process the review result
+    return processReview(documentId, review);
+  }
+
+  @Shared
+  public void submitReview(SharedWorkflowContext ctx, String review) {
+    // Signal the waiting run handler
+    ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
+  }
 }
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ReviewWorkflow.kt#here"} 
 @Workflow
 class ReviewWorkflow {
 
-    companion object {
-        private val REVIEW_PROMISE = durablePromiseKey<String>("review")
-    }
+  companion object {
+    val REVIEW_PROMISE = durablePromiseKey<String>("review")
+  }
 
-    @Workflow
-    suspend fun run(ctx: WorkflowContext, documentId: String): String {
-        // Send document for review
-        ctx.runBlock { askReview(documentId) }
+  @Workflow
+  suspend fun run(ctx: WorkflowContext, documentId: String): String {
+    // Send document for review
+    ctx.runBlock { askReview(documentId) }
 
-        // Wait for external review submission
-        val review: String = ctx.promise(REVIEW_PROMISE).future().await()
+    // Wait for external review submission
+    val review: String = ctx.promise(REVIEW_PROMISE).future().await()
 
-        // Process the review result
-        return processReview(documentId, review)
-    }
+    // Process the review result
+    return processReview(documentId, review)
+  }
 
-    @Shared
-    suspend fun submitReview(ctx: SharedWorkflowContext, review: String) {
-        // Signal the waiting run handler
-        ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
-    }
+  @Shared
+  suspend fun submitReview(ctx: SharedWorkflowContext, review: String) {
+    // Signal the waiting run handler
+    ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
+  }
 }
 ```
 </CodeGroup>

@@ -9,12 +9,9 @@ plugins {
 dependencies {
     // Restate SDK
     annotationProcessor(libs.restate.sdk.api.gen)
-    implementation(libs.restate.sdk.api)
-    implementation(libs.restate.sdk.common)
-    implementation(libs.restate.sdk.http.vertx)
+    implementation(libs.restate.sdk.http)
     implementation(libs.restate.sdk.lambda)
     implementation(libs.restate.sdk.request.identity)
-    implementation(libs.restate.sdk.serde.jackson)
     implementation(libs.restate.sdk.testing)
 
     implementation(libs.jackson.parameter.names)

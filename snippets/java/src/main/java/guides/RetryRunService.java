@@ -44,9 +44,7 @@ public class RetryRunService {
 
   // <start_raw>
   @Handler
-  public void myHandler(
-      Context ctx,
-      @Accept("*/*") @Raw byte[] request) {
+  public void myHandler(Context ctx, @Accept("*/*") @Raw byte[] request) {
     try {
       var decodedRequest = decodeRequest(request);
 
@@ -65,9 +63,7 @@ public class RetryRunService {
     try {
       // If the timeout hits first, it throws a `TimeoutError`.
       // If you do not catch it, it will lead to a retry.
-      MyServiceClient.fromContext(ctx)
-          .myHandler("Hello")
-          .await(Duration.ofSeconds(5));
+      MyServiceClient.fromContext(ctx).myHandler("Hello").await(Duration.ofSeconds(5));
 
       var awakeable = ctx.awakeable(Boolean.class);
       // ...Do something that will trigger the awakeable

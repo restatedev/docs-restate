@@ -51,10 +51,7 @@ class RetryRunService {
 
   // <start_raw>
   @Handler
-  suspend fun myHandler(
-      ctx: Context,
-      @Accept("*/*") @Raw request: ByteArray
-  ) {
+  suspend fun myHandler(ctx: Context, @Accept("*/*") @Raw request: ByteArray) {
     try {
       val decodedRequest = decodeRequest(request)
 
@@ -71,9 +68,7 @@ class RetryRunService {
   suspend fun myTimeoutHandler(ctx: Context) {
     // <start_timeout>
     try {
-      ctx.awakeable<String>()
-          .withTimeout(5.seconds)
-          .await()
+      ctx.awakeable<String>().withTimeout(5.seconds).await()
     } catch (e: TimeoutException) {
       // Handle the timeout
     }
