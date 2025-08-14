@@ -15,7 +15,6 @@ public class RetryRunService {
 
     // <start_here>
     try {
-      // <mark_1>
       RetryPolicy myRunRetryPolicy =
           RetryPolicy.defaultPolicy()
               .setInitialDelay(Duration.ofMillis(500))
@@ -23,7 +22,6 @@ public class RetryRunService {
               .setMaxDelay(Duration.ofSeconds(10))
               .setMaxAttempts(10)
               .setMaxDuration(Duration.ofMinutes(5));
-      // </mark_1>
       ctx.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
     } catch (TerminalException e) {
       // Handle the terminal error after retries exhausted

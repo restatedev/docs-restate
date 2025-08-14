@@ -17,7 +17,6 @@ class RetryRunService {
 
     // <start_here>
     try {
-      // <mark_1>
       val myRunRetryPolicy =
           RetryPolicy(
               initialDelay = 5.seconds,
@@ -25,7 +24,6 @@ class RetryRunService {
               maxDelay = 60.seconds,
               maxAttempts = 10,
               maxDuration = 5.minutes)
-      // </mark_1>
       ctx.runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
     } catch (e: TerminalException) {
       // Handle the terminal error after retries exhausted

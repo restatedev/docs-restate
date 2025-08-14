@@ -8,13 +8,13 @@ Restate uses an execution log to replay operations after failures and suspension
 
 ## Run 
 
-Use [`ctx.run`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context#run) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
+Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
 ```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect"} 
 const result = await ctx.run<string>(async () => doDbRequest());
 ```
 
-Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.call`, or nested `ctx.run`).
+Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run`).
 
 <AccordionGroup>
 
@@ -27,48 +27,29 @@ Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`,
   Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
 
 
-  You can customize how `ctx.run` retries via the [`RunOptions`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RunOptions):
+  You can customize how `ctx.run` retries via:
 
-  ```typescript {"CODE_LOAD::ts/src/develop/retries.ts?1"} 
-import * as restate from "@restatedev/restate-sdk";
-
-function writeToOtherSystem() {
-  return undefined;
+```typescript {"CODE_LOAD::ts/src/develop/retries.ts#here"} 
+try {
+  const myRunRetryPolicy = {
+    initialRetryInterval: { milliseconds: 500 },
+    retryIntervalFactor: 2,
+    maxRetryInterval: { seconds: 1 },
+    maxRetryAttempts: 5,
+    maxRetryDuration: { seconds: 1 },
+  };
+  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
+} catch (e) {
+  if (e instanceof restate.TerminalError) {
+    // Undo or compensate here (see Sagas guide)
+  }
+  throw e;
 }
-
-const service = restate.service({
-  name: "MyService",
-  handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      try {
-        const myRunRetryPolicy = {
-          initialRetryInterval: { milliseconds: 500 },
-          retryIntervalFactor: 2,
-          maxRetryInterval: { seconds: 1 },
-          maxRetryAttempts: 5,
-          maxRetryDuration: { seconds: 1 },
-        };
-        await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
-      } catch (e) {
-        if (e instanceof restate.TerminalError) {
-          // Undo or compensate here (see Sagas guide)
-        }
-        throw e;
-      }
-    },
-  },
-});
-
-const paymentClient = {
-  call: (txId: string, amt: number) => {
-    return { error: "", isSuccess: false };
-  },
-};
 ```
 
   * You can limit retries by time or count
   * When the policy is exhausted, a `TerminalError` is thrown
-  * See [Error Handling](/develop/ts/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
+  * See the [Error Handling Guide](/guides/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation
 
   </Accordion>
   <Accordion title="Increasing timeouts">
@@ -89,15 +70,17 @@ The SDK provides deterministic helpers for random values — seeded by the invoc
 
 ### UUIDs
 
-Use `ctx.rand.uuidv4()` to generate stable UUIDs for things like idempotency keys:
+To generate stable UUIDs for things like idempotency keys:
 
 ```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#uuid"} 
 const uuid = ctx.rand.uuidv4();
 ```
 
+Do not use this in cryptographic contexts.
+
 ### Random numbers
 
-Use `ctx.rand.random()` to generate a deterministic float between `0` and `1`:
+To generate a deterministic float between `0` and `1`:
 
 
 ```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb"} 
