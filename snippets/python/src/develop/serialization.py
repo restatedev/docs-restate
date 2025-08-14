@@ -47,9 +47,6 @@ async def my_handler(ctx: ObjectContext, greeting: str) -> str:
     # To serialize awakeable payloads
     ctx.awakeable(serde=MySerde())
 
-    # To serialize the results of actions
-    await ctx.run("some-task", some_task, serde=MySerde())
-
     # etc.
 
     return "some-output"
