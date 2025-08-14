@@ -1,5 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { WorkflowContext } from "@restatedev/restate-sdk";
+import {as} from "vitest/dist/chunks/reporters.nr4dxCkA";
 
 const service = restate.service({
   name: "Awakeable",
@@ -14,9 +15,6 @@ const service = restate.service({
 
       // Handler suspends here until external completion
       const review = await promise;
-
-      // Continue processing with the result
-      console.log("Review received:", review);
       // <end_here>
 
       // <start_resolve>
@@ -26,7 +24,7 @@ const service = restate.service({
 
       // <start_reject>
       // Complete with error
-      ctx.rejectAwakeable(id, "Review timeout exceeded");
+      ctx.rejectAwakeable(id, "This cannot be reviewed.");
       // <end_reject>
     },
   },
@@ -35,27 +33,6 @@ const service = restate.service({
 function requestHumanReview(name: string, awakeableId: string) {
   return "123";
 }
-
-restate.workflow({
-  name: "reviewWorkflow",
-  handlers: {
-    run: async (ctx: WorkflowContext, name: string) => {
-      await ctx.run(() => askReview(name));
-      // <start_promise>
-      // Wait for a promise by name - suspends until resolved
-      const review = await ctx.promise<string>("review");
-      // <end_promise>
-      // ... do something with review
-    },
-
-    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
-      // <start_resolve_promise>
-      // Resolve from any workflow handler
-      ctx.promise<string>("review").resolve(review);
-      // <end_resolve_promise>
-    },
-  },
-});
 
 // <start_review>
 restate.workflow({
@@ -67,16 +44,20 @@ restate.workflow({
       await ctx.run(() => askReview(documentId));
 
       // Wait for external review submission
+      // <start_promise>
       const review = await ctx.promise<string>("review");
+      // <end_promise>
 
       // Process the review result
       return processReview(documentId, review);
     },
 
     // External endpoint to submit reviews
-    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
       // Signal the waiting run handler
+      // <start_resolve_promise>
       ctx.promise<string>("review").resolve(review);
+      // <end_resolve_promise>
     },
   },
 });
@@ -85,3 +66,5 @@ restate.workflow({
 function askReview(email: string) {
   return "123";
 }
+
+function processReview(documentId: string, review: string) {}

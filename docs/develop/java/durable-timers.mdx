@@ -1,0 +1,90 @@
+---
+title: "Scheduling & Timers"
+description: "Durable timers, scheduled actions, and sleep, backed by Restate."
+icon: "timer"
+---
+
+Restate provides durable, fault-tolerant timers that allow you to:
+- [Sleep](/develop/ts/durable-timers#durable-sleep): Pause a handler for a given duration 
+- [Send delayed messages](/develop/ts/service-communication#delayed-messages): Schedule handler invocations in the future
+- [Set timeouts](/develop/ts/durable-timers#timers-and-timeouts) for async operations
+- Implement patterns like [cron jobs](/develop/ts/durable-timers#cron-jobs)
+
+## How it works
+
+Restate tracks and manages timers, ensuring they survive failures and restarts.
+For example, if a service is sleeping for 12 hours and fails after 8 hours, then Restate will make sure it only sleeps 4 hours more.  
+
+If your handler runs on function-as-a-service platforms like AWS Lambda, Restate suspends the handler while it is sleeping, to free up resources.
+Since these platforms charge on execution time, this saves costs.
+
+## Durable sleep
+To pause a handler for a set duration:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#sleep"} 
+await ctx.sleep({ seconds: 10 });
+```
+
+<Info>
+    Note that if you sleep in an [exclusive handler](/develop/ts/overview#exclusive-vs-shared-handlers) in a Virtual Object, all other calls to this object will be queued.
+</Info>
+
+<Accordion title="Clock synchronization Restate Server vs. SDK">
+    The Restate SDK calculates the wake-up time based on the delay you specify.
+    The Restate Server then uses this calculated time to wake up the handler.
+    If the Restate Server and the SDK have different system clocks, the sleep duration might not be accurate.
+    So make sure that the system clock of the Restate Server and the SDK have the same timezone and are synchronized.
+    A mismatch can cause timers to fire earlier or later than expected.
+</Accordion>
+
+## Scheduling async tasks
+
+To invoke a handler at a later time, use [delayed messages](/develop/ts/service-communication#delayed-messages).
+
+<Accordion title={"Delayed messages vs. sleep and send"}>
+
+In theory, you can schedule future work in Restate in two ways:
+1. **Delayed messages** (recommended)
+2. **Sleep + send** - sleeping in the current handler, then sending a message
+
+At first sight, both approaches might seem to achieve similar results.
+However, we recommend to use delayed messages for the following reasons:
+
+- **Handler completes immediately**: The calling handler can finish execution and complete the invocation without waiting for the delay to finish
+- **No Virtual Object blocking**: Other requests to the same Virtual Object can be processed during the delay period
+- **Better for service versioning**: No long-running invocations that require keeping old service deployments around for a long time (see [service versioning](/operate/registration))
+</Accordion>
+
+## Timers and timeouts
+
+Most context actions are async actions that return a [`RestatePromise`](https://docs.restate.dev/tsdocs/types/_restatedev_restate-sdk.RestatePromise).
+
+`RestatePromise` supports setting timeouts, allowing you to bound how long your code waits for an operation.
+
+When an operation times out, it throws a [`TimeoutError`](https://docs.restate.dev/tsdocs/classes/_restatedev_restate-sdk.TimeoutError).
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#timer"} 
+try {
+  await ctx
+    .serviceClient(MyService)
+    .myHandler("Hi")
+    .orTimeout({ seconds: 5 });
+} catch (error) {
+  if (error instanceof restate.TimeoutError) {
+    console.error("Operation timed out:", error);
+  } else {
+    throw error; // Re-throw other errors
+  }
+}
+```
+
+For alternative ways of racing async operations, have a look at the [`RestatePromise` Combinator docs](/develop/ts/journaling-results#restatepromise-combinators).
+
+## Cron jobs
+
+Restate does not yet include native cron support, but you can implement your own cron scheduler using:
+- Durable timers
+- Virtual Objects
+- A repeat loop or sleep-schedule pattern
+
+Check out the guide on [implementing cron jobs](/guides/cron-jobs).

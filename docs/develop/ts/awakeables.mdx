@@ -27,18 +27,18 @@ Implementing this pattern in a distributed system is tricky, since you need to e
 
 Restate makes promises are durable and distributed. They survive crashes and can be resolved or rejected by any handler in the workflow.
 
-To save costs on FaaS deployments, Restate lets the handler suspend while awaiting the promise, and invokes it again when the result is available.
+To save costs on FaaS deployments, Restate lets the handler [suspend](/basics/key-concepts#suspensions-on-faas) while awaiting the promise, and invokes it again when the result is available.
 
 ## Awakeables
 
 **Best for:** Services and Virtual Objects where you need to coordinate with external systems.
 
+### Creating and waiting for awakeables
 1. **Create an awakeable** - Get a unique ID and promise
 2. **Send the ID externally** - Pass the awakeable ID to your external system
-3. **Wait for completion** - Your handler suspends until the external system responds
-4. **Resume with result** - Handler continues with the returned data
+3. **Wait for result** - Your handler [suspends](/basics/key-concepts#suspensions-on-faas) until the external system responds
 
-```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"}
+```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"} 
 // Create awakeable and get unique ID
 const { id, promise } = ctx.awakeable<string>();
 
@@ -47,21 +47,17 @@ await ctx.run(() => requestHumanReview(name, id));
 
 // Handler suspends here until external completion
 const review = await promise;
-
-// Continue processing with the result
-console.log("Review received:", review);
 ```
 
 <Accordion title="Serialization">
   Both awakeables and durable promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization. Complex objects are automatically serialized/deserialized. See the [serialization docs](/develop/ts/serialization) for customization options.
 </Accordion>
 
-
 <Info>
     Note that if you wait for an awakeable in an [exclusive handler](/develop/ts/overview#exclusive-vs-shared-handlers) in a Virtual Object, all other calls to this object will be queued.
 </Info>
 
-### Completing Awakeables
+### Resolving/rejecting Awakeables
 
 External processes complete awakeables in two ways:
 
@@ -96,7 +92,7 @@ ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
 **Reject:**
 ```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject"} 
 // Complete with error
-ctx.rejectAwakeable(id, "Review timeout exceeded");
+ctx.rejectAwakeable(id, "This cannot be reviewed.");
 ```
 
 ## Durable Promises
@@ -119,18 +115,18 @@ Update the retention time via the [service configuration](/operate/configuration
 
 ### Creating and waiting for promises
 
+Wait for a promise by name:
+
 ```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"} 
-// Wait for a promise by name - suspends until resolved
 const review = await ctx.promise<string>("review");
 ```
 
 ### Resolving/rejecting promises
 
+Resolve/reject from any workflow handler:
 ```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"} 
-// Resolve from any workflow handler
 ctx.promise<string>("review").resolve(review);
 ```
-
 
 ### Complete workflow example
 
@@ -151,7 +147,7 @@ restate.workflow({
     },
 
     // External endpoint to submit reviews
-    submitReview: (ctx: restate.WorkflowSharedContext, review: string) => {
+    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
       // Signal the waiting run handler
       ctx.promise<string>("review").resolve(review);
     },
@@ -163,7 +159,7 @@ restate.workflow({
 
 **External → Workflow** (shown above): External handlers signal the run handler
 - Use for human approvals, external API responses, manual interventions
-- External handlers call `ctx.promise("name").resolve(data)`
+- External handlers call the handler which resolves the promise
 
 **Workflow → External**: Run handler signals other handlers waiting for workflow events  
 - Use for step completion notifications, status updates, result broadcasting

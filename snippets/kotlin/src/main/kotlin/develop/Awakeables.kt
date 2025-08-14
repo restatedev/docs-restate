@@ -5,28 +5,27 @@ import dev.restate.sdk.kotlin.*
 class Awakeables {
   suspend fun awakeables(ctx: ObjectContext) {
     // <start_here>
-    // <mark_1>
+    // Create awakeable and get unique ID
     val awakeable = ctx.awakeable<String>()
     val awakeableId: String = awakeable.id
-    // </mark_1>
 
-    // <mark_2>
-    ctx.runBlock { triggerTaskAndDeliverId(awakeableId) }
-    // </mark_2>
+    // Send ID to external system (email, queue, webhook, etc.)
+    ctx.runBlock { requestHumanReview(awakeableId) }
 
-    // <mark_3>
-    val payload: String = awakeable.await()
-    // </mark_3>
+    // Handler suspends here until external completion
+    val review: String = awakeable.await()
     // <end_here>
 
     // <start_resolve>
-    ctx.awakeableHandle(awakeableId).resolve("hello")
+    // Complete with success data
+    ctx.awakeableHandle(awakeableId).resolve("Looks good!")
     // <end_resolve>
 
     // <start_reject>
-    ctx.awakeableHandle(awakeableId).reject("my error reason")
+    // Complete with error
+    ctx.awakeableHandle(awakeableId).reject("This cannot be reviewed.")
     // <end_reject>
   }
 
-  private fun triggerTaskAndDeliverId(awakeableId: String) {}
+  private fun requestHumanReview(awakeableId: String): String { return "hello" }
 }

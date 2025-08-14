@@ -6,29 +6,29 @@ import dev.restate.sdk.ObjectContext;
 public class Awakeables {
 
   public void awakeables(ObjectContext ctx) {
+    String name = "hello";
     // <start_here>
-    // <mark_1>
+    // Create awakeable and get unique ID
     Awakeable<String> awakeable = ctx.awakeable(String.class);
     String awakeableId = awakeable.id();
-    // </mark_1>
 
-    // <mark_2>
-    ctx.run(() -> triggerTaskAndDeliverId(awakeableId));
-    // </mark_2>
+    // Send ID to external system (email, queue, webhook, etc.)
+    ctx.run(() -> requestHumanReview(name, awakeableId));
 
-    // <mark_3>
-    String payload = awakeable.await();
-    // </mark_3>
+    // Handler suspends here until external completion
+    String review = awakeable.await();
     // <end_here>
 
     // <start_resolve>
-    ctx.awakeableHandle(awakeableId).resolve(String.class, "hello");
+    // Complete with success data
+    ctx.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
     // <end_resolve>
 
     // <start_reject>
-    ctx.awakeableHandle(awakeableId).reject("my error reason");
+    // Complete with error
+    ctx.awakeableHandle(awakeableId).reject("This cannot be reviewed.");
     // <end_reject>
   }
 
-  public void triggerTaskAndDeliverId(String awakeableId) {}
+  public void requestHumanReview(String name, String awakeableId) {}
 }
