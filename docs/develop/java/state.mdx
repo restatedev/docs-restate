@@ -4,65 +4,86 @@ description: "Store key-value state in Restate."
 icon: "database"
 ---
 
-Restate lets you persist key-value (K/V) state using its embedded K/V store.
-
-## Key characteristics
-
-<Info>
-    [Learn about Restate's embedded K/V store](/basics/key-concepts#consistent-state).
-</Info>
-
-**State is only available for Virtual Objects and Workflows.**
-
-Scope & retention: 
-- For Virtual Objects: State is scoped per object key and retained indefinitely. It is persisted and shared across all invocations for that object until explicitly cleared.
-- For Workflows: State is scoped per workflow execution (workflow ID) and retained only for the duration of the workflow’s configured retention time.
-
-Access Rules:
-- [Exclusive handlers](/develop/ts/overview#exclusive-vs-shared-handlers) (e.g., `run()` in workflows) can read and write state.
-- [Shared handlers](/develop/ts/overview#exclusive-vs-shared-handlers) can only read state and cannot mutate it.
-
-You can inspect and edit the K/V state via the UI and the [CLI](/operate/introspection#inspecting-application-state).
-
+<StateIntro/>
 
 ## List all state keys
-Use [`ctx.stateKeys()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#statekeys) to retrieve all keys for which the current Virtual Object has stored state:
+To retrieve all keys for which the current Virtual Object has stored state:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#statekeys"} 
-const stateKeys = ctx.stateKeys();
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/State.java#statekeys"} 
+Collection<String> keys = ctx.stateKeys();
 ```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/State.kt#statekeys"} 
+val keys = ctx.stateKeys()
+```
+</CodeGroup>
 
 ## Get state value
-Use [`ctx.get<T>()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#get-1) to read a value by key. Returns null if the key doesn't exist.
+To read a value by key.
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#get"} 
-const myString = (await ctx.get<string>("my-string-key")) ?? "my-default";
-const myNumber = (await ctx.get<number>("my-number-key")) ?? 0;
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/State.java#get"} 
+// Getting String value
+StateKey<String> STRING_STATE_KEY = StateKey.of("my-key", String.class);
+String stringState = ctx.get(STRING_STATE_KEY).orElse("my-default");
+
+// Getting integer value
+StateKey<Integer> INT_STATE_KEY = StateKey.of("my-key", Integer.class);
+int intState = ctx.get(INT_STATE_KEY).orElse(0);
 ```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/State.kt#get"} 
+// Getting String value
+val STRING_STATE_KEY = stateKey<String>("my-key")
+val stringState: String? = ctx.get(STRING_STATE_KEY)
 
+// Getting integer value
+val INT_STATE_KEY = stateKey<Int>("my-key")
+val intState: Int? = ctx.get(INT_STATE_KEY)
+```
+</CodeGroup>
+Returns null if the key doesn't exist.
 By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
 
 ## Set state value
-Use [`ctx.set()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#set-1) to write or update a value:
+To write or update a value:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#set"} 
-ctx.set("my-key", "my-new-value");
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/State.java#set"} 
+StateKey<String> STRING_STATE_KEY = StateKey.of("my-key", String.class);
+ctx.set(STRING_STATE_KEY, "my-new-value");
 ```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/State.kt#set"} 
+val STRING_STATE_KEY = stateKey<String>("my-key")
+ctx.set(STRING_STATE_KEY, "my-new-value")
+```
+</CodeGroup>
 
 ## Clear state key
-Use [`ctx.clear()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#clear) to delete a specific key:
+To delete a specific key:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#clear"} 
-ctx.clear("my-key");
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/State.java#clear"} 
+StateKey<String> STRING_STATE_KEY = StateKey.of("my-key", String.class);
+ctx.clear(STRING_STATE_KEY);
 ```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/State.kt#clear"} 
+val STRING_STATE_KEY = stateKey<String>("my-key")
+ctx.clear(STRING_STATE_KEY)
+```
+</CodeGroup>
 
 ## Clear all state keys
 
-Use [`ctx.clearAll()`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext#clearall) to remove all stored state for the current Virtual Object:
+To remove all stored state for the current Virtual Object:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#clear_all"} 
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/State.java#clear_all"} 
 ctx.clearAll();
 ```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/State.kt#clear_all"} 
+ctx.clearAll()
+```
+</CodeGroup>
 
 ## Advanced: Eager vs. lazy state loading
 
@@ -77,5 +98,5 @@ Restate supports two modes for loading state in handlers:
 ### Lazy state
 - **How it works**: State is fetched on-demand via `ctx.get()` calls from the Restate Server
 - **Benefits**: Reduces initial request size and memory usage
-- **Setup**: Set `enableLazyState` to `true` in the [service or handler configuration](/operate/configuration/services)
+- **Setup**: Enable lazy state in the [service or handler configuration](/operate/configuration/services)
 - **Best for**: Large state objects that aren't needed in every handler execution
