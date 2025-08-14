@@ -1,0 +1,118 @@
+---
+title: "Services"
+description: "Implementing Restate services with the TypeScript SDK."
+icon: "brackets-curly"
+---
+
+
+The Restate TypeScript SDK is open source and available on [GitHub](https://github.com/restatedev/sdk-typescript).
+
+The Restate SDK lets you implement **handlers**. Handlers can be part of a **[Basic Service](/basics/services#basic-service)**, a **[Virtual Object](/basics/services#virtual-object)**, or a **[Workflow](/basics/services#workflow)**. This page shows how to define them with the TypeScript SDK.
+
+## Prerequisites
+- [NodeJS](https://nodejs.org/en/) >= v18.17.1 or [Bun](https://bun.sh/docs/installation) or [Deno](https://deno.land/#installation)
+- [npm CLI](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) >= 9.6.7
+
+## Getting started
+<Tip>
+    Get started quickly with the [TypeScript Quickstart](/get_started/quickstart?sdk=ts).
+</Tip>
+
+Add the [`@restatedev/restate-sdk`](https://www.npmjs.com/package/@restatedev/restate-sdk) dependency to your project to start developing Restate services.
+
+
+## Basic Services
+
+[Basic Services](/basics/services) group related **handlers** and expose them as callable endpoints:
+
+```ts {"CODE_LOAD::ts/src/develop/service.ts"}
+import * as restate from "@restatedev/restate-sdk";
+
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, greeting: string) => {
+      return `${greeting}!`;
+    },
+  },
+});
+
+restate.endpoint().bind(myService).listen();
+```
+
+
+* Define a service using [`restate.service`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.service).
+* The service has a name and a list of handlers.
+* Each handler has a name and can be called at `<RESTATE_INGRESS>/myService/myHandler`
+* Handlers take the [`Context`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context) as the first argument.
+* Handlers can take one optional JSON-serializable input and must return a JSON-serializable output (see [custom serialization](/develop/ts/serialization) for advanced types).
+* Create an endpoint to expose the service over HTTP (port `9080` by default).
+
+## Virtual Objects
+
+[Virtual Objects](/basics/services) are services that are stateful and key-addressable — each object instance has a unique ID and persistent state.
+
+```ts {"CODE_LOAD::ts/src/develop/virtual_object.ts"}
+import * as restate from "@restatedev/restate-sdk";
+
+const myObject = restate.object({
+  name: "MyObject",
+  handlers: {
+    myHandler: async (ctx: restate.ObjectContext, greeting: string) => {
+      return `${greeting} ${ctx.key}!`;
+    },
+    myConcurrentHandler: restate.handlers.object.shared(
+      async (ctx: restate.ObjectSharedContext, greeting: string) => {
+        return `${greeting} ${ctx.key}!`;
+      }
+    ),
+  },
+});
+
+restate.endpoint().bind(myObject).listen();
+```
+
+* Define a Virtual Object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
+* Each instance is identified by a key (accessible via `ctx.key`).
+* Virtual Objects can have [exclusive and shared handlers](/basics/functions#handler-behavior).
+* Exclusive handlers receive an [`ObjectContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext), allowing read/write access to object state.
+* Shared handlers are wrapped in `handlers.object.shared(...)` and use the [`ObjectSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectSharedContext)
+
+
+## Workflows
+
+[Workflows](/basics/services) are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations, which require external interaction via signals and queries.
+
+```ts {"CODE_LOAD::ts/src/develop/workflow.ts"} 
+import * as restate from "@restatedev/restate-sdk";
+
+const myWorkflow = restate.workflow({
+  name: "MyWorkflow",
+  handlers: {
+    run: async (ctx: restate.WorkflowContext, req: string) => {
+      // implement workflow logic here
+
+      return "success";
+    },
+
+    interactWithWorkflow: async (ctx: restate.WorkflowSharedContext) => {
+      // implement interaction logic here
+      // e.g. resolve a promise that the workflow is waiting on
+    },
+  },
+});
+
+export const MyWorkflow: typeof myWorkflow = { name: "MyWorkflow" };
+
+restate.endpoint().bind(myWorkflow).listen();
+```
+
+* Define a workflow with [`restate.workflow(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.workflow)
+* Every workflow **must** include a `run` handler:
+  * This is the main orchestration entry point
+  * It runs exactly once per workflow execution and uses the [`WorkflowContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowContext)
+  * Use `ctx.key` to access the workflow's unique ID
+* Additional handlers must use the [`WorkflowSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowSharedContext) and can signal or query the workflow. They can run concurrently with the `run` handler and until the retention time expires.
+
+## Configuring services
+Check out the [service configuration docs](/operate/configuration/services) to learn how to configure service behavior, including timeouts and retention policies.
