@@ -9,6 +9,10 @@ internal class SideEffects {
     val output: String = ctx.runBlock { doDbRequest() }
     // <end_side_effect>
 
+    // <start_async_side_effect>
+    val myRunFuture: DurableFuture<String> = ctx.runAsync { doSomethingSlow() }
+    // <end_async_side_effect>
+
     val paymentClient = PaymentClient()
     val txId = ""
     val amount = 1
@@ -41,6 +45,10 @@ internal class SideEffects {
   }
 
   private fun doDbRequest(): String {
+    return ""
+  }
+
+  private fun doSomethingSlow(): String {
     return ""
   }
 }

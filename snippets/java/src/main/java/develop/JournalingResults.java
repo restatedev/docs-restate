@@ -14,6 +14,10 @@ class JournalingResults {
     String output = ctx.run(String.class, () -> doDbRequest());
     // <end_side_effect>
 
+    // <start_async_side_effect>
+    DurableFuture<String> myRunFuture = ctx.runAsync(String.class, () -> doSomethingSlow());
+    // <end_async_side_effect>
+
     Awakeable<Boolean> a1 = ctx.awakeable(Boolean.class);
     Awakeable<Boolean> a2 = ctx.awakeable(Boolean.class);
     Awakeable<Boolean> a3 = ctx.awakeable(Boolean.class);
@@ -36,6 +40,10 @@ class JournalingResults {
   }
 
   private String doDbRequest() {
+    return "";
+  }
+
+  private String doSomethingSlow() {
     return "";
   }
 }

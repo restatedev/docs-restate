@@ -1,0 +1,66 @@
+---
+title: "Error Handling"
+description: "Stop infinite retries with Terminal Errors."
+icon: "triangle-exclamation"
+---
+
+Restate handles retries for failed invocations.
+
+<Info>
+    Check out the [Error Handling guide](/guides/error-handling) to learn more about how Restate handles transient errors, terminal errors, retries, and timeouts.
+</Info>
+
+## Retry strategies
+By default, Restate does infinite retries with an exponential backoff strategy.
+
+Check out the [error handling guide](/guides/error-handling) to learn how to customize this.
+
+## Terminal Errors
+
+For failures for which you do not want retries, but instead want the invocation to end and the error message
+to be propagated back to the caller, you can throw a **terminal error**.
+
+You can throw a `TerminalError` with an optional HTTP status code and a message anywhere in your handler, as follows:
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#terminal"} 
+throw new TerminalError("Something went wrong.", { errorCode: 500 });
+```
+
+You can catch terminal errors, and build your control flow around it.
+
+<Info>
+    When you throw a terminal error, you might need to undo the actions you did earlier in your handler to make sure that your system remains in a consistent state.
+    Have a look at our [sagas guide](/guides/sagas) to learn more.
+</Info>
+
+## Mapping errors to `TerminalError`
+
+If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.
+
+You can do this using the `asTerminalError` option in your [service configuration](/operate/configuration/services).
+
+For example, to fail with `TerminalError` for each `MyValidationError`, do the following:
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#as_terminal"} 
+class MyValidationError extends Error {}
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      if (name.length === 0) {
+        throw new MyValidationError("Length too short");
+      }
+      return `Hello ${name}`;
+    },
+  },
+  options: {
+    asTerminalError: (err) => {
+      if (err instanceof MyValidationError) {
+        // My validation error is terminal
+        return new restate.TerminalError(err.message, { errorCode: 400 });
+      }
+    },
+  },
+});
+```
