@@ -12,15 +12,22 @@ my_service = Service("MyService")
 def send_verification():
     pass
 
+
 def fetch_user_data(user_id: int) -> dict:
     # Simulate fetching user data
     return {"user_id": user_id, "name": "John Doe"}
 
+
 def fetch_order_history(user_id: int) -> list:
     # Simulate fetching order history
-    return [{"order_id": 1, "user_id": user_id, "item": "Book"}, {"order_id": 2, "user_id": user_id, "item": "Pen"}]
+    return [
+        {"order_id": 1, "user_id": user_id, "item": "Book"},
+        {"order_id": 2, "user_id": user_id, "item": "Pen"},
+    ]
+
 
 analytics_service = Service("AnalyticsService")
+
 
 @analytics_service.handler()
 async def calculate_metrics(ctx: Context, user_id: int) -> dict:
@@ -86,14 +93,18 @@ async def my_other_handler(ctx: Context, arg):
     async def call_llm(prompt: str, model: str) -> str:
         # ... implement ...
         return "llm response"
+
     # <start_as_completed>
-    call1 = ctx.run_typed("LLM call", call_llm, prompt="What is the weather?", model="gpt-4")
-    call2 = ctx.run_typed("LLM call", call_llm, prompt="What is the weather?", model="gpt-3.5-turbo")
+    call1 = ctx.run_typed(
+        "LLM call", call_llm, prompt="What is the weather?", model="gpt-4"
+    )
+    call2 = ctx.run_typed(
+        "LLM call", call_llm, prompt="What is the weather?", model="gpt-3.5-turbo"
+    )
     async for future in restate.as_completed(call1, call2):
         # do something with the completed future
         print(await future)
     # <end_as_completed>
-
 
     # <start_wait_completed>
     claude = ctx.service_call(claude_sonnet, arg=f"What is the weather?")
@@ -109,9 +120,11 @@ async def my_other_handler(ctx: Context, arg):
         await f.cancel_invocation()
     # <end_wait_completed>
 
+
 @my_service.handler()
 async def claude_sonnet(ctx: Context, req: str) -> str:
     return f"Bonjour {req.content[13:]}!"
+
 
 @my_service.handler()
 async def open_ai(ctx: Context, req: str) -> str:

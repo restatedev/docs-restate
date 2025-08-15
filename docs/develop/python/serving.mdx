@@ -4,113 +4,116 @@ description: "Create an endpoint to serve your services."
 icon: "globe"
 ---
 
-Restate services can run in a few ways: as a Node.js HTTP handler, as an AWS
-Lambda handler, or on other Javascript runtimes like Bun, Deno and Cloudflare
-Workers.
 
-## Creating a Node.js HTTP handler
-1. Create the endpoint
-2. Bind one or multiple services to it.
-3. Listen on the specified port (default `9080`) for connections and requests.
+Restate services can run in a few ways: as an HTTP handler, or as an AWS Lambda handler.
 
-```typescript {"CODE_LOAD::ts/src/develop/serving.ts#endpoint"} 
-import * as restate from "@restatedev/restate-sdk";
-restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .listen();
+## Creating the app
+Create the app and bind one or multiple services to it:
+
+```python {"CODE_LOAD::python/src/develop/serving.py#endpoint"} 
+import restate
+
+app = restate.app(services=[my_service, my_object])
 ```
 
-<Accordion title="Customizing the HTTP2 server">
+<Accordion title={"Mounting Restate app on a FastAPI app"}>
+If you are using [FastAPI](https://fastapi.tiangolo.com/), you can mount the Restate app on a route as follows:
 
-If you need to manually control or customize the HTTP2 server, you can call `http2Handler()` instead of `listen()`, and then use it to manually instantiate the HTTP server:
+```python {"CODE_LOAD::python/src/develop/serving.py#fastapi"} 
+from fastapi import FastAPI
+app = FastAPI()
 
-```ts {"CODE_LOAD::ts/src/develop/serving.ts#custom_endpoint"} 
-const http2Handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .http2Handler();
-const httpServer = http2.createServer(http2Handler);
-httpServer.listen();
+app.mount("/restate/v1", restate.app(services=[my_service, my_object]))
 ```
 
+Then, [register the service](/operate/registration#registering-a-deployment) with Restate specifying this route, here `localhost:9080/restate/v1`.
 </Accordion>
 
-## Creating a Lambda handler
+## Serving the app
+The Python SDK follows the [ASGI](https://asgi.readthedocs.io/en/latest/introduction.html) standard for the serving of the services.
 
-To register your service as a Lambda function, use the `/lambda` import
-component and change the endpoint into a Lambda handler.
-```typescript {"CODE_LOAD::ts/src/develop/serving_lambda.ts#lambda"} 
-import * as restate from "@restatedev/restate-sdk/lambda";
-export const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
+[Hypercorn](https://pypi.org/project/Hypercorn/) and [Uvicorn](https://www.uvicorn.org/) are two popular ASGI servers that you can use to serve your Restate services.
+
+### Hypercorn
+The templates and examples use [Hypercorn](https://pypi.org/project/Hypercorn/) to serve the services.
+
+#### Hypercorn development server
+To use Hypercorn during development, you can run the app with:
+
+```python {"CODE_LOAD::python/src/develop/serving.py#hypercorn"} 
+if __name__ == "__main__":
+    import hypercorn
+    import hypercorn.asyncio
+    import asyncio
+    conf = hypercorn.Config()
+    conf.bind = ["0.0.0.0:9080"]
+    asyncio.run(hypercorn.asyncio.serve(app, conf))
 ```
 
-The implementation of your services and handlers remains the same for both deployment options.
+Check out the [Quickstart](/quickstart) for more instructions.
 
-Have a look at the [deployment section](/category/aws-lambda)
-for guidance on how to deploy your services on AWS Lambda.
+#### Hypercorn production server
 
-## Creating a fetch handler
-Other Javascript runtimes like Deno and Cloudflare Workers have
-built on top of the [Fetch Standard](https://github.com/whatwg/fetch) for
-defining HTTP server handlers. To register your service as a fetch handler, use
-the `/fetch` import component.
-```typescript {"CODE_LOAD::ts/src/develop/serving_fetch.ts#fetch"} 
-import * as restate from "@restatedev/restate-sdk/fetch";
-const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
-// Cloudflare expects the handler as a default export
-export default handler;
-// Deno expects to be passed the fetch function
-Deno.serve({ port: 9080 }, handler.fetch);
+To run the app in production, we recommend using a configuration file for Hypercorn:
+
+```toml hypercorn-config.toml
+bind = "0.0.0.0:9080"
+h2_max_concurrent_streams = 2147483647
+keep_alive_max_requests = 2147483647
+keep_alive_timeout = 2147483647
+workers = 8
 ```
-By default, a fetch handler will not advertise itself as working
-bidirectionally; the SDK will end the HTTP request at each suspension point,
-and the Restate runtime will re-invoke the service when there is more work to
-do.
 
-However, you can use the method `.bidirectional()` on the endpoint builder to
-change this on supported platforms, which will improve latencies once the
-service is re-registered with the runtime.
-- Deno (including Deno Deploy) supports HTTP2 and therefore bidirectional mode can be enabled.
-- Cloudflare Workers do not support end-to-end HTTP2 or bidirectional HTTP1.1,
-and enabling bidirectional mode will cause invocations to stall and time out.
-Services running on Workers must be discovered with the `--use-http1.1`
-CLI flag.
+Run the app with:
+```shell
+python -m hypercorn --config hypercorn-config.toml example:app
+```
 
-<Accordion title={"Cloudflare Workers and minification"}>
+This serves the app you specified in an `example.py` file, which contains [the `app`](/develop/python/serving#creating-the-app).
 
-    Cloudflare Workers minification is not working correctly with the Restate SDK. If you see an issue similar to:
+### Uvicorn
+You can also use [Uvicorn](https://www.uvicorn.org/) to serve [the app](/develop/python/serving#creating-the-app).
+To run the app with Uvicorn:
 
-    ```
-    ✘ [ERROR] restate-cloudflare-worker: Uncaught TypeError: Cannot read properties of undefined (reading '__wbindgen_malloc')
-    ```
+```shell
+uvicorn example:app
+````
 
-    Then most likely you have enabled minification when deploying. Disable it with `minify = false` in your `workers.toml` file.
-</Accordion>
+Uvicorn does not support HTTP/2, so you need to tell Restate to use HTTP/1.1 when [registering the deployment](/operate/registration#deployments-supporting-only-http1-1).
+
+
 
 ## Validating request identity
 
 SDKs can validate that incoming requests come from a particular Restate
 instance. You can find out more about request identity in the [Security docs](/operate/security#locking-down-service-access)
 
-```typescript {"CODE_LOAD::ts/src/develop/serving.ts#identity"} 
-restate
-  .endpoint()
-  .bind(myService)
-  .withIdentityV1("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
-  .listen();
+```python {"CODE_LOAD::python/src/develop/serving.py#identity"} 
+app = restate.app(
+    services=[my_service],
+    identity_keys=["publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"],
+)
 ```
+
+## Advanced serving options
+
+<Accordion title={"Lifespan events handling in ASGI apps"}>
+
+    If you need to perform startup and shutdown tasks in your ASGI app, you can use the lifespan events:
+
+```python {"CODE_LOAD::python/src/develop/serving.py#lifespan"}
+from contextlib import asynccontextmanager
+import asyncio
+
+
+@asynccontextmanager
+async def lifespan_fn():
+    print("perform startup tasks")
+    yield
+    print("perform shutdown tasks")
+    await asyncio.sleep(1)
+
+app = restate.app(services=[my_service], lifespan=lifespan_fn)
+```
+
+</Accordion>

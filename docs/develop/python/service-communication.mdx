@@ -12,7 +12,7 @@ Your Restate handler can call other handlers in three ways:
 - **[Delayed messages](#delayed-messages)**: Send a message after a delay
 
 <Info>
-    To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
+    To call a service from an external application, see the [HTTP](/operate/invocation/http) or [Kafka](/operate/invocation/kafka) documentation.
 </Info>
 
 <Info>[Learn how Restate how it works](/basics/key-concepts#resilient-communication)</Info>
@@ -22,37 +22,30 @@ Your Restate handler can call other handlers in three ways:
 
 To call a Restate handler and wait for its result:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#request_response"} 
-// To call a Service:
-const svcResponse = await ctx.serviceClient(myService).myHandler("Hi");
+```python {"CODE_LOAD::python/src/develop/service_communication.py#request_response"} 
+# import my_service # Import the service module to get to the handler, not the service itself
 
-// To call a Virtual Object:
-const objResponse = await ctx
-  .objectClient(myObject, "Mary")
-  .myHandler("Hi");
+# To call a Service:
+response = await ctx.service_call(my_service.my_handler, arg="Hi")
 
-// To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-const wfResponse = await ctx
-  .workflowClient(myWorkflow, "wf-id")
-  .run("Hi");
-// Other handlers can be called anytime within workflow retention
-const result = await ctx
-  .workflowClient(myWorkflow, "wf-id")
-  .interactWithWorkflow();
+# To call a Virtual Object:
+response = await ctx.object_call(my_object.my_handler, key="Mary", arg="Hi")
+
+# To call a Workflow:
+# `run` handler — can only be called once per workflow ID
+response = await ctx.workflow_call(my_workflow.run, key="my_workflow_id", arg="Hi")
+# Other handlers can be called anytime within workflow retention
+response = await ctx.workflow_call(
+    my_workflow.interact_with_workflow, key="my_workflow_id", arg="Hi"
+)
 ```
 
 Use generic calls when you don't have the service definition or need dynamic service names:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_call"} 
-const response = await ctx.genericCall({
-  service: "MyObject",
-  method: "myHandler",
-  parameter: "Hi",
-  key: "Mary", // drop this for Service calls
-  inputSerde: restate.serde.json,
-  outputSerde: restate.serde.json,
-});
+```python {"CODE_LOAD::python/src/develop/service_communication.py#request_response_generic"} 
+response = await ctx.generic_call(
+    "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
+)
 ```
 
 <Accordion title={"Workflow retention"}>
@@ -72,40 +65,35 @@ Use the UI or CLI to [cancel](/operate/invocation#cancelling-invocations) and un
 
 To send a message to another Restate handler without waiting for a response:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#one_way"} 
-// To message a Service:
-ctx.serviceSendClient(myService).myHandler("Hi");
+```python {"CODE_LOAD::python/src/develop/service_communication.py#one_way"} 
+# To message a Service:
+ctx.service_send(my_service.my_handler, arg="Hi")
 
-// To message a Virtual Object:
-ctx.objectSendClient(myObject, "Mary").myHandler("Hi");
+# To message a Virtual Object:
+ctx.object_send(my_object.my_handler, key="Mary", arg="Hi")
 
-// To message a Workflow:
-// `run` handler — can only be called once per workflow ID
-ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
-// Other handlers can be called anytime within workflow retention
-ctx.workflowSendClient(myWorkflow, "wf-id").interactWithWorkflow();
+# To message a Workflow:
+# `run` handler — can only be called once per workflow ID
+ctx.workflow_send(my_workflow.run, key="my_wf_id", arg="Hi")
+# Other handlers can be called anytime within workflow retention
+ctx.workflow_send(my_workflow.interact_with_workflow, key="my_wf_id", arg="Hi")
 ```
 Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
 
 
 Use generic send when you don't have the service definition:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_send"} 
-ctx.genericSend({
-  service: "MyService",
-  method: "myHandler",
-  parameter: "Hi",
-  inputSerde: restate.serde.json,
-});
+```python {"CODE_LOAD::python/src/develop/service_communication.py#one_way_generic"} 
+ctx.generic_send("MyService", "my_handler", arg=json.dumps("Hi").encode("utf-8"))
 ```
 
 <Info>
     Calls to a Virtual Object execute in order of arrival, serially.
     Example:
 
-```typescript {"CODE_LOAD::ts/src/develop/service_communication.ts#ordering"} 
-ctx.objectSendClient(myObject, "Mary").myHandler("I'm call A");
-ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
+```python {"CODE_LOAD::python/src/develop/service_communication.py#ordering"} 
+ctx.object_send(my_object.my_handler, key="Mary", arg="I'm call A")
+ctx.object_send(my_object.my_handler, key="Mary", arg="I'm call B")
 ```
 
     Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
@@ -115,33 +103,30 @@ ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
 
 To send a message after a delay:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#delayed"} 
-// To message a Service with a delay:
-ctx
-  .serviceSendClient(myService)
-  .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+```python {"CODE_LOAD::python/src/develop/service_communication.py#delayed"} 
+# To message a Service with a delay:
+ctx.service_send(my_service.my_handler, arg="Hi", send_delay=timedelta(seconds=5))
 
-// To message a Virtual Object with a delay:
-ctx
-  .objectSendClient(myObject, "Mary")
-  .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+# To message a Virtual Object with a delay:
+ctx.object_send(
+    my_object.my_handler, key="Mary", arg="Hi", send_delay=timedelta(seconds=5)
+)
 
-// To message a Workflow with a delay:
-ctx
-  .workflowSendClient(myWorkflow, "Mary")
-  .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+# To message a Workflow with a delay:
+ctx.workflow_send(
+    my_workflow.run, key="my_workflow_id", arg="Hi", send_delay=timedelta(seconds=5)
+)
 ```
 
 Use generic send with a delay when you don't have the service definition:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_delayed"} 
-ctx.genericSend({
-  service: "MyService",
-  method: "myHandler",
-  parameter: "Hi",
-  inputSerde: restate.serde.json,
-  delay: { seconds: 5 },
-});
+```python {"CODE_LOAD::python/src/develop/service_communication.py#delayed_generic"} 
+ctx.generic_send(
+    "MyService",
+    "my_handler",
+    arg=json.dumps("Hi").encode("utf-8"),
+    send_delay=timedelta(seconds=5),
+)
 ```
 
 <Info>
@@ -152,21 +137,12 @@ ctx.genericSend({
 
 To prevent duplicate executions of the same call, add an idempotency key:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#idempotency_key"} 
-// For request-response
-const response = await ctx.serviceClient(myService).myHandler(
-  "Hi",
-  restate.rpc.opts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
-// For sending a message
-ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
+```python {"CODE_LOAD::python/src/develop/service_communication.py#idempotency_key"} 
+await ctx.service_call(
+    my_service.my_handler,
+    arg="Hi",
+    idempotency_key="my-idempotency-key",
+)
 ```
 
 Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
@@ -176,17 +152,15 @@ However, if multiple handlers might call the same service independently, you can
 
 To wait for or get the result of a previously sent message:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#attach"} 
-const handle = ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
-const invocationId = await handle.invocationId;
+```python {"CODE_LOAD::python/src/develop/service_communication.py#attach"} 
+# Send a request, get the invocation id
+handle = ctx.service_send(
+    my_service.my_handler, arg="Hi", idempotency_key="my-idempotency-key"
+)
+invocation_id = await handle.invocation_id()
 
-// Later...
-const response = ctx.attach(invocationId);
+# Now re-attach
+result = await ctx.attach_invocation(invocation_id)
 ```
 
 - With an idempotency key: Wait for completion and retrieve the result.
@@ -197,68 +171,9 @@ const response = ctx.attach(invocationId);
 
 To cancel a running handler:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#cancel"} 
-const handle = ctx.serviceSendClient(myService).myHandler("Hi");
-const invocationId = await handle.invocationId;
-
-// Cancel the invocation
-ctx.cancel(invocationId);
+```python {"CODE_LOAD::python/src/develop/service_communication.py#cancel"} 
+ctx.cancel_invocation(invocation_id)
 ```
-
-## Advanced: sharing service type definitions
-When calling services, you need access to their type definitions for type safety. Here are four approaches to share service definitions without exposing implementation details:
-
-<AccordionGroup>
-    <Accordion title={"Option 1: Export type-only service definition"}>
-
-        Export only the service type information from where you define your service:
-
-```typescript {"CODE_LOAD::ts/src/develop/my_service.ts#api_export"} 
-export const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: async (ctx: restate.Context, greeting: string) => {
-      return `${greeting}!`;
-    },
-  },
-});
-
-export type MyService = typeof myService;
-```
-
-        Import and use this definition in calling handlers:
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#export_definition"} 
-const response = await ctx
-  .serviceClient<MyService>({ name: "MyService" })
-  .myHandler("Hi");
-```
-    </Accordion>
-    <Accordion title={"Option 2: Define service interface manually"}>
-        Create a TypeScript interface matching the service's handler signatures. Useful when the service is in a different language or when you can't import the type definition:
-
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#interface"} 
-interface MyService {
-  myHandler(ctx: unknown, greeting: string): Promise<string>;
-}
-const response = await ctx
-  .serviceClient<MyService>({ name: "MyService" })
-  .myHandler("Hi");
-```
-
-    </Accordion>
-    <Accordion title={"Option 3: Import as dev dependency"}>
-        When your service is published as a separate package, import it as a dev dependency to access its types:
-
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#dev_dependency"} 
-// import type { MyService } from "my-service-package";
-
-const response = await ctx
-  .serviceClient<MyService>({ name: "MyService" })
-  .myHandler("Hi");
-```
-
-    </Accordion>
-</AccordionGroup>
 
 
 ## See also
