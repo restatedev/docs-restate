@@ -39,12 +39,12 @@ app = restate.app([my_service])
 ```
 
 
-* Define a service using [`restate.service`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.service).
-* The service has a name and a list of handlers.
-* Each handler has a name and can be called at `<RESTATE_INGRESS>/myService/myHandler`
-* Handlers take the [`Context`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.Context) as the first argument.
-* Handlers can take one optional JSON-serializable input and must return a JSON-serializable output (see [custom serialization](/develop/ts/serialization) for advanced types).
-* Create an endpoint to expose the service over HTTP (port `9080` by default).
+* Initialize the Service and specify the service name (here `MyService`).
+* Annotate each handler with `@my_service.handler()`. Optionally, you can override the handler name (here `myHandler`).
+* Each handler can then be called at `<RESTATE_INGRESS>/myService/myHandler`
+* Handlers take the `restate.Context` as the first argument.
+* Handlers can take one optional JSON-serializable input and must return an optional output. These can be of any primitive type, `TypedDict` or Pydantic model (or see [custom serialization](/develop/python/serialization) for advanced types).
+* Finally, initialize the app, bind the service(s) to it, and serve it. Look at the [serving docs](/develop/python/serving) to learn more about serving your app.
 
 ## Virtual Objects
 
@@ -69,12 +69,11 @@ async def my_concurrent_handler(ctx: restate.ObjectSharedContext, greeting: str)
 app = restate.app([my_object])
 ```
 
-* Define a Virtual Object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
-* Each instance is identified by a key (accessible via `ctx.key`).
+* Initialize a `restate.VirtualObject` and specify the object's name (here `MyVirtualObject`).
+* Each instance is identified by a key (accessible via `ctx.key()`).
 * Virtual Objects can have [exclusive and shared handlers](/basics/functions#handler-behavior).
-* Exclusive handlers receive an [`ObjectContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectContext), allowing read/write access to object state.
-* Shared handlers are wrapped in `handlers.object.shared(...)` and use the [`ObjectSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.ObjectSharedContext)
-
+* Exclusive handlers receive an `ObjectContext`, allowing read/write access to object state.
+* Shared handlers have the annotation `kind="shared"` and receive an `ObjectSharedContext`.
 
 ## Workflows
 
@@ -101,12 +100,12 @@ async def interact_with_workflow(ctx: restate.WorkflowSharedContext, req: str):
 app = restate.app([my_workflow])
 ```
 
-* Define a workflow with [`restate.workflow(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.workflow)
+* Initialize a `restate.Workflow` and specify its name (here `MyWorkflow`).
 * Every workflow **must** include a `run` handler:
-  * This is the main orchestration entry point
-  * It runs exactly once per workflow execution and uses the [`WorkflowContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowContext)
-  * Use `ctx.key` to access the workflow's unique ID
-* Additional handlers must use the [`WorkflowSharedContext`](https://docs.restate.dev/tsdocs/interfaces/_restatedev_restate-sdk.WorkflowSharedContext) and can signal or query the workflow. They can run concurrently with the `run` handler and until the retention time expires.
+  * This is the main orchestration entry point and is annotated with `@my_workflow.main()`.
+  * It runs exactly once per workflow execution and uses the `WorkflowContext`
+  * Use `ctx.key()` to access the workflow's unique ID
+* Additional handlers are annotated with `@my_workflow.handler()`. They must use the `WorkflowSharedContext` and can signal or query the workflow. They can run concurrently with the `run` handler and until the retention time expires.
 
 ## Configuring services
 Check out the [service configuration docs](/operate/configuration/services) to learn how to configure service behavior, including timeouts and retention policies.
