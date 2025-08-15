@@ -21,6 +21,7 @@ if __name__ == "__main__":
     import hypercorn
     import hypercorn.asyncio
     import asyncio
+
     conf = hypercorn.Config()
     conf.bind = ["0.0.0.0:9080"]
     asyncio.run(hypercorn.asyncio.serve(app, conf))
@@ -29,6 +30,7 @@ if __name__ == "__main__":
 
 # <start_fastapi>
 from fastapi import FastAPI
+
 app = FastAPI()
 
 app.mount("/restate/v1", restate.app(services=[my_service, my_object]))
@@ -46,6 +48,7 @@ async def lifespan_fn():
     yield
     print("perform shutdown tasks")
     await asyncio.sleep(1)
+
 
 app = restate.app(services=[my_service], lifespan=lifespan_fn)
 # <end_lifespan>
