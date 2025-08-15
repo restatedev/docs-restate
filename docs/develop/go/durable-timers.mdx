@@ -11,8 +11,10 @@ import TimersIntro from "/snippets/sdk/timers-intro.mdx";
 ## Durable sleep
 To pause a handler for a set duration:
 
-```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#sleep"} 
-await ctx.sleep({ seconds: 10 });
+```go {"CODE_LOAD::go/develop/durabletimers.go#here"} 
+if err := restate.Sleep(ctx, 10*time.Second); err != nil {
+  return "", err
+}
 ```
 
 <Info>
@@ -29,7 +31,7 @@ await ctx.sleep({ seconds: 10 });
 
 ## Scheduling async tasks
 
-To invoke a handler at a later time, use [delayed messages](/develop/ts/service-communication#delayed-messages).
+To invoke a handler at a later time, use [delayed messages](/develop/go/service-communication#delayed-messages).
 
 <Accordion title={"Delayed messages vs. sleep and send"}>
 
@@ -47,28 +49,29 @@ However, we recommend to use delayed messages for the following reasons:
 
 ## Timers and timeouts
 
-Most context actions are async actions that return a `RestatePromise`.
+Most context actions are async actions that return a future.
 
-`RestatePromise` supports setting timeouts, allowing you to bound how long your code waits for an operation.
+You can use [Restate's combinators](/develop/go/concurrent-tasks) to race an async operation against a timeout:
 
-When an operation times out, it throws a `TimeoutError`.
+```go {"CODE_LOAD::go/develop/durabletimers.go#timer"} 
+sleepFuture := restate.After(ctx, 30*time.Second)
+callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 
-```typescript {"CODE_LOAD::ts/src/develop/durable_timers.ts#timer"} 
-try {
-  await ctx
-    .serviceClient(myService)
-    .myHandler("Hi")
-    .orTimeout({ seconds: 5 });
-} catch (error) {
-  if (error instanceof restate.TimeoutError) {
-    console.error("Operation timed out:", error);
-  } else {
-    throw error; // Re-throw other errors
+selector := restate.Select(ctx, sleepFuture, callFuture)
+switch selector.Select() {
+case sleepFuture:
+  if err := sleepFuture.Done(); err != nil {
+    return "", err
   }
+  return "sleep won", nil
+case callFuture:
+  result, err := callFuture.Response()
+  if err != nil {
+    return "", err
+  }
+  return fmt.Sprintf("call won with result: %s", result), nil
 }
 ```
-
-For alternative ways of racing async operations, have a look at the [`RestatePromise` Combinator docs](/develop/ts/journaling-results#restatepromise-combinators).
 
 ## Cron jobs
 

@@ -77,7 +77,7 @@ func (JournalingResults) PromiseCombinators(ctx restate.Context, name string) (s
 	_ = metrics
 
 	// <start_race>
-	sleepFuture := restate.After(ctx, 100*time.Millisecond)
+	sleepFuture := restate.After(ctx, 30*time.Second)
 	callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 
 	selector := restate.Select(ctx, sleepFuture, callFuture)

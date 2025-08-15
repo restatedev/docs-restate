@@ -12,62 +12,51 @@ import StateLazy from '/snippets/sdk/state-lazy.mdx';
 ## List all state keys
 To retrieve all keys for which the current Virtual Object has stored state:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#statekeys"} 
-const stateKeys = ctx.stateKeys();
+```typescript {"CODE_LOAD::go/develop/state.go#statekeys"} 
+stateKeys, err := restate.Keys(ctx)
+if err != nil {
+  return err
+}
 ```
 
 ## Get state value
 To read a value by key:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#get"} 
-const myString = (await ctx.get<string>("my-string-key")) ?? "my-default";
-const myNumber = (await ctx.get<number>("my-number-key")) ?? 0;
+```typescript {"CODE_LOAD::go/develop/state.go#get"} 
+myString := "my-default"
+if s, err := restate.Get[*string](ctx, "my-string-key"); err != nil {
+  return err
+} else if s != nil {
+  myString = *s
+}
+
+myNumber, err := restate.Get[int](ctx, "my-number-key")
+if err != nil {
+  return err
+}
 ```
 Returns null if the key doesn't exist.
-
-See the [serialization docs](/develop/java/serialization) to customize the state serializer.
 
 ## Set state value
 To write or update a value:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#set"} 
-ctx.set("my-key", "my-new-value");
+```typescript {"CODE_LOAD::go/develop/state.go#set"} 
+restate.Set(ctx, "my-key", "my-new-value")
 ```
 
 ## Clear state key
 To delete a specific key:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#clear"} 
-ctx.clear("my-key");
+```typescript {"CODE_LOAD::go/develop/state.go#clear"} 
+restate.Clear(ctx, "my-key")
 ```
 
 ## Clear all state keys
 
 To remove all stored state for the current Virtual Object:
 
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#clear_all"} 
-ctx.clearAll();
+```typescript {"CODE_LOAD::go/develop/state.go#clear_all"} 
+restate.ClearAll(ctx)
 ```
 
 <StateLazy/>
-
-## Advanced: Typed State
-
-You can specify the types of your Object's K/V state, to ensure type safety and better developer experience:
-
-```typescript {"CODE_LOAD::ts/src/develop/state.ts#typed_state"} 
-type GreeterContext = restate.ObjectContext<{
-  name: string;
-  count: number;
-}>
-
-export const greeter = restate.object({
-  name: "Greeter",
-  handlers: {
-    greet: async (ctx: GreeterContext, name: string) => {
-      const count: number = await ctx.get("count") ?? 0;
-      ctx.set("name", name);
-    },
-  },
-});
-```

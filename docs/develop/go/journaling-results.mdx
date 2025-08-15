@@ -8,42 +8,53 @@ Restate uses an execution log to replay operations after failures and suspension
 
 ## Run 
 
-Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
+Use `Run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#side_effect"} 
-const result = await ctx.run<string>(async () => doDbRequest());
+```go {"CODE_LOAD::go/develop/journalingresults.go#side_effect"} 
+result, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+  return doDbRequest()
+})
+if err != nil {
+  return err
+}
 ```
 
-Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run`).
+Note that inside `Run`, you cannot use the Restate context (e.g., `get`, `sleep`, or nested `Run`).
+You should only use methods available on the [`RunContext`](https://pkg.go.dev/github.com/restatedev/sdk-go#RunContext) provided to your function.
 
 <AccordionGroup>
 
   <Accordion title="Serialization">
-  By default, results are serialized using [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON). See the [serialization docs](/develop/ts/serialization) to customize this.
+      You can return any payload that can be serialized. By default, serialization is
+      done with [`JSONCodec`](https://pkg.go.dev/github.com/restatedev/sdk-go/encoding#PayloadCodec)
+      which uses `encoding/json`. If you don't need to return anything, you can use
+      `restate.Void{}` which serialises to a nil byte slice.
   </Accordion>
 
   <Accordion title="Error handling and retry policies">
 
-  Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/ts/error-handling) is thrown.
+  Failures in `Run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalError`](/develop/go/error-handling) is thrown.
 
 
-  You can customize how `ctx.run` retries via:
+  You can customize how `Run` retries via:
 
-```typescript {"CODE_LOAD::ts/src/develop/retries.ts#here"} 
-try {
-  const myRunRetryPolicy = {
-    initialRetryInterval: { milliseconds: 500 },
-    retryIntervalFactor: 2,
-    maxRetryInterval: { seconds: 1 },
-    maxRetryAttempts: 5,
-    maxRetryDuration: { seconds: 1 },
-  };
-  await ctx.run("write", () => writeToOtherSystem(), myRunRetryPolicy);
-} catch (e) {
-  if (e instanceof restate.TerminalError) {
-    // Undo or compensate here (see Sagas guide)
-  }
-  throw e;
+```typescript {"CODE_LOAD::go/develop/journalingresults.go#side_effect_retry"} 
+result, err := restate.Run(ctx,
+  func(ctx restate.RunContext) (string, error) {
+    return doDbRequest()
+  },
+  // After 10 seconds, give up retrying
+  restate.WithMaxRetryDuration(time.Second*10),
+  // On the first retry, wait 100 milliseconds before next attempt
+  restate.WithInitialRetryInterval(time.Millisecond*100),
+  // Grow retry interval with factor 2
+  restate.WithRetryIntervalFactor(2.0),
+  // Optional: provide a name for the operation to be visible in the
+  // observability tools.
+  restate.WithName("my_db_request"),
+)
+if err != nil {
+  return err
 }
 ```
 
@@ -72,20 +83,21 @@ The SDK provides deterministic helpers for random values — seeded by the invoc
 
 To generate stable UUIDs for things like idempotency keys:
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#uuid"} 
-const uuid = ctx.rand.uuidv4();
+```typescript {"CODE_LOAD::go/develop/journalingresults.go#uuid"} 
+uuid := restate.Rand(ctx).UUID()
 ```
 
 Do not use this in cryptographic contexts.
 
 ### Random numbers
 
-To generate a deterministic float between `0` and `1`:
+Methods exist on `restate.Rand(ctx)` for generating `float64` and `uint64`, or
+otherwise `restate.Rand(ctx).Source()` can be provided to `math/rand/v2` as a
+source for any random operation:
 
-
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#random_nb"} 
-const randomNumber = ctx.rand.random();
+```typescript {"CODE_LOAD::go/develop/journalingresults.go#random_nb"} 
+randomInt := restate.Rand(ctx).Uint64()
+randomFloat := restate.Rand(ctx).Float64()
+randomSource := rand.New(restate.Rand(ctx).Source())
 ```
-
-This behaves like `Math.random()` but is deterministically replayable.
 
