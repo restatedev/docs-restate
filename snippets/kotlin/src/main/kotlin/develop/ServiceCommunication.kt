@@ -17,8 +17,7 @@ class ServiceCommunication {
     val svcResponse: String = MyServiceClient.fromContext(ctx).myHandler(request).await()
 
     // To call a Virtual Object:
-    val objResponse: String =
-        MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await()
+    val objResponse: String = MyObjectClient.fromContext(ctx, objectKey).myHandler(request).await()
 
     // To call a Workflow:
     // `run` handler — can only be called once per workflow ID

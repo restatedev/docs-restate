@@ -9,7 +9,7 @@ class MyApp {
     RestateHttpServer.listen(
         Endpoint.builder()
             .bind(new MyService())
-            .bind(new MyVirtualObject())
+            .bind(new MyObject())
             .bind(new MyWorkflow())
             .build());
   }

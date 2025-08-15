@@ -31,7 +31,6 @@ class JournalingResults {
     Awakeable<Boolean> a2 = ctx.awakeable(Boolean.class);
     Awakeable<Boolean> a3 = ctx.awakeable(Boolean.class);
 
-
     // <start_parallel>
     // Start operations concurrently using DurableFuture
     var call1 = ctx.runAsync(UserData.class, () -> fetchUserData(123));

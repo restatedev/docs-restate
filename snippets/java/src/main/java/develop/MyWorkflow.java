@@ -20,8 +20,9 @@ public class MyWorkflow {
   }
 
   @Shared
-  public void interactWithWorkflow(SharedWorkflowContext ctx, String input) {
+  public String interactWithWorkflow(SharedWorkflowContext ctx, String input) {
     // implement interaction logic here
+    return "my result";
   }
 
   public static void main(String[] args) {

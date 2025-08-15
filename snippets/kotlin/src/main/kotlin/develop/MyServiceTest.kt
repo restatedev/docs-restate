@@ -2,13 +2,12 @@ package develop
 
 import dev.restate.sdk.testing.BindService
 import dev.restate.sdk.testing.RestateTest
-import develop.clients.GreeterService
 
 // <start_extension>
 @RestateTest
-class GreeterTest {
+class MyServiceTest {
 
-  @BindService val service = GreeterService()
+  @BindService val service = MyService()
 
   // Your tests
 

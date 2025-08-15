@@ -8,7 +8,7 @@ fun main() {
   RestateHttpServer.listen(
       endpoint {
         bind(MyService())
-        bind(MyVirtualObject())
+        bind(MyObject())
         bind(MyWorkflow())
       })
 }

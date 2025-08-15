@@ -18,8 +18,9 @@ class MyWorkflow {
   }
 
   @Handler
-  suspend fun interactWithWorkflow(ctx: SharedWorkflowContext, input: String) {
+  suspend fun interactWithWorkflow(ctx: SharedWorkflowContext, input: String): String {
     // implement interaction logic here
+    return "my result"
   }
 }
 

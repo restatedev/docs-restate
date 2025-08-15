@@ -9,7 +9,7 @@ import dev.restate.sdk.kotlin.*
 import dev.restate.sdk.kotlin.endpoint.*
 
 @VirtualObject
-class MyVirtualObject {
+class MyObject {
 
   @Handler
   suspend fun myHandler(ctx: ObjectContext, greeting: String): String {
@@ -25,6 +25,6 @@ class MyVirtualObject {
 }
 
 fun main() {
-  RestateHttpServer.listen(endpoint { bind(MyVirtualObject()) })
+  RestateHttpServer.listen(endpoint { bind(MyObject()) })
 }
 // <end_here>

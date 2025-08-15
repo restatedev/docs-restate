@@ -18,14 +18,14 @@ public class ServiceCommunication {
     String svcResponse = MyServiceClient.fromContext(ctx).myHandler(request).await();
 
     // To call a Virtual Object:
-    String objResponse =
-        MyVirtualObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
+    String objResponse = MyObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
 
     // To call a Workflow:
     // `run` handler — can only be called once per workflow ID
     String wfResponse = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await();
     // Other handlers can be called anytime within workflow retention
-    MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await();
+    String status =
+        MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await();
     // <end_request_response>
   }
 
@@ -111,8 +111,8 @@ public class ServiceCommunication {
   private void orderingGuarantees(Context ctx) {
     String objectKey = "";
     // <start_ordering>
-    MyVirtualObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call A");
-    MyVirtualObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call B");
+    MyObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call A");
+    MyObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call B");
     // <end_ordering>
   }
 }

@@ -10,7 +10,7 @@ import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
 
 @VirtualObject
-public class MyVirtualObject {
+public class MyObject {
 
   @Handler
   public String myHandler(ObjectContext ctx, String greeting) {
@@ -25,7 +25,7 @@ public class MyVirtualObject {
   }
 
   public static void main(String[] args) {
-    RestateHttpServer.listen(Endpoint.bind(new MyVirtualObject()));
+    RestateHttpServer.listen(Endpoint.bind(new MyObject()));
   }
 }
 // <end_here>

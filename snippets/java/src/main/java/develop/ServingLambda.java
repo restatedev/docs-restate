@@ -7,7 +7,7 @@ import dev.restate.sdk.lambda.BaseRestateLambdaHandler;
 class MyLambdaHandler extends BaseRestateLambdaHandler {
   @Override
   public void register(Endpoint.Builder builder) {
-    builder.bind(new MyService()).bind(new MyVirtualObject());
+    builder.bind(new MyService()).bind(new MyObject());
   }
 }
 // <end_here>

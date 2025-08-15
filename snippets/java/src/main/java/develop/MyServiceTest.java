@@ -1,13 +1,12 @@
 package develop;
 
 import dev.restate.sdk.testing.*;
-import develop.clients.GreeterService;
 
 // <start_extension>
 @RestateTest
-class GreeterTest {
+class MyServiceTest {
 
-  @BindService GreeterService service = new GreeterService();
+  @BindService MyService service = new MyService();
 
   // Your tests
 
