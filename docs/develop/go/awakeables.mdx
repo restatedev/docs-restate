@@ -14,19 +14,27 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 2. **Send the ID externally** - Pass the awakeable ID to your external system
 3. **Wait for result** - Your handler [suspends](/basics/key-concepts#suspensions-on-faas) until the external system responds
 
-```ts {"CODE_LOAD::ts/src/develop/awakeable.ts#here"} 
-// Create awakeable and get unique ID
-const { id, promise } = ctx.awakeable<string>();
+```go {"CODE_LOAD::go/develop/awakeable.go#here"} 
+awakeable := restate.Awakeable[string](ctx)
+awakeableId := awakeable.Id()
 
-// Send ID to external system (email, queue, webhook, etc.)
-await ctx.run(() => requestHumanReview(name, id));
+if _, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+  return requestHumanReview(awakeableId)
+}); err != nil {
+  return err
+}
 
-// Handler suspends here until external completion
-const review = await promise;
+review, err := awakeable.Result()
+if err != nil {
+  return err
+}
 ```
 
 <Accordion title="Serialization">
-  Both awakeables and durable promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization. Complex objects are automatically serialized/deserialized. See the [serialization docs](/develop/ts/serialization) for customization options.
+    You can resolve an awakeable with any payload that can be serialized. By default,
+    serialization is done with [`JSONCodec`](https://pkg.go.dev/github.com/restatedev/sdk-go/encoding#PayloadCodec)
+    which uses `encoding/json`. If you don't need to provide anything, you can
+    use `restate.Void{}` which serializes to a nil byte slice.
 </Accordion>
 
 <Info>
@@ -38,7 +46,7 @@ const review = await promise;
 External processes complete awakeables in two ways:
 
 - **Resolve** with success data → handler continues normally
-- **Reject** with error reason → throws a [terminal error](/develop/ts/error-handling) in the waiting handler
+- **Reject** with error reason → throws a [terminal error](/develop/go/error-handling) in the waiting handler
 
 #### Via HTTP API
 
@@ -47,7 +55,7 @@ External systems can complete awakeables using Restate's HTTP API:
 **Resolve with data:**
 ```shell
 curl localhost:8080/restate/awakeables/prom_1PePOqp/resolve \
-  --json '{"approved": true, "comments": "Looks good!"}'
+  --json '"Looks good!"'
 ```
 
 **Reject with error:**
@@ -60,15 +68,13 @@ curl localhost:8080/restate/awakeables/prom_1PePOqp/reject \
 #### Via SDK (from other handlers)
 
 **Resolve:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve"} 
-// Complete with success data
-ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
+```go {"CODE_LOAD::go/develop/awakeable.go#resolve"} 
+restate.ResolveAwakeable(ctx, awakeableId, "Looks good!")
 ```
 
 **Reject:**
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#reject"} 
-// Complete with error
-ctx.rejectAwakeable(id, "This cannot be reviewed.");
+```go {"CODE_LOAD::go/develop/awakeable.go#reject"} 
+restate.RejectAwakeable(ctx, awakeableId, fmt.Errorf("Cannot do review"))
 ```
 
 ## Durable Promises
@@ -93,44 +99,47 @@ Update the retention time via the [service configuration](/operate/configuration
 
 Wait for a promise by name:
 
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"} 
-const review = await ctx.promise<string>("review");
+```go {"CODE_LOAD::go/develop/durablepromise.go#promise"} 
+review, err := restate.Promise[string](ctx, "review").Result()
 ```
 
 ### Resolving/rejecting promises
 
 Resolve/reject from any workflow handler:
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"} 
-ctx.promise<string>("review").resolve(review);
+```go {"CODE_LOAD::go/develop/durablepromise.go#resolve_promise"} 
+err := restate.Promise[string](ctx, "review").Resolve(review)
+if err != nil {
+  return err
+}
 ```
 
 ### Complete workflow example
 
-```ts expandable {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#review"} 
-restate.workflow({
-  name: "reviewWorkflow",
-  handlers: {
-    // Main workflow execution
-    run: async (ctx: WorkflowContext, documentId: string) => {
-      // Send document for review
-      await ctx.run(() => askReview(documentId));
+```go expandable {"CODE_LOAD::go/develop/durablepromise.go#review"} 
+type ReviewWorkflow struct{}
 
-      // Wait for external review submission
-      const review = await ctx.promise<string>("review");
+func (ReviewWorkflow) Run(ctx restate.WorkflowContext, documentId string) (string, error) {
+  // Send document for review
+  if _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, askReview(documentId)
+  }); err != nil {
+    return "", err
+  }
 
-      // Process the review result
-      return processReview(documentId, review);
-    },
+  // Wait for external review submission
+  review, err := restate.Promise[string](ctx, "review").Result()
+  if err != nil {
+    return "", err
+  }
 
-    // External endpoint to submit reviews
-    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
-      // Signal the waiting run handler
-      ctx.promise<string>("review").resolve(review);
+  // Process the review result
+  return processReview(documentId, review)
+}
 
-      ctx.promise<string>("review")
-    },
-  },
-});
+func (ReviewWorkflow) SubmitReview(ctx restate.WorkflowSharedContext, review string) error {
+  // Signal the waiting run handler
+  return restate.Promise[string](ctx, "review").Resolve(review)
+}
 ```
 
 <AwakeablesOutro/>

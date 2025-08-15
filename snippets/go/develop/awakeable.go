@@ -10,40 +10,34 @@ type Awakeable struct{}
 
 func (Awakeable) Greet(ctx restate.Context, name string) error {
 	// <start_here>
-	// <mark_1>
 	awakeable := restate.Awakeable[string](ctx)
 	awakeableId := awakeable.Id()
-	// </mark_1>
 
-	// <mark_2>
 	if _, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
-		return triggerTaskAndDeliverId(awakeableId)
+		return requestHumanReview(awakeableId)
 	}); err != nil {
 		return err
 	}
-	// </mark_2>
 
-	// <mark_3>
-	payload, err := awakeable.Result()
+	review, err := awakeable.Result()
 	if err != nil {
 		return err
 	}
-	// </mark_3>
 	// <end_here>
 
-	_ = payload
+	_ = review
 
 	// <start_resolve>
-	restate.ResolveAwakeable(ctx, awakeableId, "hello")
+	restate.ResolveAwakeable(ctx, awakeableId, "Looks good!")
 	// <end_resolve>
 
 	// <start_reject>
-	restate.RejectAwakeable(ctx, awakeableId, fmt.Errorf("my error reason"))
+	restate.RejectAwakeable(ctx, awakeableId, fmt.Errorf("Cannot do review"))
 	// <end_reject>
 
 	return nil
 }
 
-func triggerTaskAndDeliverId(awakeableId string) (string, error) {
+func requestHumanReview(awakeableId string) (string, error) {
 	return "123", nil
 }

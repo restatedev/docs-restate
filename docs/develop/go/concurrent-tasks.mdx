@@ -12,81 +12,73 @@ import ConcurrentTaskIntro from "/snippets/sdk/concurrent-tasks-intro.mdx";
 ## Parallelizing tasks
 Start multiple durable operations concurrently by calling them without immediately awaiting:
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#parallel"} 
-const call1 = ctx.run("fetch_user", async () => fetchUserData({ userId: 123 }));
-const call2 = ctx.run("fetch_orders", async () => fetchOrderHistory({ userId: 123 }));
-const call3 = ctx.serviceClient(analyticsService).calculateMetrics({ userId: 123 });
+```go {"CODE_LOAD::go/develop/journalingresults.go#parallel"} 
+call1 := restate.RunAsync(ctx, func(ctx restate.RunContext) (UserData, error) {
+  return fetchUserData(123)
+})
+call2 := restate.RunAsync(ctx, func(ctx restate.RunContext) (OrderHistory, error) {
+  return fetchOrderHistory(123)
+})
+call3 := restate.Service[int](ctx, "AnalyticsService", "CalculateMetrics").RequestFuture(123)
 
-const user = await call1;
-const orders = await call2;
-const metrics = await call3;
+user, _ := call1.Result()
+orders, _ := call2.Result()
+metrics, _ := call3.Response()
 ```
 
 Check out the guide on [parallelizing work](guides/parallelizing-work).
 
 ## Retrieving results
 
-Restate provides several patterns for coordinating concurrent tasks. All patterns use `RestatePromise` combinators that log the order of completion, ensuring deterministic behavior during replays.
+Operations such as calls, awakeables, and `restate.After` return futures which can
+be safely selected over using `restate.Select`. Restate will log the order in which they complete, to make this deterministic on replay.
 
+<Warning>
+    **Don't use Go routines**:
+
+    Do not try to combine blocking Restate operations using goroutines, channels or select statements. These cannot be used deterministically, and will likely lead to non-determinism errors upon replay. The only place it is safe to use these types is inside of a restate.Run function.
+</Warning>
+
+### Select the first successful completion
+
+```go {"CODE_LOAD::go/develop/journalingresults.go#race"} 
+sleepFuture := restate.After(ctx, 100*time.Millisecond)
+callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
+
+selector := restate.Select(ctx, sleepFuture, callFuture)
+switch selector.Select() {
+case sleepFuture:
+  if err := sleepFuture.Done(); err != nil {
+    return "", err
+  }
+  return "sleep won", nil
+case callFuture:
+  result, err := callFuture.Response()
+  if err != nil {
+    return "", err
+  }
+  return fmt.Sprintf("call won with result: %s", result), nil
+}
+```
+
+Select blocks on the next completed operation or returns `nil` if there are none left.
 
 ### Wait for all tasks to complete
 
-Similar to [`Promise.all`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all), waits for all promises to resolve successfully:
+```go {"CODE_LOAD::go/develop/journalingresults.go#all"} 
+callFuture1 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
+callFuture2 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi again")
 
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#all"} 
-const sleepPromise = ctx.sleep({ milliseconds: 100 });
-const callPromise = ctx.serviceClient(myService).myHandler("Hi");
-const externalCallPromise = ctx.run(() => httpCall());
+selector := restate.Select(ctx, callFuture1, callFuture2)
 
-const resultArray = await RestatePromise.all([
-  sleepPromise,
-  callPromise,
-  externalCallPromise,
-]);
+// Collect all results
+var subResults []string
+for selector.Remaining() {
+  response, err := selector.Select().(restate.ResponseFuture[string]).Response()
+  if err != nil {
+    return "", err
+  }
+  subResults = append(subResults, response)
+}
 ```
 
-### Wait for the first successful completion
-
-Similar to [`Promise.any`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any), returns the first promise that resolves successfully:
-
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#any"} 
-const sleepPromise1 = ctx.sleep({ milliseconds: 100 });
-const sleepPromise2 = ctx.sleep({ milliseconds: 200 });
-const callPromise = ctx.serviceClient(myService).myHandler("Hi");
-
-const firstResult = await RestatePromise.any([
-  sleepPromise1,
-  sleepPromise2,
-  callPromise,
-]);
-```
-
-### Wait for the first to complete
-
-Similar to [`Promise.race`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race), returns the first promise to settle (resolve or reject):
-
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#race"} 
-const sleepPromise3 = ctx.sleep({ milliseconds: 100 });
-const callPromise2 = ctx.serviceClient(myService).myHandler("Hi");
-
-const firstToComplete = await RestatePromise.race([
-  sleepPromise3,
-  callPromise2,
-]);
-```
-
-### Wait for all to settle
-
-Similar to [`Promise.allSettled`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled), waits for all promises to complete regardless of success or failure:
-
-```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#allSettled"} 
-const sleepPromise4 = ctx.sleep({ milliseconds: 100 });
-const callPromise3 = ctx.serviceClient(myService).myHandler("Hi");
-const externalCallPromise2 = ctx.run(() => httpCall());
-
-const allResults = await RestatePromise.allSettled([
-  sleepPromise4,
-  callPromise3,
-  externalCallPromise2,
-]);
-```
