@@ -1,18 +1,16 @@
 import restate
-from restate import Workflow, WorkflowSharedContext, WorkflowContext
-from restate.serde import Serde
 
-my_workflow = Workflow("MyWorkflow")
+my_workflow = restate.Workflow("MyWorkflow")
 
 
 @my_workflow.main()
-async def run(ctx: WorkflowContext, req: str) -> str:
+async def run(ctx: restate.WorkflowContext, req: str) -> str:
     # ... implement workflow logic here ---
     return "success"
 
 
 @my_workflow.handler()
-async def interact_with_workflow(ctx: WorkflowSharedContext, req: str):
+async def interact_with_workflow(ctx: restate.WorkflowSharedContext, req: str):
     # ... implement interaction logic here ...
     return
 

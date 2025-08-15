@@ -1,11 +1,10 @@
 import restate
-from restate import Context, Service
 
-my_service = Service("MyService")
+my_service = restate.Service("MyService")
 
 
 @my_service.handler("myHandler")
-async def my_handler(ctx: Context, greeting: str) -> str:
+async def my_handler(ctx: restate.Context, greeting: str) -> str:
     return f"${greeting}!"
 
 

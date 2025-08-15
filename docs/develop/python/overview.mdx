@@ -5,39 +5,37 @@ icon: "brackets-curly"
 ---
 
 
-The Restate TypeScript SDK is open source and available on [GitHub](https://github.com/restatedev/sdk-typescript).
+The Restate Python SDK is open source and available on [GitHub](https://github.com/restatedev/sdk-python).
 
-The Restate SDK lets you implement **handlers**. Handlers can be part of a **[Basic Service](/basics/services#basic-service)**, a **[Virtual Object](/basics/services#virtual-object)**, or a **[Workflow](/basics/services#workflow)**. This page shows how to define them with the TypeScript SDK.
+The Restate SDK lets you implement **handlers**. Handlers can be part of a **[Basic Service](/basics/services#basic-service)**, a **[Virtual Object](/basics/services#virtual-object)**, or a **[Workflow](/basics/services#workflow)**. This page shows how to define them with the Python SDK.
 
 ## Prerequisites
-- [NodeJS](https://nodejs.org/en/) >= v18.17.1 or [Bun](https://bun.sh/docs/installation) or [Deno](https://deno.land/#installation)
-- [npm CLI](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) >= 9.6.7
+- Python >= v3.11
 
 ## Getting started
 <Tip>
-    Get started quickly with the [TypeScript Quickstart](/get_started/quickstart?sdk=ts).
+    Get started quickly with the [Python Quickstart](/quickstart#python).
 </Tip>
 
-Add the [`@restatedev/restate-sdk`](https://www.npmjs.com/package/@restatedev/restate-sdk) dependency to your project to start developing Restate services.
+Add the `restate_sdk[serde]` dependency to your Python project to start developing Restate services.
 
 
 ## Basic Services
 
 [Basic Services](/basics/services) group related **handlers** and expose them as callable endpoints:
 
-```ts {"CODE_LOAD::ts/src/develop/service.ts"}
-import * as restate from "@restatedev/restate-sdk";
+```python {"CODE_LOAD::python/src/develop/my_service.py"} 
+import restate
 
-const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: async (ctx: restate.Context, greeting: string) => {
-      return `${greeting}!`;
-    },
-  },
-});
+my_service = restate.Service("MyService")
 
-restate.endpoint().bind(myService).listen();
+
+@my_service.handler("myHandler")
+async def my_handler(ctx: restate.Context, greeting: str) -> str:
+    return f"${greeting}!"
+
+
+app = restate.app([my_service])
 ```
 
 
@@ -52,24 +50,23 @@ restate.endpoint().bind(myService).listen();
 
 [Virtual Objects](/basics/services) are services that are stateful and key-addressable — each object instance has a unique ID and persistent state.
 
-```ts {"CODE_LOAD::ts/src/develop/virtual_object.ts"}
-import * as restate from "@restatedev/restate-sdk";
+```python {"CODE_LOAD::python/src/develop/my_virtual_object.py"} 
+import restate
 
-const myObject = restate.object({
-  name: "MyObject",
-  handlers: {
-    myHandler: async (ctx: restate.ObjectContext, greeting: string) => {
-      return `${greeting} ${ctx.key}!`;
-    },
-    myConcurrentHandler: restate.handlers.object.shared(
-      async (ctx: restate.ObjectSharedContext, greeting: string) => {
-        return `${greeting} ${ctx.key}!`;
-      }
-    ),
-  },
-});
+my_object = restate.VirtualObject("MyVirtualObject")
 
-restate.endpoint().bind(myObject).listen();
+
+@my_object.handler("myHandler")
+async def my_handler(ctx: restate.ObjectContext, greeting: str) -> str:
+    return f"${greeting} ${ctx.key()}!"
+
+
+@my_object.handler(kind="shared")
+async def my_concurrent_handler(ctx: restate.ObjectSharedContext, greeting: str) -> str:
+    return f"${greeting} ${ctx.key()}!"
+
+
+app = restate.app([my_object])
 ```
 
 * Define a Virtual Object using [`restate.object(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.object)
@@ -83,28 +80,25 @@ restate.endpoint().bind(myObject).listen();
 
 [Workflows](/basics/services) are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations, which require external interaction via signals and queries.
 
-```ts {"CODE_LOAD::ts/src/develop/workflow.ts"} 
-import * as restate from "@restatedev/restate-sdk";
+```python {"CODE_LOAD::python/src/develop/my_workflow.py"} 
+import restate
 
-const myWorkflow = restate.workflow({
-  name: "MyWorkflow",
-  handlers: {
-    run: async (ctx: restate.WorkflowContext, req: string) => {
-      // implement workflow logic here
+my_workflow = restate.Workflow("MyWorkflow")
 
-      return "success";
-    },
 
-    interactWithWorkflow: async (ctx: restate.WorkflowSharedContext) => {
-      // implement interaction logic here
-      // e.g. resolve a promise that the workflow is waiting on
-    },
-  },
-});
+@my_workflow.main()
+async def run(ctx: restate.WorkflowContext, req: str) -> str:
+    # ... implement workflow logic here ---
+    return "success"
 
-export const MyWorkflow: typeof myWorkflow = { name: "MyWorkflow" };
 
-restate.endpoint().bind(myWorkflow).listen();
+@my_workflow.handler()
+async def interact_with_workflow(ctx: restate.WorkflowSharedContext, req: str):
+    # ... implement interaction logic here ...
+    return
+
+
+app = restate.app([my_workflow])
 ```
 
 * Define a workflow with [`restate.workflow(...)`](https://docs.restate.dev/tsdocs/functions/_restatedev_restate-sdk.workflow)

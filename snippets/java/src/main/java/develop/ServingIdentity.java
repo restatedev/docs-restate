@@ -10,7 +10,6 @@ class MySecureApp {
     var endpoint =
         Endpoint.builder()
             .bind(new MyService())
-            // !mark
             .withRequestIdentityVerifier(
                 RestateRequestIdentityVerifier.fromKeys(
                     "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"))

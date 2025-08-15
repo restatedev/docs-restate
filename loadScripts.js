@@ -191,10 +191,11 @@ async function updateCodeBlocksInFile(filePath) {
     // Process each match asynchronously
     let updatedContent = fileContent;
     for (const match of matches) {
-        const [fullMatch, lang, metaBefore, loadPath, customTagRaw, optionsStrRaw, metaAfter, oldCode] = match;
+        const [fullMatch, lang, metaBefore, loadPathRaw, customTagRaw, optionsStrRaw, metaAfter, oldCode] = match;
         const fullMeta = (metaBefore + (metaAfter || "")).trim();
-        const customTag = customTagRaw ? customTagRaw.replace(/"/g, '') : '';
-        const optionsStr = optionsStrRaw ? optionsStrRaw.replace(/"/g, '') : '';
+        const loadPath = loadPathRaw ? loadPathRaw.replace(/"/g, '') : undefined;
+        const customTag = customTagRaw ? customTagRaw.replace(/"/g, '') : undefined;
+        const optionsStr = optionsStrRaw ? optionsStrRaw.replace(/"/g, '') : undefined;
 
         
         let loadedCode;
