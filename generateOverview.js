@@ -20,11 +20,49 @@ function parseFrontmatter(content) {
     const frontmatterText = match[1];
     const frontmatter = {};
     
-    // Simple YAML parser for title and description
+    // Simple YAML parser for title, description, and tags
     const lines = frontmatterText.split('\n');
+    let inTagsArray = false;
+    let currentTags = [];
+    
     for (const line of lines) {
+        const trimmedLine = line.trim();
+        
+        // Handle tags array
+        if (trimmedLine.startsWith('tags:')) {
+            const tagsValue = trimmedLine.slice(5).trim();
+            if (tagsValue.startsWith('[') && tagsValue.endsWith(']')) {
+                // Inline array format: tags: ["recipe", "development"]
+                const tagsContent = tagsValue.slice(1, -1);
+                currentTags = tagsContent.split(',').map(tag => 
+                    tag.trim().replace(/^["']|["']$/g, '')
+                ).filter(tag => tag.length > 0);
+                frontmatter.tags = currentTags;
+            } else if (tagsValue === '[' || tagsValue === '') {
+                // Start of multiline array
+                inTagsArray = true;
+                currentTags = [];
+            }
+            continue;
+        }
+        
+        if (inTagsArray) {
+            if (trimmedLine === ']') {
+                // End of tags array
+                inTagsArray = false;
+                frontmatter.tags = currentTags;
+                continue;
+            } else if (trimmedLine.startsWith('-')) {
+                // Array item: - "recipe"
+                const tag = trimmedLine.slice(1).trim().replace(/^["']|["']$/g, '');
+                if (tag) currentTags.push(tag);
+                continue;
+            }
+        }
+        
+        // Handle regular key-value pairs
         const colonIndex = line.indexOf(':');
-        if (colonIndex > -1) {
+        if (colonIndex > -1 && !inTagsArray) {
             const key = line.slice(0, colonIndex).trim();
             let value = line.slice(colonIndex + 1).trim();
             
@@ -42,6 +80,46 @@ function parseFrontmatter(content) {
 }
 
 /**
+ * Groups guides by their tags
+ * @param {Array} guides - Array of guide objects
+ * @returns {Object} Object with tags as keys and arrays of guides as values
+ */
+function groupGuidesByTags(guides) {
+    const groupedGuides = {};
+
+
+    for (const guide of guides) {
+        const tags = guide.tags || ['uncategorized'];
+        
+        for (const tag of tags) {
+            if (!groupedGuides[tag]) {
+                groupedGuides[tag] = [];
+            }
+            groupedGuides[tag].push(guide);
+        }
+    }
+    
+    return groupedGuides;
+}
+
+/**
+ * Maps tags to human-readable section headers
+ * @param {string} tag - The tag name
+ * @returns {string} Human-readable header
+ */
+function getHeaderForTag(tag) {
+    const tagHeaders = {
+        'recipe': 'Recipes',
+        'development': 'Development Guides', 
+        'deployment': 'Deployment Guides',
+        'integration': 'Integrations',
+        'uncategorized': 'Other Guides'
+    };
+    
+    return tagHeaders[tag] || tag.charAt(0).toUpperCase() + tag.slice(1) + ' Guides';
+}
+
+/**
  * Generates the overview.mdx content
  * @param {Array} guides - Array of guide objects
  * @returns {string} Complete MDX content
@@ -49,15 +127,30 @@ function parseFrontmatter(content) {
 function generateOverviewContent(guides) {
     const validGuides = guides.filter(guide => guide.title && guide.description);
     
-    // Sort guides alphabetically by title
-    validGuides.sort((a, b) => a.title.localeCompare(b.title));
+    // Group guides by tags
+    const groupedGuides = groupGuidesByTags(validGuides);
     
-    const productCards = validGuides.map(guide => {
-        const guideName = guide.filename.replace('.mdx', '');
-        const imgPath = `/img/guides/${guideName}/${guideName}.png`;
-        const href = `/guides/${guideName}`;
+    // Define preferred tag order
+    const tagOrder = ['recipe', 'development', 'deployment', 'integration', 'uncategorized'];
+    
+    // Generate sections for each tag group
+    const sections = [];
+    
+    for (const tag of tagOrder) {
+        if (!groupedGuides[tag] || groupedGuides[tag].length === 0) {
+            continue;
+        }
         
-        return `    <ProductCard
+        const tagGuides = groupedGuides[tag];
+        // Sort guides within each section alphabetically by title
+        tagGuides.sort((a, b) => a.title.localeCompare(b.title));
+        
+        const productCards = tagGuides.map(guide => {
+            const guideName = guide.filename.replace('.mdx', '');
+            const imgPath = `/img/guides/${guideName}/${guideName}.png`;
+            const href = `/guides/${guideName}`;
+            
+            return `    <ProductCard
         title="${guide.title}"
         description="${guide.description}"
         href="${href}"
@@ -65,7 +158,45 @@ function generateOverviewContent(guides) {
         model="Microservices"
         type="Recipe"
     />`;
-    }).join('\n');
+        }).join('\n');
+        
+        const sectionHeader = getHeaderForTag(tag);
+        sections.push(`## ${sectionHeader}
+
+<Columns cols={3}>
+${productCards}
+</Columns>`);
+    }
+    
+    // Handle any remaining tags not in the preferred order
+    for (const tag of Object.keys(groupedGuides)) {
+        if (!tagOrder.includes(tag) && groupedGuides[tag].length > 0) {
+            const tagGuides = groupedGuides[tag];
+            tagGuides.sort((a, b) => a.title.localeCompare(b.title));
+            
+            const productCards = tagGuides.map(guide => {
+                const guideName = guide.filename.replace('.mdx', '');
+                const imgPath = `/img/guides/${guideName}/${guideName}.png`;
+                const href = `/guides/${guideName}`;
+                
+                return `    <ProductCard
+        title="${guide.title}"
+        description="${guide.description}"
+        href="${href}"
+        img="${imgPath}"
+        model="Microservices"
+        type="Recipe"
+    />`;
+            }).join('\n');
+            
+            const sectionHeader = getHeaderForTag(tag);
+            sections.push(`## ${sectionHeader}
+
+<Columns cols={3}>
+${productCards}
+</Columns>`);
+        }
+    }
 
     return `---
 mode: "wide"
@@ -76,11 +207,7 @@ description: "Learn how to do common tasks with Restate."
 
 import { ProductCard } from '/snippets/blocks/guides/product-cards.mdx';
 
-## Recipes
-
-<Columns cols={3}>
-${productCards}
-</Columns>
+${sections.join('\n\n')}
 `;
 }
 
@@ -120,9 +247,10 @@ function generateGuidesOverview() {
                     guides.push({
                         filename: file,
                         title: frontmatter.title,
-                        description: frontmatter.description
+                        description: frontmatter.description,
+                        tags: frontmatter.tags || []
                     });
-                    console.log(`✅ Processed ${file}: "${frontmatter.title}"`);
+                    console.log(`✅ Processed ${file}: "${frontmatter.title}" (tags: ${(frontmatter.tags || []).join(', ') || 'none'})`);
                 } else {
                     console.log(`⚠️  Skipping ${file} - missing title or description in frontmatter`);
                 }
