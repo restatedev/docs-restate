@@ -7,8 +7,8 @@ my_service = Service("MyService")
 
 @my_service.handler()
 async def my_handler(ctx: Context, arg):
-    # <start_here>
+    # <start_terminal>
     from restate.exceptions import TerminalError
 
     raise TerminalError("Something went wrong.")
-    # <end_here>
+    # <end_terminal>

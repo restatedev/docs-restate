@@ -1,9 +1,11 @@
 const fs = require("fs");
 const path = require("path");
 const chokidar = require("chokidar");
+const { generateGuidesOverview } = require("./generateOverview");
 
 const MDX_DIR = path.resolve("./docs"); // Folder with your .mdx files
 const SNIPPET_DIR = path.resolve("./snippets"); // Folder with code to load
+const GUIDES_DIR = path.resolve("./docs/guides"); // Folder with guide files
 
 const LANGUAGE_SYMBOLS = {
     ts: {
@@ -266,13 +268,36 @@ function startWatcher() {
             console.log(`✏️ File changed: ${filePath}`);
 
             if (filePath.endsWith(".mdx")) {
+                // Check if it's a guide file (but not the overview itself)
+                if (filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
+                    console.log("🔄 Guide file changed, regenerating overview...");
+                    generateGuidesOverview();
+                }
                 // updateCodeBlocksInFile(filePath);
             } else {
                 console.log("🔁 Updating all .mdx files (snippet changed)...");
                 updateAllMdxFiles();
             }
+        })
+        .on("add", (filePath) => {
+            if (filePath.endsWith(".mdx") && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
+                console.log(`📄 New guide file added: ${filePath}`);
+                console.log("🔄 Regenerating overview...");
+                generateGuidesOverview();
+            }
+        })
+        .on("unlink", (filePath) => {
+            if (filePath.endsWith(".mdx") && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
+                console.log(`🗑️ Guide file removed: ${filePath}`);
+                console.log("🔄 Regenerating overview...");
+                generateGuidesOverview();
+            }
         });
 }
+
+// Generate guides overview on startup
+console.log("🏗️ Generating guides overview on startup...");
+generateGuidesOverview();
 
 updateAllMdxFiles();
 // startWatcher();
