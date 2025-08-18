@@ -9,19 +9,19 @@ import (
 	server "github.com/restatedev/sdk-go/server"
 )
 
-type MyVirtualObject struct{}
+type MyObject struct{}
 
-func (MyVirtualObject) MyHandler(ctx restate.ObjectContext, greeting string) (string, error) {
+func (MyObject) MyHandler(ctx restate.ObjectContext, greeting string) (string, error) {
 	return fmt.Sprintf("%s %s!", greeting, restate.Key(ctx)), nil
 }
 
-func (MyVirtualObject) MyConcurrentHandler(ctx restate.ObjectSharedContext, greeting string) (string, error) {
+func (MyObject) MyConcurrentHandler(ctx restate.ObjectSharedContext, greeting string) (string, error) {
 	return fmt.Sprintf("%s %s!", greeting, restate.Key(ctx)), nil
 }
 
 func main() {
 	if err := server.NewRestate().
-		Bind(restate.Reflect(MyVirtualObject{})).
+		Bind(restate.Reflect(MyObject{})).
 		Start(context.Background(), "0.0.0.0:9080"); err != nil {
 		log.Fatal(err)
 	}

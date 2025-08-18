@@ -4,8 +4,19 @@ import dev.restate.sdk.annotation.CustomSerdeFactory
 import dev.restate.sdk.annotation.Handler
 import dev.restate.sdk.annotation.Service
 import dev.restate.sdk.kotlin.Context
-import dev.restate.serde.kotlinx.KotlinSerializationSerdeFactory
 import kotlinx.serialization.json.Json
+
+// <start_import>
+import dev.restate.serde.kotlinx.*
+// <end_import>
+
+
+class Util {
+  // <start_typetag>
+  var myType = typeTag<String>()
+  // <end_typetag>
+}
+
 
 // <start_custom>
 class MyJsonSerdeFactory : KotlinSerializationSerdeFactory(json = Json { prettyPrint = true })

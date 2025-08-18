@@ -9,14 +9,14 @@ import (
 )
 
 type MyService struct{}
-type MyVirtualObject struct{}
+type MyObject struct{}
 type MyWorkflow struct{}
 
 func serveLambda() {
 	// <start_lambda>
 	handler, err := server.NewRestate().
 		Bind(restate.Reflect(MyService{})).
-		Bind(restate.Reflect(MyVirtualObject{})).
+		Bind(restate.Reflect(MyObject{})).
 		Bind(restate.Reflect(MyWorkflow{})).
 		Bidirectional(false).
 		LambdaHandler()

@@ -23,7 +23,7 @@ func (Router) Greet(ctx restate.Context, name string) error {
 
 func (Router) Greet2(ctx restate.Context, name string) error {
 	// <start_request_response_object>
-	response, err := restate.Object[string](ctx, "MyVirtualObject", "Mary", "MyHandler").
+	response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
 		Request("Hi")
 	if err != nil {
 		return err

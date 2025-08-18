@@ -3,6 +3,8 @@ package develop
 import dev.restate.client.Client
 import dev.restate.common.Target
 import kotlin.time.Duration.Companion.days
+import dev.restate.client.kotlin.*
+import dev.restate.serde.kotlinx.*
 
 class IngressClient {
 
@@ -87,15 +89,14 @@ class IngressClient {
     val invocationId = handle.invocationId()
 
     // Attach/peek later from the other process
-    val handle2 = restateClient.invocationHandle(invocationId, String::class.java)
+    val handle2 = restateClient.invocationHandle(invocationId, typeTag<String>())
     // use it to attach or peek (see above)
 
     // ---------------------------------
     // OPTION 3: With the idempotency key
-    val myService = Target.service("MyService", "myHandler")
+    val target = Target.service("MyService", "myHandler")
     val handle3 =
-        restateClient.idempotentInvocationHandle(
-            myService, "my-idempotency-key", String::class.java)
+        restateClient.idempotentInvocationHandle(target, "my-idempotency-key", typeTag<String>())
     // use it to attach or peek (see above)
     // <end_service_attach>
   }
@@ -121,7 +122,7 @@ class IngressClient {
 
     // ---------------------------------
     // OPTION 2: With the workflow ID
-    val wfHandle2 = restateClient.workflowHandle("MyWorkflow", "wf-id", String::class.java)
+    val wfHandle2 = restateClient.workflowHandle("MyWorkflow", "wf-id", typeTag<String>())
     // use it to attach or peek (see above)
     // <end_workflow_attach>
   }

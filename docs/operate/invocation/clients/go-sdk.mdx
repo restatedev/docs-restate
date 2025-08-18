@@ -1,0 +1,193 @@
+---
+title: "Go SDK Clients"
+sidebarTitle: "Go"
+icon: "/img/languages/go.svg"
+description: "Invoke services from non-Restate Go services."
+---
+
+The Go SDK client library lets you invoke Restate handlers from anywhere in your application.
+Use this only in non-Restate services without access to the Restate Context.
+
+<Info>
+    Always [invoke handlers via the context](/develop/ts/service-communication), if you have access to it.
+    Restate then attaches information about the invocation to the parent invocation.
+</Info>
+
+## Invoking handlers with the SDK clients
+
+First, add the dependency to your project `github.com/restatedev/sdk-go/ingress`.
+
+Then, [register the service]("/operate/registration") you want to invoke.
+
+Finally, connect to Restate and invoke the handler with your preferred semantics.
+
+- **Request-response invocations** allow you to wait on a response from the handler.
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#rpc"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// To call a service
+svcResponse, err := restateingress.Service[*MyInput, *MyOutput](
+  restateClient, "MyService", "MyHandler").
+  Request(context.Background(), &input)
+
+// To call a virtual object
+objResponse, err := restateingress.Object[*MyInput, *MyOutput](
+  restateClient, "MyObject", "Mary", "MyHandler").
+  Request(context.Background(), &input)
+
+// To Run a workflow
+wfResponse, err := restateingress.Workflow[*MyInput, *MyOutput](
+  restateClient, "MyWorkflow", "Mary", "Run").
+  Request(context.Background(), &input)
+
+// To interact with a workflow
+status, err := restateingress.Object[*MyInput, *MyOutput](
+  restateClient, "MyWorkflow", "Mary", "interactWithWorkflow").
+  Request(context.Background(), &input)
+```
+
+- **One-way invocations** allow you to send a message without waiting for a response.
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#one_way_call"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// To message a service
+restateingress.ServiceSend[*MyInput](
+  restateClient, "MyService", "MyHandler").
+  Send(context.Background(), &input)
+
+// To message a virtual object
+restateingress.ObjectSend[*MyInput](
+  restateClient, "MyObject", "Mary", "MyHandler").
+  Send(context.Background(), &input)
+
+// To Run a workflow without waiting for the result
+restateingress.WorkflowSend[*MyInput](
+  restateClient, "MyWorkflow", "Mary", "Run").
+  Send(context.Background(), &input)
+```
+
+- **Delayed invocations** allow you to schedule an invocation for a later point in time.
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#delayed_call"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// To message a service with a delay
+restateingress.ServiceSend[*MyInput](
+  restateClient, "MyService", "MyHandler").
+  Send(context.Background(), &input, restate.WithDelay(5*24*time.Hour))
+
+// To message a virtual object with a delay
+restateingress.ObjectSend[*MyInput](
+  restateClient, "MyObject", "Mary", "MyHandler").
+  Send(context.Background(), &input, restate.WithDelay(5*24*time.Hour))
+
+// To Run a workflow without waiting for the result
+restateingress.WorkflowSend[*MyInput](
+  restateClient, "MyWorkflow", "Mary", "Run").
+  Send(context.Background(), &input, restate.WithDelay(5*24*time.Hour))
+```
+
+## Invoke a handler idempotently
+
+By using Restate and an idempotency key, you can make any service call idempotent, without any extra code or setup. This is a very powerful feature to ensure that your system stays consistent and doesn’t perform the same operation multiple times.
+
+To make a service call idempotent, you can use the idempotency key feature.
+Add the idempotency key [to the header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) via:
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#service_idempotent"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+restateingress.ServiceSend[*MyInput](
+  restateClient, "MyService", "MyHandler").
+  Send(context.Background(), &input, restate.WithIdempotencyKey("abc"))
+```
+
+After the invocation completes, Restate persists the response for a retention period of one day (24 hours).
+If you re-invoke the service with the same idempotency key within 24 hours, Restate sends back the same response and doesn't re-execute the request to the service.
+
+
+The call options, with which we set the idempotency key, also let you add other headers to the request.
+
+<Info>
+    Check out the [service configuration docs](/operate/configuration/services) to tune the retention time.
+</Info>
+
+## Retrieve result of invocations and workflows
+
+You can use the client library to retrieve the results of invocations **with an idempotency key** or workflows.
+
+### Attach to an invocation with an idempotency key
+For invocations with an idempotency key, you can attach to the invocation and wait for it to finish:
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#service_attach"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// The call to which we want to attach later
+handle := restateingress.ServiceSend[*MyInput](
+  restateClient, "MyService", "MyHandler").
+  Send(context.Background(), &input, restate.WithIdempotencyKey("my-idempotency-key"))
+
+// ... do something else ...
+
+// ---------------------------------
+// OPTION 1: With the handle returned by the call
+// - Attach
+result1, err := restateingress.AttachInvocation[*MyOutput](
+  restateClient, handle.Id).
+  Attach(context.Background())
+
+// - Peek
+output, err := restateingress.AttachInvocation[*MyOutput](
+  restateClient, handle.Id).
+  Output(context.Background())
+
+// ---------------------------------
+// OPTION 2: With the Invocation ID
+// Retrieve the invocation ID from the handle and send it to another process
+invocationId := handle.Id
+
+// Attach/peek later from the other process
+handle2, err := restateingress.AttachInvocation[*MyOutput](
+  restateClient, invocationId).
+  Attach(context.Background())
+
+// ---------------------------------
+// OPTION 3: With the idempotency key
+handle3, err := restateingress.AttachService[*MyOutput](
+  restateClient, "MyService", "MyHandler", "my-idempotency-key").
+  Attach(context.Background())
+```
+
+### Attach/peek at a workflow execution
+For workflows, you can attach to the workflow execution and wait for it to finish or peek at the output:
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#workflow_attach"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// The workflow to which we want to attach later
+wfHandle := restateingress.WorkflowSend[*MyInput](
+  restateClient, "MyWorkflow", "Mary", "Run").
+  Send(context.Background(), &input)
+
+// ... do something else ...
+
+// ---------------------------------
+// OPTION 1: With the handle returned by the workflow submission
+// - Attach
+result, err := restateingress.AttachInvocation[*MyOutput](
+  restateClient, wfHandle.Id).
+  Attach(context.Background())
+
+// - Peek
+output, err := restateingress.AttachInvocation[*MyOutput](
+  restateClient, wfHandle.Id).
+  Output(context.Background())
+
+// ---------------------------------
+// OPTION 2: With the workflow ID
+wfHandle2, err := restateingress.AttachWorkflow[*MyOutput](
+  restateClient, "MyWorkflow", "wf-id").
+  Attach(context.Background())
+```
