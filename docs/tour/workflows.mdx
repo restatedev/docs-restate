@@ -19,73 +19,51 @@ A Restate application is composed of two main components:
 
 <img src="/img/tour/app_layout.svg" alt="Application Structure"/>
 
-### Running the Workflow
+A basic signup workflow looks like this:
 
-We will be implementing a signup workflow in this tour. Let's get started by running the example code.
-
-<Steps>
-    <Step title={"Launch Restate Server"}>
-        [Install the Restate Server and CLI](](/develop/local_dev)) on your machine, and launch it:
-        ```bash
-        restate-server
-        ```
-    </Step>
-    <Step title={"Get the example code"}>
-        ```bash
-        restate example typescript-tour-of-workflows && cd typescript-tour-of-workflows
-        ```
-    </Step>
-    <Step title={"Run the service"}>
-        ```bash
-        npm run dev
-        ```
-        The service is now listening on port `9080`.
-    </Step>
-    <Step title={"Register the workflow via the UI"}>
-        Open the Restate UI at `http://localhost:9070` and register the workflow deployment at `http://localhost:9080`.
-
-        Or with the CLI:
-        ```bash
-        restate deployments register http://localhost:9080
-        ```
-        You will see a registered workflow per section of this tour.
-    </Step>
-</Steps>
-
-
-### Workflow Definition
-
-Have a look at the code:
-
-```typescript {"CODE_LOAD::ts/src/tour/workflows/workflow.ts#here"}
-import * as restate from "@restatedev/restate-sdk";
-
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/getstarted/workflow.ts?collapse_prequel"} 
 export const signupWorkflow = restate.workflow({
-    name: "user-signup",
-    handlers: {
-        run: async (ctx: restate.WorkflowContext, user: User) => {
-            const userId = ctx.key; // workflow ID = user ID
-            // ... implement your workflow logic here ...
-        }
-    }
-})
+  name: "user-signup",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key; // workflow ID = user ID
 
-restate.endpoint().bind(signupWorkflow).listen(9080);
+      // Write to database
+      const success = await ctx.run("create", () => createUser(userId, user));
+      if (!success) return { success };
+
+      // Call APIs
+      await ctx.run("activate", () => activateUser(userId));
+      await ctx.run("welcome", () => sendWelcomeEmail(user));
+      return { success };
+    },
+  },
+});
 ```
-
 A workflow has a name and a list of handlers.
 The `run` handler is the main entry point that executes the workflow logic.
-Other handlers are optional and can interact with the `run` handler.
 
-An execution of the workflow is identified by a unique key (in this case, the user ID or username).
+An execution of the workflow is identified by a unique key (in this case, the user ID)
+and uses Restate's `WorkflowContext` to make steps durable.
 
-To run the workflow service, you create an endpoint to serve the workflow and listen for requests, by default on port `9080`.
+<Accordion title={"Run the example"}>
+[Install Restate](/develop/local_dev) and launch it:
+```bash
+restate-server
+```
+Run the example:
+```bash
+restate example typescript-tour-of-workflows && cd typescript-tour-of-workflows
+npm run dev
+```
 
-<Info>
-    We will implement a set of signup workflows to show different features of Restate.
-</Info>
+Then, tell Restate where your workflow is running:
+```bash
+restate deployments register http://localhost:9080
+```
+</Accordion>
 
-### Submitting Workflows
+## Submitting Workflows
 The workflow can be submitted over HTTP, Kafka, programmatically, or via the UI.
 
 To submit the workflow via HTTP send the request to `restate-ingress/workflow-name/key/run`, in our case:
@@ -94,9 +72,14 @@ curl localhost:8080/user-signup/johndoe/run \
   --json '{"name": "John Doe", "email": "john@mail.com"}'
 ```
 
-Restate will deduplicate workflow executions based on the key, here username `johndoe`.
+<Info>
+    Restate deduplicates workflow executions on the key, here `johndoe`.
+    Make sure you use another key, if you want to try a request multiple times.
+</Info>
 
-Or programmatically with the Restate SDK from other Restate services:
+<AccordionGroup>
+    <Accordion title={"Programmatic invocation"}>
+        You can invoke a workflow programmatically with the Restate SDK:
 
 ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/client.ts#submit"} 
 const restateClient = clients.connect({ url: "http://localhost:8080" });
@@ -107,14 +90,13 @@ const handle = await restateClient
 const result = await restateClient.result(handle);
 ```
 
-The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
+        The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
 
-Run the client script via:
-```bash
-npm run client
-```
-
-<AccordionGroup>
+        Run the client script via:
+        ```bash
+        npm run client
+        ```
+    </Accordion>
     <Accordion title={"Scheduling for later"}>
         You can schedule a workflow to run at a later time by specifying a delay:
         ```bash
@@ -136,7 +118,7 @@ npm run client
 
 ## Durable Execution
 
-Restate workflows use durable execution to ensure your business logic survives any failure and resumes exactly where it left off. Unlike traditional workflow systems that require separate orchestrator infrastructure and worker management, Restate lets you deploy your workflows the same way you deploy your application code.
+Restate uses Durable Execution to ensure your business logic survives any failure and resumes exactly where it left off. Unlike traditional workflow systems that require separate orchestrator infrastructure and worker management, Restate lets you deploy your workflows the same way you deploy your application code.
 
 You write a workflow as a regular function. You use the Restate SDK to persist the steps your workflow completes in the Restate Server.
 
@@ -144,63 +126,35 @@ If your workflow crashes or restarts, the execution replays from the journal to 
 
 <img src="/img/tour/durable_execution_microservices.gif" alt="Durable Workflow Execution" />
 
-The `WorkflowContext` provides durable execution capabilities:
-
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/getstarted/workflow.ts?collapse_prequel"}
-export const signupWorkflow = restate.workflow({
-  name: "user-signup",
-  handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
-      const userId = ctx.key; // workflow ID = user ID
-
-      const success = await ctx.run("create", () => createUserInDB(user));
-      if (!success) return { success };
-
-      await ctx.run("activate", () => callActivateUserAPI(userId));
-      await ctx.run("welcome", () => sendWelcomeEmail(user));
-      return { success };
-    },
-  },
-});
-```
-
-The `WorkflowContext` object lets us do durable operations like:
+To persist a workflow step, you use the `WorkflowContext` actions:
 - **Durable Steps**: `ctx.run()` ensures non-deterministic operations like database writes or external API calls are persisted
 - **Progress Recovery**: If the workflow crashes after user creation, it resumes at the email step
 - Full execution traces for debugging and monitoring
 
 <Accordion title={"Try it out"}>
-<Steps>
-    <Step title={"Send a request for Alice"}>
-        ```bash
-        curl localhost:8080/user-signup/alicedoe/run \
-          --json '{"name": "Alice", "email": "alice@mail.com"}'
-        ```
-    </Step>
-    <Step title={"Troubleshooting"}>
-        Go to the UI at `http://localhost:9070`, on the invocations page, and click on the invocation ID of the retrying invocation:
-        <Frame>
-        <img src="/img/tour/workflows/workflow_retries.png" alt="Workflow Retries"/>
-        </Frame>
-        You see how the invocation went through the steps of the workflow, and how it is stuck on retrying to send the welcome email.
-    </Step>
-    <Step title={"Fix the issue"}>
-        To fix the problem, remove the line `failOnAlice` from the `sendWelcomeEmail` function in the `utils.ts` file, and restart your service:
+Send a request for Alice:
+```bash
+curl localhost:8080/user-signup/alicedoe/run \
+--json '{"name": "Alice", "email": "alice@mail.com"}'
+```
+Go to the UI at `http://localhost:9070`, on the invocations page, and click on the invocation ID of the retrying invocation:
+<Frame>
+<img src="/img/tour/workflows/workflow_retries.png" alt="Workflow Retries"/>
+</Frame>
+You see how the invocation went through the steps of the workflow, and how it is stuck on retrying to send the welcome email.
 
-        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"} 
-export function sendWelcomeEmail(user: { name: string; email: string }) {
+To fix the problem, remove the line `failOnAlice` from the `sendWelcomeEmail` function in the `utils.ts` file:
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"} 
+export function sendWelcomeEmail(user: User) {
   failOnAlice(user.name, "send welcome email");
   console.log(`Welcome email sent: ${user.email}`);
 }
 ```
-    </Step>
-    <Step title={"Succesfull completion"}>
-        Once we have done this, we see the workflow finished successfully:
-        <Frame>
-        <img src="/img/tour/workflows/workflow_fixed.png" alt="Workflow Success"/>
-        </Frame>
-    </Step>
-</Steps>
+Once you restart the service, the workflow finishes successfully:
+<Frame>
+<img src="/img/tour/workflows/workflow_fixed.png" alt="Workflow Success"/>
+</Frame>
 </Accordion>
 
 ## In-line Steps vs. Separate Activities
@@ -212,11 +166,11 @@ Restate workflows can execute operations inline or delegate to separate services
 
 ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/activities/workflow.ts#activities"} 
 // Move user DB interaction to dedicated service
-const success = await ctx.serviceClient(userService).createUser(user);
+const success = await ctx.serviceClient(userService).createUser({ userId, user });
 if (!success) return { success };
 
 // Execute other steps inline
-await ctx.run("activate", () => callActivateUserAPI(userId));
+await ctx.run("activate", () => activateUser(userId));
 await ctx.run("welcome", () => sendWelcomeEmail(user));
 ```
 
@@ -227,9 +181,7 @@ Workflows are just one of the service types Restate supports. The other service 
 - [Virtual Objects](/basics/services): stateful services that can be used to manage state and concurrency across multiple invocations.
 
 <Info>
-    Restate can be used for more than just workflows.
-    You can implement any service as a Restate service.
-    Have a look at the [Microservice Orchestration Tour]("/tour/microservice-orchestration") to learn how to build microservices with Restate.
+To learn more, follow at the [Microservice Orchestration Tour]("/tour/microservice-orchestration").
 </Info>
 
 <Accordion title={"Try it out"}>
@@ -259,26 +211,27 @@ Workflows can store state in Restate, which can be queried later by other handle
 export const signupWithQueries = restate.workflow({
   name: "signup-with-queries",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
+    run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
 
-      const success = await ctx.run("create", () => createUserInDB(user));
+      ctx.set("user", user);
+      const success = await ctx.run("create", () => createUser(userId, user));
       if (!success) {
         ctx.set("status", "failed");
         return { success };
       }
-
       ctx.set("status", "created");
-      await ctx.run("activate", () => callActivateUserAPI(userId));
-      ctx.set("completed-at", await ctx.date.toJSON());
-      ctx.set("status", "active");
 
+      await ctx.run("activate", () => activateUser(userId));
       await ctx.run("welcome", () => sendWelcomeEmail(user));
       return { success };
     },
 
-    getStatus: async (ctx: restate.WorkflowSharedContext) => {
-      return await ctx.get("status");
+    getStatus: async (ctx: WorkflowSharedContext) => {
+      return {
+        status: await ctx.get("status"),
+        user: await ctx.get("user"),
+      };
     },
   },
 });
@@ -286,7 +239,7 @@ export const signupWithQueries = restate.workflow({
 Key characteristics:
 - State is isolated per workflow execution.
 - State lives up to the duration of the workflow retention ([default one day](/operate/configuration/services#retention-policies)).
-- State is queryable from the Restate UI.
+- State is queryable from other handlers or the Restate UI.
 
 <Frame>
     <img src="/img/tour/workflows/queries.png" alt="Workflow Queries"/>
@@ -309,23 +262,18 @@ Pause workflow execution waiting for external events using durable promises:
 export const signupWithSignals = restate.workflow({
   name: "signup-with-signals",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
+    run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
 
       // Generate verification secret and send email
       const secret = ctx.rand.uuidv4();
-      await ctx.run("verify", () =>
-        sendVerificationEmail(userId, user, secret),
-      );
+      await ctx.run("verify", () => sendVerificationEmail(userId, user, secret));
 
       // Wait for user to click verification link
       const clickedSecret = await ctx.promise<string>("email-verified");
       return { success: clickedSecret === secret };
     },
-    verifyEmail: async (
-      ctx: restate.WorkflowSharedContext,
-      req: { secret: string },
-    ) => {
+    verifyEmail: async (ctx: WorkflowSharedContext, req: { secret: string }) => {
       // Resolve the promise to continue the main workflow
       await ctx.promise<string>("email-verified").resolve(req.secret);
     },
@@ -369,29 +317,29 @@ You can also use promises the other way around: to send events from the workflow
 export const signupWithEvents = restate.workflow({
   name: "signup-with-events",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
+    run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
 
-      const success = await ctx.run("create", () => createUserInDB(user));
+      const success = await ctx.run("create", () => createUser(userId, user));
       if (!success) {
         await ctx.promise<string>("user-created").reject("Creation failed.");
         return { success };
       }
       await ctx.promise<string>("user-created").resolve("User created.");
 
-      await ctx.run("activate", () => callActivateUserAPI(userId));
+      await ctx.run("activate", () => activateUser(userId));
       await ctx.run("welcome", () => sendWelcomeEmail(user));
       return { success };
     },
 
-    waitForUserCreation: async (ctx: restate.WorkflowSharedContext) => {
+    waitForUserCreation: async (ctx: WorkflowSharedContext) => {
       return ctx.promise<string>("user-created");
     },
   },
 });
 ```
 
-External clients can now call the `waitForUserCreation` or `waitForUserActivation` handlers to wait for specific events in the signup process before proceeding with other operations.
+Here, external clients can wait for the user to be created in the database.
 
 These handlers can be called up to the workflow's retention period ([default one day](/operate/configuration/services#retention-policies)).
 
@@ -418,20 +366,18 @@ Use durable timers for long-running workflows with timeouts and retries:
 export const signupWithTimers = restate.workflow({
   name: "signup-with-timers",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
+    run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
 
       const secret = ctx.rand.uuidv4();
-      await ctx.run("verify", () =>
-        sendVerificationEmail(userId, user, secret),
-      );
+      await ctx.run("verify", () => sendVerificationEmail(userId, user, secret));
 
       const clickedPromise = ctx.promise<string>("email-verified").get();
       const verificationTimeout = ctx.sleep({ days: 1 });
       while (true) {
         const reminderTimer = ctx.sleep({ seconds: 15 });
 
-        // Wait for either email verification, reminder timeout, or verification timeout
+        // Wait for email verification, reminder timer or timeout
         const result = await RestatePromise.race([
           clickedPromise.map(() => "verified"),
           reminderTimer.map(() => "reminder"),
@@ -446,18 +392,12 @@ export const signupWithTimers = restate.workflow({
             await ctx.run("remind", () => sendReminderEmail(user));
             break;
           case "timeout":
-            throw new restate.TerminalError(
-              "Email verification timed out after 24 hours",
-            );
+            throw new TerminalError("Email verification timed out after 24 hours");
         }
       }
     },
-    verifyEmail: async (
-      ctx: restate.WorkflowSharedContext,
-      request: { secret: string },
-    ) => {
-      // Resolve the promise to continue the main workflow
-      await ctx.promise<string>("email-verified").resolve(request.secret);
+    verifyEmail: async (ctx: WorkflowSharedContext, req: { secret: string }) => {
+      await ctx.promise<string>("email-verified").resolve(req.secret);
     },
   },
 });
@@ -521,7 +461,6 @@ Configure custom retry policies for specific operations to avoid blocking the wo
 
 ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/retries/workflow.ts#retries"} 
 try {
-  // Define a retry policy for sending the welcome email
   const policy = {
     maxRetryAttempts: 3,
     initialRetryIntervalMillis: 1000,
@@ -562,22 +501,18 @@ Build compensating actions for each step and execute them in reverse order on fa
 export const signupWithSagas = restate.workflow({
   name: "signup-with-sagas",
   handlers: {
-    run: async (ctx: restate.WorkflowContext, user: User) => {
+    run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
       const compensations = [];
 
       try {
-        compensations.push(() => ctx.run("delete", () => deleteUserInDB(user)));
-        await ctx.run("create", () => createUserInDB(user));
+        compensations.push(() => ctx.run("delete", () => deleteUser(userId)));
+        await ctx.run("create", () => createUser(userId, user));
 
-        compensations.push(() =>
-          ctx.run("deactivate", () => callDeactivateUserAPI(userId)),
-        );
-        await ctx.run("activate", () => callActivateUserAPI(userId));
+        compensations.push(() => ctx.run("deactivate", () => deactivateUser(userId)));
+        await ctx.run("activate", () => activateUser(userId));
 
-        compensations.push(() =>
-          ctx.run("unsubscribe", () => cancelSubscription(user)),
-        );
+        compensations.push(() => ctx.run("unsubscribe", () => cancelSubscription(user)));
         await ctx.run("subscribe", () => subscribeToPaidPlan(user));
       } catch (e) {
         if (e instanceof restate.TerminalError) {
