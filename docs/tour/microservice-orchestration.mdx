@@ -111,7 +111,7 @@ This process continues until the handler runs till completion.
 
     To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `utils.ts` file:
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"} 
 export function createSubscription(
   userId: string,
   subscription: string,
@@ -232,7 +232,7 @@ export const subscriptionSaga = restate.service({
 
     The Disney subscription is not available, so the handler will fail and run compensations:
     <Frame>
-        <img src="/img/tour/microservices/sagas.png" alt="Workflow Sagas"/>
+        <img src="/img/tour/microservices/sagas.png" alt="Sagas"/>
     </Frame>
 </Accordion>
 
@@ -244,7 +244,9 @@ Until now, the services we looked at did not share any state between requests.
 
 To implement stateful entities like shopping carts, user profiles, or AI agents, Restate provides **Virtual Objects**.
 
-Each Virtual Object instance maintains isolated state:
+Each Virtual Object instance maintains isolated state and is identified by a unique key.
+
+Here is an example of a Virtual Object that tracks user subscriptions:
 
 ```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/objects/service.ts?collapse_prequel"} 
 export const userSubscriptions = restate.object({
@@ -261,7 +263,7 @@ export const userSubscriptions = restate.object({
       ctx.set("subscriptions", subscriptions);
 
       // Update metrics
-      ctx.set("lastUpdated", ctx.date.toJSON());
+      ctx.set("lastUpdated", await ctx.date.toJSON());
     },
 
     getSubscriptions: async (ctx: ObjectSharedContext) => {
@@ -280,16 +282,18 @@ Restate ensures that your state is durable and consistent:
 - K/V state is stored permanently. It has no automatic expiry. Clear it via `ctx.clear()`.
 - State is queryable via the UI:
 <Frame>
-<img src="/img/tour/microservices/state.png" alt="Workflow Sagas"/>
+<img src="/img/tour/microservices/state.png" alt="State"/>
 </Frame>
 
 <Accordion title={"Try it out"}>
 
-    Add a few subscriptions for a user:
+    Add a few subscriptions for some users.
+    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
     ```bash
     curl localhost:8080/UserSubscriptions/user-123/add --json '"Hulu"'
     curl localhost:8080/UserSubscriptions/user-123/add --json '"Prime"'
     curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
+    curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
     ```
 
     Get the subscriptions for the user:
@@ -340,13 +344,23 @@ The handler can finish execution without waiting for the ticket delivery or remi
 You can use Restate's communication primitives to implement microservices that communicate reliably and scale independently.
 
 <Accordion title={"Try it out"}>
-```bash
-# Test service communication
-restate invoke SubscriptionService.add --json '{"userId": "user-789", "creditCard": "4111111111111111", "subscriptions": ["basic"]}'
 
-# Watch the flow in UI
-open http://localhost:9070
-```
+    Add a few subscriptions for some users.
+    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
+    ```bash
+    curl localhost:8080/ConcertTicketingService/buy --json '{
+        "ticketId": "ticket-789",
+        "price": 100,
+        "customerEmail": "me@mail.com",
+        "concertDate": "2026-10-01T20:00:00Z"
+    }'
+    ```
+
+
+    See in the UI how the first call had the response logged, while the ticket delivery happened asynchronously and the reminder was scheduled for in 406 days:
+    <Frame>
+        <img src="/img/tour/microservices/communication.png" alt="Communication"/>
+    </Frame>
 </Accordion>
 
 ## Request Idempotency
@@ -363,7 +377,8 @@ curl -X POST localhost:8080/ConcertTicketingService/buy \
   --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
 ```
 
-Notice how doing the same request with the same idempotency key will return the same response without re-executing the handler.
+Notice how doing the same request with the same idempotency key will print the same payment reference.
+Instead of executing the handler again, Restate returns the result of the first execution.
 
 ## External Events
 
@@ -407,6 +422,29 @@ There is no limit to how long you can persist an awakeable, so you can wait for 
 
 You can also use awakeables to implement human-in-the-loop interactions, such as waiting for user input or approvals.
 
+<Accordion title={"Try it out"}>
+    Initiate a payment by calling the `process` handler. Add `/send` to call the handler without waiting for the response:
+    ```bash
+    curl localhost:8080/Payments/process \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+    ```
+
+    In the UI, you can see that the payment is waiting for confirmation.
+
+    You can restart the service to see how Restate continues waiting for the payment confirmation.
+
+    Simulate approving the payment by executing the **curl request that was printed in the service logs**, similar to:
+    ```bash
+    curl localhost:8080/Payments/confirm \
+        --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
+    ```
+
+    You can see in the UI that the payment was processed successfully and the awakeable was resolved:
+    <Frame>
+        <img src="/img/tour/microservices/awakeables.png" alt="Awakeables"/>
+    </Frame>
+</Accordion>
+
 ## Durable Timers
 Waiting on external events might take a long time, and you might want to add timeouts to operations like this.
 
@@ -415,44 +453,41 @@ Restate tracks these timers so they survive crashes and do not restart from the 
 
 Let's extend our payment service to automatically cancel payments that don't complete within a reasonable time:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts?collapse_prequel"} 
-export const paymentsWithTimeout = restate.service({
-  name: "PaymentsWithTimeout",
-  handlers: {
-    process: async (ctx: Context, req: PaymentRequest) => {
-      const confirmation = ctx.awakeable<PaymentResult>();
-
-      const payRef = await ctx.run("pay", () =>
-        initPayment(req, confirmation.id),
-      );
-
-      // Race between payment confirmation and timeout
-      try {
-        return confirmation.promise.orTimeout({ minutes: 10 });
-      } catch (e) {
-        if (e instanceof TimeoutError) {
-          // Cancel the payment with external provider
-          await ctx.run("cancel-payment", () => cancelPayment(payRef));
-          return {
-            success: false,
-            errorMessage: "Payment timeout",
-          };
-        }
-        throw e;
-      }
-    },
-
-    confirm: async (
-      ctx: Context,
-      confirmation: { id: string; result: PaymentResult },
-    ) => {
-      ctx.resolveAwakeable(confirmation.id, confirmation.result);
-    },
-  },
-});
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts#or_timeout"} 
+// Race between payment confirmation and timeout
+try {
+  return await confirmation.promise.orTimeout({ seconds: 30 });
+} catch (e) {
+  if (e instanceof TimeoutError) {
+    // Cancel the payment with external provider
+    await ctx.run("cancel-payment", () => cancelPayment(payRef));
+    return {
+      success: false,
+      errorMessage: "Payment timeout",
+    };
+  }
+  throw e;
+}
 ```
 
 You can also set timeouts for RPC calls or other asynchronous operations with the Restate SDK.
+
+<Accordion title={"Try it out"}>
+    Initiate a payment by calling the `process` handler. Add `/send` to call the handler without waiting for the response:
+    ```bash
+    curl localhost:8080/PaymentsWithTimeout/process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+    ```
+
+    Wait for 30 seconds without confirming the payment.
+
+    Try restarting the service while the payment is waiting for confirmation to see how Restate continues waiting for the timer and the confirmation.
+
+    In the UI, you can see that the payment times out and cancels the payment:
+    <Frame>
+        <img src="/img/tour/microservices/timer.png" alt="Timers"/>
+    </Frame>
+</Accordion>
 
 ## Concurrent Tasks
 
@@ -474,7 +509,7 @@ export const parallelSubscriptionService = restate.service({
 
             // Start all subscriptions in parallel
             const subscriptionPromises = []
-            for (const subscription in req.subscriptions) {
+            for (const subscription of req.subscriptions) {
                 subscriptionPromises.push(ctx.run(`add-${subscription}`, () =>
                     createSubscription(req.userId, subscription, payRef)
                 ))
@@ -490,6 +525,20 @@ export const parallelSubscriptionService = restate.service({
 ```
 
 Restate retries all parallel tasks until they all complete and can deterministically replay the order of completion (for example for `RestatePromise.any`).
+
+<Accordion title={"Try it out"}>
+    Add a few subscriptions for some users.
+    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
+    ```bash
+    curl localhost:8080/ParallelSubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
+    ```
+
+    In the UI, you can see that all subscriptions are processed in parallel:
+    <Frame>
+        <img src="/img/tour/microservices/concurrent_tasks.png" alt="Concurrent Tasks"/>
+    </Frame>
+</Accordion>
 
 You can extend this to include the saga pattern and run all compensations in parallel as well.
 
