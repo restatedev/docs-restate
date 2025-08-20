@@ -1,0 +1,91 @@
+---
+title: "Getting Started with Restate Cloud"
+sidebarTitle: "Getting started"
+icon: "cloud"
+description: "Learn how to use Restate Cloud, the fully managed version of Restate."
+---
+
+
+<Card title="Restate Cloud" icon="cloud" href={"https://restate.dev/cloud/"}>
+    Learn more and sign up.
+</Card>
+
+Restate Cloud) is a fully managed serverless version of Restate, with a suite of tools supporting a stellar local development experience, and security features like [request signing](#securing-your-services) and [IAM roles for AWS Lambda](#aws-lambda-services).
+
+This allows you to focus on your services, which you can deploy wherever you normally do, while Restate Cloud handles all aspects of availability and durability for your invocations, workflows, and state.
+
+## Creating your first environment
+
+You can sign in to Cloud using an email address and password, or using Google or GitHub SSO.
+After signing up, you'll be prompted to create an account, and an environment. An environment is an instance of the Restate server that is unique to you, and managed by Restate.
+
+Accounts and environments must have a name comprising of lowercase alphanumeric
+characters or hyphens. For example, you can choose `dev` for your account and
+`my-environment` for your environment.
+
+You can start using your new environment straight away using the [CLI](/develop/local_dev#running-restate-server--cli-locally):
+
+```bash
+# authenticate to Cloud
+restate cloud login
+# set up your CLI to talk to your Cloud environment
+restate cloud env configure
+# check that everything is working!
+restate whoami
+```
+
+<Info title="Switching environments in the CLI">
+    At any time, you can switch your CLI back to point to a Restate server running
+    on your machine with `restate config use-environment local` (see the
+    [CLI docs](/operate/configuration/cli#using-the-config-file)).
+</Info>
+
+## Registering Restate services with your environment
+
+You can use your Cloud environment exactly as a self-hosted one; register
+services with `restate deployments register <service-endpoint>`.
+
+However, currently your services must be accessible over the public internet for
+Restate to be able to invoke them. If you want to develop using a
+service running on your local machine, you can expose it using our tunnel
+feature:
+
+```bash
+# expose localhost:9080 to Restate Cloud
+restate cloud env tunnel --local-port 9080
+# copy the tunnel url from the output and register it to your environment
+restate deployments register tunnel://example:9081
+```
+
+
+## Invoking your services
+
+In the UI you can find the URL of your Restate environment. All requests must be
+authenticated using a Bearer token. We suggest that humans use their SSO token
+which is obtained by `restate cloud login`, and will be used automatically by
+the CLI. If you want to test invocations using `curl` as described in the [invoke docs](/invoke/http), you can use the tunnel command to expose
+the ingress port of the Restate server as if it was running on your machine:
+
+```bash
+restate cloud env tunnel --remote-port 8080
+curl localhost:8080/MyService/myHandler
+```
+
+### API tokens
+
+For programmatic invocation, awakeable completion, or admin API usage from
+scripts, CI pipelines, API gateways, or services that exist outside Restate,
+you can create an API key in the UI, selecting an appropriate role for your use
+case.
+
+```bash
+curl -H "Authorization: Bearer $MY_API_KEY" https://201hy10cd3h6426jy80tb32n6en.env.us.restate.cloud:8080/MyService/MyHandler
+curl -H "Authorization: Bearer $MY_API_KEY" https://201hy10cd3h6426jy80tb32n6en.env.us.restate.cloud:9070/deployments
+```
+
+To use the CLI programmatically with this token:
+
+```bash
+export RESTATE_HOST_SCHEME=https RESTATE_HOST=201hy10cd3h6426jy80tb32n6en.env.us.restate.cloud RESTATE_AUTH_TOKEN=$MY_API_KEY
+restate whoami
+```

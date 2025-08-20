@@ -1,0 +1,196 @@
+---
+title: "Connecting services to Restate Cloud"
+sidebarTitle: "Connecting services"
+icon: "link"
+description: "Learn how to connect your services to Restate Cloud."
+---
+
+
+## Setting up a tunnel to Restate Cloud
+
+You can connect your services to Restate Cloud via Restate's tunnel client.
+
+### 1. Create a Restate Cloud environment
+Open the [Restate Cloud UI](https://cloud.restate.dev) and create a new environment.
+
+Note the environment id (`env_...`) and request signing key (under security -> HTTP services: `publickeyv1_...`), as you will need them later.
+
+Create a "Full" scope API key and copy the key for later.
+
+### 2. Setup the CLI
+Next, we need to set up a CLI profile to connect to our Restate Cloud environment.
+
+Log in to Restate Cloud using the CLI:
+```bash
+restate cloud login
+```
+
+Set up a new CLI profile for your environment:
+```bash
+restate cloud env configure
+```
+
+Tell the CLI to use the new environment:
+```bash
+restate config use-env <name>
+```
+
+### 3. Run the tunnel
+
+Run the tunnel in a Docker container. Either locally or next to your service:
+
+```bash
+# export RESTATE_ENVIRONMENT_ID=env_...
+# export RESTATE_BEARER_TOKEN=key_...
+# export RESTATE_TUNNEL_NAME=test-tunnel
+# export RESTATE_SIGNING_PUBLIC_KEY=publickeyv1_...
+# export RESTATE_CLOUD_REGION=eu
+# export RUST_LOG=info
+
+docker run \
+  -e RESTATE_CLOUD_REGION \
+  -e RESTATE_ENVIRONMENT_ID \
+  -e RESTATE_SIGNING_PUBLIC_KEY \
+  -e RESTATE_BEARER_TOKEN \
+  -e RESTATE_TUNNEL_NAME \
+  -e RUST_LOG \
+  -p 8080:8080 \
+  -p 9090:9090 \
+  -it ghcr.io/restatedev/restate-cloud-tunnel-client:0.4.0
+```
+
+### 4. Run a Restate service locally
+
+Follow the quickstart to [run a Restate service locally](/quickstart).
+
+### 5. Register your service
+
+If your setup is correct, you can now register your service with the Restate Cloud environment:
+```bash
+restate deployments register https://tunnel.eu.restate.cloud:9080/<no-prefix-env-id>/<tunnel-name>/http/<remote-fqdn>/<remote-port>
+```
+
+- Use just the numeric environment id here (without the `env_` prefix).
+- The tunnel name must match the name provided to the tunnel client
+- The remote fqdn and port must resolve to the Restate service endpoint (e.g. `localhost:9080`) from the perspective of the tunnel client
+
+For example, if your service is running on `localhost:9080` and your environment id is `env_20d1231jyphzkm8`, you can register it like this:
+```bash
+restate deployments register https://tunnel.eu.restate.cloud:9080/20d1231jyphzkm8/test-tunnel/http/localhost/9080
+```
+
+### 6. Test your service
+
+You can now test your service by invoking it via Restate Cloud.
+
+### How does it work?
+- Restate CLI is communicating with your Restate environment at `https://*.eu.restate.cloud:9070` using your user id token and asking the admin API to perform a discovery at the special tunnel URL
+- The Restate Cloud end of the tunnel receives the request from your environment and, subject to matching tunnel found, forwarding the traffic to the tunnel container
+- The tunnel container is forwarding the traffic to the Restate service endpoint
+
+## AWS Lambda services
+
+To invoke services running on AWS Lambda, Restate Cloud needs to assume an AWS
+identity in the same account that the Lambda is deployed to. Create a new role
+that has permission to invoke your Lambda handlers, and give it the following
+trust policy.
+
+<Info>
+    The Restate Cloud role is distinct from the Lambda function's execution role.
+    The execution role is assumed by your function to perform its work. A dedicated
+    invoker role is needed to grant Restate Cloud permission to invoke service handler
+    functions in your account, and nothing more.
+</Info>
+
+<CodeGroup>
+```json IAM JSON Policy expandable
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::654654156625:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+                "StringEquals": {
+                    "aws:PrincipalArn": "arn:aws:iam::654654156625:role/RestateCloud",
+                    "sts:ExternalId": "${ENVIRONMENT_ID}"
+                }
+            }
+        },
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::654654156625:root"
+            },
+            "Action": "sts:TagSession"
+        }
+    ]
+}
+```
+
+Replace the `${ENVIRONMENT_ID}` placeholder with the environment ID can be found in the UI and in the output of `restate whoami`.
+This trust policy allows the Restate Cloud `us.restate.cloud` region principal to assume the role, but only on behalf of the specified environment ID.
+
+```ts AWS CDK
+const restateCloudRole = new iam.Role(this, "RestateCloudRole", {
+    assumedBy: new iam.AccountPrincipal("654654156625")
+        .withConditions({
+            "StringEquals": {
+                "sts:ExternalId": environmentId,
+                "aws:PrincipalArn": "arn:aws:iam::654654156625:role/RestateCloud",
+            },
+        }),
+});
+restateCloudRole.assumeRolePolicy!.addStatements(
+    new iam.PolicyStatement({
+        principals: [new iam.AccountPrincipal("654654156625")],
+        actions: ["sts:TagSession"],
+    }),
+);
+```
+
+        When you use the [Restate CDK construct library](/deploy/services/faas/lambda/cdk) to deploy
+        Lambda handlers, the provided invoker role will automatically be granted access
+        to invoke the corresponding functions. If you manage Restate service deployments
+        some other way, you should ensure that the Restate Cloud invoker role is permitted
+        to call the appropriate Lambda handler functions by allowing it to perform `lambda:InvokeFunction`.
+
+        Use the `environmentId` variable to pass the environment ID can be found in the UI and in the output of `restate whoami`.
+        This trust policy allows the Restate Cloud `us.restate.cloud` region principal to assume the role, but only on behalf of the specified environment.
+</CodeGroup>
+
+You can now register your Lambda through the new role:
+
+```shell
+restate deployments register <LAMBDA_FUNCTION_ARN> --assume-role-arn <ROLE_ARN>
+```
+
+If something isn't working, the environment logs in the cloud UI may help
+you find the issue.
+
+<Info>
+    **Securing your services:**
+
+    If your Lambda has an appropriate trust policy as described above, you do not
+need to secure incoming requests any further. If you choose to however, the
+identity verification checks will work on Lambda endpoints as well.
+</Info>
+
+
+## Public HTTP endpoint & request signing
+
+Restate invokes your services over the public internet. For production use cases
+HTTPS must be used between Restate and your services. You can terminate TLS at
+the service endpoint directly, but it's likely easier to use a fronting
+load balancer like an AWS NLB.
+
+You must secure access to your service so that only Restate can call it.
+The easiest way to do this is with our native request identity feature.
+All requests to your service will be signed with a unique environment-specific private
+key. You can find the corresponding public key in the environment settings UI, under HTTP Services.
+It is safe to include this public key directly in your service code.
+
+Have a look at the SDK serving documentation to learn how for [TS](/develop/ts/serving#validating-request-identity), [Java, Kotlin](/develop/java/serving#validating-request-identity), [Python](/develop/python/serving#validating-request-identity), [Go](/develop/go/serving#validating-request-identity), and [Rust](https://docs.rs/restate-sdk/latest/restate_sdk/http_server/index.html#validating-request-identity).
