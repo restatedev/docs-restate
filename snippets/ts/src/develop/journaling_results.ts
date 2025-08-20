@@ -38,21 +38,14 @@ const service = restate.service({
       const sleepPromise2 = ctx.sleep({ milliseconds: 200 });
       const callPromise = ctx.serviceClient(myService).myHandler("Hi");
 
-      const firstResult = await RestatePromise.any([
-        sleepPromise1,
-        sleepPromise2,
-        callPromise,
-      ]);
+      const firstResult = await RestatePromise.any([sleepPromise1, sleepPromise2, callPromise]);
       // <end_any>
 
       // <start_race>
       const sleepPromise3 = ctx.sleep({ milliseconds: 100 });
       const callPromise2 = ctx.serviceClient(myService).myHandler("Hi");
 
-      const firstToComplete = await RestatePromise.race([
-        sleepPromise3,
-        callPromise2,
-      ]);
+      const firstToComplete = await RestatePromise.race([sleepPromise3, callPromise2]);
       // <end_race>
 
       // <start_allSettled>
@@ -68,15 +61,9 @@ const service = restate.service({
       // <end_allSettled>
 
       // <start_parallel>
-      const call1 = ctx.run("fetch_user", async () =>
-        fetchUserData({ userId: 123 })
-      );
-      const call2 = ctx.run("fetch_orders", async () =>
-        fetchOrderHistory({ userId: 123 })
-      );
-      const call3 = ctx
-        .serviceClient(analyticsService)
-        .calculateMetrics({ userId: 123 });
+      const call1 = ctx.run("fetch_user", async () => fetchUserData({ userId: 123 }));
+      const call2 = ctx.run("fetch_orders", async () => fetchOrderHistory({ userId: 123 }));
+      const call3 = ctx.serviceClient(analyticsService).calculateMetrics({ userId: 123 });
 
       const user = await call1;
       const orders = await call2;

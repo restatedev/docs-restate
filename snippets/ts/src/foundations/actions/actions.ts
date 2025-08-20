@@ -40,10 +40,7 @@ const ValidationService = restate.service({
 const NotificationService = restate.service({
   name: "NotificationService",
   handlers: {
-    sendEmail: async (
-      ctx: restate.Context,
-      req: { userId: string; message: string }
-    ) => {},
+    sendEmail: async (ctx: restate.Context, req: { userId: string; message: string }) => {},
   },
 });
 
@@ -64,25 +61,23 @@ const ShoppingCartObject = restate.object({
 const ReminderService = restate.service({
   name: "ReminderService",
   handlers: {
-    sendReminder: async (
-      ctx: restate.Context,
-      req: { userId: string; message: string }
-    ) => {},
+    sendReminder: async (ctx: restate.Context, req: { userId: string; message: string }) => {},
   },
 });
 
 const UserAccount = restate.object({
   name: "UserAccount",
   handlers: {
-    getProfile: async (ctx: restate.ObjectContext) =>
-      ({ name: "John" } as UserProfile),
+    getProfile: async (ctx: restate.ObjectContext) => ({ name: "John" } as UserProfile),
   },
 });
+
+type Order = {};
 
 const OrderWorkflow = restate.workflow({
   name: "OrderWorkflow",
   handlers: {
-    run: async (ctx: restate.WorkflowContext) => {},
+    run: async (ctx: restate.WorkflowContext, order: Order) => {},
     getStatus: async (ctx: restate.WorkflowSharedContext) => "pending",
   },
 });
@@ -109,47 +104,33 @@ const ActionsExampleService = restate.service({
       // <end_durable_steps>
     },
 
-    serviceCallsExample: async (
-      ctx: restate.Context,
-      { userId, orderId, order }: any
-    ) => {
+    serviceCallsExample: async (ctx: restate.Context, { userId, orderId, order }: any) => {
       // <start_service_calls>
       // Call another service
-      const validation = await ctx
-        .serviceClient(ValidationService)
-        .validateOrder(order);
+      const validation = await ctx.serviceClient(ValidationService).validateOrder(order);
 
       // Call Virtual Object function
       const profile = await ctx.objectClient(UserAccount, userId).getProfile();
 
       // Call Workflow function
-      const status = await ctx
-        .workflowClient(OrderWorkflow, orderId)
-        .getStatus();
+      const result = await ctx.workflowClient(OrderWorkflow, orderId).run(order);
       // <end_service_calls>
     },
 
     sendingMessagesExample: async (ctx: restate.Context, userId: string) => {
       // <start_sending_messages>
       // Fire-and-forget notification
-      ctx
-        .serviceSendClient(NotificationService)
-        .sendEmail({ userId, message: "Welcome!" });
+      ctx.serviceSendClient(NotificationService).sendEmail({ userId, message: "Welcome!" });
 
       // Background analytics
-      ctx
-        .serviceSendClient(AnalyticsService)
-        .recordEvent({ kind: "user_signup", userId });
+      ctx.serviceSendClient(AnalyticsService).recordEvent({ kind: "user_signup", userId });
 
       // Cleanup task
       ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
       // <end_sending_messages>
     },
 
-    delayedMessagesExample: async (
-      ctx: restate.Context,
-      { userId, message }: any
-    ) => {
+    delayedMessagesExample: async (ctx: restate.Context, { userId, message }: any) => {
       // <start_delayed_messages>
       // Schedule reminder for tomorrow
       ctx.serviceSendClient(ReminderService).sendReminder(
@@ -223,9 +204,7 @@ const WorkflowExampleWorkflow = restate.workflow({
     run: async (ctx: restate.WorkflowContext) => {
       // <start_workflow_promises>
       // Wait for external event
-      const paymentResult = await ctx.promise<PaymentResult>(
-        "payment-completed"
-      );
+      const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
 
       // Wait for human approval
       const approved = await ctx.promise<boolean>("manager-approval");
@@ -240,10 +219,7 @@ const WorkflowExampleWorkflow = restate.workflow({
 
     // <start_signal_functions>
     // In a signal function
-    confirmPayment: async (
-      ctx: WorkflowSharedContext,
-      result: PaymentResult
-    ) => {
+    confirmPayment: async (ctx: WorkflowSharedContext, result: PaymentResult) => {
       await ctx.promise("payment-completed").resolve(result);
     },
 

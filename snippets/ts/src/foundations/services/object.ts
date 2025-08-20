@@ -22,12 +22,10 @@ const cartObject = restate.object({
       return items;
     },
 
-    getTotal: restate.handlers.object.shared(
-      async (ctx: restate.ObjectSharedContext) => {
-        const items = (await ctx.get<Item[]>("items")) ?? [];
-        return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-      }
-    ),
+    getTotal: restate.handlers.object.shared(async (ctx: restate.ObjectSharedContext) => {
+      const items = (await ctx.get<Item[]>("items")) ?? [];
+      return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    }),
   },
 });
 // <end_here>

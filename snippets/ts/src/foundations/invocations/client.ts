@@ -27,10 +27,7 @@ const greeterService = restate.service({
       // <end_attach>
       return `${greeting}!`;
     },
-    cancel: async (
-      ctx: restate.Context,
-      { greeting }: { greeting: string }
-    ) => {
+    cancel: async (ctx: restate.Context, { greeting }: { greeting: string }) => {
       // <start_cancel>
       const handle = ctx.serviceSendClient(myService).myHandler("Hi");
       const invocationId = await handle.invocationId;
@@ -48,8 +45,6 @@ async function call() {
   const restateClient = clients.connect({ url: "http://localhost:8080" });
 
   // To call a service:
-  const greet = await restateClient
-    .serviceClient(greeterService)
-    .greet({ greeting: "Hi" });
+  const greet = await restateClient.serviceClient(greeterService).greet({ greeting: "Hi" });
   // <end_here>
 }

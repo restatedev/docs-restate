@@ -34,9 +34,7 @@ const myPlainTSFunction2 = async () => {
   const restateClient = clients.connect({ url: "http://localhost:8080" });
 
   // To send a message to a service
-  await restateClient
-    .serviceSendClient<MyService>({ name: "MyService" })
-    .greet({ greeting: "Hi" });
+  await restateClient.serviceSendClient<MyService>({ name: "MyService" }).greet({ greeting: "Hi" });
 
   // To send a message to an object
   await restateClient
@@ -69,10 +67,7 @@ const myPlainTSFunction3 = async () => {
   // To send a delayed message to a workflow
   const handle = await restateClient
     .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
-    .workflowSubmit(
-      { greeting: "Hi" },
-      clients.rpc.sendOpts({ delay: { seconds: 1 } })
-    );
+    .workflowSubmit({ greeting: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
   // You cannot send a delayed message to a shared handler in a workflow
   // <end_delayed_call_node>
 };

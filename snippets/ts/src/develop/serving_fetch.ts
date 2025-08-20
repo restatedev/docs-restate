@@ -15,12 +15,7 @@ const myWorkflow = restate.workflow({
 
 // <start_fetch>
 import * as restate from "@restatedev/restate-sdk/fetch";
-const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
+const handler = restate.endpoint().bind(myService).bind(myVirtualObject).bind(myWorkflow).handler();
 // Cloudflare expects the handler as a default export
 export default handler;
 // Deno expects to be passed the fetch function

@@ -101,17 +101,13 @@ Make request-response calls to other services. Your function waits for the resul
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#service_calls"} 
 // Call another service
-const validation = await ctx
-  .serviceClient(ValidationService)
-  .validateOrder(order);
+const validation = await ctx.serviceClient(ValidationService).validateOrder(order);
 
 // Call Virtual Object function
 const profile = await ctx.objectClient(UserAccount, userId).getProfile();
 
 // Call Workflow function
-const status = await ctx
-  .workflowClient(OrderWorkflow, orderId)
-  .getStatus();
+const result = await ctx.workflowClient(OrderWorkflow, orderId).run(order);
 ```
 
 ```java Java
@@ -143,14 +139,10 @@ Make one-way calls that don't return results. Your function continues immediatel
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#sending_messages"} 
 // Fire-and-forget notification
-ctx
-  .serviceSendClient(NotificationService)
-  .sendEmail({ userId, message: "Welcome!" });
+ctx.serviceSendClient(NotificationService).sendEmail({ userId, message: "Welcome!" });
 
 // Background analytics
-ctx
-  .serviceSendClient(AnalyticsService)
-  .recordEvent({ kind: "user_signup", userId });
+ctx.serviceSendClient(AnalyticsService).recordEvent({ kind: "user_signup", userId });
 
 // Cleanup task
 ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
@@ -225,9 +217,7 @@ Create promises that external systems can resolve to send data to your workflow.
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#workflow_promises"} 
 // Wait for external event
-const paymentResult = await ctx.promise<PaymentResult>(
-  "payment-completed"
-);
+const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
 
 // Wait for human approval
 const approved = await ctx.promise<boolean>("manager-approval");
@@ -243,10 +233,7 @@ Resolve promises from signal functions.
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#signal_functions"} 
 // In a signal function
-confirmPayment: async (
-  ctx: WorkflowSharedContext,
-  result: PaymentResult
-) => {
+confirmPayment: async (ctx: WorkflowSharedContext, result: PaymentResult) => {
   await ctx.promise("payment-completed").resolve(result);
 },
 

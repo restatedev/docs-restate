@@ -17,10 +17,7 @@ function sendEmailWithLink(param: {
 const signupWorkflow = restate.workflow({
   name: "user-signup",
   handlers: {
-    run: async (
-      ctx: restate.WorkflowContext,
-      user: { name: string; email: string }
-    ) => {
+    run: async (ctx: restate.WorkflowContext, user: { name: string; email: string }) => {
       // workflow ID = user ID; workflow runs once per user
       const userId = ctx.key;
 
@@ -33,10 +30,7 @@ const signupWorkflow = restate.workflow({
       return clickSecret === secret;
     },
 
-    click: async (
-      ctx: restate.WorkflowSharedContext,
-      request: { secret: string }
-    ) => {
+    click: async (ctx: restate.WorkflowSharedContext, request: { secret: string }) => {
       await ctx.promise<string>("link-clicked").resolve(request.secret);
     },
   },

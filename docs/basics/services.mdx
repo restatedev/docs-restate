@@ -27,14 +27,10 @@ const subscriptionService = restate.service({
     add: async (ctx: restate.Context, req: SubscriptionRequest) => {
       const paymentId = ctx.rand.uuidv4();
 
-      const payRef = await ctx.run(() =>
-        createRecurringPayment(req.creditCard, paymentId)
-      );
+      const payRef = await ctx.run(() => createRecurringPayment(req.creditCard, paymentId));
 
       for (const subscription of req.subscriptions) {
-        await ctx.run(() =>
-          createSubscription(req.userId, subscription, payRef)
-        );
+        await ctx.run(() => createSubscription(req.userId, subscription, payRef));
       }
     },
   },
@@ -70,12 +66,10 @@ const cartObject = restate.object({
       return items;
     },
 
-    getTotal: restate.handlers.object.shared(
-      async (ctx: restate.ObjectSharedContext) => {
-        const items = (await ctx.get<Item[]>("items")) ?? [];
-        return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-      }
-    ),
+    getTotal: restate.handlers.object.shared(async (ctx: restate.ObjectSharedContext) => {
+      const items = (await ctx.get<Item[]>("items")) ?? [];
+      return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    }),
   },
 });
 ```
@@ -100,10 +94,7 @@ Workflows orchestrate multi-step processes with guaranteed once-per-ID execution
 const signupWorkflow = restate.workflow({
   name: "user-signup",
   handlers: {
-    run: async (
-      ctx: restate.WorkflowContext,
-      user: { name: string; email: string }
-    ) => {
+    run: async (ctx: restate.WorkflowContext, user: { name: string; email: string }) => {
       // workflow ID = user ID; workflow runs once per user
       const userId = ctx.key;
 
@@ -116,10 +107,7 @@ const signupWorkflow = restate.workflow({
       return clickSecret === secret;
     },
 
-    click: async (
-      ctx: restate.WorkflowSharedContext,
-      request: { secret: string }
-    ) => {
+    click: async (ctx: restate.WorkflowSharedContext, request: { secret: string }) => {
       await ctx.promise<string>("link-clicked").resolve(request.secret);
     },
   },
@@ -151,12 +139,7 @@ You can combine these service types within the same application for different as
 Services deploy behind endpoints. Multiple services can bind to the same endpoint.
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/app.ts#here"} 
-restate
-  .endpoint()
-  .bind(subscriptionService)
-  .bind(cartObject)
-  .bind(signupWorkflow)
-  .listen(9080);
+restate.endpoint().bind(subscriptionService).bind(cartObject).bind(signupWorkflow).listen(9080);
 ```
 
 Services run on your preferred platform: serverless (AWS Lambda), containers (Kubernetes), or dedicated servers.

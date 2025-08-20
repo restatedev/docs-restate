@@ -52,10 +52,7 @@ restate.workflow({
     },
 
     // External endpoint to submit reviews
-    submitReview: async (
-      ctx: restate.WorkflowSharedContext,
-      review: string
-    ) => {
+    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
       // Signal the waiting run handler
       // <start_resolve_promise>
       await ctx.promise<string>("review").resolve(review);

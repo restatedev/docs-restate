@@ -17,9 +17,7 @@ const bookingWorkflow = restate.service({
       const compensations = [];
 
       // <start_twostep>
-      const bookingId = await ctx.run(() =>
-        flightClient.reserve(customerId, flight)
-      );
+      const bookingId = await ctx.run(() => flightClient.reserve(customerId, flight));
       compensations.push(() => ctx.run(() => flightClient.cancel(bookingId)));
 
       // ... do other work, like reserving a car, etc. ...

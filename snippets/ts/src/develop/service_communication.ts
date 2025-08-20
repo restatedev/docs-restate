@@ -12,19 +12,13 @@ const service = restate.service({
       const svcResponse = await ctx.serviceClient(myService).myHandler("Hi");
 
       // To call a Virtual Object:
-      const objResponse = await ctx
-        .objectClient(myObject, "Mary")
-        .myHandler("Hi");
+      const objResponse = await ctx.objectClient(myObject, "Mary").myHandler("Hi");
 
       // To call a Workflow:
       // `run` handler — can only be called once per workflow ID
-      const wfResponse = await ctx
-        .workflowClient(myWorkflow, "wf-id")
-        .run("Hi");
+      const wfResponse = await ctx.workflowClient(myWorkflow, "wf-id").run("Hi");
       // Other handlers can be called anytime within workflow retention
-      const result = await ctx
-        .workflowClient(myWorkflow, "wf-id")
-        .interactWithWorkflow();
+      const result = await ctx.workflowClient(myWorkflow, "wf-id").interactWithWorkflow();
       // <end_request_response>
     },
     greet2: async (ctx: restate.Context, name: string) => {
@@ -136,9 +130,7 @@ const service = restate.service({
     },
     greet6: async (ctx: restate.Context) => {
       // <start_export_definition>
-      const response = await ctx
-        .serviceClient<MyService>({ name: "MyService" })
-        .myHandler("Hi");
+      const response = await ctx.serviceClient<MyService>({ name: "MyService" }).myHandler("Hi");
       // <end_export_definition>
     },
     greet7: async (ctx: restate.Context) => {
@@ -146,18 +138,14 @@ const service = restate.service({
       interface MyService {
         myHandler(ctx: unknown, greeting: string): Promise<string>;
       }
-      const response = await ctx
-        .serviceClient<MyService>({ name: "MyService" })
-        .myHandler("Hi");
+      const response = await ctx.serviceClient<MyService>({ name: "MyService" }).myHandler("Hi");
       // <end_interface>
     },
     greet8: async (ctx: restate.Context) => {
       // <start_dev_dependency>
       // import type { MyService } from "my-service-package";
 
-      const response = await ctx
-        .serviceClient<MyService>({ name: "MyService" })
-        .myHandler("Hi");
+      const response = await ctx.serviceClient<MyService>({ name: "MyService" }).myHandler("Hi");
       // <end_dev_dependency>
     },
   },
