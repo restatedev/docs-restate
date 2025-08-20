@@ -40,24 +40,32 @@ export const signupWorkflow = restate.workflow({
   },
 });
 ```
-A workflow has a name and a list of handlers.
+A workflow has handlers that can be called over HTTP.
 The `run` handler is the main entry point that executes the workflow logic.
 
 An execution of the workflow is identified by a unique key (in this case, the user ID)
 and uses Restate's `WorkflowContext` to make steps durable.
+
+You don't need to run your services in any special way. Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda.
 
 ### Run the example
 [Install Restate](/develop/local_dev) and launch it:
 ```bash
 restate-server
 ```
-Run the example:
+
+Get the example:
 ```bash
 restate example typescript-tour-of-workflows && cd typescript-tour-of-workflows
+npm install
+```
+
+Run the example:
+```bash
 npm run dev
 ```
 
-Then, tell Restate where your workflow is running, either via the UI or CLI:
+Then, tell Restate where your workflow is running via the UI (`http://localhost:9070`) or CLI:
 ```bash
 restate deployments register http://localhost:9080
 ```
@@ -128,7 +136,7 @@ If your workflow crashes or restarts, the execution replays from the journal to 
 To persist a workflow step, you use the `WorkflowContext` actions:
 - **Durable Steps**: `ctx.run()` ensures non-deterministic operations like database writes or external API calls are persisted
 - **Progress Recovery**: If the workflow crashes after user creation, it resumes at the email step
-- Full execution traces for debugging and monitoring
+- **Observability**: Full execution traces for debugging and monitoring
 
 <Accordion title={"Try it out"}>
 Send a request for Alice:
@@ -439,24 +447,24 @@ Have a look at the Concurrent Tasks docs for your SDK to learn more ([TS](/devel
 
 ## Error Handling
 
-Workflows need robust error handling to deal with failures across distributed systems. Restate distinguishes between two types of errors that require different handling strategies.
+By default, Restate retries failures infinitely with an exponential backoff strategy.
+For some failures, you might not want to retry or only retry a limited number of times.
+
+For these cases, Restate distinguishes between two types of errors: transient errors and terminal errors.
 
 ### Transient vs Terminal Errors
 
-**Transient errors** are temporary failures that can be retried:
-- Network timeouts
-- Service unavailability  
-- Rate limiting
-- Infrastructure issues
+- **Transient Errors**: These are temporary issues that can be retried, such as network timeouts or service unavailability. Restate automatically retries these errors.
+- **Terminal Errors**: These indicate a failure that will not be retried, such as invalid input or business logic violations. Restate stops execution and allows you to handle these errors gracefully.
 
-**Terminal errors** are permanent failures that should not be retried:
-- Invalid input data
-- Business rule violations
-
+Throw a `TerminalError` in your handler to indicate a terminal failure:
+```typescript {"CODE_LOAD::ts/src/tour/workflows/terminal_error.ts#terminal_error"}
+throw new TerminalError("Invalid credit card");
+```
 
 ### Configuring Retry Behavior
 
-Configure custom retry policies for specific operations to avoid blocking the workflow:
+Some actions let you configure their retry behavior, for example to limit the number of retries of a run block:
 
 ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/retries/workflow.ts#retries"} 
 try {
@@ -469,6 +477,8 @@ try {
   console.error("Failed to send welcome email after retries:", error);
 }
 ```
+
+When the retries are exhausted, the run block will throw a `TerminalError`, that you can handle in your handler logic.
 
 <Accordion title={"Try it out"}>
     Submit the workflow for Alice:
@@ -488,13 +498,18 @@ try {
 
 </Accordion>
 
+Learn more with the [Error Handling Guide](/guides/error-handling).
+
 ## Sagas and rollback
 
-Sagas are a design pattern for handling transactions that span multiple services. They break complex processes into a sequence of steps, each with a corresponding **compensating action** to undo the work if failures occur later.
+On a terminal failure, Restate stops the execution of the handler.
+You might, however, want to roll back the changes made by the workflow to keep your system in a consistent state.
+This is where Sagas come in.
 
-When a step in your workflow fails, sagas ensure system consistency by running compensation actions for all previously completed steps in reverse order.
+Sagas are a pattern for rolling back changes made by a workflow when it fails.
 
-Build compensating actions for each step and execute them in reverse order on failure:
+In Restate, you can implement a saga by building a list of compensating actions for each step of the workflow.
+On a terminal failure, you execute them in reverse order:
 
 ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/sagas/workflow.ts?collapse_prequel"} 
 export const signupWithSagas = restate.workflow({
@@ -527,12 +542,12 @@ export const signupWithSagas = restate.workflow({
 });
 ```
 
-Key Benefits:
 
-- **Automatic Rollback**: Failed workflows automatically undo completed steps
-- **Consistency**: System remains in a valid state even after partial failures  
-- **Resilience**: Compensation actions are also durable and will retry on failure
-- **Observability**: Full execution trace shows both forward and compensation steps
+**Benefits with Restate:**
+- The list of compensations can be recovered after a crash, and Restate knows which compensations still need to be run.
+- Sagas always run till completion (success or complete rollback)
+- Full trace of all operations and compensations
+- No complex state machines needed
 
 <Accordion title={"Try it out"}>
     Submit the workflow for Alice:
@@ -547,6 +562,7 @@ Key Benefits:
     </Frame>
 </Accordion>
 
+Learn more with the [Sagas Guide](/guides/sagas).
 
 ## Cancellation
 
