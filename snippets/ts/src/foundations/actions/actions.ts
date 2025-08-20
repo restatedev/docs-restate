@@ -112,7 +112,7 @@ const ActionsExampleService = restate.service({
       // Call Virtual Object function
       const profile = await ctx.objectClient(UserAccount, userId).getProfile();
 
-      // Call Workflow function
+      // Submit Workflow
       const result = await ctx.workflowClient(OrderWorkflow, orderId).run(order);
       // <end_service_calls>
     },
@@ -142,16 +142,16 @@ const ActionsExampleService = restate.service({
       // <end_delayed_messages>
     },
 
-    durableTimersExample: async (ctx: restate.Context, { userId }: any) => {
+    durableTimersExample: async (ctx: restate.Context, { userId, orderId, order }: any) => {
       // <start_durable_timers>
       // Sleep for specific duration
       await ctx.sleep({ minutes: 5 }); // 5 minutes
 
       // Wait for action or timeout
-      const profile = await ctx
-        .objectClient(UserAccount, userId)
-        .getProfile()
-        .orTimeout({ minutes: 1 });
+      const result = await ctx
+        .workflowClient(OrderWorkflow, orderId)
+        .run(order)
+        .orTimeout({ minutes: 5 });
       // <end_durable_timers>
     },
   },
