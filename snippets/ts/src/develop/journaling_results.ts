@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { RestatePromise } from "@restatedev/restate-sdk";
-import {myService} from "./service";
+import { myService } from "./service";
 
 function fetchOrderHistory(param: { userId: number }) {
   return Promise.resolve(undefined);
@@ -19,7 +19,7 @@ const service = restate.service({
       // <end_side_effect>
     },
 
-    promiseCombinators: async (ctx: restate.Context, name: string) => {
+    promiseCombinatorsAll: async (ctx: restate.Context, name: string) => {
       // <start_all>
       const sleepPromise = ctx.sleep({ milliseconds: 100 });
       const callPromise = ctx.serviceClient(myService).myHandler("Hi");
@@ -31,7 +31,8 @@ const service = restate.service({
         externalCallPromise,
       ]);
       // <end_all>
-
+    },
+    promiseCombinatorsAny: async (ctx: restate.Context, name: string) => {
       // <start_any>
       const sleepPromise1 = ctx.sleep({ milliseconds: 100 });
       const sleepPromise2 = ctx.sleep({ milliseconds: 200 });
@@ -67,9 +68,15 @@ const service = restate.service({
       // <end_allSettled>
 
       // <start_parallel>
-      const call1 = ctx.run("fetch_user", async () => fetchUserData({ userId: 123 }));
-      const call2 = ctx.run("fetch_orders", async () => fetchOrderHistory({ userId: 123 }));
-      const call3 = ctx.serviceClient(analyticsService).calculateMetrics({ userId: 123 });
+      const call1 = ctx.run("fetch_user", async () =>
+        fetchUserData({ userId: 123 })
+      );
+      const call2 = ctx.run("fetch_orders", async () =>
+        fetchOrderHistory({ userId: 123 })
+      );
+      const call3 = ctx
+        .serviceClient(analyticsService)
+        .calculateMetrics({ userId: 123 });
 
       const user = await call1;
       const orders = await call2;
@@ -96,11 +103,11 @@ async function httpCall() {
 }
 
 const analyticsService = restate.service({
-    name: "AnalyticsService",
-    handlers: {
-        calculateMetrics: async (ctx: restate.Context, req: { userId: number }) => {
-        // Simulate some analytics calculation
-        return 500;
-        },
+  name: "AnalyticsService",
+  handlers: {
+    calculateMetrics: async (ctx: restate.Context, req: { userId: number }) => {
+      // Simulate some analytics calculation
+      return 500;
     },
+  },
 });

@@ -22,22 +22,22 @@ Basic Services group related handlers as callable endpoints.
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/basic_service.ts#here"} 
 const subscriptionService = restate.service({
-    name: "SubscriptionService",
-    handlers: {
-        add: async (ctx: restate.Context, req: SubscriptionRequest) => {
-            const paymentId = ctx.rand.uuidv4();
+  name: "SubscriptionService",
+  handlers: {
+    add: async (ctx: restate.Context, req: SubscriptionRequest) => {
+      const paymentId = ctx.rand.uuidv4();
 
-            const payRef = await ctx.run(() =>
-                createRecurringPayment(req.creditCard, paymentId)
-            );
+      const payRef = await ctx.run(() =>
+        createRecurringPayment(req.creditCard, paymentId)
+      );
 
-            for (const subscription of req.subscriptions) {
-                await ctx.run(() =>
-                    createSubscription(req.userId, subscription, payRef)
-                );
-            }
-        },
+      for (const subscription of req.subscriptions) {
+        await ctx.run(() =>
+          createSubscription(req.userId, subscription, payRef)
+        );
+      }
     },
+  },
 });
 ```
 </CodeGroup>
@@ -56,25 +56,27 @@ Stateful entities identified by a unique key.
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/object.ts#here"} 
 const cartObject = restate.object({
-    name: "cart",
-    handlers: {
-        addItem: async (ctx: restate.ObjectContext, item: Item) => {
-            const items = await ctx.get<Item[]>("items") ?? [];
-            const existing = items.find(i => i.productId === item.productId);
-            if (existing) {
-                existing.quantity += item.quantity;
-            } else {
-                items.push(item);
-            }
-            ctx.set("items", items);
-            return items;
-        },
+  name: "cart",
+  handlers: {
+    addItem: async (ctx: restate.ObjectContext, item: Item) => {
+      const items = (await ctx.get<Item[]>("items")) ?? [];
+      const existing = items.find((i) => i.productId === item.productId);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        items.push(item);
+      }
+      ctx.set("items", items);
+      return items;
+    },
 
-        getTotal: restate.handlers.object.shared(async (ctx: restate.ObjectSharedContext) => {
-            const items = await ctx.get<Item[]>("items") ?? [];
-            return items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        }),
-    }
+    getTotal: restate.handlers.object.shared(
+      async (ctx: restate.ObjectSharedContext) => {
+        const items = (await ctx.get<Item[]>("items")) ?? [];
+        return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      }
+    ),
+  },
 });
 ```
 </CodeGroup>
@@ -96,31 +98,31 @@ Workflows orchestrate multi-step processes with guaranteed once-per-ID execution
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/workflow.ts#here"} 
 const signupWorkflow = restate.workflow({
-    name: "user-signup",
-    handlers: {
-        run: async (
-            ctx: restate.WorkflowContext,
-            user: { name: string; email: string }
-        ) => {
-            // workflow ID = user ID; workflow runs once per user
-            const userId = ctx.key;
+  name: "user-signup",
+  handlers: {
+    run: async (
+      ctx: restate.WorkflowContext,
+      user: { name: string; email: string }
+    ) => {
+      // workflow ID = user ID; workflow runs once per user
+      const userId = ctx.key;
 
-            await ctx.run(() => createUserEntry(user));
+      await ctx.run(() => createUserEntry(user));
 
-            const secret = ctx.rand.uuidv4();
-            await ctx.run(() => sendEmailWithLink({ userId, user, secret }));
+      const secret = ctx.rand.uuidv4();
+      await ctx.run(() => sendEmailWithLink({ userId, user, secret }));
 
-            const clickSecret = await ctx.promise<string>("link-clicked");
-            return clickSecret === secret;
-        },
-
-        click: async (
-            ctx: restate.WorkflowSharedContext,
-            request: { secret: string }
-        ) => {
-            await ctx.promise<string>("link-clicked").resolve(request.secret);
-        },
+      const clickSecret = await ctx.promise<string>("link-clicked");
+      return clickSecret === secret;
     },
+
+    click: async (
+      ctx: restate.WorkflowSharedContext,
+      request: { secret: string }
+    ) => {
+      await ctx.promise<string>("link-clicked").resolve(request.secret);
+    },
+  },
 });
 ```
 </CodeGroup>
@@ -149,11 +151,12 @@ You can combine these service types within the same application for different as
 Services deploy behind endpoints. Multiple services can bind to the same endpoint.
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/app.ts#here"} 
-restate.endpoint()
-    .bind(subscriptionService)
-    .bind(cartObject)
-    .bind(signupWorkflow)
-    .listen(9080);
+restate
+  .endpoint()
+  .bind(subscriptionService)
+  .bind(cartObject)
+  .bind(signupWorkflow)
+  .listen(9080);
 ```
 
 Services run on your preferred platform: serverless (AWS Lambda), containers (Kubernetes), or dedicated servers.

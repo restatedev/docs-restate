@@ -13,258 +13,247 @@ Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // External API call
-    const apiResult = await ctx.run("fetch-data", async () => {
-    const response = await fetch("https://api.example.com/data");
-    return response.json();
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#durable_steps"} 
+// External API call
+const apiResult = await ctx.run("fetch-data", async () => {
+  const response = await fetch("https://api.example.com/data");
+  return response.json();
 });
 
-    // Database operation
-    const dbResult = await ctx.run("update-user", () => {
-    return database.users.update(userId, { name: "John" });
+// Database operation
+const dbResult = await ctx.run("update-user", () => {
+  return updateUserDatabase(userId, { name: "John" });
 });
 
-    // Random value generation
-    const randomId = await ctx.run("generate-id", () => {
-    return Math.random().toString(36);
-});
-    ```
+// Idempotency key generation
+const id = await ctx.run("generate-id", () => uuid());
+```
+
 </CodeGroup>
 
 Without `ctx.run()`, these operations would produce different results during replay, breaking deterministic recovery.
 
-### State management
+## State management
 
 Available in Virtual Object and Workflow functions for persistent key-value storage.
 
-#### Get
+### Get
 
 Retrieve stored state by key.
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // Get with type and default value
-    const profile = await ctx.get<UserProfile>("profile");
-    const count = (await ctx.get<number>("count")) ?? 0;
-        const settings = await ctx.get<Settings>("settings") ?? defaultSettings;
-            ```
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#state_get"} 
+// Get with type and default value
+const profile = await ctx.get<UserProfile>("profile");
+const count = (await ctx.get<number>("count")) ?? 0;
+const cart = (await ctx.get<ShoppingCart>("cart")) ?? [];
+```
 
-            ```java Java
-            // Get with optional handling
-            UserProfile profile = ctx.get("profile", UserProfile.class);
-            Integer count = ctx.get("count", Integer.class).orElse(0);
-            Settings settings = ctx.get("settings", Settings.class).orElse(defaultSettings);
-            ```
-
-            ```python Python
-            # Get with default values
-            profile = await ctx.get("profile", UserProfile)
-            count = await ctx.get("count", int) or 0
-            settings = await ctx.get("settings", Settings) or default_settings
-            ```
 </CodeGroup>
 
-#### Set
+### Set
 
 Store state that persists across function invocations.
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // Store simple values
-    ctx.set("lastLogin", new Date().toISOString());
-    ctx.set("loginCount", loginCount + 1);
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#state_set"} 
+// Store simple values
+ctx.set("lastLogin", ctx.date.toJSON());
+ctx.set("count", count + 1);
 
-    // Store complex objects
-    ctx.set("profile", {
-    name: "John Doe",
-    email: "john@example.com",
-    preferences: { theme: "dark" }
+// Store complex objects
+ctx.set("profile", {
+  name: "John Doe",
+  email: "john@example.com",
 });
-    ```
-
-    ```java Java
-    // Store values
-    ctx.set("lastLogin", Instant.now().toString());
-    ctx.set("loginCount", loginCount + 1);
-    ctx.set("profile", userProfile);
-    ```
-
-    ```python Python
-    # Store values
-    await ctx.set("lastLogin", datetime.now().isoformat())
-    await ctx.set("loginCount", login_count + 1)
-    await ctx.set("profile", user_profile)
-    ```
+```
 </CodeGroup>
 
-#### Clear
+### Clear
 
 State is retained indefinitely for Virtual Objects, or for the configured retention period for Workflows.
 
 To clear state:
 
 <CodeGroup>
-    ```typescript TypeScript
-    // Clear specific keys
-    ctx.clear("tempData");
-    ctx.clear("sessionToken");
 
-    // Clear all user data
-    ctx.clearAll();
-    ```
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#state_clear"} 
+// Clear specific keys
+ctx.clear("shoppingCart");
+ctx.clear("sessionToken");
+
+// Clear all user data
+ctx.clearAll();
+```
 
 </CodeGroup>
 
 
-###  Service communication
+##  Service communication
 
-#### Request-response calls
+### Request-response calls
 
 Make request-response calls to other services. Your function waits for the result.
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // Call another service
-    const validation = await ctx.serviceCall(ValidationService).validateOrder(order);
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#service_calls"} 
+// Call another service
+const validation = await ctx
+  .serviceClient(ValidationService)
+  .validateOrder(order);
 
-    // Call Virtual Object function
-    const profile = await ctx.objectCall(UserAccount, userId).getProfile();
+// Call Virtual Object function
+const profile = await ctx.objectClient(UserAccount, userId).getProfile();
 
-    // Call Workflow function
-    const status = await ctx.workflowCall(OrderWorkflow, orderId).getStatus();
-    ```
+// Call Workflow function
+const status = await ctx
+  .workflowClient(OrderWorkflow, orderId)
+  .getStatus();
+```
 
-    ```java Java
-    // Call another service
-    ValidationResult validation = ValidationServiceClient.fromContext(ctx)
-    .validateOrder(order).await();
+```java Java
+// Call another service
+ValidationResult validation = ValidationServiceClient.fromContext(ctx)
+.validateOrder(order).await();
 
-    // Call Virtual Object function
-    ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
-    .getProfile().await();
-    ```
+// Call Virtual Object function
+ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
+.getProfile().await();
+```
 
-    ```python Python
-    # Call another service
-    validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+```python Python
+# Call another service
+validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
 
-    # Call Virtual Object function
-    profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
-    ```
+# Call Virtual Object function
+profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
+```
+
 </CodeGroup>
 
 
-#### Sending messages
+### Sending messages
 
 Make one-way calls that don't return results. Your function continues immediately.
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // Fire-and-forget notification
-    ctx.serviceSend(NotificationService).sendEmail(userId, "Welcome!");
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#sending_messages"} 
+// Fire-and-forget notification
+ctx
+  .serviceSendClient(NotificationService)
+  .sendEmail({ userId, message: "Welcome!" });
 
-    // Background analytics
-    ctx.serviceSend(AnalyticsService).recordEvent({ kind: "user_signup", userId });
+// Background analytics
+ctx
+  .serviceSendClient(AnalyticsService)
+  .recordEvent({ kind: "user_signup", userId });
 
-    // Cleanup task
-    ctx.serviceSend(CleanupService).deleteExpiredData();
-    ```
+// Cleanup task
+ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
+```
 
-    ```java Java
-    // Fire-and-forget calls
-    NotificationServiceClient.fromContext(ctx).send()
-    .sendEmail(userId, "Welcome!");
+```java Java
+// Fire-and-forget calls
+NotificationServiceClient.fromContext(ctx).send()
+.sendEmail(userId, "Welcome!");
 
-    AnalyticsServiceClient.fromContext(ctx).send()
-    .recordEvent("user_signup", eventData);
-    ```
+AnalyticsServiceClient.fromContext(ctx).send()
+.recordEvent("user_signup", eventData);
+```
+
 </CodeGroup>
 
-#### Delayed messages
+### Delayed messages
 
 Schedule functions to run in the future.
 
-```typescript TypeScript
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#delayed_messages"} 
 // Schedule reminder for tomorrow
-ctx.serviceCall(ReminderService).sendReminder(userId, message, {
-delay: 24 * 60 * 60 * 1000 // 24 hours
-});
+ctx.serviceSendClient(ReminderService).sendReminder(
+  { userId, message },
+  sendOpts({
+    delay: { days: 1 },
+  })
+);
 ```
 
-###  Durable timers
+## Durable timers and timeouts
 
 Pause function execution for a specific duration.
 
 <CodeGroup>
 
-    ```typescript TypeScript
-    // Sleep for 30 seconds
-    await ctx.sleep(30 * 1000);
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#durable_timers"} 
+// Sleep for specific duration
+await ctx.sleep({ minutes: 5 }); // 5 minutes
 
-    // Sleep for specific duration
-    await ctx.sleep(5 * 60 * 1000); // 5 minutes
+// Wait for action or timeout
+const profile = await ctx
+  .objectClient(UserAccount, userId)
+  .getProfile()
+  .orTimeout({ minutes: 1 });
+```
 
-    // Sleep until specific time
-    const targetTime = new Date('2024-12-25T09:00:00Z');
-    const delay = targetTime.getTime() - Date.now();
-    await ctx.sleep(delay);
-    ```
+```java Java
+// Sleep for durations
+ctx.sleep(Duration.ofSeconds(30));
+ctx.sleep(Duration.ofMinutes(5));
+ctx.sleep(Duration.ofHours(1));
+```
 
-    ```java Java
-    // Sleep for durations
-    ctx.sleep(Duration.ofSeconds(30));
-    ctx.sleep(Duration.ofMinutes(5));
-    ctx.sleep(Duration.ofHours(1));
-    ```
+```python Python
+# Sleep with timedelta
+await ctx.sleep(timedelta(seconds=30))
+await ctx.sleep(timedelta(minutes=5))
+await ctx.sleep(timedelta(hours=1))
+```
 
-    ```python Python
-    # Sleep with timedelta
-    await ctx.sleep(timedelta(seconds=30))
-    await ctx.sleep(timedelta(minutes=5))
-    await ctx.sleep(timedelta(hours=1))
-    ```
 </CodeGroup>
 
 
 Functions consume no resources while sleeping and resume at exactly the right time, even across restarts ([see suspensions](/basics/key-concepts#suspensions-on-faas)).
 
-### Workflow events
+## Workflow events
 
 Use durable promises to wait for external events or human input in your workflows.
 
 Create promises that external systems can resolve to send data to your workflow.
 
-```typescript TypeScript
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#workflow_promises"} 
 // Wait for external event
-const paymentResult = await ctx.promise<PaymentResult>("payment-completed");
+const paymentResult = await ctx.promise<PaymentResult>(
+  "payment-completed"
+);
 
-    // Wait for human approval
-    const approved = await ctx.promise<boolean>("manager-approval");
+// Wait for human approval
+const approved = await ctx.promise<boolean>("manager-approval");
 
-    // Wait for multiple events
-    const [payment, inventory] = await Promise.all([
-    ctx.promise<PaymentResult>("payment"),
-    ctx.promise<InventoryResult>("inventory")
-    ]);
-    ```
+// Wait for multiple events
+const [payment, inventory] = await Promise.all([
+  ctx.promise<PaymentResult>("payment"),
+  ctx.promise<InventoryResult>("inventory"),
+]);
+```
 
-    Resolve promises from signal functions.
+Resolve promises from signal functions.
 
-    ```typescript TypeScript
-    // In a signal function
-    export const confirmPayment = async (ctx: WorkflowSharedContext, result: PaymentResult) => {
-        ctx.promise("payment-completed").resolve(result);
-    };
+```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#signal_functions"} 
+// In a signal function
+confirmPayment: async (
+  ctx: WorkflowSharedContext,
+  result: PaymentResult
+) => {
+  await ctx.promise("payment-completed").resolve(result);
+},
 
-    // In a signal function
-    export const approveRequest = async (ctx: WorkflowSharedContext, approved: boolean) => {
-        ctx.promise("manager-approval").resolve(approved);
-    };
-    ```
+// In a signal function
+approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
+  await ctx.promise("manager-approval").resolve(approved);
+},
+```
 
-    <Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at [awakeables](/awakeables).</Info>
+<Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at [awakeables](/awakeables).</Info>

@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { myService, MyService } from "./my_service";
-import { myObject } from "./my_virtual_object";
+import { myObject } from "./virtual_object";
 import { myWorkflow } from "./workflow";
 
 const service = restate.service({

@@ -1,6 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
 import { WorkflowContext } from "@restatedev/restate-sdk";
-import {as} from "vitest/dist/chunks/reporters.nr4dxCkA";
 
 const service = restate.service({
   name: "Awakeable",
@@ -53,13 +52,14 @@ restate.workflow({
     },
 
     // External endpoint to submit reviews
-    submitReview: async (ctx: restate.WorkflowSharedContext, review: string) => {
+    submitReview: async (
+      ctx: restate.WorkflowSharedContext,
+      review: string
+    ) => {
       // Signal the waiting run handler
       // <start_resolve_promise>
-      ctx.promise<string>("review").resolve(review);
+      await ctx.promise<string>("review").resolve(review);
       // <end_resolve_promise>
-
-      ctx.promise<string>("review")
     },
   },
 });
