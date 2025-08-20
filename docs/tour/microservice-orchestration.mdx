@@ -19,14 +19,13 @@ A Restate application is composed of two main components:
 
 <img src="/img/tour/app_layout.svg" alt="Application Structure"/>
 
-
 A basic subscription service orchestration looks like this:
 
 ```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/getstarted/service.ts?collapse_prequel"} 
 export const subscriptionService = restate.service({
   name: "SubscriptionService",
   handlers: {
-    add: async (ctx: restate.Context, req: SubscriptionRequest) => {
+    add: async (ctx: Context, req: SubscriptionRequest) => {
       const paymentId = ctx.rand.uuidv4();
 
       const payRef = await ctx.run("pay", () =>
@@ -68,11 +67,17 @@ Then, tell Restate where your services are running via the UI (`http://localhost
 restate deployments register http://localhost:9080
 ```
 
-Invoke the service handler to add a subscription:
+To invoke a handler, send a request to `restate-ingress/MyServiceName/handlerName`:
 ```bash
 curl localhost:8080/SubscriptionService/add \
   --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
 ```
+
+Click in the UI's invocations tab on the inovcation ID of your request to see the execution trace of your request.
+
+<Frame>
+<img src="/img/tour/microservices/traces.png" alt="Invocation overview" />
+</Frame>
 
 ## Durable Execution
 
@@ -91,11 +96,39 @@ This process continues until the handler runs till completion.
 - Deterministic IDs from `ctx.random()` ensure operations are idempotent
 - Full execution traces for debugging and monitoring
 
-<Accordion title={"Try it out yourself!"}>
-    Invoke the service handler to add a subscription:
+<Accordion title={"Try it out"}>
+    Try to add a subscription for Netflix:
     ```bash
-    curl localhost:9070/SubscriptionService/add --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
+    curl localhost:8080/SubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
     ```
+
+    On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
+
+    <Frame>
+        <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
+    </Frame>
+
+    To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `utils.ts` file:
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"}
+export function createSubscription(
+  userId: string,
+  subscription: string,
+  _paymentRef: string,
+): string {
+  failOnNetflix(subscription);
+  terminalErrorOnDisney(subscription);
+  console.log(`>>> Created subscription ${subscription} for user ${userId}`);
+  return "SUCCESS";
+}
+```
+
+    Once you restart the service, the workflow finishes successfully:
+    <Frame>
+        <img src="/img/tour/microservices/netflix_fixed.png" alt="Invocation overview" />
+    </Frame>
+
 </Accordion>
 
 ## Error Handling
@@ -117,16 +150,16 @@ throw new TerminalError("Invalid credit card");
 
     Some actions let you configure their retry behavior, for example to limit the number of retries of a run block:
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/retries/service.ts#retries"}
-try {
-    const policy = {
+```typescript {"CODE_LOAD::ts/src/tour/microservices/retries.ts#retries"} 
+const retryPolicy = {
     maxRetryAttempts: 3,
     initialRetryIntervalMillis: 1000,
 };
-    await ctx.run("welcome", () => sendWelcomeEmail(user), policy);
-} catch (error) {
-    console.error("Failed to send welcome email after retries:", error);
-}
+
+const payRef = await ctx.run("pay", () =>
+    createRecurringPayment(req.creditCard, paymentId),
+    retryPolicy
+);
 ```
 
     When the retries are exhausted, the run block will throw a `TerminalError`, that you can handle in your handler logic.
@@ -135,7 +168,7 @@ try {
 
 Learn more with the [Error Handling Guide](/guides/error-handling).
 
-## Sagas and rollback
+## Sagas and Rollback
 On a terminal failure, Restate stops the execution of the handler.
 You might, however, want to roll back the changes made by the workflow to keep your system in a consistent state.
 This is where Sagas come in.
@@ -145,12 +178,13 @@ Sagas are a pattern for rolling back changes made by a handler when it fails.
 In Restate, you can implement a saga by building a list of compensating actions for each step of the workflow.
 On a terminal failure, you execute them in reverse order:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"}
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"} 
 export const subscriptionSaga = restate.service({
   name: "SubscriptionSaga",
   handlers: {
-    add: async (ctx: restate.Context, req: SubscriptionRequest) => {
+    add: async (ctx: Context, req: SubscriptionRequest) => {
       const compensations = [];
+
       try {
         const paymentId = ctx.rand.uuidv4();
         compensations.push(() =>
@@ -162,7 +196,7 @@ export const subscriptionSaga = restate.service({
 
         for (const subscription of req.subscriptions) {
           compensations.push(() =>
-            ctx.run(`del-${subscription}`, () =>
+            ctx.run(`undo-${subscription}`, () =>
               removeSubscription(req.userId, subscription),
             ),
           );
@@ -189,15 +223,17 @@ export const subscriptionSaga = restate.service({
 - Full trace of all operations and compensations
 - No complex state machines needed
 
-<Accordion title={"Try it out yourself!"}>
-```bash
-# Test the saga pattern
-restate invoke SubscriptionSaga.add --json '{"userId": "user-456", "creditCard": "4111111111111111", "subscriptions": ["premium", "sports"]}'
+<Accordion title={"Try it out"}>
+    Add a subscription for Disney:
+    ```bash
+    curl localhost:8080/SubscriptionSaga/add \
+    --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Disney"]}'
+    ```
 
-# View execution in UI
-open http://localhost:9070
-```
-The UI shows each saga step, results, and any compensations that ran.
+    The Disney subscription is not available, so the handler will fail and run compensations:
+    <Frame>
+        <img src="/img/tour/microservices/sagas.png" alt="Workflow Sagas"/>
+    </Frame>
 </Accordion>
 
 Learn more with the [Sagas Guide](/guides/sagas).
@@ -235,24 +271,44 @@ export const userSubscriptions = restate.object({
 });
 ```
 
+Virtual Objects are ideal for implementing any entity with mutable state.
 Restate ensures that your state is durable and consistent:
 - Each object key processes requests sequentially (no race conditions)
 - Only one handler can modify state at a time (no concurrent/lost writes)
 - State changes are logged with Durable Execution and survive failures
 - Different object keys can be processed in parallel
+- K/V state is stored permanently. It has no automatic expiry. Clear it via `ctx.clear()`.
+- State is queryable via the UI:
+<Frame>
+<img src="/img/tour/microservices/state.png" alt="Workflow Sagas"/>
+</Frame>
 
-Virtual Objects are ideal for implementing any entity with mutable state.
+<Accordion title={"Try it out"}>
 
-## Resilient Service-to-Service Communication
+    Add a few subscriptions for a user:
+    ```bash
+    curl localhost:8080/UserSubscriptions/user-123/add --json '"Hulu"'
+    curl localhost:8080/UserSubscriptions/user-123/add --json '"Prime"'
+    curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
+    ```
 
-Restate provides durable communication between services.
+    Get the subscriptions for the user:
+    ```bash
+    curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
+    ```
 
-Restate supports three communication patterns:
+    Or use the UI's state tab to explore the object state.
+</Accordion>
+
+## Resilient Communication
+
+The Restate SDK includes clients to call other handlers reliably. You can call another handler in three ways:
 - **Request-Response**: Wait for a response
 - **One-Way Messages**: Fire-and-forget
 - **Delayed Messages**: Schedule for later
 
-All communication is durably logged and guaranteed to complete.
+When you call another handler, the Restate Server acts as a message broker.
+All communication is proxied via the Restate Server where it gets durably logged and retried till completion.
 
 Imagine a handler which processes a concert ticket purchase, and calls multiple services to handle payment, ticket delivery, and reminders:
 
@@ -260,7 +316,7 @@ Imagine a handler which processes a concert ticket purchase, and calls multiple 
 export const concertTicketingService = restate.service({
   name: "ConcertTicketingService",
   handlers: {
-    buy: async (ctx: restate.Context, req: PurchaseTicketRequest) => {
+    buy: async (ctx: Context, req: PurchaseTicketRequest) => {
       // Request-response call - wait for payment to complete
       const payRef = await ctx.serviceClient(paymentService).charge(req);
 
@@ -278,11 +334,12 @@ export const concertTicketingService = restate.service({
 });
 ```
 
-Each of these calls is durable and will be retried upon failures.
+Each of these calls gets persisted in Restate's log and will be retried upon failures.
 The handler can finish execution without waiting for the ticket delivery or reminder to complete.
-And each service can scale independently.
 
-<Accordion title={"Try it out yourself!"}>
+You can use Restate's communication primitives to implement microservices that communicate reliably and scale independently.
+
+<Accordion title={"Try it out"}>
 ```bash
 # Test service communication
 restate invoke SubscriptionService.add --json '{"userId": "user-789", "creditCard": "4111111111111111", "subscriptions": ["basic"]}'
@@ -312,30 +369,28 @@ Notice how doing the same request with the same idempotency key will return the 
 
 Until now we showed either synchronous API calls via `ctx.run` or calls to other Restate services.
 
-But some API calls may respond asynchronously, such as waiting for external systems to complete operations through webhooks or callbacks.
+Another common scenario is APIs that respond asynchronously via webhooks or callbacks.
+For this, you can use Restate's awakeables.
 
-For this, you can use `awakeable`. It allows you to pause execution until an external system completes an operation, such as waiting for a payment processor to confirm a transaction.
-
-Let's implement a payment processing flow where we initiate a payment with an external provider and wait for their webhook confirmation:
-
+For example, some payment providers like Stripe require you to initiate a payment and then wait for their webhook to confirm the transaction.
 ```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/events/service.ts?collapse_prequel"} 
-export const asyncPaymentService = restate.service({
-  name: "AsyncPaymentService",
+export const payments = restate.service({
+  name: "Payments",
   handlers: {
-    processPayment: async (ctx: restate.Context, req: PaymentRequest) => {
+    process: async (ctx: Context, req: PaymentRequest) => {
       // Create awakeable to wait for webhook payment confirmation
       const confirmation = ctx.awakeable<PaymentResult>();
 
       // Initiate payment with external provider (Stripe, PayPal, etc.)
-      await ctx.run("pay", () => initExternalPayment(req, confirmation.id));
+      await ctx.run("pay", () => initPayment(req, confirmation.id));
 
       // Wait for external payment provider to call our webhook
       return confirmation.promise;
     },
 
     // Webhook handler called by external payment provider
-    confirmPayment: async (
-      ctx: restate.Context,
+    confirm: async (
+      ctx: Context,
       confirmation: { id: string; result: PaymentResult },
     ) => {
       // Resolve the awakeable to continue the payment flow
@@ -345,70 +400,101 @@ export const asyncPaymentService = restate.service({
 });
 ```
 
-## Durable Timers
+Awakeables are like promises or futures that can be recovered after a crash.
+Restate persists the awakeable in its log and can recover it on another process when needed.
 
-Durable timers let you add timeouts and scheduling to your workflows. They survive crashes and resume exactly when scheduled.
+There is no limit to how long you can persist an awakeable, so you can wait for external events that may take hours, or even months to arrive.
+
+You can also use awakeables to implement human-in-the-loop interactions, such as waiting for user input or approvals.
+
+## Durable Timers
+Waiting on external events might take a long time, and you might want to add timeouts to operations like this.
+
+The Restate SDK offers durable timer implementations that you can use to limit waiting for an action.
+Restate tracks these timers so they survive crashes and do not restart from the beginning.
 
 Let's extend our payment service to automatically cancel payments that don't complete within a reasonable time:
 
 ```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts?collapse_prequel"} 
-export const asyncPaymentServiceWithTimeout = restate.service({
-  name: "AsyncPaymentServiceWithTimeout",
+export const paymentsWithTimeout = restate.service({
+  name: "PaymentsWithTimeout",
   handlers: {
-    processPayment: async (ctx: restate.Context, req: PaymentRequest) => {
-      const paymentConfirmation = ctx.awakeable<PaymentResult>();
+    process: async (ctx: Context, req: PaymentRequest) => {
+      const confirmation = ctx.awakeable<PaymentResult>();
 
-      // Initiate payment with external provider
-      const payRef = await ctx.run("init-payment", () =>
-        initExternalPayment(req, paymentConfirmation.id),
+      const payRef = await ctx.run("pay", () =>
+        initPayment(req, confirmation.id),
       );
 
       // Race between payment confirmation and timeout
       try {
-        return paymentConfirmation.promise.orTimeout({ minutes: 10 });
+        return confirmation.promise.orTimeout({ minutes: 10 });
       } catch (e) {
         if (e instanceof TimeoutError) {
           // Cancel the payment with external provider
-          await ctx.run("cancel-payment", () => cancelExternalPayment(payRef));
+          await ctx.run("cancel-payment", () => cancelPayment(payRef));
           return {
             success: false,
-            errorMessage: "Payment timed out after 10 minutes",
+            errorMessage: "Payment timeout",
           };
         }
         throw e;
       }
     },
 
-    // Webhook handler called by external payment provider
-    confirmPayment: async (
-      ctx: restate.Context,
-      confirmation: { awakeableId: string; result: PaymentResult },
+    confirm: async (
+      ctx: Context,
+      confirmation: { id: string; result: PaymentResult },
     ) => {
-      // Resolve the awakeable to continue the payment flow
-      ctx.resolveAwakeable(confirmation.awakeableId, confirmation.result);
+      ctx.resolveAwakeable(confirmation.id, confirmation.result);
     },
   },
 });
 ```
 
-For more complex timer patterns like recurring reminders, see the [Timers Guide](/develop/ts/timers).
+You can also set timeouts for RPC calls or other asynchronous operations with the Restate SDK.
 
-## Advanced Patterns
+## Concurrent Tasks
 
-<CardGroup title="Advanced Patterns">
-<Card title="Timers and Scheduling" icon="clock">
-  Use durable timers for complex timing logic, such as sending reminders or handling timeouts.
-</Card>
-<Card title="Parallelize Work" icon="arrows-right-left">
-  Run multiple operations concurrently, such as creating multiple subscriptions in parallel.
-</Card>
-<Card title="Cron Jobs" icon="arrows-right-left">
-    Implement durable cron jobs that run at specific intervals, such as daily reports or periodic data processing.
-</Card>
-<Card title="Webhook Processing" icon="arrows-right-left">
-    Point your webhooks to Restate handlers, which can then handle incoming requests with durable execution.
-</Card>
-</CardGroup>
+When you are waiting on an awakeable or a timer, you are effectively running concurrent tasks and waiting for one of them to complete.
+
+Restate allows more advanced concurrency patterns to run tasks in parallel and wait for their results.
+
+Let's extend our subscription service to process all subscriptions concurrently and handle failures gracefully:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/concurrenttasks/service.ts?collapse_prequel"} 
+export const parallelSubscriptionService = restate.service({
+    name: "ParallelSubscriptionService",
+    handlers: {
+        add: async (ctx: Context, req: SubscriptionRequest) => {
+            const paymentId = ctx.rand.uuidv4();
+            const payRef = await ctx.run("pay", () =>
+                createRecurringPayment(req.creditCard, paymentId)
+            );
+
+            // Start all subscriptions in parallel
+            const subscriptionPromises = []
+            for (const subscription in req.subscriptions) {
+                subscriptionPromises.push(ctx.run(`add-${subscription}`, () =>
+                    createSubscription(req.userId, subscription, payRef)
+                ))
+            }
+
+            // Wait for all subscriptions to complete
+            await RestatePromise.all(subscriptionPromises)
+
+            return { success: true, paymentRef: payRef };
+        },
+    },
+});
+```
+
+Restate retries all parallel tasks until they all complete and can deterministically replay the order of completion (for example for `RestatePromise.any`).
+
+You can extend this to include the saga pattern and run all compensations in parallel as well.
+
+Have a look at the Concurrent Tasks docs for your SDK to learn more ([TS](/develop/ts/concurrent-tasks) / [Java / Kotlin](/develop/java/concurrent-tasks) / [Python](/develop/python/concurrent-tasks) / [Go](/develop/go/concurrent-tasks)).
+
 
 ## Summary
 
