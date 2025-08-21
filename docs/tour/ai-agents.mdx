@@ -1,315 +1,904 @@
 ---
 title: "AI Agents"
-description: "Learn how to build resilient, fault-tolerant AI agents with durable execution, tool orchestration, and human-in-the-loop workflows."
+description: "Build fault-tolerant, observable AI agents that recover from failures and support advanced interaction patterns."
 icon: "robot"
 ---
 
-AI agents face several production challenges: LLM API failures, non-deterministic execution, expensive retry costs, and managing long-running workflows.
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 
-Restate's durable execution model addresses these by persisting execution state and automatically resuming from the last successful step.
+AI agents are long-running processes that combine LLMs with tools and external APIs to complete complex tasks. With Restate, you can build agents that are **resilient to failures**, **stateful across conversations**, and **observable** without managing complex retry logic or external state stores.
 
-This guide covers:
-- Durable execution for LLM calls and tool invocations
-- Human-in-the-loop patterns with timeouts and escalation
-- Managing agent state and conversation history
-- Multi-agent coordination patterns
+In this guide, you'll learn how to:
+- Build durable AI agents that recover automatically from crashes and API failures
+- Integrate with existing AI SDKs like Vercel AI SDK and OpenAI
+- Implement resilient human-in-the-loop workflows with approvals and timeouts
+- Manage conversation history and state across multi-turn interactions
+- Orchestrate multiple agents working together on complex tasks
 
-## Durable Execution
 
-LLM calls are expensive and can fail. Traditional retry logic wastes tokens and produces inconsistent results. Restate's durable execution persists the results of successful operations, so they don't repeat on retry.
+## Getting Started
 
-### How It Works
+A Restate AI application has two main components:
+- **Restate Server**: The core engine that manages durable execution and orchestrates your agents
+- **Agent Services**: Your agent or AI workflow logic using the Restate SDK with automatic durability and state management
 
-A Restate AI application has two parts:
-- **Restate Server**: Manages durable execution and routes requests to your agents
-- **Agent Services**: Your AI logic using the Restate SDK for durability
+<img src="/img/tour/app_layout.svg" alt="Application Structure"/>
 
-Restate Server persists operations in a log. LLM calls and tool invocations made through the Restate context are logged once and cached on replay:
+A basic AI agent that uses tools looks like this:
 
-ANIMATION
-
-### Integrating Restate with AI SDKs
-
-To use durable execution, wrap expensive operations (LLM calls, tool invocations) in durable steps. Many AI SDKs support middleware for this.
-
-Here's how to make an agent durable with the Vercel AI SDK:
-
-```ts
-async function simpleAgent(restate: restate.Context, prompt: string) {
-  const model = wrapLanguageModel({
-    model: openai("gpt-4o-2024-08-06", { structuredOutputs: true }),
-    middleware: durableCalls(restate, { maxRetryAttempts: 3 }),
-  });
-
-  const result = await generateText({
-    model,
-    tools: {
-      getWeather: tool({
-        description: "Get the current weather for a given city.",
-        parameters: z.object({ city: z.string() }),
-        execute: async ({ city }) => {
-          // call tool wrapped as Restate durable step
-          return await restate.run("get weather", () => fetchWeather(city));
-        }
-      })
-    },
-    maxSteps: 5,
-    maxRetries: 3,
-    system: "You are a helpful agent.",
-    messages: [{ role: "user", content: prompt }]
-  });
-
-  return result.text;
-
-}
-```
-
-Serve the agent as a Restate service:
-
-```ts
-const agent = restate.service({
-  name: "agent",
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/template/src/app.ts?collapse_prequel"} 
+export const agent = restate.service({
+  name: "assistant",
   handlers: {
-    run: async (ctx: restate.Context, prompt: string) => {
-      return simpleAgent(ctx, prompt);
+    run: async (ctx: Context, { messages }: { messages: CoreMessage[] }) => {
+      const { fullStream } = await streamObject({
+        model: openai("gpt-4o-mini"),
+        messages,
+        tools: { getWeather: weatherTool },
+        maxSteps: 10,
+      }))
+
+      const result = await fullStream;
+      return result;
     },
-  },
-  options: {
-    journalRetention: { days: 1 },
-    ...toolErrorAsTerminalError,
   },
 });
-
-restate.endpoint()
-  .bind(agent)
-  .listen(9080);
 ```
 
-Start the server:
+An agent service has handlers that can be called over HTTP. The agent receives messages and uses the Restate `Context` to make LLM calls and tool executions durable - they automatically recover from failures without losing progress.
 
+You don't need to run your agents in any special way. Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda.
+
+### Run the example
+[Install Restate](/develop/local_dev) and launch it:
 ```bash
 restate-server
 ```
 
-## Observability
+Get the example:
+```bash
+restate example typescript-ai-agents && cd typescript-ai-agents
+npm install
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/template" />
 
-The Restate UI shows what's stored in the execution journal.
-
-
-## Durable Tools
-
-Tool execution can fail. Use the Restate Context to persist steps within your tool execution. This ensures that if a tool call fails, steps it already completed will not repeat on retry.
-
-### Durable steps
-To wrap non-deterministic operations (like API calls) in durable steps, use `ctx.run()`:
-
-```typescript
-const weatherTool = tool({
-  description: "Get weather for a city",
-  parameters: z.object({ city: z.string() }),
-  execute: async ({ city }) => {
-    // This API call won't repeat on replay
-    return await ctx.run("fetch-weather", () => 
-      fetch(`https://api.weather.com/v1/current?q=${city}`)
-        .then(res => res.json())
-    );
-  }
-});
+Run the example:
+```bash
+npm run dev
 ```
 
-### Human-in-the-Loop Steps
-
-Some agent actions need human approval. Use awakeables to pause execution until a human responds:
-
-```typescript
-const dangerousTool = tool({
-  description: "Do something dangerous",
-  parameters: z.object({ task: z.string() }),
-  execute: async ({ task }) => {
-    const id, approvalPromise = await ctx.awakeable<boolean>()
-    await restate_context.run("request-approval", () =>
-      requestToolExecutionApproval(task, id)
-    );
-    const approved = await approvalPromise;
-
-    if (!approved) {
-      throw new Error("Tool execution not approved by human. Try another tool or ask for help.");
-    }
-  }
-});
+Then, tell Restate where your agent is running via the UI (`http://localhost:9070`) or CLI:
+```bash
+restate deployments register http://localhost:9080
 ```
 
-### Schedule Background Tasks
-
-You can let tools schedule background tasks that either run immediately or at a later time:
-
-
-```typescript
-const followUpWithPatient = tool({
-  description: "Schedule follow-up",
-  parameters: z.object({ patientId: z.string(), topic: z.string() }),
-  execute: async ({ patient, topic }) => {
-      // Ask patient how the treatment is going 3 days later
-      ctx.serviceClient(emailService).followUp(patient, topic, {delay: "3 days"});
-  }
-});
+To invoke the agent, send a request to `restate-ingress/ServiceName/handlerName`:
+```bash
+curl localhost:8080/assistant/run \
+  --json '{"messages": [{"role": "user", "content": "What is the weather in San Francisco?"}]}'
 ```
 
-### Parallel Tool Execution
+Click in the UI's invocations tab to see the execution trace showing the LLM call and weather tool execution.
 
-Run independent tools concurrently:
+<Frame>
+<img src="/img/tour/ai-agents/basic-trace.png" alt="Agent execution trace" />
+</Frame>
 
-```typescript
-const parallelToolsAgent = restate.service({
-  name: "ParallelToolsAgent",
+
+## Durable Execution
+
+AI agents make multiple LLM calls and tool executions that can fail due to rate limits, network issues, or service outages. Restate uses Durable Execution to ensure your agents recover their progress without starting over.
+
+Whenever an agent executes an operation with the Restate `Context`, this gets sent to the Restate Server and persisted in a log. On a failure or crash, Restate automatically retries with the log of completed operations, allowing the agent to resume from where it left off.
+
+<img src="/img/tour/durable_execution_ai.gif" alt="Durable AI Agent Execution" />
+
+Here's an agent that performs multiple steps to analyze and respond to user queries:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/examples/restate/services/multi_tool.ts?collapse_prequel"} 
+export const calculatorAgent = restate.service({
+  name: "calculator-agent",
   handlers: {
-    gatherComprehensiveData: async (ctx, request: { topic: string }) => {
-      // Start all data gathering operations in parallel
-      const [webResults, dbResults, apiResults] = await Promise.all([
-        ctx.run("web-search", () => searchWeb({ query: request.topic })),
-        ctx.run("database-search", () => queryDatabase({ 
-          sql: `SELECT * FROM articles WHERE topic LIKE '%${request.topic}%'` 
-        })),
-        ctx.run("external-api", () => fetchFromExternalAPI({ 
-          endpoint: "research", params: { topic: request.topic } 
-        }))
-      ]);
-      
-      // Process and combine results
-      const combinedData = await ctx.run("combine-results", () =>
-        generateText({
-          model: openai("gpt-4o"),
-          prompt: `Combine and synthesize these research results about ${request.topic}`,
-          maxTokens: 4096
-        })
-      );
+    run: async (ctx: Context, request: CalculatorRequest) => {
+      // Each step is durable and recoverable
+      const analysis = await ctx.run("analyze", async () => {
+        return await generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Analyze this math problem: ${request.problem}`,
+        });
+      });
+
+      const calculation = await ctx.run("calculate", async () => {
+        return await generateObject({
+          model: openai("gpt-4o-mini"),
+          schema: calculatorSchema,
+          tools: { calculate: calculatorTool },
+          messages: [{ role: "user", content: request.problem }],
+        });
+      });
+
+      const response = await ctx.run("respond", async () => {
+        return await generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Explain this result: ${calculation.object.result}`,
+        });
+      });
+
+      return { analysis: analysis.text, calculation: calculation.object, response: response.text };
+    },
+  },
+});
+```
+
+**Key Benefits:**
+- `ctx.run()` makes LLM calls and tool executions durable - they replay results on failures
+- If the agent crashes after analysis, it resumes at the calculation step
+- No duplicate API calls or lost progress
+- Full execution traces for debugging and monitoring
+
+<Accordion title={"Try it out"}>
+    Try solving a complex math problem:
+    ```bash
+    curl localhost:8080/calculator-agent/run \
+      --json '{"problem": "What is the compound interest on $1000 at 5% annually for 3 years?"}'
+    ```
+
+    In the invocation page, you can see each step being executed durably. Try restarting the service during execution to see how it recovers seamlessly.
+</Accordion>
+
+> **Compared to workflow engines:** Restate's durable function model allows you to keep the entire agent as one long-running function. You don't need to split LLM calls and tool executions into separate activities, keeping context and shared resources together.
+
+
+## Agent Loops with AI SDKs
+
+Real AI agents often run in loops, making multiple LLM calls and tool executions until they complete a task. Restate integrates seamlessly with popular AI SDKs to make these loops fault-tolerant.
+
+Here's how to build an agent loop using the Vercel AI SDK:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/examples/restate/services/multi_tool.ts"} 
+export const mathAgent = restate.service({
+  name: "math-agent",
+  handlers: {
+    solve: async (ctx: Context, { problem }: { problem: string }) => {
+      let step = 0;
+      const maxSteps = 10;
+      const messages: CoreMessage[] = [
+        { role: "system", content: "You are a helpful math tutor. Solve problems step by step." },
+        { role: "user", content: problem }
+      ];
+
+      while (step < maxSteps) {
+        const result = await ctx.run(`step-${step}`, async () => {
+          return await streamObject({
+            model: openai("gpt-4o-mini"),
+            messages,
+            tools: {
+              calculate: {
+                description: "Calculate mathematical expressions",
+                parameters: z.object({
+                  expression: z.string(),
+                }),
+                execute: async ({ expression }) => {
+                  const result = evaluate(expression);
+                  return { result };
+                },
+              },
+            },
+            maxSteps: 1,
+          });
+        });
+
+        // Process the result and add to conversation
+        const response = await result.fullStream;
+        
+        if (response.finishReason === "stop") {
+          return response.object;
+        }
+
+        messages.push(...response.messages);
+        step++;
+      }
+
+      return { error: "Max steps reached" };
+    },
+  },
+});
+```
+
+**Integration Benefits:**
+- Works with any AI SDK (Vercel AI, OpenAI, Anthropic, etc.)
+- Each loop iteration is durable and recoverable
+- Automatic retry on API failures with exponential backoff
+- Tool executions are cached and don't re-execute on replay
+- Conversation state persists across crashes
+
+<Accordion title={"Try it out"}>
+    Send a complex math problem that requires multiple steps:
+    ```bash
+    curl localhost:8080/math-agent/solve \
+      --json '{"problem": "A store offers a 20% discount, then adds 8% tax. If I buy items worth $150, how much do I pay?"}'
+    ```
+
+    Watch in the UI how the agent makes multiple LLM calls and tool executions, with each step being recorded durably.
+</Accordion>
+
+
+
+## Observability and Debugging
+
+Restate provides built-in observability for AI agents, giving you complete visibility into LLM calls, tool executions, and conversation flows without additional instrumentation.
+
+Every agent execution creates a detailed trace showing:
+- Individual LLM calls with prompts and responses
+- Tool executions with inputs and outputs  
+- Timing and retry information
+- State changes and conversation history
+- Error details and recovery attempts
+
+<Frame>
+<img src="/img/tour/ai-agents/agent-trace.png" alt="AI Agent Execution Trace" />
+</Frame>
+
+Click on any invocation in the UI to see the complete execution timeline. This makes debugging agent behavior, understanding decision paths, and optimizing performance straightforward.
+
+<Accordion title={"Crash Recovery in Action"}>
+    AI agents can crash during any step - while waiting for an LLM response, during tool execution, or while processing results. Restate automatically recovers the agent to exactly where it left off.
+
+    Try this:
+    1. Start a long-running agent task
+    2. Kill the process while it's executing  
+    3. Restart the service
+    4. Watch in the UI as execution resumes from the exact step where it crashed
+
+    <Frame>
+    <img src="/img/tour/ai-agents/crash-recovery.png" alt="Agent Crash Recovery" />
+    </Frame>
+</Accordion>
+
+<Accordion title={"OpenTelemetry Integration"}>
+    Restate supports OpenTelemetry for exporting traces to external systems like Langfuse, DataDog, or Jaeger:
+
+    ```bash
+    # Set environment variables for OTEL export
+    export OTEL_EXPORTER_OTLP_ENDPOINT=https://your-langfuse-instance.com/api/public/ingestion
+    export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer your-api-key"
+    
+    # Start Restate with OTEL enabled
+    restate-server --otel-endpoint $OTEL_EXPORTER_OTLP_ENDPOINT
+    ```
+
+    This gives you AI agent traces alongside your existing observability stack.
+</Accordion>
+
+
+## Human-in-the-Loop Workflows
+
+Many AI agents need human oversight for high-risk decisions, compliance requirements, or handling edge cases. Restate makes it easy to pause agent execution, wait for human input, and handle timeouts gracefully.
+
+### Workflow Approval Pattern
+
+Here's a loan processing agent that requires human approval for uncertain cases:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/examples/restate/services/human_approval.ts?collapse_prequel"} 
+export const loanProcessor = restate.workflow({
+  name: "loan-processor",
+  handlers: {
+    process: async (ctx: WorkflowContext, application: LoanApplication) => {
+      const loanId = ctx.key;
+
+      // AI assessment step
+      const assessment = await ctx.run("assess", async () => {
+        return await generateObject({
+          model: openai("gpt-4o-mini"),
+          schema: assessmentSchema,
+          messages: [{
+            role: "user",
+            content: `Assess this loan application: ${JSON.stringify(application)}`
+          }],
+        });
+      });
+
+      // Automatic approval for high-confidence cases
+      if (assessment.confidence > 0.9 && assessment.recommendation === "approve") {
+        return { approved: true, reason: "Automatic approval - high confidence" };
+      }
+
+      // Require human approval for uncertain cases
+      const humanDecision = await ctx.promise<ApprovalDecision>("human-approval");
       
       return {
-        synthesizedData: combinedData.text,
-        totalSources: webResults.length + dbResults.length + apiResults.length
+        approved: humanDecision.approved,
+        reason: humanDecision.reason,
+        approver: humanDecision.approver
       };
-    }
-  }
+    },
+
+    // Human approver calls this endpoint
+    approve: async (ctx: WorkflowSharedContext, decision: ApprovalDecision) => {
+      ctx.promiseResolve("human-approval", decision);
+    },
+  },
 });
 ```
 
-Restate will take care of retries of each step, and finally will collect the results.
+### Tool Approval Pattern
 
-## Agent Context and State
-
-Agents need to maintain conversation history and state. Virtual Objects provide isolated, consistent state management per agent session:
+For agents that need approval for specific tool calls, you can implement approval within the agent loop:
 
 ```typescript
-// Keyed by session ID
-const agent = restate.object({
-    name: "Agent",
-    handlers: {
-        run: async (restate_ctx: restate.ObjectContext, message: string) => {
-            // Load the session context
-            const messages = (await restate_ctx.get<Message[]>("messages")) ?? [];
-            messages.push({role: "user", content: message});
+// Within an agent loop
+if (toolCall.name === "transfer_money" && toolCall.amount > 10000) {
+  // Request approval for high-value transfers
+  const approval = await ctx.promise<boolean>("approval-" + toolCall.id);
+  if (!approval) {
+    continue; // Skip this tool call
+  }
+}
 
-            const result = await runVercelAIAgent(restate_ctx, messages);
+// Execute the approved tool
+const result = await ctx.run(`tool-${toolCall.id}`, () => 
+  executeTool(toolCall)
+);
+```
 
-            // Store the session context
-            messages.push({role: "assistant", content: result});
-            restate_ctx.set("messages", messages);
-            return result;
-        },
+**Benefits with Restate:**
+- Agents pause indefinitely while waiting for human input
+- No timeouts or lost context during approval workflows
+- Full audit trail of AI decisions and human overrides
+- Agents resume exactly where they left off after approval
+
+<Accordion title={"Try it out"}>
+    Process a loan application that requires human approval:
+    ```bash
+    curl localhost:8080/loan-processor/loan-123/process \
+      --json '{
+        "applicant": "John Doe",
+        "amount": 50000,
+        "creditScore": 650,
+        "income": 75000
+      }'
+    ```
+
+    The workflow will pause waiting for human approval. Provide approval:
+    ```bash
+    curl localhost:8080/loan-processor/loan-123/approve \
+      --json '{
+        "approved": true,
+        "reason": "Good income-to-debt ratio",
+        "approver": "sarah@bank.com"
+      }'
+    ```
+
+    Watch in the UI how the workflow pauses and resumes after human input.
+</Accordion>
+
+<Accordion title={"Timeouts and Escalation"}>
+    Add timeouts to human approval steps to prevent workflows from hanging indefinitely:
+
+    ```typescript
+    try {
+      const decision = await ctx.promise<ApprovalDecision>("human-approval")
+        .orTimeout({ hours: 24 });
+      return decision;
+    } catch (e) {
+      if (e instanceof TimeoutError) {
+        // Escalate to manager or auto-reject
+        return { approved: false, reason: "Approval timeout - escalated" };
+      }
+      throw e;
     }
+    ```
+</Accordion>
+
+
+
+## Multi-turn Conversations and State
+
+AI agents often need to maintain conversation history and context across multiple interactions. Restate's Virtual Objects provide stateful, isolated contexts for each user or conversation thread.
+
+Here's a stateful chat agent that remembers conversation history:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/examples/restate/services/chat.ts?collapse_prequel"} 
+export const conversationAgent = restate.object({
+  name: "conversation",
+  handlers: {
+    chat: async (ctx: ObjectContext, { message }: { message: string }) => {
+      const conversationId = ctx.key; // Unique per conversation
+
+      // Retrieve existing conversation state
+      let state = await ctx.get<ChatState>("state") ?? {
+        messages: [],
+        context: {},
+        createdAt: Date.now()
+      };
+
+      // Add user message to history
+      state.messages.push({ role: "user", content: message });
+
+      // Generate AI response with full conversation history
+      const response = await ctx.run("generate", async () => {
+        return await generateText({
+          model: openai("gpt-4o-mini"),
+          messages: [
+            { role: "system", content: "You are a helpful assistant. Remember previous conversation context." },
+            ...state.messages
+          ],
+        });
+      });
+
+      // Add AI response to history and save state
+      state.messages.push({ role: "assistant", content: response.text });
+      state.context.lastInteraction = Date.now();
+      
+      ctx.set("state", state);
+
+      return {
+        response: response.text,
+        conversationId,
+        messageCount: state.messages.length
+      };
+    },
+
+    // Get conversation history
+    getHistory: async (ctx: ObjectSharedContext) => {
+      const state = await ctx.get<ChatState>("state");
+      return state?.messages ?? [];
+    },
+
+    // Clear conversation
+    reset: async (ctx: ObjectContext) => {
+      ctx.clear("state");
+      return { reset: true };
+    },
+  },
 });
 ```
+
+**State Management Benefits:**
+- Each conversation gets isolated, persistent state
+- Conversation history survives service restarts and crashes
+- No external database required - state is automatically managed
+- Concurrent conversations are processed safely without race conditions
+- State is queryable and exportable via the UI
+
+<Frame>
+<img src="/img/tour/ai-agents/conversation-state.png" alt="Conversation State Management" />
+</Frame>
+
+<Accordion title={"Try it out"}>
+    Start a conversation with a specific ID:
+    ```bash
+    curl localhost:8080/conversation/user-123/chat \
+      --json '{"message": "Hi, I am planning a trip to Japan. What should I know?"}'
+    ```
+
+    Continue the conversation - the agent remembers previous context:
+    ```bash
+    curl localhost:8080/conversation/user-123/chat \
+      --json '{"message": "What about the best time to visit?"}'
+    ```
+
+    Get conversation history:
+    ```bash
+    curl localhost:8080/conversation/user-123/getHistory
+    ```
+
+    The agent maintains context across all interactions within the same conversation ID.
+</Accordion>
+
+
+
+## Concurrent Tasks and Sub-agents
+
+Complex AI workflows often benefit from parallel execution - running multiple agents simultaneously or breaking work into concurrent sub-tasks. This reduces overall execution time and allows specialized agents to work in parallel.
+
+Here's an agent that parallelizes research tasks:
+
+```typescript
+export const researchOrchestrator = restate.service({
+  name: "research-orchestrator",
+  handlers: {
+    research: async (ctx: Context, { topic, aspects }: ResearchRequest) => {
+      // Start multiple research agents in parallel
+      const researchPromises = aspects.map(aspect => 
+        ctx.run(`research-${aspect}`, async () => {
+          return await generateObject({
+            model: openai("gpt-4o-mini"),
+            schema: researchSchema,
+            messages: [{
+              role: "user",
+              content: `Research ${aspect} of ${topic}. Provide detailed analysis.`
+            }],
+            tools: { webSearch: searchTool, getDocument: documentTool }
+          });
+        })
+      );
+
+      // Wait for all research to complete
+      const results = await Promise.all(researchPromises);
+
+      // Synthesize findings
+      const synthesis = await ctx.run("synthesize", async () => {
+        return await generateText({
+          model: openai("gpt-4o-mini"),
+          messages: [{
+            role: "user",
+            content: `Synthesize these research findings into a comprehensive report: ${JSON.stringify(results)}`
+          }]
+        });
+      });
+
+      return {
+        topic,
+        individualFindings: results,
+        synthesis: synthesis.text,
+        completedAt: new Date().toISOString()
+      };
+    },
+  },
+});
+```
+
+**Concurrency Benefits:**
+- Multiple agents or tasks run simultaneously
+- Shorter recovery time (replay only failed parts)
+- Reduced memory usage (shorter execution logs)
+- Better resource utilization
+- Fault isolation (one task failure doesn't affect others)
+
+<Accordion title={"Sub-workflow Pattern"}>
+    For complex workflows, break them into separate durable functions:
+
+    ```typescript
+    // Main orchestrator
+    export const mainWorkflow = restate.service({
+      name: "main-workflow",
+      handlers: {
+        process: async (ctx: Context, input: ProcessInput) => {
+          // Delegate to specialized sub-workflows
+          const [analysis, validation, enrichment] = await Promise.all([
+            ctx.serviceClient(analysisWorkflow).analyze(input.data),
+            ctx.serviceClient(validationWorkflow).validate(input.rules),
+            ctx.serviceClient(enrichmentWorkflow).enrich(input.context)
+          ]);
+
+          return { analysis, validation, enrichment };
+        },
+      },
+    });
+    ```
+
+    This pattern provides:
+    - **Simpler recovery**: Each sub-workflow recovers independently  
+    - **Better observability**: Clear separation of concerns in traces
+    - **Scalability**: Sub-workflows can scale independently
+    - **Reusability**: Sub-workflows can be used by multiple orchestrators
+</Accordion>
+
+
 ## Multi-Agent Orchestration
 
-Complex tasks can be split across specialized agents. Call other agents from within tools:
+Multi-agent systems coordinate specialized agents to solve complex problems. Restate provides reliable orchestration patterns where agents can communicate durably and maintain shared context.
 
-**Request-Response**: Wait for another agent's result:
+Here's a loan evaluation system with multiple specialized agents:
 
-```typescript
-tool({
-    description: "Handoff to BlueSky agent for research.",
-    parameters: z.object({ prompt: z.string() }),
-    execute: async ({ prompt }) =>
-        await restate_ctx.serviceClient(blueSkyAgent).run_agent(prompt),
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/main/vercel-ai/examples/restate/services/multi_agent.ts?collapse_prequel"} 
+// Risk assessment specialist
+export const riskAgent = restate.service({
+  name: "risk-agent",
+  handlers: {
+    assess: async (ctx: Context, application: LoanApplication) => {
+      return await ctx.run("risk-analysis", async () => {
+        return await generateObject({
+          model: openai("gpt-4o-mini"),
+          schema: riskAssessmentSchema,
+          messages: [{
+            role: "user",
+            content: `Assess the risk for this loan application: ${JSON.stringify(application)}`
+          }],
+          tools: { checkCreditHistory: creditTool, analyzeIncome: incomeTool }
+        });
+      });
+    },
+  },
+});
+
+// Main orchestrator that coordinates multiple agents
+export const loanEvaluator = restate.workflow({
+  name: "loan-evaluator",
+  handlers: {
+    evaluate: async (ctx: WorkflowContext, application: LoanApplication) => {
+      const loanId = ctx.key;
+
+      // Coordinate multiple agents in parallel
+      const [riskAssessment, creditCheck, incomeVerification] = await Promise.all([
+        ctx.serviceClient(riskAgent).assess(application),
+        ctx.serviceClient(creditAgent).verify(application.ssn),
+        ctx.serviceClient(incomeAgent).verify(application.income)
+      ]);
+
+      // Final decision with all agent inputs
+      const decision = await ctx.run("decide", async () => {
+        return await generateObject({
+          model: openai("gpt-4o-mini"),
+          schema: loanDecisionSchema,
+          messages: [{
+            role: "user",
+            content: `Make a loan decision based on:\nRisk: ${JSON.stringify(riskAssessment)}\nCredit: ${JSON.stringify(creditCheck)}\nIncome: ${JSON.stringify(incomeVerification)}`
+          }]
+        });
+      });
+
+      return {
+        loanId,
+        decision: decision.object,
+        assessments: { riskAssessment, creditCheck, incomeVerification },
+        processedAt: new Date().toISOString()
+      };
+    },
+  },
 });
 ```
 
-**Fire-and-Forget**: Start agents without waiting for results:
+### Stateful Agent Coordination
+
+For complex multi-agent workflows, use a Virtual Object as the orchestrator to maintain shared context:
 
 ```typescript
-const parallelProcessingAgent = restate.service({
-  name: "ParallelAgent",
+export const projectOrchestrator = restate.object({
+  name: "project-orchestrator",
   handlers: {
-    processDocument: async (ctx, request: { documentId: string; userId: string }) => {
-      // Start multiple agents working in parallel
-      ctx.serviceSend(summaryAgent).generateSummary({ 
-        documentId: request.documentId 
+    start: async (ctx: ObjectContext, { projectSpec }: ProjectRequest) => {
+      const projectId = ctx.key;
+      
+      // Initialize shared state
+      await ctx.set("project", {
+        spec: projectSpec,
+        status: "planning",
+        agents: [],
+        results: {},
+        startedAt: Date.now()
       });
+
+      // Assign work to different agents
+      const assignments = await ctx.run("plan", () => planProject(projectSpec));
       
-      ctx.serviceSend(keywordAgent).extractKeywords({ 
-        documentId: request.documentId 
-      });
+      // Track agent assignments
+      for (const assignment of assignments) {
+        ctx.serviceSendClient(assignmentQueue).assign({
+          projectId,
+          agentType: assignment.type,
+          task: assignment.task
+        });
+      }
+
+      return { projectId, assignments };
+    },
+
+    // Agents call this to report progress
+    updateProgress: async (ctx: ObjectContext, update: ProgressUpdate) => {
+      const project = await ctx.get<Project>("project");
+      project.results[update.agentId] = update.result;
       
-      ctx.serviceSend(sentimentAgent).analyzeSentiment({ 
-        documentId: request.documentId 
-      });
+      // Check if all agents completed
+      if (this.allAgentsComplete(project)) {
+        project.status = "completed";
+        // Trigger final synthesis
+        ctx.serviceSendClient(synthesisAgent).synthesize(project.results);
+      }
       
-      // Continue with main processing - other agents work in background
-      const mainProcessing = await ctx.run("main-processing", 
-        () => processDocumentMain(request.documentId)
-      );
-      
-      return { processedId: request.documentId, status: "processing" };
-    }
-  }
+      await ctx.set("project", project);
+    },
+  },
 });
 ```
 
-## Long-running Agents
+**Multi-Agent Benefits:**
+- **Specialized expertise**: Each agent focuses on specific domains
+- **Fault tolerance**: Agent failures don't crash the entire system  
+- **Scalability**: Agents can be scaled independently
+- **Observability**: Clear visibility into inter-agent communication
+- **Coordination**: Shared state and reliable message passing
 
-Use Virtual Objects for agents that run continuously, checking for new tasks periodically:
+<Accordion title={"Try it out"}>
+    Start a loan evaluation with multiple agents:
+    ```bash
+    curl localhost:8080/loan-evaluator/loan-456/evaluate \
+      --json '{
+        "applicant": "Jane Smith",
+        "amount": 75000,
+        "ssn": "123-45-6789",
+        "income": 90000,
+        "purpose": "home improvement"
+      }'
+    ```
+
+    Watch in the UI how the orchestrator coordinates multiple specialized agents in parallel, each contributing their expertise to the final decision.
+</Accordion>
+
+
+## Advanced Patterns
+
+Restate enables sophisticated AI agent patterns that would be complex to implement with traditional architectures. Here are some advanced patterns for production AI systems:
+
+### Real-time Progress Updates
+
+Stream agent progress to users in real-time using Restate's pub/sub capabilities:
 
 ```typescript
-const backgroundAgent = restate.object({
-  name: "BackgroundAgent",
+export const streamingAgent = restate.service({
+  name: "streaming-agent",
   handlers: {
-    start: async (ctx) => {
-      while (await ctx.get<boolean>("active")) {
-        const tasks = await ctx.run("check-tasks", () => checkForNewTasks());
-        
-        for (const task of tasks) {
-          await ctx.run(`process-${task.id}`, () => processTask(task));
+    process: async (ctx: Context, { userId, task }: StreamingRequest) => {
+      // Publish progress updates as the agent works
+      const publishProgress = (step: string, data: any) => {
+        ctx.serviceSendClient(notificationService).notify({
+          userId,
+          type: "agent-progress",
+          step,
+          data,
+          timestamp: Date.now()
+        });
+      };
+
+      publishProgress("started", { task });
+
+      const analysis = await ctx.run("analyze", async () => {
+        const result = await analyzeTask(task);
+        publishProgress("analysis-complete", result);
+        return result;
+      });
+
+      const execution = await ctx.run("execute", async () => {
+        const result = await executeTask(analysis);
+        publishProgress("execution-complete", result);
+        return result;
+      });
+
+      publishProgress("finished", { analysis, execution });
+      return { analysis, execution };
+    },
+  },
+});
+```
+
+### Interruptible Agents
+
+Build agents that can be interrupted and redirected mid-execution:
+
+```typescript
+export const codingAgent = restate.object({
+  name: "coding-agent",
+  handlers: {
+    code: async (ctx: ObjectContext, { prompt }: CodingRequest) => {
+      const sessionId = ctx.key;
+      let currentStep = 0;
+      
+      while (currentStep < 10) {
+        // Check for interruption signals
+        const interruption = await ctx.get<Interruption>("interruption");
+        if (interruption) {
+          ctx.clear("interruption");
+          // Handle the interruption
+          return await this.handleInterruption(ctx, interruption);
         }
-        
-        await ctx.timer(Duration.ofMinutes(5)); // Check every 5 minutes
+
+        // Normal agent step
+        const result = await ctx.run(`step-${currentStep}`, async () => {
+          return await generateCode(prompt, currentStep);
+        });
+
+        if (result.completed) break;
+        currentStep++;
+      }
+
+      return { code: result.code, steps: currentStep };
+    },
+
+    // External systems can interrupt the agent
+    interrupt: async (ctx: ObjectContext, interruption: Interruption) => {
+      await ctx.set("interruption", interruption);
+      return { interrupted: true };
+    },
+  },
+});
+```
+
+### Long-running Agent Workflows
+
+Build agents that can run for days or weeks, handling external events and timeouts:
+
+```typescript
+export const campaignAgent = restate.workflow({
+  name: "campaign-agent",
+  handlers: {
+    run: async (ctx: WorkflowContext, campaign: Campaign) => {
+      const campaignId = ctx.key;
+      
+      // Run campaign for specified duration
+      const endTime = Date.now() + campaign.durationMs;
+      
+      while (Date.now() < endTime) {
+        // Wait for external events or timeout
+        try {
+          const event = await ctx.promise<CampaignEvent>("event")
+            .orTimeout({ hours: 6 }); // Check every 6 hours
+            
+          await this.handleEvent(ctx, event);
+        } catch (e) {
+          if (e instanceof TimeoutError) {
+            // Regular campaign maintenance
+            await ctx.run("maintenance", () => 
+              performCampaignMaintenance(campaignId)
+            );
+          }
+        }
+      }
+
+      return { campaignId, status: "completed" };
+    },
+
+    event: async (ctx: WorkflowSharedContext, event: CampaignEvent) => {
+      ctx.promiseResolve("event", event);
+    },
+  },
+});
+```
+
+### Integration with External AI Platforms
+
+Integrate with external AI platforms like Langfuse for advanced monitoring:
+
+```typescript
+// Export traces to Langfuse
+export const observableAgent = restate.service({
+  name: "observable-agent",
+  handlers: {
+    process: async (ctx: Context, input: ProcessInput) => {
+      // Start Langfuse trace
+      const trace = await ctx.run("start-trace", () => 
+        langfuse.trace({
+          name: "agent-process",
+          input,
+          metadata: { restateInvocationId: ctx.invocationId }
+        })
+      );
+
+      try {
+        const result = await ctx.run("llm-call", async () => {
+          const generation = trace.generation({ name: "main-llm-call" });
+          const result = await openai.chat.completions.create({...});
+          generation.end({ output: result });
+          return result;
+        });
+
+        trace.update({ output: result });
+        return result;
+      } catch (error) {
+        trace.update({ output: error });
+        throw error;
       }
     },
-    
-    stop: async (ctx) => {
-      ctx.set("active", false);
-    }
-  }
+  },
 });
 ```
 
-## Custom AI Workflows
-
-You can build AI workflows directly with the Restate SDK instead of using agent frameworks. Common patterns:
-
-<CardGroup>
-    <Card title={"Chaining LLM Calls"} href={"/develop/ts/llm-chains"}/>
-    <Card title={"Parallelizing Calls"} href={"/develop/ts/llm-chains"}/>
-    <Card title={"Routing"} href={"/develop/ts/llm-chains"}/>
-    <Card title={"Evaluator-optimizer"} href={"/develop/ts/llm-chains"}/>
-</CardGroup>
+These patterns enable building production-grade AI systems with:
+- **Real-time user feedback** during long-running agent processes
+- **Interruptible execution** for dynamic agent behavior  
+- **Long-running workflows** that survive service restarts
+- **Advanced observability** with external AI monitoring tools
+- **Event-driven architecture** for responsive AI systems
 
 ## Summary
 
-Restate provides these patterns for building resilient AI agents:
+Restate transforms AI agent development by providing:
 
-- **Durable Execution**: LLM calls and tool invocations are cached and don't repeat on retry
-- **Human-in-the-Loop**: Use awakeables and timers for approval workflows
-- **Persistent State**: Virtual Objects maintain conversation history across failures  
-- **Multi-Agent**: Coordinate multiple specialized agents with reliable communication
+- **Durable Execution**: Automatic recovery from failures without losing progress
+- **State Management**: Persistent conversation history and context
+- **SDK Integration**: Works with popular AI SDKs like Vercel AI and OpenAI
+- **Human-in-the-Loop**: Seamless approval workflows with timeouts  
+- **Multi-Agent Coordination**: Reliable orchestration of specialized agents
+- **Advanced Patterns**: Real-time streaming, interruptions, and long-running workflows
 
-These patterns handle the unique challenges of AI systems: expensive operations, non-deterministic execution, and long-running workflows.
+Build resilient, observable AI agents that handle real-world complexity without the typical infrastructure overhead.
