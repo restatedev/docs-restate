@@ -15,7 +15,7 @@ Open the [Restate Cloud UI](https://cloud.restate.dev) and create a new environm
 
 Note the environment id (`env_...`) and request signing key (under security -> HTTP services: `publickeyv1_...`), as you will need them later.
 
-Create a "Full" scope API key and copy the key for later.
+Create a `"Full"` scope API key with a descriptive name for the tunnel client and copy the key for later.
 
 ### 2. Setup the CLI
 Next, we need to set up a CLI profile to connect to our Restate Cloud environment.
@@ -36,8 +36,11 @@ restate config use-env <name>
 ```
 
 ### 3. Run the tunnel
+The tunnel can be hosted as a cloud VM in your VPC, a sidecar to your service, or a dedicated pod in your container orchestrator.
 
-Run the tunnel in a Docker container. Either locally or next to your service:
+You can deploy multiple copies for redundancy.
+
+To run the tunnel:
 
 ```bash
 # export RESTATE_ENVIRONMENT_ID=env_...
@@ -45,23 +48,74 @@ Run the tunnel in a Docker container. Either locally or next to your service:
 # export RESTATE_TUNNEL_NAME=test-tunnel
 # export RESTATE_SIGNING_PUBLIC_KEY=publickeyv1_...
 # export RESTATE_CLOUD_REGION=eu
-# export RUST_LOG=info
 
 docker run \
-  -e RESTATE_CLOUD_REGION \
   -e RESTATE_ENVIRONMENT_ID \
-  -e RESTATE_SIGNING_PUBLIC_KEY \
   -e RESTATE_BEARER_TOKEN \
   -e RESTATE_TUNNEL_NAME \
-  -e RUST_LOG \
+  -e RESTATE_SIGNING_PUBLIC_KEY \
+  -e RESTATE_CLOUD_REGION \
   -p 8080:8080 \
   -p 9090:9090 \
-  -it ghcr.io/restatedev/restate-cloud-tunnel-client:0.4.0
+  -p 9070:9070
+  -it ghcr.io/restatedev/restate-cloud-tunnel-client:latest
 ```
 
-### 4. Run a Restate service locally
+<AccordionGroup>
+<Accordion title="Environment variables">
+- `RESTATE_ENVIRONMENT_ID` is the environment id (including the `env_` prefix).
+- `RESTATE_BEARER_TOKEN` is the API key you created in step 1.
+- `RESTATE_TUNNEL_NAME` is a name for the tunnel. Choose a unique DNS-friendly tunnel name, e.g. `prod-tunnel`.
+- `RESTATE_SIGNING_PUBLIC_KEY` is the public key you copied from the Cloud UI in step 1.
+- `RESTATE_CLOUD_REGION` is the region of your Restate Cloud environment, e.g. `eu` or `us`.
+- You can run `latest` or pin the current version, e.g. `0.4.0`
+- The health check URL is at `:9090/health`
+</Accordion>
+<Accordion title="Tunnel ports">
+The tunnel client exposes the following ports
+- `9090` tunnel's own health status
+- `8080` Restate Ingress
+- `9070` Restate Admin API
+</Accordion>
+</AccordionGroup>
+
+### 4. Run a Restate service
 
 Follow the quickstart to [run a Restate service locally](/quickstart).
+
+<CodeGroup>
+```bash TypeScript
+restate example typescript-hello-world
+cd typescript-hello-world
+npm install
+npm run dev
+```
+```bash Java
+restate example java-hello-world-maven
+cd java-hello-world-maven
+mvn compile exec:java
+```
+```bash Kotlin
+restate example kotlin-hello-world
+cd kotlin-hello-world
+./gradlew run
+```
+```bash Python
+restate example python-hello-world
+cd python-hello-world
+uv run .
+```
+```Bash Go
+restate example go-hello-world &&
+cd go-hello-world
+go run .
+```
+```bash Rust
+restate example rust-hello-world
+cd rust-hello-world
+cargo run
+```
+</CodeGroup>
 
 ### 5. Register your service
 
@@ -81,12 +135,35 @@ restate deployments register https://tunnel.eu.restate.cloud:9080/20d1231jyphzkm
 
 ### 6. Test your service
 
-You can now test your service by invoking it via Restate Cloud.
+You can now test your service by invoking it via Restate Cloud:
+
+<CodeGroup>
+    ```bash TypeScript
+    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
+    ```
+    ```bash Java
+    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
+    ```
+    ```bash Kotlin
+    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
+    ```
+    ```bash Python
+    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
+    ```
+    ```Bash Go
+    curl localhost:8080/Greeter/Greet --json '"Sarah"'
+    ```
+    ```bash Rust
+    curl localhost:8080/Greeter/greet --json '"Sarah"'
+    ```
+</CodeGroup>
+
+
 
 ### How does it work?
-- Restate CLI is communicating with your Restate environment at `https://*.eu.restate.cloud:9070` using your user id token and asking the admin API to perform a discovery at the special tunnel URL
-- The Restate Cloud end of the tunnel receives the request from your environment and, subject to matching tunnel found, forwarding the traffic to the tunnel container
-- The tunnel container is forwarding the traffic to the Restate service endpoint
+- Restate CLI is communicating with your Restate environment at `https://*.eu.restate.cloud:9070` using your user ID token and asks the admin API to perform a discovery at the special tunnel URL.
+- The Restate Cloud end of the tunnel receives the request from your environment and forwards the traffic to the tunnel container.
+- The tunnel container is forwarding the traffic to the Restate service endpoint.
 
 ## AWS Lambda services
 
