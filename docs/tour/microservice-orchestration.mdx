@@ -4,7 +4,7 @@ description: "Learn how to orchestrate microservices with durable execution, sag
 icon: "circle-nodes"
 ---
 
-import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
 
 Microservice orchestration is about coordinating multiple services to complete complex business workflows. Restate provides powerful primitives for building resilient, observable orchestration patterns.
 
@@ -13,6 +13,22 @@ In this guide, you'll learn how to:
 - Implement sagas for distributed transactions with resilient compensation
 - Use durable timers and external events for complex async patterns
 - Implement stateful entities with Virtual Objects
+
+<Tabs>
+    <Tab title="TypeScript">TypeScript code here</Tab>
+    <Tab title="Java">Java code here</Tab>
+</Tabs>
+
+
+<GlobalTabs>
+<GlobalTab title="TypeScript">TypeScript code here</GlobalTab>
+<GlobalTab title="Java">Java code here</GlobalTab>
+</GlobalTabs>
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="TypeScript">More TypeScript code</GlobalTab>
+<GlobalTab title="Java">More Java code</GlobalTab>
+</GlobalTabs>
 
 ## Getting Started
 A Restate application is composed of two main components:
@@ -23,7 +39,8 @@ A Restate application is composed of two main components:
 
 A basic subscription service orchestration looks like this:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/getstarted/service.ts?collapse_prequel"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/getstarted/service.ts?collapse_prequel"}
 export const subscriptionService = restate.service({
   name: "SubscriptionService",
   handlers: {
@@ -43,6 +60,29 @@ export const subscriptionService = restate.service({
   },
 });
 ```
+
+```java Java
+@Service
+public class SubscriptionService {
+
+    @Handler
+    public void add(Context ctx, SubscriptionRequest req) {
+        var paymentId = ctx.random().nextUUID().toString();
+
+        String payRef = ctx.run(
+        "pay",
+        String.class,
+        () -> createRecurringPayment(req.creditCard(), paymentId));
+
+        for (String subscription : req.subscriptions()) {
+        ctx.run("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
+        }
+    }
+}
+```
+
+</CodeGroup>
+
 A service has handlers that can be called over HTTP. Each handler receives a `Context` object that provides durable execution primitives. Any action performed with the Context is automatically recorded and can survive failures.
 
 You don't need to run your services in any special way. Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda.
@@ -114,7 +154,7 @@ This process continues until the handler runs till completion.
 
     To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `utils.ts` file:
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"} 
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"}
 export function createSubscription(
   userId: string,
   subscription: string,
@@ -145,7 +185,7 @@ For these cases, Restate distinguishes between two types of errors:
 - **Terminal Errors**: These indicate a failure that will not be retried, such as invalid input or business logic violations. Restate stops execution and allows you to handle these errors gracefully.
 
 Throw a `TerminalError` in your handler to indicate a terminal failure:
-```typescript {"CODE_LOAD::ts/src/tour/microservices/terminal_error.ts#terminal_error"} 
+```typescript {"CODE_LOAD::ts/src/tour/microservices/terminal_error.ts#terminal_error"}
 throw new TerminalError("Invalid credit card");
 ```
 
@@ -153,7 +193,7 @@ throw new TerminalError("Invalid credit card");
 
     Some actions let you configure their retry behavior, for example to limit the number of retries of a run block:
 
-```typescript {"CODE_LOAD::ts/src/tour/microservices/retries.ts#retries"} 
+```typescript {"CODE_LOAD::ts/src/tour/microservices/retries.ts#retries"}
 const retryPolicy = {
     maxRetryAttempts: 3,
     initialRetryIntervalMillis: 1000,
@@ -181,7 +221,7 @@ Sagas are a pattern for rolling back changes made by a handler when it fails.
 In Restate, you can implement a saga by building a list of compensating actions for each step of the workflow.
 On a terminal failure, you execute them in reverse order:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"}
 export const subscriptionSaga = restate.service({
   name: "SubscriptionSaga",
   handlers: {
@@ -251,7 +291,7 @@ Each Virtual Object instance maintains isolated state and is identified by a uni
 
 Here is an example of a Virtual Object that tracks user subscriptions:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/objects/service.ts?collapse_prequel"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/objects/service.ts?collapse_prequel"}
 export const userSubscriptions = restate.object({
   name: "UserSubscriptions",
   handlers: {
@@ -320,7 +360,7 @@ All communication is proxied via the Restate Server where it gets durably logged
 
 Imagine a handler which processes a concert ticket purchase, and calls multiple services to handle payment, ticket delivery, and reminders:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/communication/service.ts?collapse_prequel"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/communication/service.ts?collapse_prequel"}
 export const concertTicketingService = restate.service({
   name: "ConcertTicketingService",
   handlers: {
@@ -392,7 +432,7 @@ Another common scenario is APIs that respond asynchronously via webhooks or call
 For this, you can use Restate's awakeables.
 
 For example, some payment providers like Stripe require you to initiate a payment and then wait for their webhook to confirm the transaction.
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/events/service.ts?collapse_prequel"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/events/service.ts?collapse_prequel"}
 export const payments = restate.service({
   name: "Payments",
   handlers: {
@@ -457,7 +497,7 @@ Restate tracks these timers so they survive crashes and do not restart from the 
 
 Let's extend our payment service to automatically cancel payments that don't complete within a reasonable time:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts#or_timeout"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts#or_timeout"}
 // Race between payment confirmation and timeout
 try {
   return await confirmation.promise.orTimeout({ seconds: 30 });
@@ -501,30 +541,32 @@ Restate allows more advanced concurrency patterns to run tasks in parallel and w
 
 Let's extend our subscription service to process all subscriptions concurrently and handle failures gracefully:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/concurrenttasks/service.ts?collapse_prequel"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/concurrenttasks/service.ts?collapse_prequel"}
 export const parallelSubscriptionService = restate.service({
-    name: "ParallelSubscriptionService",
-    handlers: {
-        add: async (ctx: Context, req: SubscriptionRequest) => {
-            const paymentId = ctx.rand.uuidv4();
-            const payRef = await ctx.run("pay", () =>
-                createRecurringPayment(req.creditCard, paymentId)
-            );
+  name: "ParallelSubscriptionService",
+  handlers: {
+    add: async (ctx: Context, req: SubscriptionRequest) => {
+      const paymentId = ctx.rand.uuidv4();
+      const payRef = await ctx.run("pay", () =>
+        createRecurringPayment(req.creditCard, paymentId),
+      );
 
-            // Start all subscriptions in parallel
-            const subscriptionPromises = []
-            for (const subscription of req.subscriptions) {
-                subscriptionPromises.push(ctx.run(`add-${subscription}`, () =>
-                    createSubscription(req.userId, subscription, payRef)
-                ))
-            }
+      // Start all subscriptions in parallel
+      const subscriptionPromises = [];
+      for (const subscription of req.subscriptions) {
+        subscriptionPromises.push(
+          ctx.run(`add-${subscription}`, () =>
+            createSubscription(req.userId, subscription, payRef),
+          ),
+        );
+      }
 
-            // Wait for all subscriptions to complete
-            await RestatePromise.all(subscriptionPromises)
+      // Wait for all subscriptions to complete
+      await RestatePromise.all(subscriptionPromises);
 
-            return { success: true, paymentRef: payRef };
-        },
+      return { success: true, paymentRef: payRef };
     },
+  },
 });
 ```
 
@@ -555,7 +597,7 @@ Restate simplifies microservice orchestration with:
 
 - **Durable Execution**: Automatic failure recovery without complex retry logic
 - **Sagas**: Distributed transactions with resilient compensation
-- **Service Communication**: Reliable RPC and messaging between services  
+- **Service Communication**: Reliable RPC and messaging between services
 - **Stateful Processing**: Consistent state management without external stores
 - **Advanced Patterns**: Fault-tolerant timers, awakeables, and parallel execution
 
