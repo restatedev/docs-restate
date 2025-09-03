@@ -48,6 +48,34 @@ Example Code: Doesn't use an SDK, only does an LLM call, a tool call, another LL
 
 ...
 
+```
+export const claimProcessing = restate.service({
+    name: "claim-agent",
+    handlers: {
+        run: async (ctx: Context, req: { message: string }) => {
+            const response = await ctx.run("parse-claim", async () =>
+                openai.responses.parse({
+                    model: "gpt-4o-mini",
+                    input: req.message,
+                    text: { format: zodInsuranceClaim },
+                })
+            );
+            const claim = response.output_parsed;
+
+            if (!claim) {
+                const message = "Your request is incomplete. Missing data: " + JSON.stringify(response.incomplete_details)
+                await ctx.run("email", () => emailCustomer(message))
+                return message
+            }
+
+            await ctx.run("create", () => addClaimToLegacySystem(claim));
+            return `Claim for ${claim.amount} due to ${claim.reason} has been processed.`;
+        },
+    },
+});
+
+restate.endpoint().bind(claimProcessing).listen(9080);
+```
 
 ## Building an Agent Loop
 
