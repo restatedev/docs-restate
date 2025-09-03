@@ -1,6 +1,199 @@
 ---
 title: "AI Agents"
-description: "This tour gives you an introduction to Restate for AI Agents."
+description: "Build resilient, observable AI agents that recover from failures and handle complex multi-step tasks."
 icon: "robot"
 ---
+
+## Why Restate for AI Agents?
+
+AI agent implementations struggle with reliability and state management. When agents make multiple LLM calls, tool executions, or API requests, any failure can lose context and progress. Restate solves these challenges by providing **durable execution**, **automatic recovery**, and **built-in observability** for AI agents.
+
+### Resilient Agent Execution
+
+AI agents are inherently fragile - they make expensive LLM calls, interact with rate-limited APIs, and perform complex multi-step workflows. Restate's durable execution ensures your agents recover automatically from any failure without losing progress.
+
+**Automatic Recovery Features:**
+- **LLM call persistence**: Every model response is saved and replayed during recovery
+- **Tool execution durability**: External API calls are retried until they succeed
+- **State consistency**: Agent state remains consistent across failures
+
+### Simple Integration with AI SDKs
+
+Restate works seamlessly with popular AI frameworks like Vercel AI SDK and OpenAI Agent SDK. No need to rewrite your existing agent logic:
+```typescript
+const weatherAgent = restate.service({
+  name: "WeatherAgent",
+  handlers: {
+    run: async (ctx: restate.Context, prompt: string) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o-mini"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+
+      const result = await generateText({
+        model,
+        tools: {
+          getWeather: tool({
+            description: "Get weather for a city",
+            parameters: z.object({ city: z.string() }),
+            execute: async ({ city }) =>
+              ctx.run("fetch-weather", () => fetchWeather(city)),
+          }),
+        },
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      return result.text;
+    },
+  },
+});
+```
+
+- **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses
+- **Tool execution**: Make tool execution steps resilient with Restate Context actions
+- **Flexiblity**: From simple agents to low-level multi-agent systems
+
+### Built-in Observability
+
+Track every step of your agent's execution with detailed traces and state inspection:
+
+<img src="/img/tour/ai-agents/agent-trace.png" alt="AI Agent Execution Trace" />
+
+- **Complete execution timeline**: See every LLM call, tool execution, and state change
+- **Debug failed agents**: Inspect exactly where and why agents failed
+- **OpenTelemetry integration**: Export traces to Langfuse, DataDog, or custom systems
+
+## Key AI Agent Patterns
+
+### Stateful Conversational Agents
+
+Maintain conversation history and context across multiple interactions using Virtual Objects:
+
+```typescript
+const chatSession = restate.object({
+  name: "ChatSession",
+  handlers: {
+    message: async (ctx: ObjectContext, message: string) => {
+      const messages = (await ctx.get("history")) ?? [];
+      messages.push({ role: "user", content: message });
+
+      const response = await generateText({
+        model: wrapLanguageModel({
+          model: openai("gpt-4o"),
+          middleware: durableCalls(ctx),
+        }),
+        messages,
+      });
+
+      ctx.set("history", [...messages, ...response.messages]);
+      return response.text;
+    },
+  },
+});
+```
+
+### Human-in-the-Loop Workflows
+
+Implement approval workflows and human oversight without complex infrastructure:
+
+```typescript
+const approval = await ctx.awakeable<boolean>();
+await ctx.run("request-approval", () => 
+  sendApprovalRequest(approval.id, decision)
+);
+const decision = await approval.promise;
+```
+
+- **Durable waiting**: Waiting continues across crashes and restarts
+- **Timeout handling**: Set crash-proof timeouts with automatic escalation paths
+- **Cost efficiency**: No compute costs while waiting on serverless platforms
+
+### Multi-Agent Orchestration
+
+Coordinate specialized agents for complex tasks with reliable communication:
+
+```typescript
+const [eligibility, fraud, cost] = await Promise.all([
+  ctx.serviceClient(eligibilityAgent).analyze(claim),
+  ctx.serviceClient(fraudAgent).analyze(claim),
+  ctx.serviceClient(costAgent).analyze(claim),
+]);
+
+const decision = await generateText({
+  model,
+  prompt: `Make decision based on: ${eligibility}, ${fraud}, ${cost}`,
+});
+```
+
+### Error Handling and Retries
+
+Configure sophisticated retry policies for different failure scenarios:
+
+```typescript
+// Limit LLM retries to control costs
+const model = wrapLanguageModel({
+  model: openai("gpt-4o-mini"),
+  middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+});
+
+// Handle tool errors gracefully
+const result = await generateText({
+  model,
+  tools: { /* your tools */ },
+  options: { ...toolErrorAsTerminalError },
+});
+```
+
+## When to Choose Restate
+
+**✅ Choose Restate when you need:**
+- **Reliable agent execution**: Automatically recover from LLM API failures, rate limits, and timeouts
+- **Stateful agents**: Maintain conversation history and context across interactions
+- **Multi-step workflows**: Coordinate complex tasks involving multiple LLM calls and tool executions
+- **Human oversight**: Implement approval workflows and human-in-the-loop patterns
+- **Observability**: Debug and monitor agent behavior with complete execution traces
+- **Multi-agent systems**: Orchestrate specialized agents with reliable communication
+- **Cost efficiency**: Never lose expensive LLM responses to infrastructure failures
+- **Integration flexibility**: Work with existing AI SDKs and LLM providers
+
+<Info>
+    Building AI agents with Restate? Join our community on [Discord](https://discord.com/invite/skW3AZ6uGd) to share your use case and get help from other developers.
+</Info>
+
+## Comparison with Other Solutions
+
+| Feature | Restate | Traditional Agent Frameworks |
+|---------|---------|----------------------------|
+| **Failure Recovery** | Automatic recovery from any point | Manual checkpoint management |
+| **State Management** | Built-in durable state | External databases required |
+| **Observability** | Complete execution traces | Custom logging and monitoring |
+| **LLM Integration** | Native SDK support | Custom wrapper implementations |
+| **Human-in-the-Loop** | Built-in approval workflows | Complex state machines |
+| **Multi-Agent** | Reliable service communication | Message queues and coordination logic |
+| **Development Model** | Regular TypeScript/Python code | Framework-specific patterns |
+
+## Getting Started
+
+Ready to build resilient AI agents with Restate? Here are your next steps:
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/develop/local_dev">
+    Set up Restate and run your first agent
+  </Card>
+  <Card title="Hands-on Tutorial" icon="pen" href="/tour/ai-agents">
+    Build weather agents, chatbots, and multi-agent systems
+  </Card>
+  <Card title="Need help?" icon="thought-bubble">
+    Discuss your AI agent use case on <strong>[Discord](https://discord.gg/skW3AZ6uGd)</strong> or <strong>[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA)</strong>.
+  </Card>
+</CardGroup>
+
+## Examples
+
+Explore AI agent patterns for common scenarios:
+
+- **Customer support**: Multi-turn conversation agents with knowledge base integration
+- **[Insurance claims](/tour/ai-agents)**: Multi-agent analysis with human approval workflows
+- **[Code generation](https://github.com/igalshilman/agent47/tree/main)**: Interactive coding agents with tool integration
+- [Other AI patterns and examples](https://github.com/restatedev/ai-examples/tree/main)
 
