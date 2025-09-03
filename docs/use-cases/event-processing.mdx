@@ -1,5 +1,120 @@
 ---
 title: "Event Processing"
-description: "An introduction to Restate for Kafka event processing and ETL workflows."
+description: "Build lightweight, transactional event handlers with built-in resiliency."
 icon: "wave-sine"
 ---
+
+## Why Restate for Event Processing?
+
+Kafka event processing requires managing Kafka consumers, handling retries, maintaining state stores, and coordinating complex workflows. Restate eliminates this complexity by providing **lightweight, transactional event processing** with zero consumer management and built-in state.
+
+## Transactional Event Processing
+
+Build event handlers with complex workflows, loops, timers, and transactional guarantees:
+
+```typescript
+const userFeed = restate.object({
+  name: "userFeed",
+  handlers: {
+    processPost: async (ctx: restate.ObjectContext, post: SocialMediaPost) => {
+      const userId = ctx.key;
+
+      const postId = await ctx.run(() => createPost(userId, post));
+
+      // Wait for processing to complete with durable timers
+      while ((await ctx.run(() => getPostStatus(postId))) === PENDING) {
+        await ctx.sleep({ seconds: 5 });
+      }
+
+      await ctx.run(() => updateUserFeed(userId, postId));
+    },
+  },
+});
+```
+
+**Key Benefits:**
+- **Push-based delivery**: Events delivered directly to handlers with zero consumer management
+- **Automatic retries**: Failed handlers are retried with exponential backoff until they succeed
+- **Durable execution**: Handlers survive failures and resume exactly where they left off
+- **Parallel processing**: Events for different keys process concurrently
+
+## Stateful Event Handlers
+
+Maintain persistent state across events without external stores:
+
+```typescript
+const packageTracker = restate.object({
+  name: "package-tracker",
+  handlers: {
+    registerPackage: async (ctx: ObjectContext, packageInfo: PackageInfo) => {
+      ctx.set("package-info", packageInfo);
+    },
+
+    updateLocation: async (
+      ctx: ObjectContext,
+      locationUpdate: LocationUpdate
+    ) => {
+      const packageInfo = await ctx.get<PackageInfo>("package-info");
+      if (!packageInfo) {
+        throw new TerminalError(`Package not found`);
+      }
+
+      (packageInfo.locations ??= []).push(locationUpdate);
+      ctx.set("package-info", packageInfo);
+    },
+
+    getPackageInfo: shared((ctx: ObjectSharedContext) =>
+      ctx.get<PackageInfo>("package-info")
+    ),
+  },
+});
+```
+
+## When to Choose Restate
+
+**✅ Choose Restate when you need:**
+- **Kafka integration**: Process Kafka events with zero consumer management
+- **Reliable processing**: Automatic retry and recovery for failed event handlers
+- **Transactional processing**: Execute steps with durable execution guarantees
+- **Stateful event processing**: Maintain state across events without external stores
+- **Event-driven workflows**: Build complex flows with loops, timers, and conditions
+
+<Info>
+    Processing events with Restate? Join our community on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) to discuss your use case.
+</Info>
+
+## Comparison with Other Solutions
+
+| Feature | Restate | Traditional Kafka Processing | Stream Processing Frameworks |
+|---------|---------|----------------------------|----------------------------|
+| **Event Delivery** | Push-based to durable handlers | Polling-based consumer groups | Built-in sources and sinks |
+| **Consumer Management** | Zero configuration | Manual offset and consumer group management | Zero configuration |
+| **Failure Recovery** | Fine-grained progress persistence with durable side effects | Coarse-grained offset commits with potential reprocessing | Coarse-grained checkpointing with potential duplicate side effects |
+| **State Management** | Built-in durable state | External state store required | Built-in state store |
+| **Queuing Semantics** | Queue-per-key with ordering guarantees | Queue-per-partition with ordering guarantees | Queue-per-partition (inherited from Kafka) |
+| **Complex Workflows** | Unlimited control flow: loops, timers, conditions | Long-running logic blocks consumer loop; requires external services | DAG-based processing with limited control flow |
+| **Best For** | Event-driven state machines, transactional processing, complex workflows | Simple ETL and message processing | High-throughput analytics, aggregations, joins |
+
+## Getting Started
+
+Ready to build event processing systems with Restate? Here are your next steps:
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/develop/local_dev">
+    Set up Restate and process your first events
+  </Card>
+  <Card title="Kafka Quickstart" icon="plug" href="/operate/invocation/kafka">
+    Follow the quickstart to implement your first durable event handler
+  </Card>
+  <Card title="Need help?" icon="thought-bubble">
+    Discuss your event processing use case on <strong>[Discord](https://discord.gg/skW3AZ6uGd)</strong> or <strong>[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA)</strong>.
+  </Card>
+</CardGroup>
+
+## Examples
+
+Explore these examples::
+
+- **Transactional processing**: Write to multiple external systems for each incoming event ([TS](https://github.com/restatedev/examples/tree/main/typescript/patterns-use-cases/README.md#transactional-event-processing) / [Go](https://github.com/restatedev/examples/tree/main/go/patterns-use-cases/README.md#transactional-event-processing) / [Python](https://github.com/restatedev/examples/tree/main/python/patterns-use-cases/README.md#transactional-event-processing) / [Java](https://github.com/restatedev/examples/tree/main/java/patterns-use-cases/README.md#transactional-event-processing) / [Kotlin](https://github.com/restatedev/examples/tree/main/kotlin/patterns-use-cases/README.md#transactional-event-processing))
+- **Parallelizing work**: [Fan-out/fan-in with Kafka events](/examples/parallelizing-work)
+- **Event joins**: Stateful package tracking ([TS](https://github.com/restatedev/examples/tree/main/typescript/patterns-use-cases/README.md#event-enrichment--joins) / [Go](https://github.com/restatedev/examples/tree/main/go/patterns-use-cases/README.md#event-enrichment--joins) / [Python](https://github.com/restatedev/examples/tree/main/python/patterns-use-cases/README.md#event-enrichment--joins) / [Java](https://github.com/restatedev/examples/tree/main/java/patterns-use-cases/README.md#event-enrichment--joins) / [Kotlin](https://github.com/restatedev/examples/tree/main/kotlin/patterns-use-cases/README.md#event-enrichment--joins))

@@ -94,7 +94,7 @@ const chatSession = restate.object({
 
 ### Human-in-the-Loop Workflows
 
-Implement approval workflows and human oversight without complex infrastructure:
+Implement resilient approval workflows and human oversight without complex infrastructure:
 
 ```typescript
 const approval = await ctx.awakeable<boolean>();
@@ -125,24 +125,54 @@ const decision = await generateText({
 });
 ```
 
-### Error Handling and Retries
+### Long-Running Background Agents
 
-Configure sophisticated retry policies for different failure scenarios:
+Build agents that run continuously in the background, monitoring events and taking actions over extended periods:
 
 ```typescript
-// Limit LLM retries to control costs
-const model = wrapLanguageModel({
-  model: openai("gpt-4o-mini"),
-  middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-});
+const mediaMonitorAgent = restate.service({
+  name: "MediaMonitor",
+  handlers: {
+    monitor: async (ctx: restate.Context, config: { 
+      keywords: string[], 
+      intervalHours: number 
+    }) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o-mini"),
+        middleware: durableCalls(ctx),
+      });
 
-// Handle tool errors gracefully
-const result = await generateText({
-  model,
-  tools: { /* your tools */ },
-  options: { ...toolErrorAsTerminalError },
+      // Fetch recent mentions across platforms
+      const mentions = await ctx.run("fetch-mentions", () =>
+        fetchSocialMentions(config.keywords)
+      );
+
+      if (mentions.length > 0) {
+        // Analyze sentiment and key themes
+        const analysis = await generateText({
+          model,
+          prompt: `Analyze these social media mentions: ${JSON.stringify(mentions)}. 
+                   Summarize sentiment, key themes, and any urgent issues.`,
+        });
+
+        // Store analysis and alert if needed
+        await ctx.run("process-analysis", () => 
+          processMediaAnalysis(analysis.text, mentions)
+        );
+      }
+
+      // Schedule next monitoring cycle
+      await ctx.serviceClient(mediaMonitorAgent)
+        .monitor(config, { delay: config.intervalHours * 60 * 60 * 1000 });
+    },
+  },
 });
 ```
+
+- **Self-scheduling**: Agents schedule their own next execution cycle
+- **Persistent monitoring**: Continues across restarts without external schedulers
+- **Efficient resource usage**: No compute costs during delay periods on serverless
+- **Flexible intervals**: Easily adjust monitoring frequency based on business needs
 
 ## When to Choose Restate
 
@@ -150,15 +180,15 @@ const result = await generateText({
 - **Reliable agent execution**: Automatically recover from LLM API failures, rate limits, and timeouts
 - **Stateful agents**: Maintain conversation history and context across interactions
 - **Multi-step workflows**: Coordinate complex tasks involving multiple LLM calls and tool executions
-- **Human oversight**: Implement approval workflows and human-in-the-loop patterns
+- **Human oversight**: Implement resilient approval and human-in-the-loop patterns
 - **Observability**: Debug and monitor agent behavior with complete execution traces
 - **Multi-agent systems**: Orchestrate specialized agents with reliable communication
-- **Cost efficiency**: Never lose expensive LLM responses to infrastructure failures
-- **Integration flexibility**: Work with existing AI SDKs and LLM providers
+- **Integration flexibility**: Restate integrates with popular Agent SDKs and supports you from simple agents to complex multi-agent architectures
 
 <Info>
-    Building AI agents with Restate? Join our community on [Discord](https://discord.com/invite/skW3AZ6uGd) to share your use case and get help from other developers.
+    Building AI agents with Restate? Join our community on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) to share your use case and get help from other developers.
 </Info>
+
 
 ## Comparison with Other Solutions
 
