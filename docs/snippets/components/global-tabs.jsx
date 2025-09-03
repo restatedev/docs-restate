@@ -31,33 +31,25 @@ export const GlobalTabs = ({ children, className = '' }) => {
     }
 
     return (
-        <div className={`simple-tabs ${className}`}>
-            <div className="tabs-list" role="tablist" style={{ borderBottom: '1px solid #e5e7eb', marginBottom: '16px' }}>
+        <div className={`tabs tabs tab-container ${className}`}>
+            <ul className="not-prose mb-6 pb-[1px] flex-none min-w-full overflow-auto border-b border-gray-200 gap-x-6 flex dark:border-gray-200/10" data-component-part="tabs-list">
                 {tabs.map((tab, index) => (
-                    <button
-                        key={index}
-                        role="tab"
-                        aria-selected={index === activeTab}
-                        onClick={() => handleTabClick(index)}
-                        className={`tab-button ${index === activeTab ? 'active' : ''}`}
-                        style={{
-                            cursor: 'pointer',
-                            padding: '8px 16px',
-                            border: 'none',
-                            background: 'none',
-                            borderBottom: index === activeTab ? '2px solid #3B82F6' : '2px solid transparent',
-                            color: index === activeTab ? '#3B82F6' : '#6B7280',
-                            fontWeight: index === activeTab ? '600' : '400',
-                            fontSize: '14px',
-                            marginRight: '24px',
-                            transition: 'all 0.2s ease'
-                        }}
-                    >
-                        {tab.props.title}
-                    </button>
+                    <li key={index} className="cursor-pointer">
+                        <button
+                            className={index === activeTab 
+                                ? "flex text-sm items-center gap-1.5 leading-6 font-semibold whitespace-nowrap pt-3 pb-2.5 -mb-px max-w-max border-b text-primary dark:text-primary-light border-current"
+                                : "flex text-sm items-center gap-1.5 leading-6 font-semibold whitespace-nowrap pt-3 pb-2.5 -mb-px max-w-max border-b text-gray-900 border-transparent hover:border-gray-300 dark:text-gray-200 dark:hover:border-gray-700"
+                            }
+                            data-component-part="tab-button"
+                            data-active={index === activeTab}
+                            onClick={() => handleTabClick(index)}
+                        >
+                            {tab.props.title}
+                        </button>
+                    </li>
                 ))}
-            </div>
-            <div className="tab-content">
+            </ul>
+            <div className="prose dark:prose-dark overflow-x-auto" data-component-part="tab-content">
                 {tabs[activeTab]?.props.children}
             </div>
         </div>
