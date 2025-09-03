@@ -1,5 +1,222 @@
 ---
 title: "Microservice Orchestration"
-description: "An introduction to service communication, sagas, and ..."
+description: "Build resilient, distributed microservices with durable execution, sagas, and reliable service communication."
 icon: "circle-nodes"
 ---
+
+## Why Restate for Microservice Orchestration?
+
+Traditional microservice orchestration requires complex infrastructure: message brokers, workflow engines, state stores, and retry mechanisms. Restate simplifies this by providing **durable execution primitives** that make distributed systems resilient by default, without the operational overhead.
+
+### Durable Execution Model
+
+Build microservices that automatically recover from failures without losing progress:
+
+```typescript
+export const orderService = restate.service({
+  name: "OrderService",
+  handlers: {
+    process: async (ctx: Context, order: Order) => {
+      // Each step is automatically durable and resumable
+      const paymentId = ctx.rand.uuidv4();
+      
+      const payment = await ctx.run("charge", () => 
+        chargePayment(order.creditCard, paymentId)
+      );
+      
+      for (const item of order.items) {
+        await ctx.run(`reserve-${item.id}`, () => 
+          reserveInventory(item.id, item.quantity)
+        );
+      }
+      
+      return { success: true, paymentId };
+    }
+  }
+});
+```
+
+**Key Benefits:**
+- **Automatic recovery**: Services resume exactly where they left off after failures
+- **Zero message loss**: All service communication is durably logged
+- **No external dependencies**: Built-in persistence and messaging
+- **Standard development**: Write services like regular HTTP APIs
+
+### Resilient Service Communication
+
+Flexible communication patterns with strong delivery guarantees:
+
+```typescript
+// Request-response: Wait for result
+const result = await ctx.serviceClient(inventoryService).checkStock(item);
+
+// Fire-and-forget: Guaranteed delivery without waiting  
+ctx.serviceSendClient(emailService).sendConfirmation(order);
+
+// Delayed execution: Schedule for later
+ctx.serviceSendClient(reminderService)
+  .sendReminder(order, sendOpts({ delay: "7d" }));
+```
+
+**Communication Guarantees:**
+- **Exactly-once delivery**: Messages are never lost or duplicated
+- **Built-in retries**: Automatic exponential backoff for transient failures  
+- **Request deduplication**: Idempotency keys prevent duplicate processing
+
+### State Management
+
+Manage stateful entities without external databases or complex consistency mechanisms:
+
+```typescript
+export const userAccount = restate.object({
+  name: "UserAccount", 
+  handlers: {
+    updateBalance: async (ctx: ObjectContext, amount: number) => {
+      const balance = (await ctx.get<number>("balance")) ?? 0;
+      const newBalance = balance + amount;
+      
+      if (newBalance < 0) {
+        throw new TerminalError("Insufficient funds");
+      }
+      
+      ctx.set("balance", newBalance);
+      return newBalance;
+    },
+    
+    getBalance: restate.handlers.object.shared(
+      async (ctx: ObjectSharedContext) => {
+        return (await ctx.get<number>("balance")) ?? 0;
+      }
+    )
+  }
+});
+```
+
+**State Guarantees:**
+- **Strict consistency**: Single-writer semantics prevent race conditions
+- **Durable persistence**: State survives crashes and deployments
+- **Horizontal scaling**: Different entity keys process independently
+- **Built-in querying**: Access state via UI and APIs
+
+## Key Orchestration Patterns
+
+### Saga Pattern Implementation
+
+Implement resilient rollback logic for non-transient failures (e.g. flight fully booked):
+
+```typescript
+export const bookingService = restate.service({
+  name: "BookingService",
+  handlers: {
+    reserve: async (ctx: Context, request: BookingRequest) => {
+      const compensations = [];
+      
+      try {
+        // Reserve hotel
+        compensations.push(() => 
+          ctx.run("cancel-hotel", () => cancelHotel(request.hotelId))
+        );
+        await ctx.run("book-hotel", () => bookHotel(request));
+        
+        // Reserve flight  
+        compensations.push(() =>
+          ctx.run("cancel-flight", () => cancelFlight(request.flightId))
+        );
+        await ctx.run("book-flight", () => bookFlight(request));
+        
+        return { success: true };
+      } catch (error) {
+        // Run compensations in reverse order
+        for (const compensation of compensations.reverse()) {
+          await compensation();
+        }
+        throw error;
+      }
+    }
+  }
+});
+```
+
+### Event-Driven Coordination  
+
+Wait for external events and webhooks with promises that survive crashes:
+
+```typescript
+// Wait for external payment confirmation
+const confirmation = ctx.awakeable<PaymentResult>();
+await ctx.run("initiate-payment", () => 
+  startPayment(order, confirmation.id)
+);
+
+// Webhook handler resolves the awakeable
+return confirmation.promise.orTimeout({ minutes: 30 });
+```
+
+### Parallel Processing
+
+Execute independent operations concurrently while maintaining durability:
+
+```typescript
+// Process all items in parallel
+const itemPromises = order.items.map(item =>
+  ctx.run(`process-${item.id}`, () => processItem(item))
+);
+
+await RestatePromise.all(itemPromises);
+```
+
+## When to Choose Restate
+
+**✅ Choose Restate when you need:**
+
+- **Reliable microservice communication**: Guaranteed delivery without extra infrastructure
+- **Distributed transaction handling**: Implement sagas without complex state machines  
+- **Consistent, stateful services**: Stateful objects with a simple concurrency model
+- **Workflow orchestration**: Coordinate long-running business processes
+- **Fault-tolerant systems**: Automatic recovery from service failures
+- **Event-driven architectures**: Handle webhooks and external events reliably
+- **Operational simplicity**: Reduce infrastructure complexity
+- **Gradual adoption**: Integrate with existing services incrementally
+
+<Info>
+Need help evaluating Restate for your architecture? Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Info>
+
+## Comparison with Traditional Solutions
+
+| Feature | Restate | Traditional Orchestration                         |
+|---------|---------|---------------------------------------------------|
+| **Infrastructure** | Single binary deployment | Message brokers + workflow engines + state stores             |
+| **Service Communication** | Built-in reliable messaging | External message queues required                  |
+| **State Management** | Integrated durable state | External state stores + locks                     |
+| **Failure Recovery** | Automatic progress recovery | Manual checkpoint/restart logic                   |
+| **Deployment Model** | Standard HTTP services | Standard HTTP services                            |
+| **Development Experience** | Regular code + IDE support | Regular code + IDE support                        |
+| **Observability** | Built-in UI & execution tracing | Manual setup                                      |
+
+## Getting Started
+
+Ready to build resilient microservices with Restate? Here are your next steps:
+
+<CardGroup cols={3}>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Run your first Restate service
+  </Card>
+  <Card title="Hands-on Tutorial" icon="play" href="/tour/microservice-orchestration">
+    Learn orchestration patterns with interactive examples
+  </Card>
+  <Card title="Need help?" icon="thought-bubble">
+    Discuss your use case on [Discord](https://discord.gg/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA)
+  </Card>
+</CardGroup>
+
+## Implementation Guides
+
+Explore specific patterns and best practices:
+
+- **Service Communication**: Reliable RPC and messaging patterns ([TS](/develop/ts/service-communication)/[Python](/develop/python/service-communication)/[Go](/develop/go/service-communication)/[Java/Kotlin](/develop/java/service-communication)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/context/trait.ContextClient.html))
+- **Error Handling**: [Retries, timeouts, and saga compensation](/guides/error-handling) 
+- **State Management**: [Virtual Objects and consistency patterns](/foundations/services#virtual-object)
+- **Event Processing**: [Webhooks, external events, and awakeables](/develop/ts/awakeable)
+- **Distributed Transactions**: [Saga pattern implementation](/guides/sagas)
+- **Concurrent tasks**: Execute multiple tasks concurrently and gather results ([TS](/develop/ts/concurrent-tasks)/[Python](/develop/python/concurrent-tasks)/[Go](/develop/go/concurrent-tasks)/[Java/Kotlin](/develop/java/concurrent-tasks)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/macro.select.html))
