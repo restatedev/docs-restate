@@ -52,7 +52,7 @@ Stateful entities identified by a unique key.
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/object.ts#here"} 
 const cartObject = restate.object({
-  name: "cart",
+  name: "ShoppingCart",
   handlers: {
     addItem: async (ctx: restate.ObjectContext, item: Item) => {
       const items = (await ctx.get<Item[]>("items")) ?? [];
@@ -92,23 +92,23 @@ Workflows orchestrate multi-step processes with guaranteed once-per-ID execution
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/services/workflow.ts#here"} 
 const signupWorkflow = restate.workflow({
-  name: "user-signup",
+  name: "UserSignup",
   handlers: {
     run: async (ctx: restate.WorkflowContext, user: { name: string; email: string }) => {
       // workflow ID = user ID; workflow runs once per user
       const userId = ctx.key;
 
-      await ctx.run(() => createUserEntry(user));
+      await ctx.run("create", () => createUserEntry({ userId, user }));
 
       const secret = ctx.rand.uuidv4();
-      await ctx.run(() => sendEmailWithLink({ userId, user, secret }));
+      await ctx.run("mail", () => sendVerificationEmail({ user, secret }));
 
-      const clickSecret = await ctx.promise<string>("link-clicked");
+      const clickSecret = await ctx.promise<string>("email-link-clicked");
       return clickSecret === secret;
     },
 
     click: async (ctx: restate.WorkflowSharedContext, request: { secret: string }) => {
-      await ctx.promise<string>("link-clicked").resolve(request.secret);
+      await ctx.promise<string>("email-link-clicked").resolve(request.secret);
     },
   },
 });

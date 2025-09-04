@@ -1,4 +1,5 @@
 import random
+import time
 import uuid
 
 from restate import Service, Context
@@ -50,8 +51,16 @@ async def my_handler(ctx: Context, arg):
     # <end_side_effect>
 
     # <start_uuid>
-    my_uuid = await ctx.run_typed("generate UUID", lambda: str(uuid.uuid4()))
+    my_uuid = ctx.uuid()
     # <end_uuid>
+
+    # <start_random_nb>
+    ctx.random().random()
+    # <end_random_nb>
+
+    # <start_time>
+    current_time = await ctx.time()
+    # <end_time>
 
     # <start_parallel>
     # Start operations concurrently

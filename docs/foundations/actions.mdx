@@ -26,7 +26,22 @@ const dbResult = await ctx.run("update-user", () => {
 });
 
 // Idempotency key generation
-const id = await ctx.run("generate-id", () => uuid());
+const id = ctx.rand.uuidv4();
+```
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#durable_steps"} 
+# External API call
+api_result = await ctx.run_typed(
+    "fetch-data", fetch_url, url="https://api.example.com/data"
+)
+
+# Database operation
+db_result = await ctx.run_typed(
+    "update-user", update_user_database, id=user_id, data={"name": "John"}
+)
+
+# Idempotency key generation
+id = ctx.uuid()
 ```
 
 </CodeGroup>
@@ -50,6 +65,13 @@ const count = (await ctx.get<number>("count")) ?? 0;
 const cart = (await ctx.get<ShoppingCart>("cart")) ?? [];
 ```
 
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_get"} 
+# Get with type and default value
+profile = await ctx.get("profile", type_hint=UserProfile)
+count = await ctx.get("count", type_hint=int) or 0
+cart = await ctx.get("cart", type_hint=ShoppingCart) or ShoppingCart()
+```
+
 </CodeGroup>
 
 ### Set
@@ -69,6 +91,15 @@ ctx.set("profile", {
   email: "john@example.com",
 });
 ```
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_set"} 
+# Store simple values
+ctx.set("lastLogin", ctx.request().headers.get("date"))
+ctx.set("count", count + 1)
+
+# Store complex objects
+ctx.set("profile", UserProfile(name="John Doe", email="john@example.com"))
+```
 </CodeGroup>
 
 ### Clear
@@ -86,6 +117,17 @@ ctx.clear("sessionToken");
 
 // Clear all user data
 ctx.clearAll();
+```
+
+
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_clear"} 
+# Clear specific keys
+ctx.clear("shoppingCart")
+ctx.clear("sessionToken")
+
+# Clear all user data
+ctx.clear_all()
 ```
 
 </CodeGroup>
@@ -120,12 +162,17 @@ ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
 .getProfile().await();
 ```
 
-```python Python
+
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#service_calls"} 
 # Call another service
-validation = await ValidationServiceClient.from_context(ctx).validate_order(order)
+validation = await ctx.service_call(validation_service.validate_order, order)
 
 # Call Virtual Object function
-profile = await UserAccountClient.from_context(ctx, user_id).get_profile()
+profile = await ctx.object_call(user_account.get_profile, key=user_id)
+
+# Submit Workflow
+result = await ctx.workflow_call(order_workflow.run, key=order_id, arg=order)
 ```
 
 </CodeGroup>
@@ -148,13 +195,19 @@ ctx.serviceSendClient(AnalyticsService).recordEvent({ kind: "user_signup", userI
 ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
 ```
 
-```java Java
-// Fire-and-forget calls
-NotificationServiceClient.fromContext(ctx).send()
-.sendEmail(userId, "Welcome!");
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#sending_messages"} 
+# Fire-and-forget notification
+ctx.service_send(
+    notification_service.send_email, {"userId": user_id, "message": "Welcome!"}
+)
 
-AnalyticsServiceClient.fromContext(ctx).send()
-.recordEvent("user_signup", eventData);
+# Background analytics
+ctx.service_send(
+    analytics_service.record_event, {"kind": "user_signup", "userId": user_id}
+)
+
+# Cleanup task
+ctx.object_send(shopping_cart_object.empty_expired_cart, key=user_id)
 ```
 
 </CodeGroup>
@@ -163,6 +216,7 @@ AnalyticsServiceClient.fromContext(ctx).send()
 
 Schedule functions to run in the future.
 
+<CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#delayed_messages"} 
 // Schedule reminder for tomorrow
 ctx.serviceSendClient(ReminderService).sendReminder(
@@ -172,6 +226,16 @@ ctx.serviceSendClient(ReminderService).sendReminder(
   })
 );
 ```
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#delayed_messages"} 
+# Schedule reminder for tomorrow
+ctx.service_send(
+    reminder_service.send_reminder,
+    {"userId": user_id, "message": message},
+    send_delay=timedelta(days=1),
+)
+```
+</CodeGroup>
 
 ## Durable timers and timeouts
 
@@ -190,18 +254,20 @@ const result = await ctx
   .orTimeout({ minutes: 5 });
 ```
 
-```java Java
-// Sleep for durations
-ctx.sleep(Duration.ofSeconds(30));
-ctx.sleep(Duration.ofMinutes(5));
-ctx.sleep(Duration.ofHours(1));
-```
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#durable_timers"} 
+# Sleep for specific duration
+await ctx.sleep(timedelta(minutes=5))  # 5 minutes
 
-```python Python
-# Sleep with timedelta
-await ctx.sleep(timedelta(seconds=30))
-await ctx.sleep(timedelta(minutes=5))
-await ctx.sleep(timedelta(hours=1))
+# Wait for action or timeout
+match await restate.select(
+    result=ctx.workflow_call(order_workflow.run, key=order_id, arg=order),
+    timeout=ctx.sleep(timedelta(minutes=5)),
+):
+    case ["result", result]:
+        return result
+    case _:
+        # Timeout occurred
+        pass
 ```
 
 </CodeGroup>
@@ -214,6 +280,8 @@ Functions consume no resources while sleeping and resume at exactly the right ti
 Use durable promises to wait for external events or human input in your workflows.
 
 Create promises that external systems can resolve to send data to your workflow.
+
+<CodeGroup>
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#workflow_promises"} 
 // Wait for external event
@@ -229,8 +297,26 @@ const [payment, inventory] = await Promise.all([
 ]);
 ```
 
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#workflow_promises"} 
+# Wait for external event
+payment_result = await ctx.promise("payment-completed").value()
+
+# Wait for human approval
+approved = await ctx.promise("manager-approval").value()
+
+# Wait for multiple events using gather
+payment_promise = ctx.promise("payment")
+inventory_promise = ctx.promise("inventory")
+payment, inventory = await restate.gather(
+    payment_promise.value(), inventory_promise.value()
+)
+```
+</CodeGroup>
+
 Resolve promises from signal functions.
 
+<CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#signal_functions"} 
 // In a signal function
 confirmPayment: async (ctx: WorkflowSharedContext, result: PaymentResult) => {
@@ -242,5 +328,19 @@ approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
   await ctx.promise("manager-approval").resolve(approved);
 },
 ```
+
+```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#signal_functions"} 
+# In a signal function
+@workflow_example_workflow.handler()
+async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult) -> None:
+    await ctx.promise("payment-completed").resolve(result)
+
+
+# In a signal function
+@workflow_example_workflow.handler()
+async def approve_request(ctx: WorkflowSharedContext, approved: bool) -> None:
+    await ctx.promise("manager-approval").resolve(approved)
+```
+</CodeGroup>
 
 <Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at [awakeables](/awakeables).</Info>
