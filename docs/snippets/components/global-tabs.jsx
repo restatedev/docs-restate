@@ -1,11 +1,21 @@
 // Custom tab compnent which allows syncing tabs with the same title across different instances
-
 export const GlobalTabs = ({ children, className = '' }) => {
     const [activeTab, setActiveTab] = useState(0)
 
     const tabs = React.Children.toArray(children).filter(child =>
         child.type && child.type.name === 'GlobalTab'
     )
+
+    // Load saved tab from localStorage on mount
+    useEffect(() => {
+        const savedLanguage = localStorage.getItem('language')
+        if (savedLanguage) {
+            const matchingIndex = tabs.findIndex(tab => tab.props.title === savedLanguage)
+            if (matchingIndex !== -1) {
+                setActiveTab(matchingIndex)
+            }
+        }
+    }, [tabs])
 
     useEffect(() => {
         const handleGlobalTabChange = (event) => {
@@ -23,8 +33,11 @@ export const GlobalTabs = ({ children, className = '' }) => {
     const handleTabClick = (index) => {
         setActiveTab(index)
 
-        // Dispatch global event to sync all tabs with the same title
+        // Save selected tab to localStorage
         const title = tabs[index].props.title
+        localStorage.setItem('language', title)
+
+        // Dispatch global event to sync all tabs with the same title
         window.dispatchEvent(new CustomEvent('globalTabChange', {
             detail: { title }
         }))
