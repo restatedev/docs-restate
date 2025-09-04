@@ -82,10 +82,9 @@ async def my_handler(ctx: Context, arg):
             return "success!"
         case ["confirmation", "deny"]:
             raise TerminalError("Confirmation was denied!")
-        case ["timeout", _]:
+        case _:
             raise TerminalError("Verification timer expired!")
     # <end_select>
-    return None
 
 
 @my_service.handler()
@@ -112,8 +111,8 @@ async def my_other_handler(ctx: Context, arg):
 
     pending, done = await restate.wait_completed(claude, openai)
 
-    # collect the completed greetings
-    greetings = [await f for f in done]
+    # collect the completed results
+    results = [await f for f in done]
 
     # cancel the pending calls
     for f in pending:

@@ -24,6 +24,6 @@ async def timer_handler(ctx: Context, arg):
     ):
         case ["greeting", greeting]:
             print("Greeting:", greeting)
-        case ["timeout", _]:
+        case _:
             print("Timeout occurred")
     # <end_timer>

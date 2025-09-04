@@ -46,7 +46,7 @@ export const subscriptionService = restate.service({
       );
 
       for (const subscription of req.subscriptions) {
-        await ctx.run(`subscribe-${subscription}`, () =>
+        await ctx.run(`add-${subscription}`, () =>
           createSubscription(req.userId, subscription, payRef),
         );
       }
@@ -115,20 +115,23 @@ subscription_service = restate.Service("SubscriptionService")
 
 @subscription_service.handler()
 async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
-    payment_id = ctx.rand_uuid()
+    payment_id = str(ctx.uuid())
 
     pay_ref = await ctx.run_typed(
-        "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+        "pay",
+        create_recurring_payment,
+        credit_card=req.credit_card,
+        payment_id=payment_id,
     )
 
-    for subscription in req["subscriptions"]:
+    for subscription in req.subscriptions:
         await ctx.run_typed(
             f"add-{subscription}",
-            lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+            create_subscription,
+            user_id=req.user_id,
+            subscription=subscription,
+            payment_ref=pay_ref,
         )
-
-
-app = restate.app(services=[subscription_service])
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/getstarted/service.py" />
 </GlobalTab>
@@ -263,9 +266,9 @@ This process continues until the handler runs till completion.
 <img src="/img/tour/durable_execution_microservices.gif" alt="Context in Restate" />
 
 **Key Benefits:**
-- `ctx.run()` makes external calls or non-deterministic operations durable. They get replayed on failures.
+- Context `run` actions make external calls or non-deterministic operations durable. They get replayed on failures.
 - If the service crashes after payment creation, it resumes at the subscription step
-- Deterministic IDs from `ctx.random()` ensure operations are idempotent
+- Deterministic IDs logged with the context ensure operations are idempotent
 - Full execution traces for debugging and monitoring
 
 <Accordion title={"Try it out"}>
@@ -317,7 +320,7 @@ To fix the problem, remove the line `failOnNetflix` from the `createSubscription
 
 ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/auxiliary/clients/SubscriptionClient.java#subscription"} 
 public static String createSubscription(String userId, String subscription, String paymentRef) {
-//    failOnNetflix(subscription);
+  failOnNetflix(subscription);
   terminalErrorOnDisney(subscription);
   System.out.println(">>> Created subscription " + subscription + " for user " + userId);
   return "SUCCESS";
@@ -381,7 +384,12 @@ On the invocation page in the UI, you can see that your request is retrying beca
 
 To fix the problem, remove the line `fail_on_netflix` from the `create_subscription` function in the `utils.py` file:
 
-```python {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/utils.py#subscription}
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/utils.py#subscription"} 
+def create_subscription(user_id: str, subscription: str, payment_ref: str) -> str:
+    fail_on_netflix(subscription)
+    terminal_error_on_disney(subscription)
+    print(f">>> Created subscription {subscription} for user {user_id}")
+    return "SUCCESS"
 ```
 </GlobalTab>
 </GlobalTabs>
@@ -668,33 +676,42 @@ async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
     compensations: List[Callable[[], Awaitable[None]]] = []
 
     try:
-        payment_id = ctx.rand_uuid()
+        payment_id = str(ctx.uuid())
 
         # Add compensation for payment
         compensations.append(
             lambda: ctx.run_typed(
-                "undo-pay", lambda: remove_recurring_payment(payment_id)
+                "undo-pay", remove_recurring_payment, payment_id=payment_id
             )
         )
 
         # Create payment
         pay_ref = await ctx.run_typed(
-            "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+            "pay",
+            create_recurring_payment,
+            credit_card=req.credit_card,
+            payment_id=payment_id,
         )
 
         # Process subscriptions
-        for subscription in req["subscriptions"]:
+        for subscription in req.subscriptions:
             # Add compensation for this subscription
             compensations.append(
                 lambda s=subscription: ctx.run_typed(
-                    f"undo-{s}", lambda: remove_subscription(req["userId"], s)
+                    f"undo-{s}",
+                    remove_subscription,
+                    user_id=req.user_id,
+                    subscription=s,
                 )
             )
 
             # Create subscription
             await ctx.run_typed(
                 f"add-{subscription}",
-                lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+                create_subscription,
+                user_id=req.user_id,
+                subscription=subscription,
+                payment_ref=pay_ref,
             )
 
     except restate.TerminalError as e:
@@ -702,9 +719,6 @@ async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
         for compensation in reversed(compensations):
             await compensation()
         raise e
-
-
-app = restate.app(services=[subscription_saga])
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/sagas/service.py" />
 </GlobalTab>
@@ -902,9 +916,6 @@ async def add(ctx: restate.ObjectContext, subscription: str) -> None:
 @user_subscriptions.handler()
 async def get_subscriptions(ctx: restate.ObjectSharedContext) -> List[str]:
     return await ctx.get("subscriptions") or []
-
-
-app = restate.app(services=[user_subscriptions])
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/objects/service.py" />
 </GlobalTab>
@@ -1035,7 +1046,7 @@ public class ConcertTicketingService {
     EmailServiceClient.fromContext(ctx).send().emailTicket(req);
 
     // Delayed message - schedule reminder for day before concert
-    EmailServiceClient.fromContext(ctx).send().sendReminder(req, dayBefore(req.concertDateTime()));
+    EmailServiceClient.fromContext(ctx).send().sendReminder(req, req.dayBefore());
 
     return "Ticket purchased successfully with payment reference: " + payRef;
   }
@@ -1105,7 +1116,7 @@ async def buy(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
     ctx.service_send(email_ticket, req)
 
     # Delayed message - schedule reminder for day before concert
-    delay = day_before(req["concertDateTime"])
+    delay = day_before(req.concert_date_time)
     ctx.service_send(send_reminder, req, send_delay=delay)
 
     return f"Ticket purchased successfully with payment reference: {pay_ref}"
@@ -1118,10 +1129,8 @@ payment_service = restate.Service("PaymentService")
 @payment_service.handler()
 async def charge(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
     # Simulate payment processing
-    payment_id = ctx.rand_uuid()
-    print(
-        f"Processing payment for ticket {req['ticketId']} with payment ID {payment_id}"
-    )
+    payment_id = str(ctx.uuid())
+    print(f"Processing payment for ticket {req.ticket_id} with payment ID {payment_id}")
     return payment_id
 
 
@@ -1132,14 +1141,14 @@ email_service = restate.Service("EmailService")
 @email_service.handler()
 async def email_ticket(ctx: restate.Context, req: PurchaseTicketRequest) -> None:
     print(
-        f"Sending ticket to {req['customerEmail']} for concert on {req['concertDateTime']}"
+        f"Sending ticket to {req.customer_email} for concert on {req.concert_date_time}"
     )
 
 
 @email_service.handler()
 async def send_reminder(ctx: restate.Context, req: PurchaseTicketRequest) -> None:
     print(
-        f"Sending reminder for concert on {req['concertDateTime']} to {req['customerEmail']}"
+        f"Sending reminder for concert on {req.concert_date_time} to {req.customer_email}"
     )
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/communication/service.py" />
@@ -1369,7 +1378,7 @@ async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
     confirmation = ctx.awakeable()
 
     # Initiate payment with external provider (Stripe, PayPal, etc.)
-    await ctx.run_typed("pay", lambda: init_payment(req, confirmation.id))
+    await ctx.run_typed("pay", init_payment, req=req, confirmation_id=confirmation.id)
 
     # Wait for external payment provider to call our webhook
     return await confirmation.promise
@@ -1378,10 +1387,7 @@ async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
 @payments.handler()
 async def confirm(ctx: restate.Context, confirmation: ConfirmationRequest) -> None:
     # Resolve the awakeable to continue the payment flow
-    ctx.resolve_awakeable(confirmation["id"], confirmation["result"])
-
-
-app = restate.app(services=[payments])
+    ctx.resolve_awakeable(confirmation.id, confirmation.result)
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/events/service.py" />
 </GlobalTab>
@@ -1514,9 +1520,9 @@ export const paymentsWithTimeout = restate.service({
 </GlobalTab>
 <GlobalTab title="Java">
 
-```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/timers/PaymentsWithTimeoutService.java?collapse_prequel"} 
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/timers/PaymentsWithTimeout.java?collapse_prequel"} 
 @Service
-public class PaymentsWithTimeoutService {
+public class PaymentsWithTimeout {
 
   @Handler
   public PaymentResult process(Context ctx, PaymentRequest req) {
@@ -1605,7 +1611,9 @@ payments_with_timeout = restate.Service("PaymentsWithTimeout")
 async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
     confirmation = ctx.awakeable()
 
-    pay_ref = await ctx.run_typed("pay", lambda: init_payment(req, confirmation.id, "PaymentsWithTimeout"))
+    pay_ref = await ctx.run_typed(
+        "pay", init_payment, req=req, confirmation_id=confirmation.id
+    )
 
     # Race between payment confirmation and timeout
     match await restate.select(
@@ -1615,18 +1623,15 @@ async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
             return result
         case ["timeout", _]:
             # Cancel the payment with external provider
-            await ctx.run_typed("cancel-payment", lambda: cancel_payment(pay_ref))
+            await ctx.run_typed("cancel-payment", cancel_payment, payment_ref=pay_ref)
             return PaymentResult(
-                success=False, transactionId=None, errorMessage="Payment timeout"
+                success=False, transaction_id=None, error_message="Payment timeout"
             )
 
 
 @payments_with_timeout.handler()
 async def confirm(ctx: restate.Context, confirmation: ConfirmationRequest) -> None:
-    ctx.resolve_awakeable(confirmation["id"], confirmation["result"])
-
-
-app = restate.app(services=[payments_with_timeout])
+    ctx.resolve_awakeable(confirmation.id, confirmation.result)
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/timers/service.py" />
 </GlobalTab>
@@ -1741,10 +1746,6 @@ public class ParallelSubscriptionService {
 
     return new SubscriptionResult(true, payRef);
   }
-
-  public static void main(String[] args) {
-    RestateHttpServer.listen(Endpoint.bind(new ParallelSubscriptionService()));
-  }
 }
 ```
 
@@ -1797,27 +1798,30 @@ parallel_subscription_service = restate.Service("ParallelSubscriptionService")
 
 @parallel_subscription_service.handler()
 async def add(ctx: restate.Context, req: SubscriptionRequest) -> SubscriptionResult:
-    payment_id = ctx.rand_uuid()
+    payment_id = str(ctx.uuid())
     pay_ref = await ctx.run_typed(
-        "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+        "pay",
+        create_recurring_payment,
+        credit_card=req.credit_card,
+        payment_id=payment_id,
     )
 
     # Start all subscriptions in parallel using asyncio.gather
     subscription_tasks = []
-    for subscription in req["subscriptions"]:
+    for subscription in req.subscriptions:
         task = ctx.run_typed(
             f"add-{subscription}",
-            lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+            create_subscription,
+            user_id=req.user_id,
+            subscription=subscription,
+            payment_ref=pay_ref,
         )
         subscription_tasks.append(task)
 
     # Wait for all subscriptions to complete
     await asyncio.gather(*subscription_tasks)
 
-    return SubscriptionResult(success=True, paymentRef=pay_ref)
-
-
-app = restate.app(services=[parallel_subscription_service])
+    return SubscriptionResult(success=True, payment_ref=pay_ref)
 ```
 <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/concurrenttasks/service.py" />
 </GlobalTab>
