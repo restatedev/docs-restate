@@ -5,6 +5,14 @@ icon: "circle-nodes"
 ---
 
 import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+<GlobalTabs>
+    <GlobalTab title="TypeScript"/>
+    <GlobalTab title="Java"/>
+    <GlobalTab title="Go"/>
+    <GlobalTab title="Python"/>
+</GlobalTabs>
 
 Microservice orchestration is about coordinating multiple services to complete complex business workflows. Restate provides powerful primitives for building resilient, observable orchestration patterns.
 
@@ -13,22 +21,6 @@ In this guide, you'll learn how to:
 - Implement sagas for distributed transactions with resilient compensation
 - Use durable timers and external events for complex async patterns
 - Implement stateful entities with Virtual Objects
-
-<Tabs>
-    <Tab title="TypeScript">TypeScript code here</Tab>
-    <Tab title="Java">Java code here</Tab>
-</Tabs>
-
-
-<GlobalTabs>
-<GlobalTab title="TypeScript">TypeScript code here</GlobalTab>
-<GlobalTab title="Java">Java code here</GlobalTab>
-</GlobalTabs>
-
-<GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="TypeScript">More TypeScript code</GlobalTab>
-<GlobalTab title="Java">More Java code</GlobalTab>
-</GlobalTabs>
 
 ## Getting Started
 A Restate application is composed of two main components:
@@ -39,8 +31,10 @@ A Restate application is composed of two main components:
 
 A basic subscription service orchestration looks like this:
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/getstarted/service.ts?collapse_prequel"}
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="TypeScript">
+
+    ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/getstarted/service.ts?collapse_prequel"} 
 export const subscriptionService = restate.service({
   name: "SubscriptionService",
   handlers: {
@@ -60,38 +54,102 @@ export const subscriptionService = restate.service({
   },
 });
 ```
+    <GitHubLink url="tsGitUrl/getstarted/service.ts" />
+</GlobalTab>
+<GlobalTab title="Java">
 
-```java Java
+    ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/getstarted/SubscriptionService.java?collapse_prequel"} 
 @Service
 public class SubscriptionService {
 
-    @Handler
-    public void add(Context ctx, SubscriptionRequest req) {
-        var paymentId = ctx.random().nextUUID().toString();
+  @Handler
+  public void add(Context ctx, SubscriptionRequest req) {
+    var paymentId = ctx.random().nextUUID().toString();
 
-        String payRef = ctx.run(
-        "pay",
-        String.class,
-        () -> createRecurringPayment(req.creditCard(), paymentId));
+    String payRef = ctx.run(
+            "pay",
+            String.class,
+            () -> createRecurringPayment(req.creditCard(), paymentId));
 
-        for (String subscription : req.subscriptions()) {
-        ctx.run("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
-        }
+    for (String subscription : req.subscriptions()) {
+      ctx.run("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
     }
+  }
 }
 ```
 
-</CodeGroup>
+    <GitHubLink url="javaGitUrl/getstarted/SubscriptionService.java" />
+</GlobalTab>
+<GlobalTab title="Go">
+
+    ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/getstarted/service.go?collapse_prequel"} 
+type SubscriptionService struct{}
+
+func (SubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) error {
+  paymentId := ctx.Rand().UUID().String()
+
+  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+    return createRecurringPayment(req.CreditCard, paymentId)
+  }, restate.WithName("pay"))
+  if err != nil {
+    return err
+  }
+
+  for _, subscription := range req.Subscriptions {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, createSubscription(req.UserId, subscription, payRef)
+    }, restate.WithName(fmt.Sprintf("add-%s", subscription)))
+    if err != nil {
+      return err
+    }
+  }
+
+  return nil
+}
+```
+    <GitHubLink url="goGitUrl/getstarted/service.go" />
+</GlobalTab>
+<GlobalTab title="Python">
+
+    ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/getstarted/service.py?collapse_prequel"} 
+subscription_service = restate.Service("SubscriptionService")
+
+
+@subscription_service.handler()
+async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
+    payment_id = ctx.rand_uuid()
+
+    pay_ref = await ctx.run_typed(
+        "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+    )
+
+    for subscription in req["subscriptions"]:
+        await ctx.run_typed(
+            f"add-{subscription}",
+            lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+        )
+
+
+app = restate.app(services=[subscription_service])
+```
+    <GitHubLink url="pyGitUrl/getstarted/service.py" />
+</GlobalTab>
+</GlobalTabs>
 
 A service has handlers that can be called over HTTP. Each handler receives a `Context` object that provides durable execution primitives. Any action performed with the Context is automatically recorded and can survive failures.
 
 You don't need to run your services in any special way. Restate works with how you already deploy your code, whether that's in Docker, on Kubernetes, or via AWS Lambda.
 
 ### Run the example
+
 [Install Restate](/develop/local_dev) and launch it:
+
 ```bash
 restate-server
 ```
+
+<GlobalTabs>
+<GlobalTab title="TypeScript">
 
 Get the example:
 ```bash
@@ -115,6 +173,79 @@ To invoke a handler, send a request to `restate-ingress/MyServiceName/handlerNam
 curl localhost:8080/SubscriptionService/add \
   --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
 ```
+
+</GlobalTab>
+<GlobalTab title="Java">
+        Get the example:
+        ```bash
+        restate example java-tour-of-orchestration && cd java-tour-of-orchestration
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/java/tutorials/tour-of-orchestration-java" />
+
+        Run the example:
+        ```bash
+        mvn compile exec:java
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+
+        To invoke a handler, send a request to `restate-ingress/MyServiceName/handlerName`:
+        ```bash
+        curl localhost:8080/SubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        Get the example:
+        ```bash
+        restate example go-tour-of-orchestration && cd go-tour-of-orchestration
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/go/tutorials/tour-of-orchestration-go" />
+
+        Run the example:
+        ```bash
+        go run .
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+
+        To invoke a handler, send a request to `restate-ingress/MyServiceName/handlerName`:
+        ```bash
+        curl localhost:8080/SubscriptionService/Add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        Get the example:
+        ```bash
+        restate example python-tour-of-orchestration && cd python-tour-of-orchestration
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python" />
+
+        Run the example:
+        ```bash
+        uv run .
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+
+        To invoke a handler, send a request to `restate-ingress/MyServiceName/handlerName`:
+        ```bash
+        curl localhost:8080/SubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime"]}'
+        ```
+
+</GlobalTab>
+</GlobalTabs>
 
 Click in the UI's invocations tab on the inovcation ID of your request to see the execution trace of your request.
 
@@ -140,21 +271,25 @@ This process continues until the handler runs till completion.
 - Full execution traces for debugging and monitoring
 
 <Accordion title={"Try it out"}>
-    Try to add a subscription for Netflix:
-    ```bash
-    curl localhost:8080/SubscriptionService/add \
-        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
-    ```
+<GlobalTabs>
+    <GlobalTabs>
+        <GlobalTab title="TypeScript">
+            Try to add a subscription for Netflix:
+            ```bash
+            curl localhost:8080/SubscriptionService/add \
+            --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
+            ```
 
-    On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
+            On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
 
-    <Frame>
-        <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
-    </Frame>
+            <Frame>
+                <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
+            </Frame>
 
-    To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `utils.ts` file:
+            To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `utils.ts` file:
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"}
+
+            ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/utils.ts#subscription"} 
 export function createSubscription(
   userId: string,
   subscription: string,
@@ -166,6 +301,101 @@ export function createSubscription(
   return "SUCCESS";
 }
 ```
+        </GlobalTab>
+        <GlobalTab title="Java">
+            Try to add a subscription for Netflix:
+            ```bash
+            curl localhost:8080/SubscriptionService/add \
+            --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
+            ```
+
+            On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
+
+            <Frame>
+                <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
+            </Frame>
+
+            To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `auxiliary/clients/SubscriptionClient.java` file:
+
+
+            ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/auxiliary/clients/SubscriptionClient.java#subscription"} 
+package my.example.auxiliary.clients;
+
+public class SubscriptionClient {
+    public static void createSubscription(String s, String subscription, String paymentRef) {
+        // Simulate creating a subscription
+        System.out.println("Creating subscription for user: " + s + ", subscription: " + subscription + ", paymentRef: " + paymentRef);
+    }
+
+    public static void removeSubscription(String s, String subscription) {
+    }
+}
+```
+
+        </GlobalTab>
+        <GlobalTab title="Go">
+            Try to add a subscription for Netflix:
+            ```bash
+            curl localhost:8080/SubscriptionService/Add \
+            --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
+            ```
+
+            On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
+
+            <Frame>
+                <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
+            </Frame>
+
+            To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `auxiliary/clients/SubscriptionClient.java` file:
+
+            ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/getstarted/service.go?collapse_prequel"} 
+type SubscriptionService struct{}
+
+func (SubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) error {
+  paymentId := ctx.Rand().UUID().String()
+
+  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+    return createRecurringPayment(req.CreditCard, paymentId)
+  }, restate.WithName("pay"))
+  if err != nil {
+    return err
+  }
+
+  for _, subscription := range req.Subscriptions {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, createSubscription(req.UserId, subscription, payRef)
+    }, restate.WithName(fmt.Sprintf("add-%s", subscription)))
+    if err != nil {
+      return err
+    }
+  }
+
+  return nil
+}
+```
+            <GitHubLink url="goGitUrl/getstarted/service.go" />
+        </GlobalTab>
+        <GlobalTab title="Python">
+            Try to add a subscription for Netflix:
+            ```bash
+            curl localhost:8080/SubscriptionService/add \
+            --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Netflix"]}'
+            ```
+
+            On the invocation page in the UI, you can see that your request is retrying because the Netflix API is down:
+
+            <Frame>
+                <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
+            </Frame>
+
+            To fix the problem, remove the line `fail_on_netflix` from the `create_subscription` function in the `utils.py` file:
+
+            ```python {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/utils.py#subscription}
+            ```
+            <GitHubLink url="pyGitUrl/getstarted/service.py" />
+        </GlobalTab>
+    </GlobalTabs>
+
 
     Once you restart the service, the workflow finishes successfully:
     <Frame>
@@ -184,8 +414,36 @@ For these cases, Restate distinguishes between two types of errors:
 - **Transient Errors**: These are temporary issues that can be retried, such as network timeouts or service unavailability. Restate automatically retries these errors.
 - **Terminal Errors**: These indicate a failure that will not be retried, such as invalid input or business logic violations. Restate stops execution and allows you to handle these errors gracefully.
 
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```typescript {"CODE_LOAD::ts/src/tour/microservices/terminal_error.ts#terminal_error"} 
+throw new TerminalError("Invalid credit card");
+```
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::java/src/main/java/tour/microservices/ErrorHandling.java#here"} 
+throw new TerminalException("Invalid credit card");
+```
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::go/tour/microservices/errorhandling.go#here"} 
+return restate.TerminalError(fmt.Errorf("invalid credit card"))
+```
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::python/src/tour/microservices/terminal_error.py#here"} 
+from restate.exceptions import TerminalError
+
+raise TerminalError("Invalid credit card")
+```
+    </GlobalTab>
+</GlobalTabs>
 Throw a `TerminalError` in your handler to indicate a terminal failure:
-```typescript {"CODE_LOAD::ts/src/tour/microservices/terminal_error.ts#terminal_error"}
+```typescript {"CODE_LOAD::ts/src/tour/microservices/terminal_error.ts#terminal_error"} 
 throw new TerminalError("Invalid credit card");
 ```
 
@@ -193,7 +451,10 @@ throw new TerminalError("Invalid credit card");
 
     Some actions let you configure their retry behavior, for example to limit the number of retries of a run block:
 
-```typescript {"CODE_LOAD::ts/src/tour/microservices/retries.ts#retries"}
+    <GlobalTabs>
+        <GlobalTab title="TypeScript">
+
+            ```ts {"CODE_LOAD::ts/src/tour/microservices/retries.ts#retries"} 
 const retryPolicy = {
     maxRetryAttempts: 3,
     initialRetryIntervalMillis: 1000,
@@ -204,6 +465,49 @@ const payRef = await ctx.run("pay", () =>
     retryPolicy
 );
 ```
+        </GlobalTab>
+        <GlobalTab title="Java">
+
+            ```java {"CODE_LOAD::java/src/main/java/tour/microservices/Retries.java#here"} 
+RetryPolicy myRunRetryPolicy =
+    RetryPolicy.defaultPolicy()
+        .setInitialDelay(Duration.ofSeconds(1))
+        .setMaxAttempts(3);
+String payRef = ctx.run(
+        "pay",
+        myRunRetryPolicy,
+        String.class,
+        () -> createRecurringPayment(req.creditCard(), paymentId));
+```
+        </GlobalTab>
+        <GlobalTab title="Go">
+
+            ```go {"CODE_LOAD::go/tour/microservices/retries.go#here"} 
+result, err := restate.Run(ctx,
+  func(ctx restate.RunContext) (string, error) {
+    return createRecurringPayment(req.CreditCard, paymentId)
+  },
+  restate.WithInitialRetryInterval(time.Millisecond*100),
+  restate.WithMaxRetryAttempts(3),
+  restate.WithName("pay"),
+)
+if err != nil {
+  return err
+}
+```
+        </GlobalTab>
+        <GlobalTab title="Python">
+
+            ```python {"CODE_LOAD::python/src/tour/microservices/retries.py#here"} 
+retry_opts = restate.RunOptions(
+    max_attempts=10, max_retry_duration=timedelta(seconds=30)
+)
+pay_ref = await ctx.run_typed(
+    "pay", lambda: create_recurring_payment(req["creditCard"], payment_id), retry_opts
+)
+```
+        </GlobalTab>
+    </GlobalTabs>
 
     When the retries are exhausted, the run block will throw a `TerminalError`, that you can handle in your handler logic.
 
@@ -221,7 +525,10 @@ Sagas are a pattern for rolling back changes made by a handler when it fails.
 In Restate, you can implement a saga by building a list of compensating actions for each step of the workflow.
 On a terminal failure, you execute them in reverse order:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"}
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/sagas/service.ts?collapse_prequel"} 
 export const subscriptionSaga = restate.service({
   name: "SubscriptionSaga",
   handlers: {
@@ -259,6 +566,160 @@ export const subscriptionSaga = restate.service({
   },
 });
 ```
+        <GitHubLink url="tsGitUrl/sagas/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/sagas/SubscriptionSaga.java?collapse_prequel"} 
+@Service
+public class SubscriptionSaga {
+
+    @Handler
+    public void add(Context ctx, SubscriptionRequest req) {
+        List<Runnable> compensations = new ArrayList<>();
+        try {
+            var paymentId = ctx.random().nextUUID().toString();
+
+            compensations.add(
+                    () -> ctx.run("undo-pay", () -> PaymentClient.removeRecurringPayment(paymentId)));
+            String payRef = ctx.run(
+                    "pay",
+                    String.class,
+                    () -> PaymentClient.createRecurringPayment(req.creditCard(), paymentId));
+
+            for (String subscription : req.subscriptions()) {
+                compensations.add(
+                        () ->
+                                ctx.run(
+                                        "undo-" + subscription,
+                                        () -> SubscriptionClient.removeSubscription(req.userId(), subscription)));
+                ctx.run(
+                        "add-" + subscription,
+                        () -> SubscriptionClient.createSubscription(req.userId(), subscription, payRef));
+            }
+        } catch (TerminalException e) {
+            for (Runnable compensation : compensations) {
+                compensation.run();
+            }
+            throw e;
+        }
+    }
+}
+```
+
+        <GitHubLink url="javaGitUrl/getstarted/sagas/SubscriptionSaga.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/sagas/service.go?collapse_prequel"} 
+type SubscriptionSaga struct{}
+
+func (SubscriptionSaga) Add(ctx restate.Context, req SubscriptionRequest) error {
+  var compensations []func() error
+
+  paymentId := ctx.Rand().UUID().String()
+
+  // Add compensation for payment
+  compensations = append(compensations, func() error {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, removeRecurringPayment(paymentId)
+    }, restate.WithName("undo-pay"))
+    return err
+  })
+
+  // Create payment
+  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+    return createRecurringPayment(req.CreditCard, paymentId)
+  }, restate.WithName("pay"))
+  if err != nil {
+    // Run compensations on failure
+    for i := len(compensations) - 1; i >= 0; i-- {
+      compensations[i]()
+    }
+    return err
+  }
+
+  // Process subscriptions
+  for _, subscription := range req.Subscriptions {
+    // Add compensation for this subscription
+    sub := subscription // Capture loop variable
+    compensations = append(compensations, func() error {
+      _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+        return restate.Void{}, removeSubscription(req.UserId, sub)
+      }, restate.WithName(fmt.Sprintf("undo-%s", sub)))
+      return err
+    })
+
+    // Create subscription
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, createSubscription(req.UserId, subscription, payRef)
+    }, restate.WithName(fmt.Sprintf("add-%s", subscription)))
+    if err != nil {
+      // Run compensations in reverse order on failure
+      for i := len(compensations) - 1; i >= 0; i-- {
+        compensations[i]()
+      }
+      return err
+    }
+  }
+
+  return nil
+}
+```
+        <GitHubLink url="goGitUrl/sagas/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/sagas/service.py?collapse_prequel"} 
+subscription_saga = restate.Service("SubscriptionSaga")
+
+
+@subscription_saga.handler()
+async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
+    compensations: List[Callable[[], Awaitable[None]]] = []
+
+    try:
+        payment_id = ctx.rand_uuid()
+
+        # Add compensation for payment
+        compensations.append(
+            lambda: ctx.run_typed(
+                "undo-pay", lambda: remove_recurring_payment(payment_id)
+            )
+        )
+
+        # Create payment
+        pay_ref = await ctx.run_typed(
+            "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+        )
+
+        # Process subscriptions
+        for subscription in req["subscriptions"]:
+            # Add compensation for this subscription
+            compensations.append(
+                lambda s=subscription: ctx.run_typed(
+                    f"undo-{s}", lambda: remove_subscription(req["userId"], s)
+                )
+            )
+
+            # Create subscription
+            await ctx.run_typed(
+                f"add-{subscription}",
+                lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+            )
+
+    except restate.TerminalError as e:
+        # Run compensations in reverse order
+        for compensation in reversed(compensations):
+            await compensation()
+        raise e
+
+
+app = restate.app(services=[subscription_saga])
+```
+        <GitHubLink url="pyGitUrl/sagas/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 **Benefits with Restate:**
 - The list of compensations can be recovered after a crash, and Restate knows which compensations still need to be run.
@@ -268,10 +729,32 @@ export const subscriptionSaga = restate.service({
 
 <Accordion title={"Try it out"}>
     Add a subscription for Disney:
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
     curl localhost:8080/SubscriptionSaga/add \
     --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Disney"]}'
     ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/SubscriptionSaga/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Disney"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/SubscriptionSaga/Add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Disney"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/SubscriptionSaga/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "Disney"]}'
+        ```
+</GlobalTab>
+</GlobalTabs>
 
     The Disney subscription is not available, so the handler will fail and run compensations:
     <Frame>
@@ -291,7 +774,10 @@ Each Virtual Object instance maintains isolated state and is identified by a uni
 
 Here is an example of a Virtual Object that tracks user subscriptions:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/objects/service.ts?collapse_prequel"}
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/objects/service.ts?collapse_prequel"} 
 export const userSubscriptions = restate.object({
   name: "UserSubscriptions",
   handlers: {
@@ -317,6 +803,124 @@ export const userSubscriptions = restate.object({
   },
 });
 ```
+        <GitHubLink url="tsGitUrl/objects/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/objects/UserSubscriptions.java?collapse_prequel"} 
+@VirtualObject
+public class UserSubscriptions {
+    private static final StateKey<List<String>> SUBSCRIPTIONS =
+            StateKey.of("subscriptions", new TypeRef<>() {});
+    private static final StateKey<String> LAST_UPDATED =
+            StateKey.of("lastUpdated", String.class);
+
+    @Handler
+    public void add(ObjectContext ctx, String subscription) {
+        // Get current subscriptions
+        List<String> subscriptions = ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
+
+        // Add new subscription
+        if (!subscriptions.contains(subscription)) {
+            subscriptions.add(subscription);
+        }
+        ctx.set(SUBSCRIPTIONS, subscriptions);
+
+        // Update metrics
+        ctx.set(LAST_UPDATED, Instant.now().toString());
+    }
+
+    @Shared
+    public List<String> getSubscriptions(SharedObjectContext ctx) {
+        return ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
+    }
+}
+```
+
+        <GitHubLink url="javaGitUrl/objects/UserSubscriptions.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/objects/service.go?collapse_prequel"} 
+type UserSubscriptions struct{}
+
+func (UserSubscriptions) Add(ctx restate.ObjectContext, subscription string) error {
+  // Get current subscriptions
+  var subscriptions []string
+  has, err := restate.Get(ctx, "subscriptions", &subscriptions)
+  if err != nil {
+    return err
+  }
+  if !has {
+    subscriptions = []string{}
+  }
+
+  // Add new subscription if not already present
+  found := false
+  for _, sub := range subscriptions {
+    if sub == subscription {
+      found = true
+      break
+    }
+  }
+  if !found {
+    subscriptions = append(subscriptions, subscription)
+  }
+
+  // Save subscriptions
+  restate.Set(ctx, "subscriptions", subscriptions)
+
+  // Update metrics
+  restate.Set(ctx, "lastUpdated", time.Now().Format(time.RFC3339))
+
+  return nil
+}
+
+func (UserSubscriptions) GetSubscriptions(ctx restate.ObjectSharedContext) ([]string, error) {
+  var subscriptions []string
+  has, err := restate.Get(ctx, "subscriptions", &subscriptions)
+  if err != nil {
+    return nil, err
+  }
+  if !has {
+    subscriptions = []string{}
+  }
+  return subscriptions, nil
+}
+```
+        <GitHubLink url="goGitUrl/objects/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/objects/service.py?collapse_prequel"} 
+user_subscriptions = restate.VirtualObject("UserSubscriptions")
+
+
+@user_subscriptions.handler()
+async def add(ctx: restate.ObjectContext, subscription: str) -> None:
+    # Get current subscriptions
+    subscriptions = await ctx.get("subscriptions") or []
+
+    # Add new subscription
+    if subscription not in subscriptions:
+        subscriptions.append(subscription)
+
+    ctx.set("subscriptions", subscriptions)
+
+    # Update metrics
+    ctx.set("lastUpdated", datetime.now().isoformat())
+
+
+@user_subscriptions.handler()
+async def get_subscriptions(ctx: restate.ObjectSharedContext) -> List[str]:
+    return await ctx.get("subscriptions") or []
+
+
+app = restate.app(services=[user_subscriptions])
+```
+        <GitHubLink url="pyGitUrl/objects/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 Virtual Objects are ideal for implementing any entity with mutable state.
 Restate ensures that your state is durable and consistent:
@@ -330,9 +934,11 @@ Restate ensures that your state is durable and consistent:
 </Frame>
 
 <Accordion title={"Try it out"}>
-
     Add a few subscriptions for some users.
-    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
+    To call a Virtual Object, you specify the object key in the URL (here `user-123`):
+
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
     curl localhost:8080/UserSubscriptions/user-123/add --json '"Hulu"'
     curl localhost:8080/UserSubscriptions/user-123/add --json '"Prime"'
@@ -344,6 +950,47 @@ Restate ensures that your state is durable and consistent:
     ```bash
     curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
     ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Hulu"'
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Prime"'
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
+        curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
+        ```
+
+        Get the subscriptions for the user:
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/Add --json '"Hulu"'
+        curl localhost:8080/UserSubscriptions/user-123/Add --json '"Prime"'
+        curl localhost:8080/UserSubscriptions/user-123/Add --json '"Disney"'
+        curl localhost:8080/UserSubscriptions/user-456/Add --json '"Netflix"'
+        ```
+
+        Get the subscriptions for the user:
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/GetSubscriptions
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Hulu"'
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Prime"'
+        curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
+        curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
+        ```
+
+        Get the subscriptions for the user:
+        ```bash
+        curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
+        ```
+</GlobalTab>
+</GlobalTabs>
 
     Or use the UI's state tab to explore the object state.
 </Accordion>
@@ -359,8 +1006,10 @@ When you call another handler, the Restate Server acts as a message broker.
 All communication is proxied via the Restate Server where it gets durably logged and retried till completion.
 
 Imagine a handler which processes a concert ticket purchase, and calls multiple services to handle payment, ticket delivery, and reminders:
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/communication/service.ts?collapse_prequel"}
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/communication/service.ts?collapse_prequel"} 
 export const concertTicketingService = restate.service({
   name: "ConcertTicketingService",
   handlers: {
@@ -381,24 +1030,185 @@ export const concertTicketingService = restate.service({
   },
 });
 ```
+        <GitHubLink url="tsGitUrl/communication/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/communication/ConcertTicketingService.java?collapse_prequel"} 
+@Service
+public class ConcertTicketingService {
+
+    @Handler
+    public String buy(Context ctx, PurchaseTicketRequest req) {
+        // Request-response call - wait for payment to complete
+        String payRef = PaymentServiceClient.fromContext(ctx).charge(req).await();
+
+        // One-way message - fire and forget ticket delivery
+        EmailServiceClient.fromContext(ctx).send().emailTicket(req);
+
+        // Delayed message - schedule reminder for day before concert
+        EmailServiceClient.fromContext(ctx).send().sendReminder(req,
+                dayBefore(req.concertDateTime()));
+
+        return "Ticket purchased successfully with payment reference: " + payRef;
+    }
+}
+```
+
+        <GitHubLink url="javaGitUrl/communication/ConcertTicketingService.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/communication/service.go?collapse_prequel"} 
+type PaymentService struct{}
+
+func (PaymentService) Charge(ctx restate.Context, req PurchaseTicketRequest) (string, error) {
+  // Simulate payment processing
+  paymentId := ctx.Rand().UUID().String()
+  fmt.Printf("Processing payment for ticket %s with payment ID %s\n", req.TicketId, paymentId)
+  return paymentId, nil
+}
+
+type EmailService struct{}
+
+func (EmailService) EmailTicket(ctx restate.Context, req PurchaseTicketRequest) error {
+  fmt.Printf("Sending ticket to %s for concert on %s\n", req.CustomerEmail, req.ConcertDateTime)
+  return nil
+}
+
+func (EmailService) SendReminder(ctx restate.Context, req PurchaseTicketRequest) error {
+  fmt.Printf("Sending reminder for concert on %s to %s\n", req.ConcertDateTime, req.CustomerEmail)
+  return nil
+}
+
+type ConcertTicketingService struct{}
+
+func (ConcertTicketingService) Buy(ctx restate.Context, req PurchaseTicketRequest) (string, error) {
+  // Request-response call - wait for payment to complete
+  payRef, err := restate.Service[PurchaseTicketRequest, string](ctx, "PaymentService", "Charge").Request(req)
+  if err != nil {
+    return "", err
+  }
+
+  // One-way message - fire and forget ticket delivery
+  restate.Service[PurchaseTicketRequest, restate.Void](ctx, "EmailService", "EmailTicket").Send(req)
+
+  // Delayed message - schedule reminder for day before concert
+  delay := dayBefore(req.ConcertDateTime)
+  restate.Service[PurchaseTicketRequest, restate.Void](ctx, "EmailService", "SendReminder").
+    Send(req, restate.WithDelay(delay))
+
+  return fmt.Sprintf("Ticket purchased successfully with payment reference: %s", payRef), nil
+}
+```
+        <GitHubLink url="goGitUrl/communication/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/communication/service.py?collapse_prequel"} 
+concert_ticketing_service = restate.Service("ConcertTicketingService")
+
+
+@concert_ticketing_service.handler()
+async def buy(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
+    # Request-response call - wait for payment to complete
+    pay_ref = await ctx.service_call(charge, req)
+
+    # One-way message - fire and forget ticket delivery
+    ctx.service_send(email_ticket, req)
+
+    # Delayed message - schedule reminder for day before concert
+    delay = day_before(req["concertDateTime"])
+    ctx.service_send(send_reminder, req, send_delay=delay)
+
+    return f"Ticket purchased successfully with payment reference: {pay_ref}"
+
+
+# Payment Service
+payment_service = restate.Service("PaymentService")
+
+
+@payment_service.handler()
+async def charge(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
+    # Simulate payment processing
+    payment_id = ctx.rand_uuid()
+    print(
+        f"Processing payment for ticket {req['ticketId']} with payment ID {payment_id}"
+    )
+    return payment_id
+
+
+# Email Service
+email_service = restate.Service("EmailService")
+
+
+@email_service.handler()
+async def email_ticket(ctx: restate.Context, req: PurchaseTicketRequest) -> None:
+    print(
+        f"Sending ticket to {req['customerEmail']} for concert on {req['concertDateTime']}"
+    )
+
+
+@email_service.handler()
+async def send_reminder(ctx: restate.Context, req: PurchaseTicketRequest) -> None:
+    print(
+        f"Sending reminder for concert on {req['concertDateTime']} to {req['customerEmail']}"
+    )
+```
+        <GitHubLink url="pyGitUrl/communication/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 Each of these calls gets persisted in Restate's log and will be retried upon failures.
 The handler can finish execution without waiting for the ticket delivery or reminder to complete.
 
 You can use Restate's communication primitives to implement microservices that communicate reliably and scale independently.
 
-<Accordion title={"Try it out"}>
 
-    Add a few subscriptions for some users.
-    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
+<Accordion title={"Try it out"}>
+    Buy a concert ticket:
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
     curl localhost:8080/ConcertTicketingService/buy --json '{
+    "ticketId": "ticket-789",
+    "price": 100,
+    "customerEmail": "me@mail.com",
+    "concertDate": "2026-10-01T20:00:00Z"
+}'
+    ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/ConcertTicketingService/buy --json '{
         "ticketId": "ticket-789",
         "price": 100,
         "customerEmail": "me@mail.com",
         "concertDate": "2026-10-01T20:00:00Z"
     }'
-    ```
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/ConcertTicketingService/Buy --json '{
+        "ticketId": "ticket-789",
+        "price": 100,
+        "customerEmail": "me@mail.com",
+        "concertDate": "2026-10-01T20:00:00Z"
+    }'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/ConcertTicketingService/buy --json '{
+        "ticketId": "ticket-789",
+        "price": 100,
+        "customerEmail": "me@mail.com",
+        "concertDate": "2026-10-01T20:00:00Z"
+    }'
+        ```
+</GlobalTab>
+</GlobalTabs>
 
 
     See in the UI how the first call had the response logged, while the ticket delivery happened asynchronously and the reminder was scheduled for in 406 days:
@@ -415,11 +1225,41 @@ This can help us prevent duplicate calls the concert ticketing service if the us
 
 Add an idempotency header to your request:
 
-```shell
-curl -X POST localhost:8080/ConcertTicketingService/buy \
-  -H 'Idempotency-Key: unique-key-123' \
-  --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
-```
+<GlobalTabs>
+<GlobalTab title="TypeScript">
+
+    ```shell
+    curl -X POST localhost:8080/ConcertTicketingService/buy \
+    -H 'Idempotency-Key: unique-key-123' \
+    --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+    ```
+</GlobalTab>
+    <GlobalTab title="Java">
+
+        ```shell
+        curl -X POST localhost:8080/ConcertTicketingService/buy \
+        -H 'Idempotency-Key: unique-key-123' \
+        --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+
+        ```shell
+        curl -X POST localhost:8080/ConcertTicketingService/Buy \
+        -H 'Idempotency-Key: unique-key-123' \
+        --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+
+        ```shell
+        curl -X POST localhost:8080/ConcertTicketingService/buy \
+        -H 'Idempotency-Key: unique-key-123' \
+        --json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+        ```
+</GlobalTab>
+</GlobalTabs>
+
 
 Notice how doing the same request with the same idempotency key will print the same payment reference.
 Instead of executing the handler again, Restate returns the result of the first execution.
@@ -432,7 +1272,12 @@ Another common scenario is APIs that respond asynchronously via webhooks or call
 For this, you can use Restate's awakeables.
 
 For example, some payment providers like Stripe require you to initiate a payment and then wait for their webhook to confirm the transaction.
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/events/service.ts?collapse_prequel"}
+
+
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/events/service.ts?collapse_prequel"} 
 export const payments = restate.service({
   name: "Payments",
   handlers: {
@@ -458,6 +1303,102 @@ export const payments = restate.service({
   },
 });
 ```
+        <GitHubLink url="tsGitUrl/events/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/events/Payments.java?collapse_prequel"} 
+@Service
+public class Payments {
+
+    @Handler
+    public PaymentResult process(Context ctx, PaymentRequest req) {
+        // Create awakeable to wait for webhook payment confirmation
+        var confirmation = ctx.awakeable(PaymentResult.class);
+
+        // Initiate payment with external provider (Stripe, PayPal, etc.)
+        ctx.run(() -> initPayment(req, confirmation.id()));
+
+        // Wait for external payment provider to call our webhook
+        return confirmation.await();
+    }
+
+    // Webhook handler called by external payment provider
+    @Handler
+    public void confirm(Context ctx, ConfirmationRequest confirmation) {
+        // Resolve the awakeable to continue the payment flow
+        ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
+    }
+}
+```
+
+        <GitHubLink url="javaGitUrl/events/Payments.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/events/service.go?collapse_prequel"} 
+type Payments struct{}
+
+func (Payments) Process(ctx restate.Context, req PaymentRequest) (PaymentResult, error) {
+  // Create awakeable to wait for webhook payment confirmation
+  confirmation := restate.Awakeable[PaymentResult](ctx)
+
+  // Initiate payment with external provider (Stripe, PayPal, etc.)
+  _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    _, err := initPayment(req, confirmation.Id())
+    return restate.Void{}, err
+  }, restate.WithName("pay"))
+  if err != nil {
+    return PaymentResult{}, err
+  }
+
+  // Wait for external payment provider to call our webhook
+  result, err := confirmation.Result()
+  if err != nil {
+    return PaymentResult{}, err
+  }
+
+  return result, nil
+}
+
+// Webhook handler called by external payment provider
+func (Payments) Confirm(ctx restate.Context, confirmation ConfirmationRequest) error {
+  // Resolve the awakeable to continue the payment flow
+  restate.ResolveAwakeable(ctx, confirmation.Id, confirmation.Result)
+  return nil
+}
+```
+        <GitHubLink url="goGitUrl/events/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/events/service.py?collapse_prequel"} 
+payments = restate.Service("Payments")
+
+
+@payments.handler()
+async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
+    # Create awakeable to wait for webhook payment confirmation
+    confirmation = ctx.awakeable()
+
+    # Initiate payment with external provider (Stripe, PayPal, etc.)
+    await ctx.run_typed("pay", lambda: init_payment(req, confirmation.id))
+
+    # Wait for external payment provider to call our webhook
+    return await confirmation.promise
+
+
+@payments.handler()
+async def confirm(ctx: restate.Context, confirmation: ConfirmationRequest) -> None:
+    # Resolve the awakeable to continue the payment flow
+    ctx.resolve_awakeable(confirmation["id"], confirmation["result"])
+
+
+app = restate.app(services=[payments])
+```
+        <GitHubLink url="pyGitUrl/events/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 Awakeables are like promises or futures that can be recovered after a crash.
 Restate persists the awakeable in its log and can recover it on another process when needed.
@@ -467,21 +1408,67 @@ There is no limit to how long you can persist an awakeable, so you can wait for 
 You can also use awakeables to implement human-in-the-loop interactions, such as waiting for user input or approvals.
 
 <Accordion title={"Try it out"}>
+
     Initiate a payment by calling the `process` handler. Add `/send` to call the handler without waiting for the response:
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
-    curl localhost:8080/Payments/process \
-        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+    curl localhost:8080/Payments/process/send \
+    --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
     ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/Payments/process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/Payments/Process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/Payments/process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+</GlobalTabs>
 
     In the UI, you can see that the payment is waiting for confirmation.
 
     You can restart the service to see how Restate continues waiting for the payment confirmation.
 
     Simulate approving the payment by executing the **curl request that was printed in the service logs**, similar to:
-    ```bash
-    curl localhost:8080/Payments/confirm \
-        --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
-    ```
+    <GlobalTabs>
+        <GlobalTab title="TypeScript">
+            ```bash
+            curl localhost:8080/Payments/confirm \
+            --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
+            ```
+        </GlobalTab>
+        <GlobalTab title="Java">
+            ```bash
+            curl localhost:8080/Payments/confirm \
+            --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
+            ```
+        </GlobalTab>
+        <GlobalTab title="Go">
+            ```bash
+            curl localhost:8080/Payments/Confirm \
+            --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
+            ```
+        </GlobalTab>
+        <GlobalTab title="Python">
+            ```bash
+            curl localhost:8080/Payments/confirm \
+            --json '{"id": "sign_1PrDkbECjgdsBmMfEUQyCnioCP-csLbd2AAAAEQ", "result": {"success": true, "transactionId": "txn-123"}}'
+            ```
+        </GlobalTab>
+    </GlobalTabs>
+
 
     You can see in the UI that the payment was processed successfully and the awakeable was resolved:
     <Frame>
@@ -497,31 +1484,207 @@ Restate tracks these timers so they survive crashes and do not restart from the 
 
 Let's extend our payment service to automatically cancel payments that don't complete within a reasonable time:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts#or_timeout"}
-// Race between payment confirmation and timeout
-try {
-  return await confirmation.promise.orTimeout({ seconds: 30 });
-} catch (e) {
-  if (e instanceof TimeoutError) {
-    // Cancel the payment with external provider
-    await ctx.run("cancel-payment", () => cancelPayment(payRef));
-    return {
-      success: false,
-      errorMessage: "Payment timeout",
-    };
-  }
-  throw e;
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/timers/service.ts?collapse_prequel"} 
+export const paymentsWithTimeout = restate.service({
+  name: "PaymentsWithTimeout",
+  handlers: {
+    process: async (ctx: Context, req: PaymentRequest) => {
+      const confirmation = ctx.awakeable<PaymentResult>();
+
+      const payRef = await ctx.run("pay", () =>
+        initPayment(req, confirmation.id),
+      );
+
+      // Race between payment confirmation and timeout
+      try {
+        return await confirmation.promise.orTimeout({ seconds: 30 });
+      } catch (e) {
+        if (e instanceof TimeoutError) {
+          // Cancel the payment with external provider
+          await ctx.run("cancel-payment", () => cancelPayment(payRef));
+          return {
+            success: false,
+            errorMessage: "Payment timeout",
+          };
+        }
+        throw e;
+      }
+    },
+
+    confirm: async (
+      ctx: Context,
+      confirmation: { id: string; result: PaymentResult },
+    ) => {
+      ctx.resolveAwakeable(confirmation.id, confirmation.result);
+    },
+  },
+});
+```
+        <GitHubLink url="tsGitUrl/timers/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/timers/PaymentsWithTimeoutService.java?collapse_prequel"} 
+@Service
+public class PaymentsWithTimeoutService {
+
+    @Handler
+    public PaymentResult process(Context ctx, PaymentRequest req) {
+        var confirmation = ctx.awakeable(PaymentResult.class);
+
+        String payRef = ctx.run(
+                "pay",
+                String.class,
+                () -> initPayment(req, confirmation.id()));
+
+        try {
+            return confirmation.await(Duration.ofSeconds(30));
+        } catch (TimeoutException e) {
+            ctx.run("cancel-payment", () -> cancelPayment(payRef));
+            return new PaymentResult(
+                    false,
+                    null,
+                    "Payment timeout"
+            );
+        }
+    }
+
+    @Handler
+    public void confirm(Context ctx, ConfirmationRequest confirmation) {
+        ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
+    }
+
 }
 ```
+
+        <GitHubLink url="javaGitUrl/timers/PaymentsWithTimeoutService.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/timers/service.go?collapse_prequel"} 
+type PaymentsWithTimeout struct{}
+
+func (PaymentsWithTimeout) Process(ctx restate.Context, req PaymentRequest) (PaymentResult, error) {
+  confirmation := restate.Awakeable[PaymentResult](ctx)
+
+  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+    return initPayment(req, confirmation.Id())
+  }, restate.WithName("pay"))
+  if err != nil {
+    return PaymentResult{}, err
+  }
+
+  // Race between payment confirmation and timeout
+  timeout := restate.After(ctx, 30*time.Second)
+  selector := restate.Select(ctx, confirmation, timeout)
+
+  switch selector.Select() {
+  case confirmation:
+    result, err := confirmation.Result()
+    if err != nil {
+      return PaymentResult{}, err
+    }
+    return result, nil
+  case timeout:
+    if err := timeout.Done(); err != nil {
+      return PaymentResult{}, err
+    }
+    // Cancel the payment with external provider
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, cancelPayment(payRef)
+    }, restate.WithName("cancel-payment"))
+    if err != nil {
+      return PaymentResult{}, err
+    }
+
+    return PaymentResult{
+      Success:      false,
+      ErrorMessage: "Payment timeout",
+    }, nil
+  default:
+    return PaymentResult{}, fmt.Errorf("unexpected selector result")
+  }
+}
+
+func (PaymentsWithTimeout) Confirm(ctx restate.Context, confirmation ConfirmationRequest) error {
+  restate.ResolveAwakeable(ctx, confirmation.Id, confirmation.Result)
+  return nil
+}
+```
+        <GitHubLink url="goGitUrl/timers/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/timers/service.py?collapse_prequel"} 
+payments_with_timeout = restate.Service("PaymentsWithTimeout")
+
+
+@payments_with_timeout.handler()
+async def process(ctx: restate.Context, req: PaymentRequest) -> PaymentResult:
+    confirmation = ctx.awakeable()
+
+    pay_ref = await ctx.run_typed("pay", lambda: init_payment(req, confirmation.id, "PaymentsWithTimeout"))
+
+    # Race between payment confirmation and timeout
+    match await restate.select(
+        confirmation=confirmation.promise, timeout=ctx.sleep(timedelta(seconds=30))
+    ):
+        case ["confirmation", result]:
+            return result
+        case ["timeout", _]:
+            # Cancel the payment with external provider
+            await ctx.run_typed("cancel-payment", lambda: cancel_payment(pay_ref))
+            return PaymentResult(
+                success=False, transactionId=None, errorMessage="Payment timeout"
+            )
+
+
+@payments_with_timeout.handler()
+async def confirm(ctx: restate.Context, confirmation: ConfirmationRequest) -> None:
+    ctx.resolve_awakeable(confirmation["id"], confirmation["result"])
+
+
+app = restate.app(services=[payments_with_timeout])
+```
+        <GitHubLink url="pyGitUrl/timers/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 You can also set timeouts for RPC calls or other asynchronous operations with the Restate SDK.
 
 <Accordion title={"Try it out"}>
+
     Initiate a payment by calling the `process` handler. Add `/send` to call the handler without waiting for the response:
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
     curl localhost:8080/PaymentsWithTimeout/process/send \
-        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+    --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
     ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/PaymentsWithTimeout/process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/PaymentsWithTimeout/Process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/PaymentsWithTimeout/process/send \
+        --json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+        ```
+</GlobalTab>
+</GlobalTabs>
+
 
     Wait for 30 seconds without confirming the payment.
 
@@ -541,7 +1704,10 @@ Restate allows more advanced concurrency patterns to run tasks in parallel and w
 
 Let's extend our subscription service to process all subscriptions concurrently and handle failures gracefully:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/concurrenttasks/service.ts?collapse_prequel"}
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-orchestration-typescript/src/concurrenttasks/service.ts?collapse_prequel"} 
 export const parallelSubscriptionService = restate.service({
   name: "ParallelSubscriptionService",
   handlers: {
@@ -569,16 +1735,149 @@ export const parallelSubscriptionService = restate.service({
   },
 });
 ```
+        <GitHubLink url="tsGitUrl/concurrenttasks/service.ts" />
+    </GlobalTab>
+    <GlobalTab title="Java">
+
+        ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/concurrenttasks/ParallelSubscriptionService.java?collapse_prequel"} 
+@Service
+public class ParallelSubscriptionService {
+
+    @Handler
+    public SubscriptionResult add(Context ctx, SubscriptionRequest req) {
+        var paymentId = ctx.random().nextUUID().toString();
+        var payRef = ctx.run("pay",
+                String.class,
+                () -> createRecurringPayment(req.creditCard(), paymentId));
+
+        // Start all subscriptions in parallel
+        List<DurableFuture<?>> subscriptionFutures = new ArrayList<>();
+        for (String subscription : req.subscriptions()) {
+            subscriptionFutures.add(
+                    ctx.runAsync("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef))
+            );
+        }
+
+        // Wait for all subscriptions to complete
+        DurableFuture.all(subscriptionFutures).await();
+
+        return new SubscriptionResult(true, payRef);
+    }
+
+    public static void main(String[] args) {
+        RestateHttpServer.listen(Endpoint.bind(new ParallelSubscriptionService()));
+    }
+}
+```
+
+        <GitHubLink url="javaGitUrl/concurrenttasks/ParallelSubscriptionService.java" />
+    </GlobalTab>
+    <GlobalTab title="Go">
+
+        ```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/concurrenttasks/service.go?collapse_prequel"} 
+type ParallelSubscriptionService struct{}
+
+func (ParallelSubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) (SubscriptionResult, error) {
+  paymentId := ctx.Rand().UUID().String()
+
+  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+    return createRecurringPayment(req.CreditCard, paymentId)
+  }, restate.WithName("pay"))
+  if err != nil {
+    return SubscriptionResult{}, err
+  }
+
+  // Start all subscriptions in parallel using selectors
+  var subscriptionSelectors []restate.Selector[restate.Void]
+  for _, subscription := range req.Subscriptions {
+    selector := restate.RunSelector(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, createSubscription(req.UserId, subscription, payRef)
+    }, restate.WithName(fmt.Sprintf("add-%s", subscription)))
+    subscriptionSelectors = append(subscriptionSelectors, selector)
+  }
+
+  // Wait for all subscriptions to complete
+  for _, selector := range subscriptionSelectors {
+    if _, err := selector.Result(); err != nil {
+      return SubscriptionResult{}, err
+    }
+  }
+
+  return SubscriptionResult{
+    Success:    true,
+    PaymentRef: payRef,
+  }, nil
+}
+```
+        <GitHubLink url="goGitUrl/concurrenttasks/service.go" />
+    </GlobalTab>
+    <GlobalTab title="Python">
+
+        ```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/app/concurrenttasks/service.py?collapse_prequel"} 
+parallel_subscription_service = restate.Service("ParallelSubscriptionService")
+
+
+@parallel_subscription_service.handler()
+async def add(ctx: restate.Context, req: SubscriptionRequest) -> SubscriptionResult:
+    payment_id = ctx.rand_uuid()
+    pay_ref = await ctx.run_typed(
+        "pay", lambda: create_recurring_payment(req["creditCard"], payment_id)
+    )
+
+    # Start all subscriptions in parallel using asyncio.gather
+    subscription_tasks = []
+    for subscription in req["subscriptions"]:
+        task = ctx.run_typed(
+            f"add-{subscription}",
+            lambda s=subscription: create_subscription(req["userId"], s, pay_ref),
+        )
+        subscription_tasks.append(task)
+
+    # Wait for all subscriptions to complete
+    await asyncio.gather(*subscription_tasks)
+
+    return SubscriptionResult(success=True, paymentRef=pay_ref)
+
+
+app = restate.app(services=[parallel_subscription_service])
+```
+        <GitHubLink url="pyGitUrl/concurrenttasks/service.py" />
+    </GlobalTab>
+</GlobalTabs>
 
 Restate retries all parallel tasks until they all complete and can deterministically replay the order of completion (for example for `RestatePromise.any`).
 
 <Accordion title={"Try it out"}>
     Add a few subscriptions for some users.
-    To call a Virtual Object, you sepecify the object key in the URL (here `user-123`):
+
+<GlobalTabs>
+<GlobalTab title="TypeScript">
     ```bash
     curl localhost:8080/ParallelSubscriptionService/add \
-        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
+    --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
     ```
+</GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/ParallelSubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/ParallelSubscriptionService/Add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
+        ```
+</GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/ParallelSubscriptionService/add \
+        --json '{"userId": "user-123", "creditCard": "4111111111111111", "subscriptions": ["Hulu", "Prime", "YouTube"]}'
+        ```
+</GlobalTab>
+</GlobalTabs>
+
+
 
     In the UI, you can see that all subscriptions are processed in parallel:
     <Frame>

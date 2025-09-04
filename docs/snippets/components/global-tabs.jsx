@@ -60,3 +60,6 @@ export const GlobalTab = ({ title, children }) => {
     return <div>{children}</div>
 }
 
+export const HiddenGlobalTab = ({ title, children }) => {
+
+}
