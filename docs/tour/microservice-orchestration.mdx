@@ -341,30 +341,51 @@ On the invocation page in the UI, you can see that your request is retrying beca
 <img src="/img/tour/microservices/netflix_stuck.png" alt="Invocation overview" />
 </Frame>
 
-To fix the problem, remove the line `failOnNetflix` from the `createSubscription` function in the `auxiliary/clients/SubscriptionClient.java` file:
+To fix the problem, remove the line `failOnNetflix` from the `CreateSubscription` function in the `shared/utils.go` file:
 
-```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/getstarted/service.go?collapse_prequel"} 
-type SubscriptionService struct{}
+```go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-orchestration-go/shared/utils.go#subscription"} 
+package shared
 
-func (SubscriptionService) Add(ctx restate.Context, req shared.SubscriptionRequest) error {
-  paymentId := restate.Rand(ctx).UUID().String()
+import (
+  "fmt"
+  "time"
 
-  payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
-    return shared.CreateRecurringPayment(req.CreditCard, paymentId)
-  }, restate.WithName("pay"))
-  if err != nil {
-    return err
-  }
+  "github.com/google/uuid"
+)
 
-  for _, subscription := range req.Subscriptions {
-    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-      return restate.Void{}, shared.CreateSubscription(req.UserId, subscription, payRef)
-    }, restate.WithName(fmt.Sprintf("add-%s", subscription)))
-    if err != nil {
-      return err
-    }
-  }
+func DayBefore(concertDate string) time.Duration {
+  return time.Minute
+}
 
+func CreateRecurringPayment(creditCard, paymentId string) (string, error) {
+  return fmt.Sprintf("payRef-%s", uuid.New().String()), nil
+}
+
+func RemoveRecurringPayment(paymentId string) error {
+  fmt.Printf("Removing recurring payment: %s\n", paymentId)
+  return nil
+}
+
+func CreateSubscription(userId, subscription, paymentRef string) error {
+  fmt.Printf("Creating subscription for user: %s, subscription: %s, paymentRef: %s\n", userId, subscription, paymentRef)
+  return nil
+}
+
+func RemoveSubscription(userId, subscription string) error {
+  fmt.Printf("Removing subscription for user: %s, subscription: %s\n", userId, subscription)
+  return nil
+}
+
+func InitPayment(req PaymentRequest, paymentId string, confirmationId string) (string, error) {
+  fmt.Printf(">>> Initiating external payment %s\n", paymentId)
+  fmt.Printf("  Confirm the payment via:\n")
+  fmt.Printf("  - For Payments service: curl localhost:8080/Payments/Confirm --json '{\"id\": \"%s\", \"result\": {\"success\": true, \"transactionId\": \"txn-123\"}}'\n", confirmationId)
+  fmt.Printf("  - For PaymentsWithTimeout service: curl localhost:8080/PaymentsWithTimeout/Confirm --json '{\"id\": \"%s\", \"result\": {\"success\": true, \"transactionId\": \"txn-123\"}}'\n", confirmationId)
+  return fmt.Sprintf("payRef-%s", uuid.New().String()), nil
+}
+
+func CancelPayment(payRef string) error {
+  fmt.Printf(">>> Canceling external payment with ref %s\n", payRef)
   return nil
 }
 ```
@@ -1801,7 +1822,7 @@ async def add(ctx: restate.Context, req: SubscriptionRequest) -> SubscriptionRes
 </GlobalTab>
 </GlobalTabs>
 
-Restate retries all parallel tasks until they all complete and can deterministically replay the order of completion (for example for `RestatePromise.any`).
+Restate retries all parallel tasks until they all complete and can deterministically replay the order of completion.
 
 <Accordion title={"Try it out"}>
 Add a few subscriptions for some users.
