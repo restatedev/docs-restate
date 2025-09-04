@@ -66,10 +66,8 @@ public class SubscriptionService {
   public void add(Context ctx, SubscriptionRequest req) {
     var paymentId = ctx.random().nextUUID().toString();
 
-    String payRef = ctx.run(
-            "pay",
-            String.class,
-            () -> createRecurringPayment(req.creditCard(), paymentId));
+    String payRef =
+        ctx.run("pay", String.class, () -> createRecurringPayment(req.creditCard(), paymentId));
 
     for (String subscription : req.subscriptions()) {
       ctx.run("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
@@ -318,16 +316,11 @@ To fix the problem, remove the line `failOnNetflix` from the `createSubscription
 
 
 ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/auxiliary/clients/SubscriptionClient.java#subscription"} 
-package my.example.auxiliary.clients;
-
-public class SubscriptionClient {
-    public static void createSubscription(String s, String subscription, String paymentRef) {
-        // Simulate creating a subscription
-        System.out.println("Creating subscription for user: " + s + ", subscription: " + subscription + ", paymentRef: " + paymentRef);
-    }
-
-    public static void removeSubscription(String s, String subscription) {
-    }
+public static String createSubscription(String userId, String subscription, String paymentRef) {
+//    failOnNetflix(subscription);
+  terminalErrorOnDisney(subscription);
+  System.out.println(">>> Created subscription " + subscription + " for user " + userId);
+  return "SUCCESS";
 }
 ```
 
@@ -372,7 +365,6 @@ func (SubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) err
   return nil
 }
 ```
-<GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/go/tutorials/tour-of-orchestration-go/getstarted/service.go" />
 </GlobalTab>
 <GlobalTab title="Python">
 Try to add a subscription for Netflix:
@@ -391,7 +383,6 @@ To fix the problem, remove the line `fail_on_netflix` from the `create_subscript
 
 ```python {CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-orchestration-python/utils.py#subscription}
 ```
-<GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-orchestration-python/app/getstarted/service.py" />
 </GlobalTab>
 </GlobalTabs>
 
@@ -571,40 +562,41 @@ export const subscriptionSaga = restate.service({
 @Service
 public class SubscriptionSaga {
 
-    @Handler
-    public void add(Context ctx, SubscriptionRequest req) {
-        List<Runnable> compensations = new ArrayList<>();
-        try {
-            var paymentId = ctx.random().nextUUID().toString();
+  @Handler
+  public void add(Context ctx, SubscriptionRequest req) {
+    List<Runnable> compensations = new ArrayList<>();
+    try {
+      var paymentId = ctx.random().nextUUID().toString();
 
-            compensations.add(
-                    () -> ctx.run("undo-pay", () -> PaymentClient.removeRecurringPayment(paymentId)));
-            String payRef = ctx.run(
-                    "pay",
-                    String.class,
-                    () -> PaymentClient.createRecurringPayment(req.creditCard(), paymentId));
+      compensations.add(
+          () -> ctx.run("undo-pay", () -> PaymentClient.removeRecurringPayment(paymentId)));
+      String payRef =
+          ctx.run(
+              "pay",
+              String.class,
+              () -> PaymentClient.createRecurringPayment(req.creditCard(), paymentId));
 
-            for (String subscription : req.subscriptions()) {
-                compensations.add(
-                        () ->
-                                ctx.run(
-                                        "undo-" + subscription,
-                                        () -> SubscriptionClient.removeSubscription(req.userId(), subscription)));
+      for (String subscription : req.subscriptions()) {
+        compensations.add(
+            () ->
                 ctx.run(
-                        "add-" + subscription,
-                        () -> SubscriptionClient.createSubscription(req.userId(), subscription, payRef));
-            }
-        } catch (TerminalException e) {
-            for (Runnable compensation : compensations) {
-                compensation.run();
-            }
-            throw e;
-        }
+                    "undo-" + subscription,
+                    () -> SubscriptionClient.removeSubscription(req.userId(), subscription)));
+        ctx.run(
+            "add-" + subscription,
+            () -> SubscriptionClient.createSubscription(req.userId(), subscription, payRef));
+      }
+    } catch (TerminalException e) {
+      for (Runnable compensation : compensations) {
+        compensation.run();
+      }
+      throw e;
     }
+  }
 }
 ```
 
-<GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/getstarted/sagas/SubscriptionSaga.java" />
+<GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/sagas/SubscriptionSaga.java" />
 </GlobalTab>
 <GlobalTab title="Go">
 
@@ -807,30 +799,29 @@ export const userSubscriptions = restate.object({
 ```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-orchestration-java/src/main/java/my/example/objects/UserSubscriptions.java?collapse_prequel"} 
 @VirtualObject
 public class UserSubscriptions {
-    private static final StateKey<List<String>> SUBSCRIPTIONS =
-            StateKey.of("subscriptions", new TypeRef<>() {});
-    private static final StateKey<String> LAST_UPDATED =
-            StateKey.of("lastUpdated", String.class);
+  private static final StateKey<List<String>> SUBSCRIPTIONS =
+      StateKey.of("subscriptions", new TypeRef<>() {});
+  private static final StateKey<String> LAST_UPDATED = StateKey.of("lastUpdated", String.class);
 
-    @Handler
-    public void add(ObjectContext ctx, String subscription) {
-        // Get current subscriptions
-        List<String> subscriptions = ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
+  @Handler
+  public void add(ObjectContext ctx, String subscription) {
+    // Get current subscriptions
+    List<String> subscriptions = ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
 
-        // Add new subscription
-        if (!subscriptions.contains(subscription)) {
-            subscriptions.add(subscription);
-        }
-        ctx.set(SUBSCRIPTIONS, subscriptions);
-
-        // Update metrics
-        ctx.set(LAST_UPDATED, Instant.now().toString());
+    // Add new subscription
+    if (!subscriptions.contains(subscription)) {
+      subscriptions.add(subscription);
     }
+    ctx.set(SUBSCRIPTIONS, subscriptions);
 
-    @Shared
-    public List<String> getSubscriptions(SharedObjectContext ctx) {
-        return ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
-    }
+    // Update metrics
+    ctx.set(LAST_UPDATED, Instant.now().toString());
+  }
+
+  @Shared
+  public List<String> getSubscriptions(SharedObjectContext ctx) {
+    return ctx.get(SUBSCRIPTIONS).orElse(new ArrayList<>());
+  }
 }
 ```
 
@@ -921,7 +912,7 @@ app = restate.app(services=[user_subscriptions])
 
 Virtual Objects are ideal for implementing any entity with mutable state.
 Restate ensures that your state is durable and consistent:
-- Handlers either have read-write access (`ObjectContext`) or read-only access (`ObjectSharedContext`). Only one handler with write access can run at a time per object key (no concurrent/lost writes or race conditions). Handlers with read-only access can run concurrently to the write-access handlers.
+- Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context). Only one handler with write access can run at a time per object key (no concurrent/lost writes or race conditions). Handlers with read-only access can run concurrently to the write-access handlers.
 - State changes are logged with Durable Execution: they survive failures and are consistent with code execution
 - Different object keys can be processed in parallel, so you can scale horizontally without risking concurrency issues
 - K/V state is stored permanently. It has no automatic expiry. Clear it via `ctx.clear()`.
@@ -932,7 +923,7 @@ Restate ensures that your state is durable and consistent:
 
 <Accordion title={"Try it out"}>
 Add a few subscriptions for some users.
-To call a Virtual Object, you specify the object key in the URL (here `user-123`):
+To call a Virtual Object, you specify the object key in the URL (here `user-123` and `user-456`):
 
 <GlobalTabs>
 <GlobalTab title="TypeScript">
@@ -943,7 +934,7 @@ curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
 curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
 ```
 
-Get the subscriptions for the user:
+Get the subscriptions for `user-123`:
 ```bash
 curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
 ```
@@ -956,7 +947,7 @@ curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
 curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
 ```
 
-Get the subscriptions for the user:
+Get the subscriptions for `user-123`:
 ```bash
 curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
 ```
@@ -969,7 +960,7 @@ curl localhost:8080/UserSubscriptions/user-123/Add --json '"Disney"'
 curl localhost:8080/UserSubscriptions/user-456/Add --json '"Netflix"'
 ```
 
-Get the subscriptions for the user:
+Get the subscriptions for `user-123`:
 ```bash
 curl localhost:8080/UserSubscriptions/user-123/GetSubscriptions
 ```
@@ -982,7 +973,7 @@ curl localhost:8080/UserSubscriptions/user-123/add --json '"Disney"'
 curl localhost:8080/UserSubscriptions/user-456/add --json '"Netflix"'
 ```
 
-Get the subscriptions for the user:
+Get the subscriptions for `user-123`:
 ```bash
 curl localhost:8080/UserSubscriptions/user-123/getSubscriptions
 ```
@@ -1035,20 +1026,19 @@ export const concertTicketingService = restate.service({
 @Service
 public class ConcertTicketingService {
 
-    @Handler
-    public String buy(Context ctx, PurchaseTicketRequest req) {
-        // Request-response call - wait for payment to complete
-        String payRef = PaymentServiceClient.fromContext(ctx).charge(req).await();
+  @Handler
+  public String buy(Context ctx, PurchaseTicketRequest req) {
+    // Request-response call - wait for payment to complete
+    String payRef = PaymentServiceClient.fromContext(ctx).charge(req).await();
 
-        // One-way message - fire and forget ticket delivery
-        EmailServiceClient.fromContext(ctx).send().emailTicket(req);
+    // One-way message - fire and forget ticket delivery
+    EmailServiceClient.fromContext(ctx).send().emailTicket(req);
 
-        // Delayed message - schedule reminder for day before concert
-        EmailServiceClient.fromContext(ctx).send().sendReminder(req,
-                dayBefore(req.concertDateTime()));
+    // Delayed message - schedule reminder for day before concert
+    EmailServiceClient.fromContext(ctx).send().sendReminder(req, dayBefore(req.concertDateTime()));
 
-        return "Ticket purchased successfully with payment reference: " + payRef;
-    }
+    return "Ticket purchased successfully with payment reference: " + payRef;
+  }
 }
 ```
 
@@ -1228,7 +1218,7 @@ Add an idempotency header to your request:
 ```shell
 curl -X POST localhost:8080/ConcertTicketingService/buy \
 -H 'Idempotency-Key: unique-key-123' \
---json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+--json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDate": "2023-10-01T20:00:00Z"}'
 ```
 </GlobalTab>
 <GlobalTab title="Java">
@@ -1236,7 +1226,7 @@ curl -X POST localhost:8080/ConcertTicketingService/buy \
 ```shell
 curl -X POST localhost:8080/ConcertTicketingService/buy \
 -H 'Idempotency-Key: unique-key-123' \
---json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+--json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDate": "2023-10-01T20:00:00Z"}'
 ```
 </GlobalTab>
 <GlobalTab title="Go">
@@ -1244,7 +1234,7 @@ curl -X POST localhost:8080/ConcertTicketingService/buy \
 ```shell
 curl -X POST localhost:8080/ConcertTicketingService/Buy \
 -H 'Idempotency-Key: unique-key-123' \
---json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+--json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDate": "2023-10-01T20:00:00Z"}'
 ```
 </GlobalTab>
 <GlobalTab title="Python">
@@ -1252,7 +1242,7 @@ curl -X POST localhost:8080/ConcertTicketingService/Buy \
 ```shell
 curl -X POST localhost:8080/ConcertTicketingService/buy \
 -H 'Idempotency-Key: unique-key-123' \
---json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDateTime": "2023-10-01T20:00:00Z"}'
+--json '{"ticketId": "ticket-789", "price": 100, "customerEmail": "me@mail.com", "concertDate": "2023-10-01T20:00:00Z"}'
 ```
 </GlobalTab>
 </GlobalTabs>
@@ -1308,24 +1298,24 @@ export const payments = restate.service({
 @Service
 public class Payments {
 
-    @Handler
-    public PaymentResult process(Context ctx, PaymentRequest req) {
-        // Create awakeable to wait for webhook payment confirmation
-        var confirmation = ctx.awakeable(PaymentResult.class);
+  @Handler
+  public PaymentResult process(Context ctx, PaymentRequest req) {
+    // Create awakeable to wait for webhook payment confirmation
+    var confirmation = ctx.awakeable(PaymentResult.class);
 
-        // Initiate payment with external provider (Stripe, PayPal, etc.)
-        ctx.run(() -> initPayment(req, confirmation.id()));
+    // Initiate payment with external provider (Stripe, PayPal, etc.)
+    ctx.run(() -> initPayment(req, confirmation.id()));
 
-        // Wait for external payment provider to call our webhook
-        return confirmation.await();
-    }
+    // Wait for external payment provider to call our webhook
+    return confirmation.await();
+  }
 
-    // Webhook handler called by external payment provider
-    @Handler
-    public void confirm(Context ctx, ConfirmationRequest confirmation) {
-        // Resolve the awakeable to continue the payment flow
-        ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
-    }
+  // Webhook handler called by external payment provider
+  @Handler
+  public void confirm(Context ctx, ConfirmationRequest confirmation) {
+    // Resolve the awakeable to continue the payment flow
+    ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
+  }
 }
 ```
 
@@ -1411,25 +1401,25 @@ Initiate a payment by calling the `process` handler. Add `/send` to call the han
 <GlobalTab title="TypeScript">
 ```bash
 curl localhost:8080/Payments/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Java">
 ```bash
 curl localhost:8080/Payments/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Go">
 ```bash
 curl localhost:8080/Payments/Process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Python">
 ```bash
 curl localhost:8080/Payments/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 </GlobalTabs>
@@ -1528,32 +1518,24 @@ export const paymentsWithTimeout = restate.service({
 @Service
 public class PaymentsWithTimeoutService {
 
-    @Handler
-    public PaymentResult process(Context ctx, PaymentRequest req) {
-        var confirmation = ctx.awakeable(PaymentResult.class);
+  @Handler
+  public PaymentResult process(Context ctx, PaymentRequest req) {
+    var confirmation = ctx.awakeable(PaymentResult.class);
 
-        String payRef = ctx.run(
-                "pay",
-                String.class,
-                () -> initPayment(req, confirmation.id()));
+    String payRef = ctx.run("pay", String.class, () -> initPayment(req, confirmation.id()));
 
-        try {
-            return confirmation.await(Duration.ofSeconds(30));
-        } catch (TimeoutException e) {
-            ctx.run("cancel-payment", () -> cancelPayment(payRef));
-            return new PaymentResult(
-                    false,
-                    null,
-                    "Payment timeout"
-            );
-        }
+    try {
+      return confirmation.await(Duration.ofSeconds(30));
+    } catch (TimeoutException e) {
+      ctx.run("cancel-payment", () -> cancelPayment(payRef));
+      return new PaymentResult(false, null, "Payment timeout");
     }
+  }
 
-    @Handler
-    public void confirm(Context ctx, ConfirmationRequest confirmation) {
-        ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
-    }
-
+  @Handler
+  public void confirm(Context ctx, ConfirmationRequest confirmation) {
+    ctx.awakeableHandle(confirmation.id()).resolve(PaymentResult.class, confirmation.result());
+  }
 }
 ```
 
@@ -1659,25 +1641,25 @@ Initiate a payment by calling the `process` handler. Add `/send` to call the han
 <GlobalTab title="TypeScript">
 ```bash
 curl localhost:8080/PaymentsWithTimeout/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Java">
 ```bash
 curl localhost:8080/PaymentsWithTimeout/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Go">
 ```bash
 curl localhost:8080/PaymentsWithTimeout/Process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 <GlobalTab title="Python">
 ```bash
 curl localhost:8080/PaymentsWithTimeout/process/send \
---json '{"amount": 100, "currency": "USD", "userId": "user-123", "orderId": "order-456"}'
+--json '{"amount": 100, "currency": "USD", "customerId": "cust-123", "orderId": "order-456"}'
 ```
 </GlobalTab>
 </GlobalTabs>
@@ -1740,30 +1722,29 @@ export const parallelSubscriptionService = restate.service({
 @Service
 public class ParallelSubscriptionService {
 
-    @Handler
-    public SubscriptionResult add(Context ctx, SubscriptionRequest req) {
-        var paymentId = ctx.random().nextUUID().toString();
-        var payRef = ctx.run("pay",
-                String.class,
-                () -> createRecurringPayment(req.creditCard(), paymentId));
+  @Handler
+  public SubscriptionResult add(Context ctx, SubscriptionRequest req) {
+    var paymentId = ctx.random().nextUUID().toString();
+    var payRef =
+        ctx.run("pay", String.class, () -> createRecurringPayment(req.creditCard(), paymentId));
 
-        // Start all subscriptions in parallel
-        List<DurableFuture<?>> subscriptionFutures = new ArrayList<>();
-        for (String subscription : req.subscriptions()) {
-            subscriptionFutures.add(
-                    ctx.runAsync("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef))
-            );
-        }
-
-        // Wait for all subscriptions to complete
-        DurableFuture.all(subscriptionFutures).await();
-
-        return new SubscriptionResult(true, payRef);
+    // Start all subscriptions in parallel
+    List<DurableFuture<?>> subscriptionFutures = new ArrayList<>();
+    for (String subscription : req.subscriptions()) {
+      subscriptionFutures.add(
+          ctx.runAsync(
+              "add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef)));
     }
 
-    public static void main(String[] args) {
-        RestateHttpServer.listen(Endpoint.bind(new ParallelSubscriptionService()));
-    }
+    // Wait for all subscriptions to complete
+    DurableFuture.all(subscriptionFutures).await();
+
+    return new SubscriptionResult(true, payRef);
+  }
+
+  public static void main(String[] args) {
+    RestateHttpServer.listen(Endpoint.bind(new ParallelSubscriptionService()));
+  }
 }
 ```
 
