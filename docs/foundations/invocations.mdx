@@ -54,14 +54,12 @@ MyServiceClient.fromClient(restate).myHandler(req);
 ```
 
 ```go Go {"CODE_LOAD::go/foundations/invocations/client.go#here"} 
-rs, err := client.Connect("http://localhost:8080")
-if err != nil {
-  return err
-}
+restateClient := restateingress.NewClient("http://localhost:8080")
 
-// To call a service:
-var greet string
-_, err = rs.CallSync(context.Background(), "GreeterService", "Greet", GreetingRequest{Greeting: "Hi"}, &greet)
+// To call a service
+response, err := restateingress.Service[*MyInput, *MyOutput](
+  restateClient, "MyService", "MyHandler").
+  Request(context.Background(), &input)
 if err != nil {
   return err
 }
@@ -128,15 +126,15 @@ await ctx.attach_invocation(invocation_id)
 ```
 
 ```go Go {"CODE_LOAD::go/foundations/invocations/client.go#attach"} 
-// Send with idempotency key
-future := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture(
-  "Hi",
-  restate.WithIdempotencyKey("my-key"),
-)
-response, err := future.Response()
-if err != nil {
-  return "", err
-}
+// Execute the request and retrieve the invocation id
+invocationId := restate.
+  ServiceSend(ctx, "MyService", "MyHandler").
+  // Optional: send attaching idempotency key
+  Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+  GetInvocationId()
+
+// Later re-attach to the request
+response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
 ```
 </CodeGroup>
 
@@ -188,11 +186,14 @@ ctx.cancel_invocation(invocation_id)
 ```
 
 ```go Go {"CODE_LOAD::go/foundations/invocations/client.go#cancel"} 
-// Send message (fire-and-forget)
-restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+// Execute the request and retrieve the invocation id
+invocationId := restate.
+  ServiceSend(ctx, "MyService", "MyHandler").
+  Send("Hi").
+  GetInvocationId()
 
-// Note: Cancellation in Go SDK would be handled through invocation management
-// This is a simplified example as the exact cancel API may differ
+// I don't need this invocation anymore, let me just cancel it
+restate.CancelInvocation(ctx, invocationId)
 ```
 </CodeGroup>
 

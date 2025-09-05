@@ -2,10 +2,9 @@ package invocations
 
 import (
 	"context"
-	"net/http"
+	restateingress "github.com/restatedev/sdk-go/ingress"
 
 	restate "github.com/restatedev/sdk-go"
-	"github.com/restatedev/sdk-go/client"
 )
 
 type MyService struct{}
@@ -24,16 +23,20 @@ func (GreeterService) Greet(ctx restate.Context, req GreetingRequest) (string, e
 	greeting := req.Greeting
 
 	// <start_attach>
-	// Send with idempotency key
-	future := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture(
-		"Hi",
-		restate.WithIdempotencyKey("my-key"),
-	)
-	response, err := future.Response()
-	if err != nil {
-		return "", err
-	}
+	// Execute the request and retrieve the invocation id
+	invocationId := restate.
+		ServiceSend(ctx, "MyService", "MyHandler").
+		// Optional: send attaching idempotency key
+		Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+		GetInvocationId()
+
+	// Later re-attach to the request
+	response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
 	// <end_attach>
+
+	if err != nil {
+
+	}
 
 	// Use response to avoid compiler warning
 	_ = response
@@ -43,33 +46,45 @@ func (GreeterService) Greet(ctx restate.Context, req GreetingRequest) (string, e
 
 func (GreeterService) Cancel(ctx restate.Context, req GreetingRequest) (restate.Void, error) {
 	// <start_cancel>
-	// Send message (fire-and-forget)
-	restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+	// Execute the request and retrieve the invocation id
+	invocationId := restate.
+		ServiceSend(ctx, "MyService", "MyHandler").
+		Send("Hi").
+		GetInvocationId()
 
-	// Note: Cancellation in Go SDK would be handled through invocation management
-	// This is a simplified example as the exact cancel API may differ
+	// I don't need this invocation anymore, let me just cancel it
+	restate.CancelInvocation(ctx, invocationId)
 	// <end_cancel>
 
 	return restate.Void{}, nil
 }
 
 func Call() error {
+	var input MyInput
+	input.Name = "Hi"
 	// <start_here>
-	rs, err := client.Connect("http://localhost:8080")
-	if err != nil {
-		return err
-	}
+	restateClient := restateingress.NewClient("http://localhost:8080")
 
-	// To call a service:
-	var greet string
-	_, err = rs.CallSync(context.Background(), "GreeterService", "Greet", GreetingRequest{Greeting: "Hi"}, &greet)
+	// To call a service
+	response, err := restateingress.Service[*MyInput, *MyOutput](
+		restateClient, "MyService", "MyHandler").
+		Request(context.Background(), &input)
 	if err != nil {
 		return err
 	}
 	// <end_here>
 
 	// Use greet to avoid compiler warning
-	_ = greet
+	_ = response
 
 	return nil
+}
+
+// Mock data structures
+type MyInput struct {
+	Name string
+}
+
+type MyOutput struct {
+	Greeting string
 }
