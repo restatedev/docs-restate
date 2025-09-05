@@ -9,13 +9,13 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 
 @Service
 public class MyService {
-    @Handler
-    public String myHandler(Context ctx, String greeting) {
-        return greeting + "!";
-    }
+  @Handler
+  public String myHandler(Context ctx, String greeting) {
+    return greeting + "!";
+  }
 
-    public static void main(String[] args) {
-        RestateHttpServer.listen(Endpoint.bind(new MyService()));
-    }
+  public static void main(String[] args) {
+    RestateHttpServer.listen(Endpoint.bind(new MyService()));
+  }
 }
 // <end_here>

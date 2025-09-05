@@ -4,8 +4,10 @@ from restate import WorkflowContext, WorkflowSharedContext
 
 order_workflow = restate.Workflow("OrderWorkflow")
 
+
 class Order(BaseModel):
     pass
+
 
 @order_workflow.main()
 async def run(ctx: WorkflowContext, order: Order) -> None:

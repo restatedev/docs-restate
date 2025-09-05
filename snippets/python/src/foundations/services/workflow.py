@@ -10,7 +10,7 @@ class User(BaseModel):
     email: str
 
 
-def create_user_entry(user_id:str, user: User) -> None:
+def create_user_entry(user_id: str, user: User) -> None:
     return None
 
 

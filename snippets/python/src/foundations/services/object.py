@@ -21,14 +21,7 @@ cart_object = restate.VirtualObject("ShoppingCart")
 @cart_object.handler()
 async def add_item(ctx: ObjectContext, item: Item) -> Cart:
     cart = await ctx.get("cart", type_hint=Cart) or Cart()
-
-    for i in cart.items:
-        if i.product_id == item.product_id:
-            i.quantity += item.quantity
-            break
-    else:
-        cart.items.append(item)
-
+    cart.items.append(item)
     ctx.set("cart", cart)
     return cart
 

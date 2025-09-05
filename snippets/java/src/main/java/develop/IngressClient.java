@@ -3,7 +3,6 @@ package develop;
 import dev.restate.client.Client;
 import dev.restate.common.Output;
 import dev.restate.common.Target;
-
 import java.time.Duration;
 
 public class IngressClient {

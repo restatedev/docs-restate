@@ -35,6 +35,7 @@ async def fetch_url(url: str) -> Dict:
 async def update_user_database(id: str, data: Any) -> Any:
     return data
 
+
 # Example service that demonstrates all actions
 actions_example_service = restate.Service("ActionsExample")
 
@@ -66,14 +67,17 @@ async def service_calls_example(ctx: Context, req: Dict[str, Any]) -> None:
     # <start_service_calls>
     # Call another service
     from validation_service import validate_order
+
     validation = await ctx.service_call(validate_order, order)
 
     # Call Virtual Object function
     from user_account import get_profile
+
     profile = await ctx.object_call(get_profile, key=user_id, arg=None)
 
     # Submit Workflow
     from order_workflow import run
+
     result = await ctx.workflow_call(run, key=order_id, arg=order)
     # <end_service_calls>
 
@@ -83,15 +87,17 @@ async def sending_messages_example(ctx: Context, user_id: str) -> None:
     # <start_sending_messages>
     # Fire-and-forget notification
     from notification_service import send_email
+
     ctx.service_send(send_email, {"userId": user_id, "message": "Welcome!"})
 
     # Background analytics
     from analytics_service import record_event
-    ctx.service_send(record_event, {"kind": "user_signup", "userId": user_id}
-    )
+
+    ctx.service_send(record_event, {"kind": "user_signup", "userId": user_id})
 
     # Cleanup task
     from shopping_cart_object import empty_expired_cart
+
     ctx.object_send(empty_expired_cart, key=user_id, arg=None)
     # <end_sending_messages>
 
@@ -104,6 +110,7 @@ async def delayed_messages_example(ctx: Context, req: Dict[str, str]) -> None:
     # <start_delayed_messages>
     # Schedule reminder for tomorrow
     from notification_service import send_reminder
+
     ctx.service_send(
         send_reminder,
         {"userId": user_id, "message": message},
@@ -123,6 +130,7 @@ async def durable_timers_example(ctx: Context, req: Dict[str, Any]) -> None:
 
     # Wait for action or timeout
     from order_workflow import run
+
     match await restate.select(
         result=ctx.workflow_call(run, key=order_id, arg=order),
         timeout=ctx.sleep(timedelta(minutes=5)),
@@ -182,7 +190,9 @@ workflow_example_workflow = restate.Workflow("WorkflowExample")
 async def run(ctx: WorkflowContext) -> None:
     # <start_workflow_promises>
     # Wait for external event
-    payment_result = await ctx.promise("payment-completed", type_hint=PaymentResult).value()
+    payment_result = await ctx.promise(
+        "payment-completed", type_hint=PaymentResult
+    ).value()
 
     # Wait for human approval
     approved = await ctx.promise("manager-approval", type_hint=bool).value()

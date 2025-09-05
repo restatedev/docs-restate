@@ -100,7 +100,7 @@ const ActionsExampleService = restate.service({
       });
 
       // Idempotency key generation
-      const id = await ctx.run("generate-id", () => uuid());
+      const id = ctx.rand.uuidv4();
       // <end_durable_steps>
     },
 

@@ -15,7 +15,7 @@ To call a function over HTTP, send a request to the Restate Server, specifying t
 For example, to call the `processPayment` function of the `PaymentService`:
 ```bash
 curl -X POST localhost:8080/PaymentService/processPayment \
-  --json '{"amount": 100, "currency": "USD"}'
+--json '{"amount": 100, "currency": "USD"}'
 ```
 
 The Restate Server ingress endpoint is here hosted at `localhost:8080`.
@@ -26,7 +26,7 @@ For example, to call `updateBalance` of the `UserAccount` object with key `user1
 
 ```bash
 curl -X POST localhost:8080/UserAccount/user123/updateBalance \
-  --json '{"amount": 50}'
+--json '{"amount": 50}'
 ```
 
 Check out the [HTTP invocation](/operate/invocation/http) docs to learn more.
@@ -45,6 +45,28 @@ const restateClient = clients.connect({ url: "http://localhost:8080" });
 const greet = await restateClient.serviceClient(greeterService).greet({ greeting: "Hi" });
 ```
 
+
+```java Java {"CODE_LOAD::java/src/main/java/foundations/invocations/Client.java#here"} 
+var restate = Client.connect("http://localhost:8080");
+
+// To call a service:
+MyServiceClient.fromClient(restate).myHandler(req);
+```
+
+```go Go {"CODE_LOAD::go/foundations/invocations/client.go#here"} 
+rs, err := client.Connect("http://localhost:8080")
+if err != nil {
+  return err
+}
+
+// To call a service:
+var greet string
+_, err = rs.CallSync(context.Background(), "GreeterService", "Greet", GreetingRequest{Greeting: "Hi"}, &greet)
+if err != nil {
+  return err
+}
+```
+
 </CodeGroup>
 
 For service-to-service calls within handlers, see [Service Communication](/basics/functions#service-communication).
@@ -61,8 +83,8 @@ Add an idempotency key to your request header to let Restate deduplicate retries
 
 ```bash
 curl -X POST localhost:8080/PaymentService/processPayment \
-  -H 'idempotency-key: payment-123' \
-  --json '{"amount": 100, "currency": "USD"}'
+-H 'idempotency-key: payment-123' \
+--json '{"amount": 100, "currency": "USD"}'
 ```
 
 On retry, Restate returns the first invocation’s result or lets you attach to it if still running.
@@ -77,6 +99,7 @@ ADD UI SCREENSHOTS
 
 Attach to ongoing invocations to retrieve their results:
 
+<CodeGoup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/invocations/client.ts#attach"} 
 const handle = ctx
   .serviceSendClient(myService)
@@ -86,6 +109,34 @@ const invocationId = await handle.invocationId;
 // Later...
 const response = ctx.attach(invocationId);
 ```
+
+```java Java {"CODE_LOAD::java/src/main/java/foundations/invocations/Client.java#attach"} 
+var handle =
+    MyServiceClient.fromContext(ctx)
+        .send()
+        .myHandler("Hi", opt -> opt.idempotencyKey("my-key"));
+var response = handle.attach().await();
+```
+```python Python {"CODE_LOAD::python/src/foundations/invocations/client.py#attach"} 
+handle = ctx.service_send(my_handler, "Hi", idempotency_key="my-key")
+invocation_id = await handle.invocation_id()
+
+# Later...
+await ctx.attach_invocation(invocation_id)
+```
+
+```go Go {"CODE_LOAD::go/foundations/invocations/client.go#attach"} 
+// Send with idempotency key
+future := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture(
+  "Hi",
+  restate.WithIdempotencyKey("my-key"),
+)
+response, err := future.Response()
+if err != nil {
+  return "", err
+}
+```
+</CodeGoup>
 
 Or over HTTP:
 ```bash
@@ -111,6 +162,7 @@ curl -X DELETE http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoa
 
 Or programmatically:
 
+<CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/invocations/client.ts#cancel"} 
 const handle = ctx.serviceSendClient(myService).myHandler("Hi");
 const invocationId = await handle.invocationId;
@@ -118,5 +170,28 @@ const invocationId = await handle.invocationId;
 // Cancel the invocation
 ctx.cancel(invocationId);
 ```
+
+```java Java {"CODE_LOAD::java/src/main/java/foundations/invocations/Client.java#cancel"} 
+var handle = MyServiceClient.fromContext(ctx).send().myHandler("Hi");
+
+// Cancel the invocation
+handle.cancel();
+```
+```python Python {"CODE_LOAD::python/src/foundations/invocations/client.py#cancel"} 
+handle = ctx.service_send(my_handler, "Hi", idempotency_key="my-key")
+invocation_id = await handle.invocation_id()
+
+# Cancel the invocation
+ctx.cancel_invocation(invocation_id)
+```
+
+```go Go {"CODE_LOAD::go/foundations/invocations/client.go#cancel"} 
+// Send message (fire-and-forget)
+restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+// Note: Cancellation in Go SDK would be handled through invocation management
+// This is a simplified example as the exact cancel API may differ
+```
+</CodeGroup>
 
 To roll back the actions the handler already completed before cancellation, check out at the [sagas guide](/guides/sagas).

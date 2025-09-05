@@ -9,7 +9,7 @@ These actions enable durable execution, state management, service communication,
 
 ### Durable steps
 
-Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate persist its result.
+Use `run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate persist its result.
 
 <CodeGroup>
 
@@ -29,6 +29,17 @@ const dbResult = await ctx.run("update-user", () => {
 const id = ctx.rand.uuidv4();
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#durable_steps"} 
+// External API call
+Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+
+// Database operation
+String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+
+// Idempotency key generation
+String id = ctx.random().nextUUID().toString();
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#durable_steps"} 
 # External API call
 api_result = await ctx.run_typed(
@@ -44,9 +55,30 @@ db_result = await ctx.run_typed(
 id = ctx.uuid()
 ```
 
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#durable_steps"} 
+// External API call
+apiResult, err := restate.Run(ctx, func(ctx restate.RunContext) (map[string]interface{}, error) {
+  return fetchData("https://api.example.com/data")
+})
+if err != nil {
+  return restate.Void{}, err
+}
+
+// Database operation
+dbResult, err := restate.Run(ctx, func(ctx restate.RunContext) (interface{}, error) {
+  return updateUserDatabase(userId, map[string]string{"name": "John"}), nil
+})
+if err != nil {
+  return restate.Void{}, err
+}
+
+// Idempotency key generation
+id := restate.Rand(ctx).UUID().String()
+```
+
 </CodeGroup>
 
-Without `ctx.run()`, these operations would produce different results during replay, breaking deterministic recovery.
+Without `run()`, these operations would produce different results during replay, breaking deterministic recovery.
 
 ## State management
 
@@ -65,11 +97,40 @@ const count = (await ctx.get<number>("count")) ?? 0;
 const cart = (await ctx.get<ShoppingCart>("cart")) ?? [];
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_get"} 
+// Get with type and default value
+UserProfile profile = ctx.get(PROFILE).orElse(null);
+int count = ctx.get(COUNT).orElse(0);
+ShoppingCart cart = ctx.get(CART).orElse(new ShoppingCart());
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_get"} 
 # Get with type and default value
 profile = await ctx.get("profile", type_hint=UserProfile)
 count = await ctx.get("count", type_hint=int) or 0
 cart = await ctx.get("cart", type_hint=ShoppingCart) or ShoppingCart()
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#state_get"} 
+// Get with type and default value
+profile, err := restate.Get[*UserProfile](ctx, "profile")
+if err != nil {
+  return err
+}
+
+count := 0
+if c, err := restate.Get[*int](ctx, "count"); err != nil {
+  return err
+} else if c != nil {
+  count = *c
+}
+
+cart := ShoppingCart{}
+if c, err := restate.Get[*ShoppingCart](ctx, "cart"); err != nil {
+  return err
+} else if c != nil {
+  cart = *c
+}
 ```
 
 </CodeGroup>
@@ -92,6 +153,15 @@ ctx.set("profile", {
 });
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_set"} 
+// Store simple values
+ctx.set(COUNT, count + 1);
+ctx.set(LAST_LOGIN, ctx.request().headers().get("date"));
+
+// Store complex objects
+ctx.set(PROFILE, new UserProfile("John Doe", "john@example.com"));
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_set"} 
 # Store simple values
 ctx.set("lastLogin", ctx.request().headers.get("date"))
@@ -99,6 +169,18 @@ ctx.set("count", count + 1)
 
 # Store complex objects
 ctx.set("profile", UserProfile(name="John Doe", email="john@example.com"))
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#state_set"} 
+// Store simple values
+restate.Set(ctx, "lastLogin", time.Now().Format(time.RFC3339))
+restate.Set(ctx, "count", count+1)
+
+// Store complex objects
+restate.Set(ctx, "profile", UserProfile{
+  Name:  "John Doe",
+  Email: "john@example.com",
+})
 ```
 </CodeGroup>
 
@@ -120,6 +202,15 @@ ctx.clearAll();
 ```
 
 
+
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_clear"} 
+// Clear specific keys
+ctx.clear(StateKey.of("shoppingCart", ShoppingCart.class));
+ctx.clear(StateKey.of("sessionToken", String.class));
+
+// Clear all user data
+ctx.clearAll();
+```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_clear"} 
 # Clear specific keys
@@ -152,29 +243,53 @@ const profile = await ctx.objectClient(UserAccount, userId).getProfile();
 const result = await ctx.workflowClient(OrderWorkflow, orderId).run(order);
 ```
 
-```java Java
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#service_calls"} 
 // Call another service
-ValidationResult validation = ValidationServiceClient.fromContext(ctx)
-.validateOrder(order).await();
+var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
 
 // Call Virtual Object function
-ProfileResult profile = UserAccountClient.fromContext(ctx, userId)
-.getProfile().await();
+var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
+
+// Submit Workflow
+var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
 ```
-
-
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#service_calls"} 
 # Call another service
-validation = await ctx.service_call(validation_service.validate_order, order)
+from validation_service import validate_order
+
+validation = await ctx.service_call(validate_order, order)
 
 # Call Virtual Object function
-profile = await ctx.object_call(user_account.get_profile, key=user_id)
+from user_account import get_profile
+
+profile = await ctx.object_call(get_profile, key=user_id, arg=None)
 
 # Submit Workflow
-result = await ctx.workflow_call(order_workflow.run, key=order_id, arg=order)
+from order_workflow import run
+
+result = await ctx.workflow_call(run, key=order_id, arg=order)
 ```
 
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#service_calls"} 
+// Call another service
+validation, err := restate.Service[map[string]bool](ctx, "ValidationService", "ValidateOrder").Request(order)
+if err != nil {
+  return err
+}
+
+// Call Virtual Object function
+profile, err := restate.Object[UserProfile](ctx, "UserAccount", userId, "GetProfile").Request(restate.Void{})
+if err != nil {
+  return err
+}
+
+// Submit Workflow
+_, err = restate.Workflow[restate.Void](ctx, "OrderWorkflow", orderId, "Run").Request(order)
+if err != nil {
+  return err
+}
+```
 </CodeGroup>
 
 
@@ -195,19 +310,51 @@ ctx.serviceSendClient(AnalyticsService).recordEvent({ kind: "user_signup", userI
 ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#sending_messages"} 
+// Fire-and-forget notification
+NotificationServiceClient.fromContext(ctx)
+    .send()
+    .sendEmail(new EmailRequest(userId, "Welcome!"));
+
+// Background analytics
+AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
+
+// Cleanup task
+ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#sending_messages"} 
 # Fire-and-forget notification
-ctx.service_send(
-    notification_service.send_email, {"userId": user_id, "message": "Welcome!"}
-)
+from notification_service import send_email
+
+ctx.service_send(send_email, {"userId": user_id, "message": "Welcome!"})
 
 # Background analytics
-ctx.service_send(
-    analytics_service.record_event, {"kind": "user_signup", "userId": user_id}
-)
+from analytics_service import record_event
+
+ctx.service_send(record_event, {"kind": "user_signup", "userId": user_id})
 
 # Cleanup task
-ctx.object_send(shopping_cart_object.empty_expired_cart, key=user_id)
+from shopping_cart_object import empty_expired_cart
+
+ctx.object_send(empty_expired_cart, key=user_id, arg=None)
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#sending_messages"} 
+// Fire-and-forget notification
+restate.ServiceSend(ctx, "NotificationService", "SendEmail").Send(map[string]string{
+  "userId":  userId,
+  "message": "Welcome!",
+})
+
+// Background analytics
+restate.ServiceSend(ctx, "AnalyticsService", "RecordEvent").Send(map[string]interface{}{
+  "kind":   "user_signup",
+  "userId": userId,
+})
+
+// Cleanup task
+restate.ObjectSend(ctx, "ShoppingCartObject", userId, "EmptyExpiredCart").Send(restate.Void{})
 ```
 
 </CodeGroup>
@@ -226,13 +373,29 @@ ctx.serviceSendClient(ReminderService).sendReminder(
   })
 );
 ```
-
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#delayed_messages"} 
+// Schedule reminder for tomorrow
+ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
+```
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#delayed_messages"} 
 # Schedule reminder for tomorrow
+from notification_service import send_reminder
+
 ctx.service_send(
-    reminder_service.send_reminder,
+    send_reminder,
     {"userId": user_id, "message": message},
     send_delay=timedelta(days=1),
+)
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#delayed_messages"} 
+// Schedule reminder for tomorrow
+restate.ServiceSend(ctx, "ReminderService", "SendReminder").Send(
+  map[string]string{
+    "userId":  userId,
+    "message": message,
+  },
+  restate.WithDelay(24*time.Hour),
 )
 ```
 </CodeGroup>
@@ -254,20 +417,60 @@ const result = await ctx
   .orTimeout({ minutes: 5 });
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#durable_timers"} 
+// Sleep for specific duration
+ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
+
+// Wait for action or timeout
+try {
+  OrderWorkflowClient.fromContext(ctx, req.orderId())
+      .run(req.order())
+      .await(Duration.ofMinutes(5));
+} catch (TimeoutException e) {
+  // Handle timeout
+}
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#durable_timers"} 
 # Sleep for specific duration
 await ctx.sleep(timedelta(minutes=5))  # 5 minutes
 
 # Wait for action or timeout
+from order_workflow import run
+
 match await restate.select(
-    result=ctx.workflow_call(order_workflow.run, key=order_id, arg=order),
+    result=ctx.workflow_call(run, key=order_id, arg=order),
     timeout=ctx.sleep(timedelta(minutes=5)),
 ):
     case ["result", result]:
         return result
     case _:
-        # Timeout occurred
-        pass
+        print("Order processing timed out")
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#durable_timers"} 
+// Sleep for specific duration
+if err := restate.Sleep(ctx, 5*time.Minute); err != nil {
+  return err
+}
+
+// Wait for action or timeout
+sleepFuture := restate.After(ctx, 5*time.Minute)
+callFuture := restate.Workflow[restate.Void](ctx, "OrderWorkflow", orderId, "Run").RequestFuture(order)
+
+selector := restate.Select(ctx, sleepFuture, callFuture)
+switch selector.Select() {
+case sleepFuture:
+  if err := sleepFuture.Done(); err != nil {
+    return err
+  }
+  // Timeout occurred
+case callFuture:
+  if _, err := callFuture.Response(); err != nil {
+    return err
+  }
+  // Call completed
+}
 ```
 
 </CodeGroup>
@@ -297,20 +500,140 @@ const [payment, inventory] = await Promise.all([
 ]);
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#workflow_promises"} 
+package foundations.actions;
+
+import static foundations.actions.ExternalAPI.fetchData;
+import static foundations.actions.ExternalAPI.updateUserDatabase;
+
+import dev.restate.sdk.*;
+import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Service;
+import dev.restate.sdk.common.TimeoutException;
+import foundations.actions.NotificationService.EmailRequest;
+import foundations.actions.ReminderService.ReminderRequest;
+import java.time.Duration;
+import java.util.Map;
+
+// Example service that demonstrates all actions
+@Service
+public class Actions {
+
+  @Handler
+  public void durableStepsExample(Context ctx, String userId) {
+    var user = "";
+
+    // External API call
+    Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+
+    // Database operation
+    String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+
+    // Idempotency key generation
+    String id = ctx.random().nextUUID().toString();
+  }
+
+  @Handler
+  public void serviceCallsExample(Context ctx, ServiceCallRequest req) {
+    // Call another service
+    var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
+
+    // Call Virtual Object function
+    var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
+
+    // Submit Workflow
+    var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
+  }
+
+  @Handler
+  public void sendingMessagesExample(Context ctx, String userId) {
+    var event = Map.of("kind", "user_signup", "userId", userId);
+    // Fire-and-forget notification
+    NotificationServiceClient.fromContext(ctx)
+        .send()
+        .sendEmail(new EmailRequest(userId, "Welcome!"));
+
+    // Background analytics
+    AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
+
+    // Cleanup task
+    ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
+  }
+
+  @Handler
+  public void delayedMessagesExample(Context ctx, DelayedMessageRequest req) {
+    var reminderRequest = new ReminderRequest(req.userId(), req.message());
+    // Schedule reminder for tomorrow
+    ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
+  }
+
+  @Handler
+  public void durableTimersExample(Context ctx, TimerRequest req) {
+    // Sleep for specific duration
+    ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
+
+    // Wait for action or timeout
+    try {
+      OrderWorkflowClient.fromContext(ctx, req.orderId())
+          .run(req.order())
+          .await(Duration.ofMinutes(5));
+    } catch (TimeoutException e) {
+      // Handle timeout
+    }
+  }
+
+  // Helper classes
+  public record ServiceCallRequest(String userId, String orderId, Order order) {}
+
+  public record DelayedMessageRequest(String userId, String message) {}
+
+  public record TimerRequest(String userId, String orderId, Order order) {}
+}
+```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#workflow_promises"} 
 # Wait for external event
-payment_result = await ctx.promise("payment-completed").value()
+payment_result = await ctx.promise(
+    "payment-completed", type_hint=PaymentResult
+).value()
 
 # Wait for human approval
-approved = await ctx.promise("manager-approval").value()
+approved = await ctx.promise("manager-approval", type_hint=bool).value()
 
 # Wait for multiple events using gather
-payment_promise = ctx.promise("payment")
-inventory_promise = ctx.promise("inventory")
+payment_promise = ctx.promise("payment", type_hint=PaymentResult)
+inventory_promise = ctx.promise("inventory", type_hint=InventoryConfirmation)
 payment, inventory = await restate.gather(
     payment_promise.value(), inventory_promise.value()
 )
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#workflow_promises"} 
+// Wait for external event
+paymentResult, err := restate.Promise[PaymentResult](ctx, "payment-completed").Result()
+if err != nil {
+  return err
+}
+
+// Wait for human approval
+approved, err := restate.Promise[bool](ctx, "manager-approval").Result()
+if err != nil {
+  return err
+}
+
+// Wait for multiple events
+paymentFuture := restate.Promise[PaymentResult](ctx, "payment")
+inventoryFuture := restate.Promise[InventoryResult](ctx, "inventory")
+
+payment, err := paymentFuture.Result()
+if err != nil {
+  return err
+}
+
+inventory, err := inventoryFuture.Result()
+if err != nil {
+  return err
+}
 ```
 </CodeGroup>
 
@@ -329,6 +652,97 @@ approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
 },
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#signal_functions"} 
+package foundations.actions;
+
+import static foundations.actions.ExternalAPI.fetchData;
+import static foundations.actions.ExternalAPI.updateUserDatabase;
+
+import dev.restate.sdk.*;
+import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Service;
+import dev.restate.sdk.common.TimeoutException;
+import foundations.actions.NotificationService.EmailRequest;
+import foundations.actions.ReminderService.ReminderRequest;
+import java.time.Duration;
+import java.util.Map;
+
+// Example service that demonstrates all actions
+@Service
+public class Actions {
+
+  @Handler
+  public void durableStepsExample(Context ctx, String userId) {
+    var user = "";
+
+    // External API call
+    Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+
+    // Database operation
+    String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+
+    // Idempotency key generation
+    String id = ctx.random().nextUUID().toString();
+  }
+
+  @Handler
+  public void serviceCallsExample(Context ctx, ServiceCallRequest req) {
+    // Call another service
+    var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
+
+    // Call Virtual Object function
+    var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
+
+    // Submit Workflow
+    var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
+  }
+
+  @Handler
+  public void sendingMessagesExample(Context ctx, String userId) {
+    var event = Map.of("kind", "user_signup", "userId", userId);
+    // Fire-and-forget notification
+    NotificationServiceClient.fromContext(ctx)
+        .send()
+        .sendEmail(new EmailRequest(userId, "Welcome!"));
+
+    // Background analytics
+    AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
+
+    // Cleanup task
+    ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
+  }
+
+  @Handler
+  public void delayedMessagesExample(Context ctx, DelayedMessageRequest req) {
+    var reminderRequest = new ReminderRequest(req.userId(), req.message());
+    // Schedule reminder for tomorrow
+    ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
+  }
+
+  @Handler
+  public void durableTimersExample(Context ctx, TimerRequest req) {
+    // Sleep for specific duration
+    ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
+
+    // Wait for action or timeout
+    try {
+      OrderWorkflowClient.fromContext(ctx, req.orderId())
+          .run(req.order())
+          .await(Duration.ofMinutes(5));
+    } catch (TimeoutException e) {
+      // Handle timeout
+    }
+  }
+
+  // Helper classes
+  public record ServiceCallRequest(String userId, String orderId, Order order) {}
+
+  public record DelayedMessageRequest(String userId, String message) {}
+
+  public record TimerRequest(String userId, String orderId, Order order) {}
+}
+```
+
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#signal_functions"} 
 # In a signal function
 @workflow_example_workflow.handler()
@@ -340,6 +754,24 @@ async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult) -> 
 @workflow_example_workflow.handler()
 async def approve_request(ctx: WorkflowSharedContext, approved: bool) -> None:
     await ctx.promise("manager-approval").resolve(approved)
+```
+
+```go Go {"CODE_LOAD::go/foundations/actions/actions.go#signal_functions"} 
+// In a signal function
+func (WorkflowExample) ConfirmPayment(ctx restate.WorkflowSharedContext, result PaymentResult) error {
+  if err := restate.Promise[PaymentResult](ctx, "payment-completed").Resolve(result); err != nil {
+    return err
+  }
+  return nil
+}
+
+// In a signal function
+func (WorkflowExample) ApproveRequest(ctx restate.WorkflowSharedContext, approved bool) error {
+  if err := restate.Promise[bool](ctx, "manager-approval").Resolve(approved); err != nil {
+    return err
+  }
+  return nil
+}
 ```
 </CodeGroup>
 

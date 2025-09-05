@@ -77,6 +77,10 @@ const service = restate.service({
       // <start_random_nb>
       const randomNumber = ctx.rand.random();
       // <end_random_nb>
+
+      // <start_time>
+      const now = await ctx.date.now()
+      // <end_time>
     },
   },
 });
