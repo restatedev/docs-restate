@@ -31,10 +31,10 @@ const id = ctx.rand.uuidv4();
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#durable_steps"} 
 // External API call
-Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
 
 // Database operation
-String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
 
 // Idempotency key generation
 String id = ctx.random().nextUUID().toString();
@@ -57,19 +57,19 @@ id = ctx.uuid()
 
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#durable_steps"} 
 // External API call
-apiResult, err := restate.Run(ctx, func(ctx restate.RunContext) (map[string]interface{}, error) {
+apiResult, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
   return fetchData("https://api.example.com/data")
 })
 if err != nil {
-  return restate.Void{}, err
+  return err
 }
 
 // Database operation
-dbResult, err := restate.Run(ctx, func(ctx restate.RunContext) (interface{}, error) {
-  return updateUserDatabase(userId, map[string]string{"name": "John"}), nil
+success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+  return updateUserDatabase(userId, user)
 })
 if err != nil {
-  return restate.Void{}, err
+  return err
 }
 
 // Idempotency key generation
@@ -113,23 +113,19 @@ cart = await ctx.get("cart", type_hint=ShoppingCart) or ShoppingCart()
 
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#state_get"} 
 // Get with type and default value
-profile, err := restate.Get[*UserProfile](ctx, "profile")
+profile, err := restate.Get[UserProfile](ctx, "profile")
 if err != nil {
   return err
 }
 
-count := 0
-if c, err := restate.Get[*int](ctx, "count"); err != nil {
+count, err := restate.Get[int](ctx, "count")
+if err != nil {
   return err
-} else if c != nil {
-  count = *c
 }
 
-cart := ShoppingCart{}
-if c, err := restate.Get[*ShoppingCart](ctx, "cart"); err != nil {
+cart, err := restate.Get[ShoppingCart](ctx, "cart")
+if err != nil {
   return err
-} else if c != nil {
-  cart = *c
 }
 ```
 
@@ -143,7 +139,7 @@ Store state that persists across function invocations.
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#state_set"} 
 // Store simple values
-ctx.set("lastLogin", ctx.date.toJSON());
+ctx.set("lastLogin", request.date);
 ctx.set("count", count + 1);
 
 // Store complex objects
@@ -156,7 +152,7 @@ ctx.set("profile", {
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_set"} 
 // Store simple values
 ctx.set(COUNT, count + 1);
-ctx.set(LAST_LOGIN, ctx.request().headers().get("date"));
+ctx.set(LAST_LOGIN, request.date());
 
 // Store complex objects
 ctx.set(PROFILE, new UserProfile("John Doe", "john@example.com"));
@@ -164,7 +160,7 @@ ctx.set(PROFILE, new UserProfile("John Doe", "john@example.com"));
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_set"} 
 # Store simple values
-ctx.set("lastLogin", ctx.request().headers.get("date"))
+ctx.set("lastLogin", request["date"])
 ctx.set("count", count + 1)
 
 # Store complex objects
@@ -173,7 +169,7 @@ ctx.set("profile", UserProfile(name="John Doe", email="john@example.com"))
 
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#state_set"} 
 // Store simple values
-restate.Set(ctx, "lastLogin", time.Now().Format(time.RFC3339))
+restate.Set(ctx, "lastLogin", request.Date)
 restate.Set(ctx, "count", count+1)
 
 // Store complex objects
@@ -273,7 +269,7 @@ result = await ctx.workflow_call(run, key=order_id, arg=order)
 
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#service_calls"} 
 // Call another service
-validation, err := restate.Service[map[string]bool](ctx, "ValidationService", "ValidateOrder").Request(order)
+validation, err := restate.Service[bool](ctx, "ValidationService", "ValidateOrder").Request(order)
 if err != nil {
   return err
 }
@@ -342,16 +338,10 @@ ctx.object_send(empty_expired_cart, key=user_id, arg=None)
 
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#sending_messages"} 
 // Fire-and-forget notification
-restate.ServiceSend(ctx, "NotificationService", "SendEmail").Send(map[string]string{
-  "userId":  userId,
-  "message": "Welcome!",
-})
+restate.ServiceSend(ctx, "NotificationService", "SendEmail").Send(message)
 
 // Background analytics
-restate.ServiceSend(ctx, "AnalyticsService", "RecordEvent").Send(map[string]interface{}{
-  "kind":   "user_signup",
-  "userId": userId,
-})
+restate.ServiceSend(ctx, "AnalyticsService", "RecordEvent").Send(event)
 
 // Cleanup task
 restate.ObjectSend(ctx, "ShoppingCartObject", userId, "EmptyExpiredCart").Send(restate.Void{})
@@ -391,10 +381,7 @@ ctx.service_send(
 ```go Go {"CODE_LOAD::go/foundations/actions/actions.go#delayed_messages"} 
 // Schedule reminder for tomorrow
 restate.ServiceSend(ctx, "ReminderService", "SendReminder").Send(
-  map[string]string{
-    "userId":  userId,
-    "message": message,
-  },
+  message,
   restate.WithDelay(24*time.Hour),
 )
 ```
@@ -524,10 +511,10 @@ public class Actions {
     var user = "";
 
     // External API call
-    Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
 
     // Database operation
-    String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
 
     // Idempotency key generation
     String id = ctx.random().nextUUID().toString();
@@ -676,10 +663,10 @@ public class Actions {
     var user = "";
 
     // External API call
-    Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
 
     // Database operation
-    String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
 
     // Idempotency key generation
     String id = ctx.random().nextUUID().toString();

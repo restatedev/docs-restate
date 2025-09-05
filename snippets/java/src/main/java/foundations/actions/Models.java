@@ -17,7 +17,7 @@ class ExternalAPI {
     return "";
   }
 
-  public static String updateUserDatabase(String id, String data) {
-    return data;
+  public static boolean updateUserDatabase(String id, String data) {
+    return true;
   }
 }

@@ -22,10 +22,10 @@ public class Actions {
 
     // <start_durable_steps>
     // External API call
-    Object apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
 
     // Database operation
-    String dbResult = ctx.run(String.class, () -> updateUserDatabase(userId, user));
+    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
 
     // Idempotency key generation
     String id = ctx.random().nextUUID().toString();

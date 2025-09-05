@@ -7,9 +7,17 @@ import (
 )
 
 // Type definitions for examples
+type User struct {
+	ID string `json:"id"`
+}
+
 type UserProfile struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
+}
+
+type MyRequest struct {
+	Date time.Time `json:"date"`
 }
 
 type ShoppingCart struct{}
@@ -25,19 +33,19 @@ type InventoryResult struct {
 }
 
 // Mock external functions
-func fetchData(url string) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func fetchData(url string) (string, error) {
+	return "", nil
 }
 
-func updateUserDatabase(id string, data interface{}) interface{} {
-	return data
+func updateUserDatabase(id string, data interface{}) (bool, error) {
+	return true, nil
 }
 
 // Mock services for examples
 type ValidationService struct{}
 
-func (ValidationService) ValidateOrder(ctx restate.Context, order interface{}) (map[string]bool, error) {
-	return map[string]bool{"valid": true}, nil
+func (ValidationService) ValidateOrder(ctx restate.Context, order interface{}) (bool, error) {
+	return true, nil
 }
 
 type NotificationService struct{}
@@ -85,22 +93,23 @@ func (OrderWorkflow) GetStatus(ctx restate.WorkflowSharedContext) (string, error
 // Example service that demonstrates all actions
 type ActionsExample struct{}
 
-func (ActionsExample) DurableStepsExample(ctx restate.Context, userId string) (restate.Void, error) {
+func (ActionsExample) DurableStepsExample(ctx restate.Context, userId string) error {
+	user := User{}
 	// <start_durable_steps>
 	// External API call
-	apiResult, err := restate.Run(ctx, func(ctx restate.RunContext) (map[string]interface{}, error) {
+	apiResult, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
 		return fetchData("https://api.example.com/data")
 	})
 	if err != nil {
-		return restate.Void{}, err
+		return err
 	}
 
 	// Database operation
-	dbResult, err := restate.Run(ctx, func(ctx restate.RunContext) (interface{}, error) {
-		return updateUserDatabase(userId, map[string]string{"name": "John"}), nil
+	success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+		return updateUserDatabase(userId, user)
 	})
 	if err != nil {
-		return restate.Void{}, err
+		return err
 	}
 
 	// Idempotency key generation
@@ -109,10 +118,10 @@ func (ActionsExample) DurableStepsExample(ctx restate.Context, userId string) (r
 
 	// Use results to avoid compiler warnings
 	_ = apiResult
-	_ = dbResult
+	_ = success
 	_ = id
 
-	return restate.Void{}, nil
+	return nil
 }
 
 func (ActionsExample) ServiceCallsExample(ctx restate.Context, req map[string]interface{}) error {
@@ -122,7 +131,7 @@ func (ActionsExample) ServiceCallsExample(ctx restate.Context, req map[string]in
 
 	// <start_service_calls>
 	// Call another service
-	validation, err := restate.Service[map[string]bool](ctx, "ValidationService", "ValidateOrder").Request(order)
+	validation, err := restate.Service[bool](ctx, "ValidationService", "ValidateOrder").Request(order)
 	if err != nil {
 		return err
 	}
@@ -148,18 +157,20 @@ func (ActionsExample) ServiceCallsExample(ctx restate.Context, req map[string]in
 }
 
 func (ActionsExample) SendingMessagesExample(ctx restate.Context, userId string) error {
-	// <start_sending_messages>
-	// Fire-and-forget notification
-	restate.ServiceSend(ctx, "NotificationService", "SendEmail").Send(map[string]string{
-		"userId":  userId,
-		"message": "Welcome!",
-	})
-
-	// Background analytics
-	restate.ServiceSend(ctx, "AnalyticsService", "RecordEvent").Send(map[string]interface{}{
+	event := map[string]interface{}{
 		"kind":   "user_signup",
 		"userId": userId,
-	})
+	}
+	message := map[string]string{
+		"userId":  userId,
+		"message": "Welcome to our service!",
+	}
+	// <start_sending_messages>
+	// Fire-and-forget notification
+	restate.ServiceSend(ctx, "NotificationService", "SendEmail").Send(message)
+
+	// Background analytics
+	restate.ServiceSend(ctx, "AnalyticsService", "RecordEvent").Send(event)
 
 	// Cleanup task
 	restate.ObjectSend(ctx, "ShoppingCartObject", userId, "EmptyExpiredCart").Send(restate.Void{})
@@ -170,15 +181,15 @@ func (ActionsExample) SendingMessagesExample(ctx restate.Context, userId string)
 
 func (ActionsExample) DelayedMessagesExample(ctx restate.Context, req map[string]string) error {
 	userId := req["userId"]
-	message := req["message"]
+	message := map[string]string{
+		"userId":  userId,
+		"message": "Welcome to our service!",
+	}
 
 	// <start_delayed_messages>
 	// Schedule reminder for tomorrow
 	restate.ServiceSend(ctx, "ReminderService", "SendReminder").Send(
-		map[string]string{
-			"userId":  userId,
-			"message": message,
-		},
+		message,
 		restate.WithDelay(24*time.Hour),
 	)
 	// <end_delayed_messages>
@@ -224,23 +235,19 @@ type StateExample struct{}
 func (StateExample) StateGetExample(ctx restate.ObjectContext) error {
 	// <start_state_get>
 	// Get with type and default value
-	profile, err := restate.Get[*UserProfile](ctx, "profile")
+	profile, err := restate.Get[UserProfile](ctx, "profile")
 	if err != nil {
 		return err
 	}
 
-	count := 0
-	if c, err := restate.Get[*int](ctx, "count"); err != nil {
+	count, err := restate.Get[int](ctx, "count")
+	if err != nil {
 		return err
-	} else if c != nil {
-		count = *c
 	}
 
-	cart := ShoppingCart{}
-	if c, err := restate.Get[*ShoppingCart](ctx, "cart"); err != nil {
+	cart, err := restate.Get[ShoppingCart](ctx, "cart")
+	if err != nil {
 		return err
-	} else if c != nil {
-		cart = *c
 	}
 	// <end_state_get>
 
@@ -252,10 +259,11 @@ func (StateExample) StateGetExample(ctx restate.ObjectContext) error {
 	return nil
 }
 
-func (StateExample) StateSetExample(ctx restate.ObjectContext, count int) (restate.Void, error) {
+func (StateExample) StateSetExample(ctx restate.ObjectContext, request MyRequest) (restate.Void, error) {
+	count := 1
 	// <start_state_set>
 	// Store simple values
-	restate.Set(ctx, "lastLogin", time.Now().Format(time.RFC3339))
+	restate.Set(ctx, "lastLogin", request.Date)
 	restate.Set(ctx, "count", count+1)
 
 	// Store complex objects

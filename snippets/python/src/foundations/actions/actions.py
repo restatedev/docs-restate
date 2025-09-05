@@ -160,9 +160,11 @@ async def state_get_example(ctx: ObjectContext) -> None:
 
 @state_example_object.handler()
 async def state_set_example(ctx: ObjectContext, count: int) -> None:
+
+    request = {"date": "Wed, 21 Oct 2015 07:28:00 GMT"}
     # <start_state_set>
     # Store simple values
-    ctx.set("lastLogin", ctx.request().headers.get("date"))
+    ctx.set("lastLogin", request["date"])
     ctx.set("count", count + 1)
 
     # Store complex objects

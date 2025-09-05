@@ -4,10 +4,12 @@ import dev.restate.sdk.ObjectContext;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.VirtualObject;
 import dev.restate.sdk.common.StateKey;
+import develop.MyObject;
 
 // Example Virtual Object that demonstrates state actions
 @VirtualObject
 public class StateExample {
+  public record MyRequest(String date) {}
   private static final StateKey<UserProfile> PROFILE = StateKey.of("profile", UserProfile.class);
   private static final StateKey<Integer> COUNT = StateKey.of("count", Integer.class);
   private static final StateKey<ShoppingCart> CART = StateKey.of("cart", ShoppingCart.class);
@@ -24,11 +26,12 @@ public class StateExample {
   }
 
   @Handler
-  public void stateSetExample(ObjectContext ctx, int count) {
+  public void stateSetExample(ObjectContext ctx, MyRequest request) {
+    var count = 1;
     // <start_state_set>
     // Store simple values
     ctx.set(COUNT, count + 1);
-    ctx.set(LAST_LOGIN, ctx.request().headers().get("date"));
+    ctx.set(LAST_LOGIN, request.date());
 
     // Store complex objects
     ctx.set(PROFILE, new UserProfile("John Doe", "john@example.com"));

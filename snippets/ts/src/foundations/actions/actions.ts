@@ -171,9 +171,10 @@ const StateExampleObject = restate.object({
     },
 
     stateSetExample: async (ctx: restate.ObjectContext, count: number) => {
+      const request = { date: "2024-01-01T00:00:00Z" };
       // <start_state_set>
       // Store simple values
-      ctx.set("lastLogin", ctx.date.toJSON());
+      ctx.set("lastLogin", request.date);
       ctx.set("count", count + 1);
 
       // Store complex objects
