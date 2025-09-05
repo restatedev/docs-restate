@@ -26,7 +26,6 @@ func (GreeterService) Greet(ctx restate.Context, req GreetingRequest) (string, e
 	// Execute the request and retrieve the invocation id
 	invocationId := restate.
 		ServiceSend(ctx, "MyService", "MyHandler").
-		// Optional: send attaching idempotency key
 		Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
 		GetInvocationId()
 
