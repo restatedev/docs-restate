@@ -55,16 +55,16 @@ async def calling_handler(ctx: Context, arg):
 
     # <start_delayed>
     # To message a Service with a delay:
-    ctx.service_send(my_service.my_handler, arg="Hi", send_delay=timedelta(seconds=5))
+    ctx.service_send(my_service.my_handler, arg="Hi", send_delay=timedelta(hours=5))
 
     # To message a Virtual Object with a delay:
     ctx.object_send(
-        my_object.my_handler, key="Mary", arg="Hi", send_delay=timedelta(seconds=5)
+        my_object.my_handler, key="Mary", arg="Hi", send_delay=timedelta(hours=5)
     )
 
     # To message a Workflow with a delay:
     ctx.workflow_send(
-        my_workflow.run, key="my_workflow_id", arg="Hi", send_delay=timedelta(seconds=5)
+        my_workflow.run, key="my_workflow_id", arg="Hi", send_delay=timedelta(hours=5)
     )
     # <end_delayed>
 
@@ -73,7 +73,7 @@ async def calling_handler(ctx: Context, arg):
         "MyService",
         "my_handler",
         arg=json.dumps("Hi").encode("utf-8"),
-        send_delay=timedelta(seconds=5),
+        send_delay=timedelta(hours=5),
     )
     # <end_delayed_generic>
 

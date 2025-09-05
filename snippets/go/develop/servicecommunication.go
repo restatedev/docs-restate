@@ -9,77 +9,74 @@ import (
 type Router struct{}
 
 func (Router) Greet(ctx restate.Context, name string) error {
-	// <start_request_response_service>
-	response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+	// <start_request_response>
+	// To call a Service:
+	svcResponse, err := restate.Service[string](ctx, "MyService", "MyHandler").
 		Request("Hi")
 	if err != nil {
 		return err
 	}
-	// <end_request_response_service>
 
-	_ = response
-	return nil
-}
-
-func (Router) Greet2(ctx restate.Context, name string) error {
-	// <start_request_response_object>
-	response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+	// To call a Virtual Object:
+	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
 		Request("Hi")
 	if err != nil {
 		return err
 	}
-	// <end_request_response_object>
 
-	// <start_request_response_workflow>
-	// Call the `run` handler of the workflow (only works once).
-	result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+	// To call a Workflow:
+	// `run` handler — can only be called once per workflow ID
+	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
 		Request("Hi")
 	if err != nil {
 		return err
 	}
-	// Call some other `GetStatus` handler of the workflow.
+	// Other handlers can be called anytime within workflow retention
 	status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
 		Request("Hi again")
 	if err != nil {
 		return err
 	}
-	// <end_request_response_workflow>
+	// <end_request_response>
 
-	_ = response
-	_ = result
+	_ = svcResponse
+	_ = objResponse
+	_ = wfResponse
 	_ = status
+	return nil
+}
 
-	// <start_one_way_service>
+func (Router) Greet2(ctx restate.Context, name string) error {
+
+	// <start_one_way>
+	// To message a Service:
 	restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
-	// <end_one_way_service>
 
-	// <start_one_way_object>
-	restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
-	// <end_one_way_object>
+	// To message a Virtual Object:
+	restate.ObjectSend(ctx, "MyObject", "Mary", "MyHandler").Send("Hi")
 
-	// <start_one_way_workflow>
-	// Call the `run` handler of the workflow (only works once).
+	// To message a Workflow:
+	// `run` handler — can only be called once per workflow ID
 	restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
 		Send("Hi")
-	// Call some other `interactWithWorkflow` handler of the workflow.
+	// Other handlers can be called anytime within workflow retention
 	restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
 		Send("Hi again")
-	// <end_one_way_workflow>
+	// <end_one_way>
 
-	// <start_delayed_service>
+	// <start_delayed>
+	// To message a Service with a delay:
 	restate.ServiceSend(ctx, "MyService", "MyHandler").
-		Send("Hi", restate.WithDelay(5*time.Second))
-	// <end_delayed_service>
+		Send("Hi", restate.WithDelay(5*time.Hour))
 
-	// <start_delayed_object>
-	restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
-		Send("Hi", restate.WithDelay(5*time.Second))
-	// <end_delayed_object>
+	// To message a Virtual Object with a delay:
+	restate.ObjectSend(ctx, "MyObject", "Mary", "MyHandler").
+		Send("Hi", restate.WithDelay(5*time.Hour))
 
-	// <start_delayed_workflow>
+	// To message a Workflow with a delay:
 	restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
-		Send("Hi", restate.WithDelay(5*time.Second))
-	// <end_delayed_workflow>
+		Send("Hi", restate.WithDelay(5*time.Hour))
+	// <end_delayed>
 
 	// <start_ordering>
 	restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")

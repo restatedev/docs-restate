@@ -40,17 +40,17 @@ const service = restate.service({
       // To message a Service with a delay:
       ctx
         .serviceSendClient(myService)
-        .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+        .myHandler("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
 
       // To message a Virtual Object with a delay:
       ctx
         .objectSendClient(myObject, "Mary")
-        .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+        .myHandler("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
 
       // To message a Workflow with a delay:
       ctx
         .workflowSendClient(myWorkflow, "Mary")
-        .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+        .run("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
       // <end_delayed>
 
       // <start_ordering>
