@@ -14,118 +14,118 @@ You can invoke handlers via Kafka events, by doing the following:
 
 <Steps>
 
-    <Step title="Develop and register an event handler">
+<Step title="Develop and register an event handler">
 
-        You can invoke any handler via Kafka events.
-        The event payload will be (de)serialized as JSON.
+You can invoke any handler via Kafka events.
+The event payload will be (de)serialized as JSON.
 
-        - When invoking **Virtual Object** or **Workflow** handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
-        The key needs to be a valid UTF-8 string.
-        The events are delivered to the subscribed handler in the order in which they arrived on the topic partition.
-        - When invoking **Virtual Object** or **Workflow** _shared_ handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
-        The key needs to be a valid UTF-8 string.
-        The events are delivered to the subscribed handler in parallel without ordering guarantees.
-        - When invoking **Service** handlers over Kafka, events are delivered in parallel without ordering guarantees.
+- When invoking **Virtual Object** or **Workflow** handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
+The key needs to be a valid UTF-8 string.
+The events are delivered to the subscribed handler in the order in which they arrived on the topic partition.
+- When invoking **Virtual Object** or **Workflow** _shared_ handlers via Kafka, the key of the Kafka record will be used to determine the Virtual Object/Workflow key.
+The key needs to be a valid UTF-8 string.
+The events are delivered to the subscribed handler in parallel without ordering guarantees.
+- When invoking **Service** handlers over Kafka, events are delivered in parallel without ordering guarantees.
 
-        Since you can invoke any handler via Kafka events, a single handler can be invoked both by RPC and via Kafka.
+Since you can invoke any handler via Kafka events, a single handler can be invoked both by RPC and via Kafka.
 
-    </Step>
+</Step>
 
 <Step title="Configure Restate to connect to a Kafka cluster">
-    Define the Kafka cluster that Restate needs to connect to in the [Restate configuration file](/operate/configuration/server#configuration-file):
+Define the Kafka cluster that Restate needs to connect to in the [Restate configuration file](/operate/configuration/server#configuration-file):
 
-    ```toml restate.toml
-    [[ingress.kafka-clusters]]
-    name = "my-cluster"
-    brokers = ["PLAINTEXT://broker:9092"]
-    ```
+```toml restate.toml
+[[ingress.kafka-clusters]]
+name = "my-cluster"
+brokers = ["PLAINTEXT://broker:9092"]
+```
 
-    And make sure the Restate Server uses it via `restate-server --config-file restate.toml`.
+And make sure the Restate Server uses it via `restate-server --config-file restate.toml`.
 
-    Check the [configuration docs](/operate/configuration/server) for more details.
+Check the [configuration docs](/operate/configuration/server) for more details.
 
-    <Accordion title="Configuring Kafka clusters via environment variables">
+<Accordion title="Configuring Kafka clusters via environment variables">
 
-        You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTERS` environment variable:
+You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTERS` environment variable:
 
-        ```bash
-        RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker:9092"]}]
-        ```
-    </Accordion>
+```bash
+RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker:9092"]}]
+```
+</Accordion>
 </Step>
 <Step title="Register the service you want to invoke."/>
 
 <Step title="Subscribe the event handler to the Kafka topic">
-    Let Restate forward events from the Kafka topic to the event handler by creating a subscription:
+Let Restate forward events from the Kafka topic to the event handler by creating a subscription:
 
-    ```bash
-    curl localhost:9070/subscriptions --json '{
-            "source": "kafka://my-cluster/my-topic",
-            "sink": "service://MyService/handle",
-            "options": {"auto.offset.reset": "earliest"}
-        }'
-    ```
+```bash
+curl localhost:9070/subscriptions --json '{
+"source": "kafka://my-cluster/my-topic",
+"sink": "service://MyService/handle",
+"options": {"auto.offset.reset": "earliest"}
+}'
+```
 
-    Once you've created a subscription, Restate immediately starts consuming events from Kafka.
-    The handler will be invoked for each event received from Kafka.
+Once you've created a subscription, Restate immediately starts consuming events from Kafka.
+The handler will be invoked for each event received from Kafka.
 
-    The `options` field is optional and accepts any configuration parameter from [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+The `options` field is optional and accepts any configuration parameter from [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
 
 </Step>
 </Steps>
 
 <AccordionGroup>
-    <Accordion title="Kafka connection configuration">
+<Accordion title="Kafka connection configuration">
 
-        You can pass arbitrary Kafka cluster options in the `restate.toml`, and those options will be applied for all the subscriptions to that cluster, for example:
+You can pass arbitrary Kafka cluster options in the `restate.toml`, and those options will be applied for all the subscriptions to that cluster, for example:
 
-        ```toml restate.toml
-        [[ingress.kafka-clusters]]
-        name = "my-cluster"
-        brokers = ["PLAINTEXT://broker:9092"]
-        sasl.username = "me"
-        sasl.password = "pass"
-        ```
+```toml restate.toml
+[[ingress.kafka-clusters]]
+name = "my-cluster"
+brokers = ["PLAINTEXT://broker:9092"]
+sasl.username = "me"
+sasl.password = "pass"
+```
 
-        For the full list of options, check [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
-    </Accordion>
+For the full list of options, check [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+</Accordion>
 
-    <Accordion title="Multiple Kafka clusters support">
+<Accordion title="Multiple Kafka clusters support">
 
-        You can configure multiple kafka clusters in the `restate.toml` file:
+You can configure multiple kafka clusters in the `restate.toml` file:
 
-        ```toml restate.toml
-        [[ingress.kafka-clusters]]
-        name = "my-cluster-1"
-        brokers = ["PLAINTEXT://localhost:9092"]
+```toml restate.toml
+[[ingress.kafka-clusters]]
+name = "my-cluster-1"
+brokers = ["PLAINTEXT://localhost:9092"]
 
-        [[ingress.kafka-clusters]]
-        name = "my-cluster-2"
-        brokers = ["PLAINTEXT://localhost:9093"]
-        ```
+[[ingress.kafka-clusters]]
+name = "my-cluster-2"
+brokers = ["PLAINTEXT://localhost:9093"]
+```
 
-        And then, when creating the subscriptions, you refer to the specific cluster by `name`:
+And then, when creating the subscriptions, you refer to the specific cluster by `name`:
 
-        ```bash
-        # Subscription to my-cluster-1
-        curl localhost:9070/subscriptions --json '{
-                "source": "kafka://my-cluster-1/topic-1",
-                "sink": "service://MyService/handleCluster1"
-            }'
+```bash
+# Subscription to my-cluster-1
+curl localhost:9070/subscriptions --json '{
+"source": "kafka://my-cluster-1/topic-1",
+"sink": "service://MyService/handleCluster1"
+}'
 
-        # Subscription to my-cluster-2
-        curl localhost:9070/subscriptions --json '{
-                "source": "kafka://my-cluster-2/topic-2",
-                "sink": "service://MyService/handleCluster2"
-            }'
-        ```
-    </Accordion>
+# Subscription to my-cluster-2
+curl localhost:9070/subscriptions --json '{
+"source": "kafka://my-cluster-2/topic-2",
+"sink": "service://MyService/handleCluster2"
+}'
+```
+</Accordion>
 
-    <Accordion title="Event metadata">
+<Accordion title="Event metadata">
 
-        You can access the event metadata in the handler by getting the request headers map:
+You can access the event metadata in the handler by getting the request headers map:
 
-        <CodeGroup>
+<CodeGroup>
 ```ts TypeScript {"CODE_LOAD::ts/src/develop/kafka.ts#headers"} 
 ctx.request().headers,
 ```
@@ -135,22 +135,22 @@ ctx.request().headers();
 ```go Go {"CODE_LOAD::go/develop/kafka.go#headers"} 
 ctx.Request().Headers
 ```
-            ```python Python {CODE_LOAD::python/develop/kafka.py#headers}
-            ctx.request().headers
-            ```
-        </CodeGroup>
+```python Python {"CODE_LOAD::python/src/develop/kafka.py#headers"} 
+ctx.request().headers
+```
+</CodeGroup>
 
-        Each event carries within this map the following entries:
+Each event carries within this map the following entries:
 
-        * `restate.subscription.id`: The subscription identifier, as shown by the [Admin API](/category/admin-api).
-        * `kafka.offset`: The record offset.
-        * `kafka.partition`: The record partition.
-        * `kafka.timestamp`: The record timestamp.
+* `restate.subscription.id`: The subscription identifier, as shown by the [Admin API](/category/admin-api).
+* `kafka.offset`: The record offset.
+* `kafka.partition`: The record partition.
+* `kafka.timestamp`: The record timestamp.
 
-    </Accordion>
-    <Accordion title="Raw event support">
-        Check out the serialization documentation of your SDK to learn how to receive raw events in your handler.
-    </Accordion>
+</Accordion>
+<Accordion title="Raw event support">
+Check out the serialization documentation of your SDK to learn how to receive raw events in your handler.
+</Accordion>
 </AccordionGroup>
 
 ## Managing Kafka Subscriptions
@@ -163,9 +163,9 @@ Subscribe a handler to a Kafka topic:
 
 ```bash
 curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster/my-topic",
-    "sink": "service://MyService/Handle",
-    "options": {"auto.offset.reset": "earliest"}
+"source": "kafka://my-cluster/my-topic",
+"sink": "service://MyService/Handle",
+"options": {"auto.offset.reset": "earliest"}
 }'
 ```
 
@@ -182,18 +182,18 @@ curl localhost:9070/subscriptions
 **Example response:**
 ```json
 {
-    "subscriptions": [
-        {
-            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
-            "source": "kafka://my-cluster/my-topic",
-            "sink": "service://Greeter/greet",
-            "options": {
-                "auto.offset.reset": "earliest",
-                "client.id": "restate",
-                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
-            }
-        }
-    ]
+"subscriptions": [
+{
+"id": "sub_11XHoawrCiWtv8kzhEyGtsR",
+"source": "kafka://my-cluster/my-topic",
+"sink": "service://Greeter/greet",
+"options": {
+"auto.offset.reset": "earliest",
+"client.id": "restate",
+"group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
+}
+}
+]
 }
 ```
 

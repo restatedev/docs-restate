@@ -12,7 +12,7 @@ Your Restate handler can call other handlers in three ways:
 - **[Delayed messages](#delayed-messages)**: Send a message after a delay
 
 <Info>
-    To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
+To call a service from an external application, see the [HTTP](/operate/invocation/http), [Kafka](/operate/invocation/kafka), or [SDK Clients](/operate/invocation/clients) documentation.
 </Info>
 
 <Info>[Learn how Restate how it works](/basics/key-concepts#resilient-communication)</Info>
@@ -22,31 +22,220 @@ Your Restate handler can call other handlers in three ways:
 
 To call a Restate handler and wait for its result:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#request_response"} 
-// To call a Service:
-const svcResponse = await ctx.serviceClient(myService).myHandler("Hi");
+```go {"CODE_LOAD::go/develop/servicecommunication.go#request_response"} 
+package develop
 
-// To call a Virtual Object:
-const objResponse = await ctx.objectClient(myObject, "Mary").myHandler("Hi");
+import (
+  "time"
 
-// To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-const wfResponse = await ctx.workflowClient(myWorkflow, "wf-id").run("Hi");
-// Other handlers can be called anytime within workflow retention
-const result = await ctx.workflowClient(myWorkflow, "wf-id").interactWithWorkflow();
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 
 Use generic calls when you don't have the service definition or need dynamic service names:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_call"} 
-const response = await ctx.genericCall({
-  service: "MyObject",
-  method: "myHandler",
-  parameter: "Hi",
-  key: "Mary", // drop this for Service calls
-  inputSerde: restate.serde.json,
-  outputSerde: restate.serde.json,
-});
+```go {"CODE_LOAD::go/develop/servicecommunication.go#generic_call"} 
+package develop
+
+import (
+  "time"
+
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 
 <Accordion title={"Workflow retention"}>
@@ -66,101 +255,469 @@ Use the UI or CLI to [cancel](/operate/invocation#cancelling-invocations) and un
 
 To send a message to another Restate handler without waiting for a response:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#one_way"} 
-// To message a Service:
-ctx.serviceSendClient(myService).myHandler("Hi");
+```go {"CODE_LOAD::go/develop/servicecommunication.go#one_way"} 
+package develop
 
-// To message a Virtual Object:
-ctx.objectSendClient(myObject, "Mary").myHandler("Hi");
+import (
+  "time"
 
-// To message a Workflow:
-// `run` handler — can only be called once per workflow ID
-ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
-// Other handlers can be called anytime within workflow retention
-ctx.workflowSendClient(myWorkflow, "wf-id").interactWithWorkflow();
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
 
 
 Use generic send when you don't have the service definition:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_send"} 
-ctx.genericSend({
-  service: "MyService",
-  method: "myHandler",
-  parameter: "Hi",
-  inputSerde: restate.serde.json,
-});
+```go {"CODE_LOAD::go/develop/servicecommunication.go#generic_send"} 
+package develop
+
+import (
+  "time"
+
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 
 <Info>
-    Calls to a Virtual Object execute in order of arrival, serially.
-    Example:
+Calls to a Virtual Object execute in order of arrival, serially.
+Example:
 
-```typescript {"CODE_LOAD::ts/src/develop/service_communication.ts#ordering"} 
-ctx.objectSendClient(myObject, "Mary").myHandler("I'm call A");
-ctx.objectSendClient(myObject, "Mary").myHandler("I'm call B");
+```go {"CODE_LOAD::go/develop/servicecommunication.go#ordering"} 
+restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
 ```
 
-    Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
+Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
 </Info>
 
 ## Delayed messages
 
 To send a message after a delay:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#delayed"} 
-// To message a Service with a delay:
-ctx
-  .serviceSendClient(myService)
-  .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+```go {"CODE_LOAD::go/develop/servicecommunication.go#delayed"} 
+package develop
 
-// To message a Virtual Object with a delay:
-ctx
-  .objectSendClient(myObject, "Mary")
-  .myHandler("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+import (
+  "time"
 
-// To message a Workflow with a delay:
-ctx
-  .workflowSendClient(myWorkflow, "Mary")
-  .run("Hi", restate.rpc.sendOpts({ delay: { seconds: 5 } }));
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 
 Use generic send with a delay when you don't have the service definition:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#generic_delayed"} 
-ctx.genericSend({
-  service: "MyService",
-  method: "myHandler",
-  parameter: "Hi",
-  inputSerde: restate.serde.json,
-  delay: { seconds: 5 },
-});
+```go {"CODE_LOAD::go/develop/servicecommunication.go#generic_delayed"} 
+package develop
+
+import (
+  "time"
+
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Router struct{}
+
+func (Router) Greet(ctx restate.Context, name string) error {
+  response, err := restate.Service[string](ctx, "MyService", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  return nil
+}
+
+func (Router) Greet2(ctx restate.Context, name string) error {
+  response, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+
+  // Call the `run` handler of the workflow (only works once).
+  result, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Request("Hi")
+  if err != nil {
+    return err
+  }
+  // Call some other `GetStatus` handler of the workflow.
+  status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
+    Request("Hi again")
+  if err != nil {
+    return err
+  }
+
+  _ = response
+  _ = result
+  _ = status
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").Send("Hi")
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("Hi")
+
+  // Call the `run` handler of the workflow (only works once).
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi")
+  // Call some other `interactWithWorkflow` handler of the workflow.
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "InteractWithWorkflow").
+    Send("Hi again")
+
+  restate.ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.WorkflowSend(ctx, "MyWorkflow", "my-workflow-id", "Run").
+    Send("Hi", restate.WithDelay(5*time.Second))
+
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call A")
+  restate.ObjectSend(ctx, "MyService", "Mary", "MyHandler").Send("I'm call B")
+
+  return nil
+}
+
+func (Router) Greet3(ctx restate.Context, name string) error {
+  restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
+
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    // Optional: send attaching idempotency key
+    Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+    GetInvocationId()
+
+  // Later re-attach to the request
+  response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
+
+  _ = response
+  _ = err
+  return nil
+}
+
+func (Router) Greet4(ctx restate.Context, name string) error {
+  // Execute the request and retrieve the invocation id
+  invocationId := restate.
+    ServiceSend(ctx, "MyService", "MyHandler").
+    Send("Hi").
+    GetInvocationId()
+
+  // I don't need this invocation anymore, let me just cancel it
+  restate.CancelInvocation(ctx, invocationId)
+
+  return nil
+}
 ```
 
 <Info>
-    Learn [how this is different](/develop/ts/durable-timers#scheduling-async-tasks) from sleeping and then sending a message.
+Learn [how this is different](/develop/ts/durable-timers#scheduling-async-tasks) from sleeping and then sending a message.
 </Info>
 
 ## Using an idempotency key
 
 To prevent duplicate executions of the same call, add an idempotency key:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#idempotency_key"} 
-// For request-response
-const response = await ctx.serviceClient(myService).myHandler(
-  "Hi",
-  restate.rpc.opts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
-// For sending a message
-ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
+```go {"CODE_LOAD::go/develop/servicecommunication.go#idempotency_key"} 
+restate.
+  ServiceSend(ctx, "MyService", "MyHandler").
+  // Send attaching idempotency key
+  Send("Hi", restate.WithIdempotencyKey("my-idempotency-key"))
 ```
 
 Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
@@ -170,17 +727,16 @@ However, if multiple handlers might call the same service independently, you can
 
 To wait for or get the result of a previously sent message:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#attach"} 
-const handle = ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({
-    idempotencyKey: "my-idempotency-key",
-  })
-);
-const invocationId = await handle.invocationId;
+```go {"CODE_LOAD::go/develop/servicecommunication.go#attach"} 
+// Execute the request and retrieve the invocation id
+invocationId := restate.
+  ServiceSend(ctx, "MyService", "MyHandler").
+  // Optional: send attaching idempotency key
+  Send("Hi", restate.WithIdempotencyKey("my-idempotency-key")).
+  GetInvocationId()
 
-// Later...
-const response = ctx.attach(invocationId);
+// Later re-attach to the request
+response, err := restate.AttachInvocation[string](ctx, invocationId).Response()
 ```
 
 - With an idempotency key: Wait for completion and retrieve the result.
@@ -191,12 +747,15 @@ const response = ctx.attach(invocationId);
 
 To cancel a running handler:
 
-```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#cancel"} 
-const handle = ctx.serviceSendClient(myService).myHandler("Hi");
-const invocationId = await handle.invocationId;
+```go {"CODE_LOAD::go/develop/servicecommunication.go#cancel"} 
+// Execute the request and retrieve the invocation id
+invocationId := restate.
+  ServiceSend(ctx, "MyService", "MyHandler").
+  Send("Hi").
+  GetInvocationId()
 
-// Cancel the invocation
-ctx.cancel(invocationId);
+// I don't need this invocation anymore, let me just cancel it
+restate.CancelInvocation(ctx, invocationId)
 ```
 
 
