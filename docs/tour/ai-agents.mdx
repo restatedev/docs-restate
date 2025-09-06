@@ -28,7 +28,7 @@ Restate works with how you already deploy your agents, whether that's in Docker,
 
 Let's run an example locally to get a better feel for how it works.
 
-### Run the example
+### Run the agent
 [Install Restate](/develop/local_dev) and launch it:
 ```bash
 npm install --global @restatedev/restate-server@latest @restatedev/restate@latest
@@ -464,7 +464,7 @@ const { text } = await generateText({
   model,
   prompt: `Claim: ${JSON.stringify(claim)}`,
   system:
-    "You are a claim decision engine. Analyze the claim  and use your tools to decide whether to approve.",
+    "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
   tools: {
     analyzeEligibility: tool({
       description: "Analyze eligibility result.",
@@ -527,27 +527,27 @@ To parallelize tool steps, implement an orchestrator tool which use `RestateProm
 
 Here is an insurance claim agent that runs multiple analyses in parallel:
 
-```typescript parallelwork/parallel-tools-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/parallelwork/parallel-tools-agent.ts#here"}
-  const { text } = await generateText({
-    model,
-    prompt: `Analyze the claim ${JSON.stringify(claim)}.
-    Use your tools to calculate key metrics and decide whether to approve.`,
-    tools: {
-      calculateMetrics: tool({
-        description: "Calculate claim metrics.",
-        inputSchema: InsuranceClaimSchema,
-        execute: async (claim: InsuranceClaim) => {
-          return RestatePromise.all([
-            ctx.run("eligibility", () => checkEligibility(claim)),
-            ctx.run("cost", () => compareToStandardRates(claim)),
-            ctx.run("fraud", () => checkFraud(claim)),
-          ]);
-        },
-      }),
-    },
-    stopWhen: [stepCountIs(10)],
-    providerOptions: { openai: { parallelToolCalls: false } },
-  });
+```typescript parallelwork/parallel-tools-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/parallelwork/parallel-tools-agent.ts#here"} 
+const { text } = await generateText({
+  model,
+  prompt: `Analyze the claim ${JSON.stringify(claim)}. 
+  Use your tools to calculate key metrics and decide whether to approve.`,
+  tools: {
+    calculateMetrics: tool({
+      description: "Calculate claim metrics.",
+      inputSchema: InsuranceClaimSchema,
+      execute: async (claim: InsuranceClaim) => {
+        return RestatePromise.all([
+          ctx.run("eligibility", () => checkEligibility(claim)),
+          ctx.run("cost", () => compareToStandardRates(claim)),
+          ctx.run("fraud", () => checkFraud(claim)),
+        ]);
+      },
+    }),
+  },
+  stopWhen: [stepCountIs(10)],
+  providerOptions: { openai: { parallelToolCalls: false } },
+});
 ```
 Restate makes sure that all parallel tasks are retried and recovered until they succeed.
 
@@ -579,15 +579,18 @@ If you want to allow the LLM to call multiple tools in parallel with `parallelTo
 
 ### Parallel Agents
 
-You can use the same `RestatePromise` primitives to run multiple agents in parallel, and let a main orchestrator agent combine their results:
+You can use the same `RestatePromise` primitives to run multiple agents in parallel.
 
+For example, to race agents against each other and [use the first result that returns](/develop/ts/concurrent-tasks#wait-for-the-first-successful-completion), while [cancelling the others](/foundations/invocations#cancelling-invocations).
+
+Or to let a main orchestrator agent combine the results of multiple specialized agents in parallel:
 
 ```typescript parallelwork/parallel-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/parallelwork/parallel-agents.ts?collapse_prequel"} 
 export default restate.service({
-  name: "ParallelAgentClaimAnalyzer",
+  name: "ParallelAgentClaimApproval",
   handlers: {
     run: async (ctx: restate.Context, claim: InsuranceClaim) => {
-      const [eligibility, rateComparison, fraudCheck] = await Promise.all([
+      const [eligibility, rateComparison, fraudCheck] = await RestatePromise.all([
         ctx.serviceClient(eligibilityAgent).run(claim),
         ctx.serviceClient(rateComparisonAgent).run(claim),
         ctx.serviceClient(fraudCheckAgent).run(claim),
@@ -609,8 +612,6 @@ export default restate.service({
   },
 });
 ```
-
-You can also run these agents in parallel inside one of the tools.
 
 <Accordion title={"Try it out"}>
     Start a request for a claim that needs to be analyzed by multiple agents in parallel.
@@ -736,93 +737,98 @@ Have a look at the advanced patterns section for an example of rolling back prev
 
 <AccordionGroup>
 <Accordion title="Manual Agent Loop">
-    If you need more control over the agent loop, you can implement it manually using Restate's durable primitives.
+If you need more control over the agent loop, you can implement it manually using Restate's durable primitives.
 
-    This allows you to:
-    - Parallelize tool calls with `RestatePromise`
-    - Implement custom stopping conditions
-    - Implement custom logic between steps
-    - Interact with external systems between steps
-    - Handle errors in a custom way
+This allows you to:
+- Parallelize tool calls with `RestatePromise`
+- Implement custom stopping conditions
+- Implement custom logic between steps
+- Interact with external systems between steps
+- Handle errors in a custom way
 
-    Here is an example of a manual agent loop that runs until a custom stopping condition is met:
+Here is an example of a manual agent loop that runs until a custom stopping condition is met:
 
-    ```typescript advanced/manual-loop-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/manual-loop-agent.ts?collapse_prequel"} 
-export default restate.object({
+```typescript advanced/manual-loop-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/manual-loop-agent.ts?collapse_prequel"} 
+export default restate.service({
   name: "ManualLoopAgent",
   handlers: {
-    run: async (ctx: restate.ObjectContext, { prompt }: { prompt: string }) => {
-      const messages =
-        (await ctx.get<ModelMessage[]>("messages", superJson)) ?? [];
-
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
+    run: async (ctx: restate.Context, {prompt}: { prompt: string }) => {
+      const messages = [{role: 'user', content: prompt} as ModelMessage];
 
       while (true) {
+        const model = wrapLanguageModel({
+          model: openai("gpt-4o"),
+          middleware: durableCalls(ctx, {maxRetryAttempts: 3}),
+        });
+
         const result = await generateText({
           model,
-          system: "You are a helpful agent that provides weather updates.",
-          prompt,
+          messages,
           tools: {
             getWeather: tool({
-              description: "Get the current weather in a given location",
-              inputSchema: WeatherRequestSchema,
+              name: 'getWeather',
+              description: 'Get the current weather in a given location',
+              inputSchema: z.object({
+                city: z.string(),
+              }),
             }),
             // add more tools here, omitting the execute function so you handle it yourself
           },
         });
 
-        // Add LLM generated messages to the message history
         messages.push(...result.response.messages);
-        ctx.set("messages", messages, superJson);
 
-        if (result.finishReason === "tool-calls") {
-          const toolCalls = result.toolCalls;
-
-          // Handle all tool call execution in parallel
-          const toolResults = await Promise.all(
-            toolCalls.map(async (toolCall) => ({
-              toolCall,
-              result: await tools[toolCall.toolName](ctx, toolCall.input),
-            })),
-          );
-
-          for (const { toolCall, result } of toolResults) {
-            messages.push({
-              role: "tool",
-              content: [
-                {
-                  toolName: toolCall.toolName,
-                  toolCallId: toolCall.toolCallId,
-                  type: "tool-result",
-                  output: { type: "json", value: result },
-                },
-              ],
-            });
+        if (result.finishReason === 'tool-calls') {
+          // Handle all tool call execution here
+          for (const toolCall of result.toolCalls) {
+            if (toolCall.toolName === 'getWeather') {
+              const toolOutput = await getWeather(ctx, toolCall.input as { city: string });
+              messages.push({
+                role: 'tool',
+                content: [
+                  {
+                    toolName: toolCall.toolName,
+                    toolCallId: toolCall.toolCallId,
+                    type: 'tool-result',
+                    output: {type: 'json', value: toolOutput},
+                  },
+                ],
+              });
+            }
+            // Handle other tool calls
           }
-          ctx.set("messages", messages, superJson);
         } else {
-          break;
+          return result.text;
         }
       }
-
-      return messages;
-    },
-  },
+    }
+  }
 });
 ```
 
+Try it out by sending a request to the service:
+```bash
+curl localhost:8080/ManualLoopAgent/run \
+--json '{"prompt": "What is the weather like in New York and San Francisco?"}'
+```
+
+In the UI, you can see how the agent runs multiple iterations and calls tools.
+
+<Frame>
+<img src="/img/tour/agents/manual-loop-agent.png" alt="Invocation overview" />
+</Frame>
+
+Try to extend the agent with persistent state, parallel tool calls, custom stopping conditions, or custom error handling.
+
 </Accordion>
-    <Accordion title="Rolling back tool executions on failure">
+<Accordion title="Rolling back tool executions on failure">
 
-        Sometimes you need to undo previous agent actions when a later step fails. Restate makes it easy to implement compensation patterns (Sagas) for AI agents.
+Sometimes you need to undo previous agent actions when a later step fails. Restate makes it easy to implement compensation patterns (Sagas) for AI agents.
 
-        Just track the rollback actions as you go, let the agent rethrow terminal tool errors, and execute the rollback actions in reverse order.
+Just track the rollback actions as you go, let the agent rethrow terminal tool errors, and execute the rollback actions in reverse order.
 
-        Here is an example of a travel booking agent that rolls back hotel, flight and car bookings if any step fails with a terminal error (e.g. car type not available):
-        ```typescript advanced/rollback-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/rollback-agent.ts#here"} 
+Here is an example of a travel booking agent that rolls back hotel, flight and car bookings if any step fails with a terminal error (e.g. car type not available):
+```typescript advanced/rollback-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/rollback-agent.ts#here"} 
 const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
   const on_rollback: { (): restate.RestatePromise<any> }[] = [];
   const on_success: { (): restate.RestatePromise<any> }[] = [];
@@ -904,33 +910,38 @@ const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
 };
 ```
 
-        Try it out by sending the following request:
-        ```bash
-        curl localhost:8080/BookingAgent/book \
-        --json '{"prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."}'
-        ```
+Try it out by sending the following request:
+```bash
+curl localhost:8080/BookingAgent/book \
+--json '{"prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."}'
+```
 
-        This will succeed successfully. Have a look at the invocation trace in the UI.
+This will succeed successfully. Have a look at the invocation trace in the UI.
 
-        To see the compensation in action, ask for an SUV rental, which will cause the car booking step to fail and trigger the compensation logic:
-        ```bash
-        curl localhost:8080/BookingAgent/book \
-        --json '{"prompt": "Planning a family vacation to Miami for 4 people from May 20-25. We need flights from Boston Logan BOS, a beachfront hotel for 4 guests, and an SUV rental with pick-up at BOS airport."}'
-        ```
+To see the compensation in action, ask for an SUV rental, which will cause the car booking step to fail and trigger the compensation logic:
+```bash
+curl localhost:8080/BookingAgent/book \
+--json '{"prompt": "Planning a family vacation to Miami for 4 people from May 20-25. We need flights from Boston Logan BOS, a beachfront hotel for 4 guests, and an SUV rental with pick-up at BOS airport."}'
+```
 
-        Have a look at the UI to see how the car booking fails, and the flight and hotel bookings are rolled back.
+Have a look at the UI to see how the car booking fails, and the flight and hotel bookings are rolled back.
 
-        <Frame>
-            <img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
-        </Frame>
+<Frame>
+<img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
+</Frame>
 </Accordion>
 <Accordion title="Long-running background agents">
+    Restate supports implementing scheduling and timer logic in your agents.
+This allows you to build agents that run periodically, wait for specific times, or implement complex scheduling logic.
+    Agents can either be long-running or reschedule themselves for later execution.
+
+    Have a look at the [scheduling docs](/develop/ts/durable-timers) to learn more.
 </Accordion>
-<Accordion title="Pub-sub to send steps back for user to see">
-</Accordion>
-<Accordion title="Streaming model responses live to UI">
+<Accordion title="Streaming back intermediate results">
+Have a look at the [pub-sub example](https://github.com/igalshilman/agent47/tree/main/packages/pubsub).
 </Accordion>
 <Accordion title="Interrupting agents">
+Have a look at the [interruptible coding agent](https://github.com/igalshilman/agent47/tree/main/packages/agent).
 </Accordion>
 </AccordionGroup>
 
