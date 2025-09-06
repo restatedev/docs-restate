@@ -487,95 +487,18 @@ const [payment, inventory] = await Promise.all([
 ]);
 ```
 
-```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#workflow_promises"} 
-package foundations.actions;
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#workflow_promises"} 
+// Wait for external event
+PaymentResult paymentResult = ctx.promise(PAYMENT_COMPLETED).future().await();
 
-import static foundations.actions.ExternalAPI.fetchData;
-import static foundations.actions.ExternalAPI.updateUserDatabase;
+// Wait for human approval
+Boolean approved = ctx.promise(MANAGER_APPROVAL).future().await();
 
-import dev.restate.sdk.*;
-import dev.restate.sdk.annotation.Handler;
-import dev.restate.sdk.annotation.Service;
-import dev.restate.sdk.common.TimeoutException;
-import foundations.actions.NotificationService.EmailRequest;
-import foundations.actions.ReminderService.ReminderRequest;
-import java.time.Duration;
-import java.util.Map;
-
-// Example service that demonstrates all actions
-@Service
-public class Actions {
-
-  @Handler
-  public void durableStepsExample(Context ctx, String userId) {
-    var user = "";
-
-    // External API call
-    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
-
-    // Database operation
-    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
-
-    // Idempotency key generation
-    String id = ctx.random().nextUUID().toString();
-  }
-
-  @Handler
-  public void serviceCallsExample(Context ctx, ServiceCallRequest req) {
-    // Call another service
-    var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
-
-    // Call Virtual Object function
-    var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
-
-    // Submit Workflow
-    var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
-  }
-
-  @Handler
-  public void sendingMessagesExample(Context ctx, String userId) {
-    var event = Map.of("kind", "user_signup", "userId", userId);
-    // Fire-and-forget notification
-    NotificationServiceClient.fromContext(ctx)
-        .send()
-        .sendEmail(new EmailRequest(userId, "Welcome!"));
-
-    // Background analytics
-    AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
-
-    // Cleanup task
-    ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
-  }
-
-  @Handler
-  public void delayedMessagesExample(Context ctx, DelayedMessageRequest req) {
-    var reminderRequest = new ReminderRequest(req.userId(), req.message());
-    // Schedule reminder for tomorrow
-    ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
-  }
-
-  @Handler
-  public void durableTimersExample(Context ctx, TimerRequest req) {
-    // Sleep for specific duration
-    ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
-
-    // Wait for action or timeout
-    try {
-      OrderWorkflowClient.fromContext(ctx, req.orderId())
-          .run(req.order())
-          .await(Duration.ofMinutes(5));
-    } catch (TimeoutException e) {
-      // Handle timeout
-    }
-  }
-
-  // Helper classes
-  public record ServiceCallRequest(String userId, String orderId, Order order) {}
-
-  public record DelayedMessageRequest(String userId, String message) {}
-
-  public record TimerRequest(String userId, String orderId, Order order) {}
-}
+// Wait for multiple events
+var paymentFuture = ctx.promise(PAYMENT).future();
+var inventoryFuture = ctx.promise(INVENTORY).future();
+PaymentResult payment = paymentFuture.await();
+InventoryResult inventory = inventoryFuture.await();
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#workflow_promises"} 
@@ -639,94 +562,17 @@ approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
 },
 ```
 
-```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#signal_functions"} 
-package foundations.actions;
+```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#signal_functions"} 
+// In a signal function
+@Shared
+public void confirmPayment(SharedWorkflowContext ctx, PaymentResult result) {
+  ctx.promiseHandle(PAYMENT_COMPLETED).resolve(result);
+}
 
-import static foundations.actions.ExternalAPI.fetchData;
-import static foundations.actions.ExternalAPI.updateUserDatabase;
-
-import dev.restate.sdk.*;
-import dev.restate.sdk.annotation.Handler;
-import dev.restate.sdk.annotation.Service;
-import dev.restate.sdk.common.TimeoutException;
-import foundations.actions.NotificationService.EmailRequest;
-import foundations.actions.ReminderService.ReminderRequest;
-import java.time.Duration;
-import java.util.Map;
-
-// Example service that demonstrates all actions
-@Service
-public class Actions {
-
-  @Handler
-  public void durableStepsExample(Context ctx, String userId) {
-    var user = "";
-
-    // External API call
-    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
-
-    // Database operation
-    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
-
-    // Idempotency key generation
-    String id = ctx.random().nextUUID().toString();
-  }
-
-  @Handler
-  public void serviceCallsExample(Context ctx, ServiceCallRequest req) {
-    // Call another service
-    var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
-
-    // Call Virtual Object function
-    var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
-
-    // Submit Workflow
-    var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
-  }
-
-  @Handler
-  public void sendingMessagesExample(Context ctx, String userId) {
-    var event = Map.of("kind", "user_signup", "userId", userId);
-    // Fire-and-forget notification
-    NotificationServiceClient.fromContext(ctx)
-        .send()
-        .sendEmail(new EmailRequest(userId, "Welcome!"));
-
-    // Background analytics
-    AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
-
-    // Cleanup task
-    ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
-  }
-
-  @Handler
-  public void delayedMessagesExample(Context ctx, DelayedMessageRequest req) {
-    var reminderRequest = new ReminderRequest(req.userId(), req.message());
-    // Schedule reminder for tomorrow
-    ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
-  }
-
-  @Handler
-  public void durableTimersExample(Context ctx, TimerRequest req) {
-    // Sleep for specific duration
-    ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
-
-    // Wait for action or timeout
-    try {
-      OrderWorkflowClient.fromContext(ctx, req.orderId())
-          .run(req.order())
-          .await(Duration.ofMinutes(5));
-    } catch (TimeoutException e) {
-      // Handle timeout
-    }
-  }
-
-  // Helper classes
-  public record ServiceCallRequest(String userId, String orderId, Order order) {}
-
-  public record DelayedMessageRequest(String userId, String message) {}
-
-  public record TimerRequest(String userId, String orderId, Order order) {}
+// In a signal function
+@Shared
+public void approveRequest(SharedWorkflowContext ctx, Boolean approved) {
+  ctx.promiseHandle(MANAGER_APPROVAL).resolve(approved);
 }
 ```
 
