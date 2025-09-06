@@ -1,6 +1,6 @@
 ---
 title: "AI Agents"
-description: "Build fault-tolerant, observable AI agents that recover from failures and support advanced interaction patterns."
+description: "Build stateful, observable AI agents that recover from failures."
 icon: "robot"
 ---
 
@@ -10,7 +10,7 @@ AI agents are long-running processes that combine LLMs with tools and external A
 
 In this guide, you'll learn how to:
 - Build durable AI agents that recover automatically from crashes and API failures
-- Integrate with existing AI SDKs like Vercel AI SDK and OpenAI
+- Integrate with existing AI SDKs like Vercel AI SDK and OpenAI Agent SDK
 - Observe and debug agent executions with detailed traces
 - Implement resilient human-in-the-loop workflows with approvals and timeouts
 - Manage conversation history and state across multi-turn interactions
@@ -37,13 +37,14 @@ restate-server
 
 Get the example:
 ```bash
-restate example typescript-ai-agents && cd typescript-ai-agents
+git clone git@github.com:restatedev/ai-examples.git && cd vercel-ai/tour-of-agents
 npm install
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/agent_tour/vercel-ai/tour-of-agents" />
 
-Run the agent:
+Export your OpenAI API key and run the agent:
 ```bash
+export OPENAI_API_KEY=sk-...
 npm run dev
 ```
 
@@ -54,7 +55,7 @@ restate deployments register http://localhost:9080
 
 This registers a set of agents which we will be covering in this tutorial.
 
-To test your setup, invoke the weather agent, either via the UI playground (by clicking on the service) or CLI:
+To test your setup, invoke the weather agent, either via the UI playground (by clicking on the service) or curl:
 ```bash
 curl localhost:8080/WeatherAgent/run \
   --json '{"prompt": "What is the weather like in San Francisco?"}'
@@ -62,7 +63,7 @@ curl localhost:8080/WeatherAgent/run \
 
 You should see the weather information printed in the terminal.
 
-Let's have a look at what happened under the hood.
+Let's have a look at what happened under the hood to make your agents resilient.
 
 ## Durable Execution
 
@@ -81,7 +82,7 @@ To implement a durable agent, you can use the Restate SDK in combination with ex
 
 Here's the implementation of the durable weather agent you just invoked:
 
-```typescript durableexecution/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/durableexecution/agent.ts?collapse_prequel"} 
+```typescript durableexecution/agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/durableexecution/agent.ts?collapse_prequel"} 
 export default restate.service({
   name: "WeatherAgent",
   handlers: {
@@ -119,36 +120,34 @@ The main difference compared to a standard Vercel AI agent is the use of the Res
 Any action with the Context is automatically recorded by the Restate Server and survives failures.
 We use this for:
 1. **Persisting LLM responses**: We wrap the model with the `durableCalls(ctx)` middleware, so that every LLM response is saved in Restate Server and can be replayed during recovery. The middleware is provided via the package [`@restatedev/vercel-ai-middleware`](https://github.com/restatedev/vercel-ai-middleware).
-2. **Resilient tool execution**: Tools can make steps durable by using Context actions. Their outcome will then be persisted for recovery and retried until they succeed. `ctx.run` runs an action durably, retrying it until it succeeds (e.g. database interaction, API calls, non-deterministic actions).
-
-<Tip> Unlike workflow engines, Restate’s durable function model lets you implement the agent as one long-running function. You don’t need to split LLM calls and tool calls into separate activities, avoiding the overhead of passing context and state around. </Tip>
+2. **Resilient tool execution**: Tools can make steps durable by using Context actions. Their outcome will then be persisted for recovery and retried until they succeed. `ctx.run` runs an action durably, retrying it until it succeeds and persisting the result in Restate (e.g. database interaction, API calls, non-deterministic actions).
 
 <Accordion title={"Try it out"}>
-    Ask for weather in Denver:
-    ```bash
-    curl localhost:8080/WeatherAgent/run \
-    --json '{"prompt": "What is the weather like in Denver?"}'
-    ```
+Ask for the weather in Denver:
+```bash
+curl localhost:8080/WeatherAgent/run \
+--json '{"prompt": "What is the weather like in Denver?"}'
+```
 
-    On the invocation page in the UI, click on the invocation ID of the failing invocation.
-    You can see that your request is retrying because the weather API is down:
+On the invocation page in the UI, click on the invocation ID of the failing invocation.
+You can see that your request is retrying because the weather API is down:
 
-    <Frame>
-        <img src="/img/tour/agents/weather-agent-stuck.png" alt="Invocation overview" />
-    </Frame>
+<Frame>
+<img src="/img/tour/agents/weather-agent-stuck.png" alt="Invocation overview" />
+</Frame>
 
-    To fix the problem, remove the line `failOnDenver` from the `fetchWeather` function in the `utils.ts` file:
+To fix the problem, remove the line `failOnDenver` from the `fetchWeather` function in the `utils.ts` file:
 
 
-    ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/utils.ts#weather"} 
+```ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/utils.ts#weather"}
 export async function fetchWeather(city: string) {
-  failOnDenver(city);
-  const output = await fetchWeatherFromAPI(city);
-  return parseWeatherResponse(output);
+    failOnDenver(city);
+    const output = await fetchWeatherFromAPI(city);
+    return parseWeatherResponse(output);
 }
 ```
 
-    Once you restart the service, the workflow finishes successfully.
+Once you restart the service, the workflow finishes successfully.
 
 </Accordion>
 
@@ -156,9 +155,7 @@ export async function fetchWeather(city: string) {
 
 As you saw in the previous section, the Restate UI comes in handy when monitoring and debugging your agents.
 
-The Invocations tab shows all agent executions with detailed traces of every LLM call, tool execution, and state change.
-
-Go to the UI at `http://localhost:9070/ui/invocations` and click on your invocation id to see the complete timeline:
+The Invocations tab shows all agent executions with detailed traces of every LLM call, tool execution, and state change:
 <Frame>
 <img src="/img/tour/agents/weather-agent.png" alt="Invocation overview" />
 </Frame>
@@ -176,12 +173,12 @@ Now that you know how to build and debug an agent, let's look at more advanced p
 Many AI agents need human oversight for high-risk decisions or gathering additional input. Restate makes it easy to pause agent execution and wait for human input.
 
 **Benefits with Restate:**
-- If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process
-- If the agent runs on function-as-a-service platforms, Restate suspends the function while its waiting, and resumes it later. You don't pay for the wait time.
+- If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
+- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://restate.dev/blog/we-replaced-400-lines-of-stepfunctions-asl-with-40-lines-of-typescript-by-making-lambdas-suspendable/)).
 
 Here's an insurance claim agent that asks for human approval for high-value claims:
 
-```typescript humanintheloop/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/humanintheloop/agent.ts#here"} 
+```typescript humanintheloop/agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/humanintheloop/agent.ts#here"} 
 const { text } = await generateText({
   model,
   system:
@@ -221,11 +218,9 @@ You can also use awakeables outside of tools, for example, to implement human ap
     Start a request for a high-value claim that needs human approval.
     Use `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
-    curl localhost:8080/ClaimEvaluationAgent/run/send \
+    curl localhost:8080/HumanClaimApprovalAgent/run/send \
     --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
     ```
-
-    In the UI, you can see that the agent is waiting for human approval.
 
     You can restart the service to see how Restate continues waiting for the approval.
 
@@ -241,27 +236,12 @@ You can also use awakeables outside of tools, for example, to implement human ap
     </Frame>
 </Accordion>
 
-<AccordionGroup>
-<Accordion title={"Eliminate waiting costs on Function-as-a-Service platforms"}>
-    The Restate Server takes care of persisting execution progress and promises.
-    Your services themselves remain lightweight, stateless functions.
-
-    With this setup, Restate can pause execution whenever needed and pick it up again later.
-
-    This is particularly valuable on Function-as-a-Service platforms like AWS Lambda, where you pay for execution time.
-    Instead of keeping a function running while it waits for a promise (approval, timers,...), Restate suspends it and then resumes once approval arrives.
-
-    That way, you reduce costs and avoid hitting execution time limits.
-
-    [Learn more](https://restate.dev/blog/we-replaced-400-lines-of-stepfunctions-asl-with-40-lines-of-typescript-by-making-lambdas-suspendable/)
-</Accordion>
-
 <Accordion title={"Timeouts and Escalation"}>
 Add timeouts to human approval steps to prevent workflows from hanging indefinitely.
 
 Restate persists the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time:
 
-```typescript humanintheloop/agent-with-timeout.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/humanintheloop/agent-with-timeout.ts#here"} 
+```typescript humanintheloop/agent-with-timeout.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/humanintheloop/agent-with-timeout.ts#here"} 
 try {
   // At most 3 hours, to reach our SLA
   const approved = await approval.promise.orTimeout({ hours: 3 });
@@ -277,15 +257,13 @@ try {
 }
 ```
 
-Try it out by sending a request to the service and killing the service process:
+Try it out by sending a request to the service:
 ```bash
-curl localhost:8080/ClaimEvaluationWithTimeoutsAgent/run/send \
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
 --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
 ```
-You can see in the UI how the process will block for the remaining time without starting over.
+You restart the service and check in the UI how the process will block for the remaining time without starting over.
 </Accordion>
-</AccordionGroup>
-
 
 ## Chat Agent with Memory
 
@@ -297,7 +275,7 @@ Each Virtual Object instance maintains isolated state and is identified by a uni
 
 Here is an example of a Virtual Object that represents chat sessions:
 
-```typescript chat/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/chat/agent.ts?collapse_prequel"} 
+```typescript chat/agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/chat/agent.ts?collapse_prequel"} 
 export default restate.object({
   name: "Chat",
   handlers: {
@@ -395,11 +373,11 @@ Each of these can then be developed, deployed, and scaled independently.
 
 You can pull out complex parts of your tool logic into separate workflows.
 
-The Restate SDK gives you clients to call other services durably from your agent logic.
+The Restate SDK gives you clients to call other Restate services durably from your agent logic.
 All calls are proxied via Restate. Restate persists the call and takes care of retries and recovery.
 
-For example, the human approval tool from the previous section can be implemented as a separate service:
-```typescript orchestration/sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/orchestration/sub-workflow-agent.ts#wf"} 
+For example, let's implement the human approval tool as a separate service:
+```typescript orchestration/sub-workflow-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/orchestration/sub-workflow-agent.ts#wf"} 
 export const humanApprovalWorfklow = restate.service({
   name: "HumanApprovalWorkflow",
   handlers: {
@@ -418,7 +396,7 @@ export const humanApprovalWorfklow = restate.service({
 ```
 
 This can now be called from the main agent via a service client:
-```typescript orchestration/sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/orchestration/sub-workflow-agent.ts#here"} 
+```typescript orchestration/sub-workflow-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/orchestration/sub-workflow-agent.ts#here"} 
 humanApproval: tool({
   description: "Ask for human approval for high-value claims.",
   inputSchema: InsuranceClaimSchema,
@@ -428,13 +406,14 @@ humanApproval: tool({
 ```
 
 These workflows have access to all Restate SDK features, including durable execution, state management, awakeables, and observability.
+They can be developed, deployed, and scaled independently.
 
 
 <Accordion title={"Try it out"}>
     Start a request for a high-value claim that needs human approval.
     Use `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
-    curl localhost:8080/ClaimEvaluationWithWorkflows/run/send \
+    curl localhost:8080/SubWorkflowClaimApprovalAgent/run/send \
     --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
     ```
 
@@ -459,7 +438,7 @@ Similar to sub-workflows, you can break down complex agents into multiple specia
 
 You can let your agent hand off tasks to other agents by calling them from tools:
 
-```typescript orchestration/multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/orchestration/multi-agent.ts#here"} 
+```typescript orchestration/multi-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts#here"} 
 const { text } = await generateText({
   model,
   prompt: `Claim: ${JSON.stringify(claim)}`,
@@ -487,7 +466,7 @@ const { text } = await generateText({
 <Accordion title={"Try it out"}>
     Start a request for a claim that needs to be analyzed by multiple agents.
     ```bash
-    curl localhost:8080/ClaimAnalysisOrchestrator/run --json '{
+    curl localhost:8080/MultiAgentClaimApproval/run --json '{
         "date":"2024-10-01",
         "category":"orthopedic",
         "reason":"hospital bill for a broken leg",
@@ -511,7 +490,7 @@ const { text } = await generateText({
 Now that our agents are broken down into smaller parts, let's have a look at how to run different parts of our agent logic in parallel to speed up execution.
 
 <Warning>
-    You might have noticed that our agents set `parallelToolCalls: false` in the OpenAI provider options.
+    You might have noticed that all example agents set `parallelToolCalls: false` in the OpenAI provider options.
     This is required to ensure deterministic execution during replays.
     When multiple tools execute in parallel and use the Context, the order of operations might differ between the original execution and the replay, leading to inconsistencies.
 </Warning>
@@ -523,11 +502,11 @@ Most actions on the Restate Context return a RestatePromise. These can be compos
 
 ### Parallel Tool Steps
 
-To parallelize tool steps, implement an orchestrator tool which use `RestatePromise`  to run multiple steps in parallel.
+To parallelize tool steps, implement an orchestrator tool that uses `RestatePromise`  to run multiple steps in parallel.
 
 Here is an insurance claim agent that runs multiple analyses in parallel:
 
-```typescript parallelwork/parallel-tools-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/parallelwork/parallel-tools-agent.ts#here"} 
+```typescript parallelwork/parallel-tools-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/parallelwork/parallel-tools-agent.ts#here"} 
 const { text } = await generateText({
   model,
   prompt: `Analyze the claim ${JSON.stringify(claim)}. 
@@ -585,7 +564,7 @@ For example, to race agents against each other and [use the first result that re
 
 Or to let a main orchestrator agent combine the results of multiple specialized agents in parallel:
 
-```typescript parallelwork/parallel-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/parallelwork/parallel-agents.ts?collapse_prequel"} 
+```typescript parallelwork/parallel-agents.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/parallelwork/parallel-agents.ts?collapse_prequel"} 
 export default restate.service({
   name: "ParallelAgentClaimApproval",
   handlers: {
@@ -616,7 +595,7 @@ export default restate.service({
 <Accordion title={"Try it out"}>
     Start a request for a claim that needs to be analyzed by multiple agents in parallel.
     ```bash
-    curl localhost:8080/ParallelAgentClaimAnalyzer/run --json '{
+    curl localhost:8080/ParallelAgentClaimApproval/run --json '{
         "date":"2024-10-01",
         "category":"orthopedic",
         "reason":"hospital bill for a broken leg",
@@ -634,6 +613,7 @@ export default restate.service({
 </Accordion>
 
 ## Error Handling
+LLM calls are costly, so you can configure retry behavior in both Restate and your AI SDK to avoid infinite loops and high costs.
 
 Restate distinguishes between two types of errors:
 - **Transient errors**: Temporary issues like network failures or rate limits. Restate automatically retries these until they succeed or the retry policy is exhausted.
@@ -651,7 +631,6 @@ Many AI SDKs also have their own retry behavior for LLM calls and tool execution
 
 ### Retries of LLM calls
 
-LLM calls are costly, so you can configure retry behavior in both Restate and your AI SDK to avoid infinite loops and high costs.
 
 In the Vercel AI SDK, set `maxRetries` on `generateText` (default: 2) to retry failed calls due to rate limits or transient errors.
 After retries are exhausted, the agent throws an error.
@@ -659,7 +638,7 @@ Restate then retries the invocation with exponential backoff to handle longer ou
 
 You can limit Restate’s retries with the `maxRetryAttempts` option in `durableCalls` middleware:
 
-```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/errorhandling/fail-on-terminal-tool-agent.ts#max_attempts_example"} 
+```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#max_attempts_example"} 
 const model = wrapLanguageModel({
   model: openai("gpt-4o"),
   middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
@@ -672,16 +651,17 @@ Once Restate’s retries are exhausted, the invocation fails with a `TerminalErr
 
 ### Tool execution errors
 
-By default, the AI SDK will convert any error in tool execution into a message to the LLM, and the agent will decide how to proceed.
+The Vercel AI SDK will convert any error in tool execution into a message to the LLM, and the agent will decide how to proceed.
+By default, it also does this for terminal errors thrown in the tool execution.
 This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
 
-However, if you want to treat tool execution errors as permanent failures, you can use one of the following options.
+However, if you want to treat terminal tool execution errors as permanent failures, you can use one of the following options.
 
 <AccordionGroup>
 <Accordion title="Fail the agent on terminal tool errors">
 **To fail the agent on terminal tool errors**, rethrow the error in `onStepFinish`:
 
-```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/errorhandling/fail-on-terminal-tool-agent.ts#option2"} 
+```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#option2"} 
 const { text } = await generateText({
   model,
   tools: {
@@ -704,7 +684,7 @@ const { text } = await generateText({
 
 To stop the agent on terminal tool errors and handle it after the agent finishes, you can use `hasTerminalToolError` in `stopWhen` and then inspect the steps for errors:
 
-```typescript errorhandling/stop-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/errorhandling/stop-on-terminal-tool-agent.ts#option3"} 
+```typescript errorhandling/stop-on-terminal-tool-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts#option3"} 
 const { steps, text } = await generateText({
   model,
   tools: {
@@ -732,6 +712,10 @@ if (terminalSteps.length > 0) {
 You can catch and handle terminal errors in your agent logic if needed.
 Have a look at the advanced patterns section for an example of rolling back previous tool executions on failure.
 
+<Info>
+You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `ctx.run` steps in your tool executions.
+</Info>
+
 
 ## Advanced patterns
 
@@ -742,13 +726,13 @@ If you need more control over the agent loop, you can implement it manually usin
 This allows you to:
 - Parallelize tool calls with `RestatePromise`
 - Implement custom stopping conditions
-- Implement custom logic between steps
+- Implement custom logic between steps (e.g. human approval)
 - Interact with external systems between steps
 - Handle errors in a custom way
 
-Here is an example of a manual agent loop that runs until a custom stopping condition is met:
+Here is an example of a manual agent loop:
 
-```typescript advanced/manual-loop-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/manual-loop-agent.ts?collapse_prequel"} 
+```typescript advanced/manual-loop-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/advanced/manual-loop-agent.ts?collapse_prequel"} 
 export default restate.service({
   name: "ManualLoopAgent",
   handlers: {
@@ -806,6 +790,8 @@ export default restate.service({
 });
 ```
 
+This can be extended to include any custom control flow you need: persistent state, parallel tool calls, custom stopping conditions, or custom error handling.
+
 Try it out by sending a request to the service:
 ```bash
 curl localhost:8080/ManualLoopAgent/run \
@@ -818,8 +804,6 @@ In the UI, you can see how the agent runs multiple iterations and calls tools.
 <img src="/img/tour/agents/manual-loop-agent.png" alt="Invocation overview" />
 </Frame>
 
-Try to extend the agent with persistent state, parallel tool calls, custom stopping conditions, or custom error handling.
-
 </Accordion>
 <Accordion title="Rolling back tool executions on failure">
 
@@ -827,8 +811,8 @@ Sometimes you need to undo previous agent actions when a later step fails. Resta
 
 Just track the rollback actions as you go, let the agent rethrow terminal tool errors, and execute the rollback actions in reverse order.
 
-Here is an example of a travel booking agent that rolls back hotel, flight and car bookings if any step fails with a terminal error (e.g. car type not available):
-```typescript advanced/rollback-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-agents-typescript/src/advanced/rollback-agent.ts#here"} 
+Here is an example of a travel booking agent that first reserves a hotel, flight and car, and then either confirms them or rolls back if any step fails with a terminal error (e.g. car type not available):
+```typescript advanced/rollback-agent.ts {"CODE_LOAD:: https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/agent_tour/vercel-ai/tour-of-agents/src/advanced/rollback-agent.ts#here"} 
 const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
   const on_rollback: { (): restate.RestatePromise<any> }[] = [];
   const on_success: { (): restate.RestatePromise<any> }[] = [];
@@ -912,7 +896,7 @@ const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
 
 Try it out by sending the following request:
 ```bash
-curl localhost:8080/BookingAgent/book \
+curl localhost:8080/BookingWithRollbackAgent/book \
 --json '{"prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."}'
 ```
 
@@ -920,11 +904,13 @@ This will succeed successfully. Have a look at the invocation trace in the UI.
 
 To see the compensation in action, ask for an SUV rental, which will cause the car booking step to fail and trigger the compensation logic:
 ```bash
-curl localhost:8080/BookingAgent/book \
+curl localhost:8080/BookingWithRollbackAgent/book \
 --json '{"prompt": "Planning a family vacation to Miami for 4 people from May 20-25. We need flights from Boston Logan BOS, a beachfront hotel for 4 guests, and an SUV rental with pick-up at BOS airport."}'
 ```
 
 Have a look at the UI to see how the car booking fails, and the flight and hotel bookings are rolled back.
+
+Check out the [sagas guide](/guides/sagas) for more details.
 
 <Frame>
 <img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
@@ -947,13 +933,17 @@ Have a look at the [interruptible coding agent](https://github.com/igalshilman/a
 
 ## Summary
 
-Restate transforms AI agent development by providing:
-
+Durable Execution, paired with your existing SDKs, gives your agents a powerful upgrade:
 - **Durable Execution**: Automatic recovery from failures without losing progress
-- **State Management**: Persistent conversation history and context
-- **Simple Integration**: Works with OpenAI API and other LLM providers
-- **Human-in-the-Loop**: Seamless approval workflows with timeouts  
+- **Persistent memory and context**: Persistent conversation history and context
+- **Observability** by default across your agents and workflows
+- **Human-in-the-Loop**: Seamless approval workflows with timeouts
 - **Multi-Agent Coordination**: Reliable orchestration of specialized agents
+- **Suspensions** to save costs on function-as-a-service platforms when agents need to wait
 - **Advanced Patterns**: Real-time progress updates, interruptions, and long-running workflows
 
-Build resilient, observable AI agents that handle real-world complexity without the typical infrastructure overhead.
+## Next Steps
+- Learn more about how to implement resilient tools with Restate in the [Tour of Workflows](/tour/workflows)
+- Check out the [other Restate AI examples on GitHub](https://github.com/restatedev/ai-examples)
+- Sign up for [Restate Cloud](https://restate.dev/cloud/) and start building agents without managing infrastructure
+
