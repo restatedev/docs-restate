@@ -1,0 +1,76 @@
+---
+title: "CLI Configuration"
+description: "Restate CLI configuration options."
+---
+
+
+You can use the CLI to interact with Restate, and manage your services, deployments and invocations.
+
+Have a look at the [CLI installation docs](/installation).
+
+There are 2 ways to configure the CLI: via environment variables or via a configuration file.
+
+## Using environment variables
+
+You can specify the following environment variables:
+
+- `RESTATE_HOST`: The hostname/IP address of the server. Default is `localhost`.
+- `RESTATE_HOST_SCHEME`: Default is `http`.
+- `RESTATE_ADMIN_URL`: To specify the full URL of the admin server (scheme+host+port).
+- `RESTATE_AUTH_TOKEN`: Set if authentication is required.
+
+For example, to specify the hostname `myhost` and the host scheme `https`, pass environment variables as follows:
+
+```shell
+RESTATE_HOST=myhost RESTATE_HOST_SCHEME=https restate <command>
+```
+
+<Info>
+You can find the full list of configuration variables in the [CLI GitHub repo](https://github.com/restatedev/restate/blob/main/cli/src/cli_env.rs).
+</Info>
+
+You can also specify the configuration in a `.env` file. The CLI will look for a `.env` file in its current directory.
+
+For example, to connect to a Restate admin server running at `http://myhost:9070`, save the following in a `.env` file:
+
+```shell .env
+RESTATE_ADMIN_URL=http://myhost:9070
+```
+
+## Using the config file
+
+By default, the CLI will treat `$HOME/.config/restate` as its config directory.
+This is configurable with `$RESTATE_CLI_CONFIG_HOME`. Restate will look for file
+named `config.toml` inside this directory. You can edit this file with
+`restate config edit`, or view its contents with `restate config view`.
+
+The config file has a native concept of 'enviroments' which are sets of
+configuration intended to specify different instances of Restate. You can
+list your configured environments:
+
+```bash
+> restate config list-environments
+CURRENT  NAME   ADMIN_BASE_URL
+*        local  http://localhost:9070/
+```
+
+By default, the CLI uses the `local` environment which is configured to point
+at a Restate instance running on your local machine. Additional environments
+can be specified as new blocks in `config.toml`:
+
+```toml config.toml
+[myhost]
+ingress_base_url = "http://myhost:8080"
+admin_base_url = "http://myhost:9070"
+bearer_token = "..."
+```
+
+The title of the block is the name of the environment. You can switch
+between environments in various ways:
+
+1. With an argument: `restate -e myhost whoami`
+2. With an environment variable: `RESTATE_ENVIRONMENT=myhost restate whoami`
+3. With the command `restate config use-environment myhost`. This will write
+the name of the environment to the CLI config directory, so that it's used by
+default for all CLI commands. You can switch back to `local` with
+`restate config use-environment local`.
