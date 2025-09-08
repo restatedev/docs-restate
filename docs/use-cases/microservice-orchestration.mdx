@@ -12,27 +12,27 @@ Traditional microservice orchestration requires complex infrastructure: message 
 
 Build microservices that automatically recover from failures without losing progress:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/order-service.ts#here"} 
 export const orderService = restate.service({
   name: "OrderService",
   handlers: {
-    process: async (ctx: Context, order: Order) => {
+    process: async (ctx: restate.Context, order: Order) => {
       // Each step is automatically durable and resumable
       const paymentId = ctx.rand.uuidv4();
-      
-      const payment = await ctx.run("charge", () => 
+
+      const payment = await ctx.run("charge", () =>
         chargePayment(order.creditCard, paymentId)
       );
-      
+
       for (const item of order.items) {
-        await ctx.run(`reserve-${item.id}`, () => 
+        await ctx.run(`reserve-${item.id}`, () =>
           reserveInventory(item.id, item.quantity)
         );
       }
-      
+
       return { success: true, paymentId };
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -46,16 +46,17 @@ export const orderService = restate.service({
 
 Flexible communication patterns with strong delivery guarantees:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/service-actions.ts#communication"} 
 // Request-response: Wait for result
 const result = await ctx.serviceClient(inventoryService).checkStock(item);
 
-// Fire-and-forget: Guaranteed delivery without waiting  
+// Fire-and-forget: Guaranteed delivery without waiting
 ctx.serviceSendClient(emailService).sendConfirmation(order);
 
 // Delayed execution: Schedule for later
-ctx.serviceSendClient(reminderService)
-  .sendReminder(order, sendOpts({ delay: "7d" }));
+ctx
+  .serviceSendClient(reminderService)
+  .sendReminder(order, sendOpts({ delay: { days: 7 } }));
 ```
 
 **Communication Guarantees:**
@@ -67,28 +68,28 @@ ctx.serviceSendClient(reminderService)
 
 Manage stateful entities without external databases or complex consistency mechanisms:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/user-account.ts#here"} 
 export const userAccount = restate.object({
-  name: "UserAccount", 
+  name: "UserAccount",
   handlers: {
-    updateBalance: async (ctx: ObjectContext, amount: number) => {
+    updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
       const balance = (await ctx.get<number>("balance")) ?? 0;
       const newBalance = balance + amount;
-      
+
       if (newBalance < 0) {
         throw new TerminalError("Insufficient funds");
       }
-      
+
       ctx.set("balance", newBalance);
       return newBalance;
     },
-    
+
     getBalance: restate.handlers.object.shared(
-      async (ctx: ObjectSharedContext) => {
+      async (ctx: restate.ObjectSharedContext) => {
         return (await ctx.get<number>("balance")) ?? 0;
       }
-    )
-  }
+    ),
+  },
 });
 ```
 
@@ -104,26 +105,26 @@ export const userAccount = restate.object({
 
 Implement resilient rollback logic for non-transient failures (e.g. flight fully booked):
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/booking-service.ts#here"} 
 export const bookingService = restate.service({
   name: "BookingService",
   handlers: {
-    reserve: async (ctx: Context, request: BookingRequest) => {
+    reserve: async (ctx: restate.Context, request: BookingRequest) => {
       const compensations = [];
-      
+
       try {
         // Reserve hotel
-        compensations.push(() => 
+        compensations.push(() =>
           ctx.run("cancel-hotel", () => cancelHotel(request.hotelId))
         );
         await ctx.run("book-hotel", () => bookHotel(request));
-        
-        // Reserve flight  
+
+        // Reserve flight
         compensations.push(() =>
           ctx.run("cancel-flight", () => cancelFlight(request.flightId))
         );
         await ctx.run("book-flight", () => bookFlight(request));
-        
+
         return { success: true };
       } catch (error) {
         // Run compensations in reverse order
@@ -132,8 +133,8 @@ export const bookingService = restate.service({
         }
         throw error;
       }
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -141,24 +142,24 @@ export const bookingService = restate.service({
 
 Wait for external events and webhooks with promises that survive crashes:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/service-actions.ts#awakeables"} 
 // Wait for external payment confirmation
 const confirmation = ctx.awakeable<PaymentResult>();
-await ctx.run("initiate-payment", () => 
+await ctx.run("initiate-payment", () =>
   startPayment(order, confirmation.id)
 );
-
-// Webhook handler resolves the awakeable
-return confirmation.promise.orTimeout({ minutes: 30 });
+await confirmation.promise.orTimeout({ minutes: 30 });
 ```
+
+And resolve with the SDK from another handler or via HTTP.
 
 ### Parallel Processing
 
 Execute independent operations concurrently while maintaining durability:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/microservices/service-actions.ts#parallel"} 
 // Process all items in parallel
-const itemPromises = order.items.map(item =>
+const itemPromises = order.items.map((item) =>
   ctx.run(`process-${item.id}`, () => processItem(item))
 );
 
