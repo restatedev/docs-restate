@@ -12,7 +12,7 @@ This command runs both the code loading watcher and the Mintlify docs server con
 
 **Manual code block updates:**
 ```bash
-node loadScripts.js
+node scripts/loadScripts.js
 ```
 Updates all code blocks in MDX files with content from snippets directory.
 

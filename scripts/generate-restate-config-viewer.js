@@ -162,12 +162,12 @@ function expandDefinitions(schema, definitions) {
     return expandRefs(schema);
 }
 
-function generateSchemaViewer(schema) {
-    let output = `---\ntitle: "${schema.title || 'Configuration Schema'}"\ndescription: "${formatDescription(schema.description || '')}"\n---\n\n`;
-    
-    if (schema.description) {
-        output += `${formatDescription(schema.description)}\n\n`;
-    }
+function generateRestateConfigViewer(schema) {
+    let output = `---\ntitle: "Restate Server Configuration"\ndescription: "Reference of the configuration options for Restate Server."\nmode: "wide"\n---\n\n` +
+        'import Intro from "/snippets/common/default-configuration.mdx" \n' +
+        '\n' +
+        '<Intro />' +
+        '\n\n';
     
     // Expand definitions into the main schema
     const definitions = schema.definitions || {};
@@ -206,7 +206,7 @@ function main() {
     
     try {
         const schema = parseJsonSchema(schemaPath);
-        const mdxContent = generateSchemaViewer(schema);
+        const mdxContent = generateRestateConfigViewer(schema);
         
         if (outputPath) {
             fs.writeFileSync(outputPath, mdxContent);
@@ -224,4 +224,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = { parseJsonSchema, generateSchemaViewer };
+module.exports = { parseJsonSchema, generateSchemaViewer: generateRestateConfigViewer };

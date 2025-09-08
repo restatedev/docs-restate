@@ -21,6 +21,21 @@ View your local preview at `http://localhost:3000`.
 
 The main branch is automatically deployed to the production documentation site. 
 
+### Code snippets
+To update code snippets in the documentation, run:
+
+```shell
+node scripts/loadScripts.js
+```
+
+
+### Restate configuration schema
+To update the Restate configuration JSON schema, add it as `snippets/schemas/restate-server-configuration-schema.json` and run:
+
+```shell
+node scripts/generate-restate-config-viewer.js snippets/schemas/restate-server-configuration-schema.json docs/references/server-config.mdx
+```
+
 ## Adding guides 
 
 1. Add the mdx to `docs/guides`. Make sure it has a title, description, and a single tag (either `recipe`, `development`, `deployment`, or `integration`).

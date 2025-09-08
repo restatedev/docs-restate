@@ -36,6 +36,10 @@ const LANGUAGE_SYMBOLS = {
         commentSymbol: "//",
         serviceSymbol: ["#[restate_sdk::service]", "#[restate_sdk::object]", "#[restate_sdk::workflow]"],
     },
+    toml: {
+        commentSymbol: "#",
+        serviceSymbol: [],
+    }
 };
 
 function extractLanguageSymbol(filePath) {
@@ -46,6 +50,7 @@ function extractLanguageSymbol(filePath) {
     if (filePath.endsWith(".go")) return LANGUAGE_SYMBOLS.go;
     if (filePath.endsWith(".rs")) return LANGUAGE_SYMBOLS.rust;
     if (filePath.endsWith(".proto")) return LANGUAGE_SYMBOLS.proto;
+    if (filePath.endsWith(".toml")) return LANGUAGE_SYMBOLS.toml;
     throw new Error(`language not detected for filepath ${filePath}`);
 }
 
