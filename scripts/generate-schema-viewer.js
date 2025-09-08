@@ -54,12 +54,27 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     const { type, optional } = getTypeFromSchema(propSchema);
     const required = isRequired && !optional ? ' required' : '';
     const description = formatDescription(propSchema.description || propSchema.title || '');
-    const defaultValue = propSchema.default !== undefined ? ` (default: \`${JSON.stringify(propSchema.default)}\`)` : '';
     
-    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}>\n`;
+    // Format default value properly for the attribute
+    let defaultAttr = '';
+    if (propSchema.default !== undefined && propSchema.default !== null) {
+        let defaultStr = '';
+        if (typeof propSchema.default === 'string') {
+            defaultStr = `"${propSchema.default}"`;
+        } else if (typeof propSchema.default === 'object') {
+            defaultStr = JSON.stringify(propSchema.default);
+        } else {
+            defaultStr = `${String(propSchema.default)}`;
+        }
+        // Escape quotes for the attribute
+        // const escapedDefault = defaultStr.replace(/"/g, '&quot;');
+        defaultAttr = ` default={${defaultStr}}`;
+    }
     
-    if (description || defaultValue) {
-        output += `${indent}    ${description}${defaultValue}\n`;
+    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${defaultAttr}>\n`;
+    
+    if (description) {
+        output += `${indent}    ${description}\n`;
     }
     
     // Handle object properties
