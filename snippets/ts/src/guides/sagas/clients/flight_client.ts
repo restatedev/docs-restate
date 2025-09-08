@@ -1,5 +1,8 @@
 export const flightClient = {
-  reserve: async (customerId: string, _req: { flightId: string; passengerName: string }) => {
+  reserve: async (
+    customerId: string,
+    _req: { flightId: string; passengerName: string }
+  ) => {
     console.info(`Flight booked for customer ${customerId}`);
     return "my id";
   },

@@ -17,7 +17,12 @@ const myWorkflow = restate.workflow({
 
 // <start_endpoint>
 import * as restate from "@restatedev/restate-sdk";
-restate.endpoint().bind(myService).bind(myVirtualObject).bind(myWorkflow).listen();
+restate
+  .endpoint()
+  .bind(myService)
+  .bind(myVirtualObject)
+  .bind(myWorkflow)
+  .listen();
 // <end_endpoint>
 
 // <start_custom_endpoint>

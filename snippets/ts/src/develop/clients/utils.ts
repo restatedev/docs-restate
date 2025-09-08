@@ -13,7 +13,10 @@ export type MyService = typeof greeterService;
 export const greetCounterObject = restate.object({
   name: "MyObject",
   handlers: {
-    greet: async (ctx: restate.ObjectContext, request: { greeting?: string }) => {
+    greet: async (
+      ctx: restate.ObjectContext,
+      request: { greeting?: string }
+    ) => {
       let count = (await ctx.get<number>("count")) ?? 0;
       count++;
       ctx.set("count", count);

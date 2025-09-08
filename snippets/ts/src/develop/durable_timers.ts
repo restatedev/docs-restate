@@ -11,7 +11,10 @@ const service = restate.service({
 
       // <start_timer>
       try {
-        await ctx.serviceClient(myService).myHandler("Hi").orTimeout({ seconds: 5 });
+        await ctx
+          .serviceClient(myService)
+          .myHandler("Hi")
+          .orTimeout({ seconds: 5 });
       } catch (error) {
         if (error instanceof restate.TimeoutError) {
           console.error("Operation timed out:", error);

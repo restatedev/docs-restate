@@ -21,10 +21,14 @@ const subscriptionService = restate.service({
     add: async (ctx: restate.Context, req: SubscriptionRequest) => {
       const paymentId = ctx.rand.uuidv4();
 
-      const payRef = await ctx.run(() => createRecurringPayment(req.creditCard, paymentId));
+      const payRef = await ctx.run(() =>
+        createRecurringPayment(req.creditCard, paymentId)
+      );
 
       for (const subscription of req.subscriptions) {
-        await ctx.run(() => createSubscription(req.userId, subscription, payRef));
+        await ctx.run(() =>
+          createSubscription(req.userId, subscription, payRef)
+        );
       }
     },
   },

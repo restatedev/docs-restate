@@ -12,7 +12,7 @@ Traditional workflow orchestrators require you to learn new DSLs, manage complex
 
 Write workflows using familiar programming constructs instead of YAML or JSON configurations:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/order-processing.ts#here"} 
 export const orderProcessing = restate.workflow({
   name: "order-processing",
   handlers: {
@@ -21,16 +21,16 @@ export const orderProcessing = restate.workflow({
       if (order.amount > 1000) {
         await ctx.run("fraud-check", () => checkForFraud(order));
       }
-      
+
       // Parallel execution with Promise.all equivalent
       const [payment, inventory] = await RestatePromise.all([
         ctx.run("charge", () => chargePayment(order)),
-        ctx.run("reserve", () => reserveInventory(order))
+        ctx.run("reserve", () => reserveInventory(order)),
       ]);
-      
+
       return { success: payment.success && inventory.success };
-    }
-  }
+    },
+  },
 });
 ```
 
@@ -70,11 +70,13 @@ Restate is built from the ground up for low-latency workflow execution. Unlike t
 
 Restate gives you the flexibility to structure your workflows however makes sense for your application. You can execute steps inline within the workflow or split them out into separate services that can scale independently or are owned by different teams:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/signup.ts#here"} 
 export const userSignup = restate.workflow({
-  name: "user-signup", 
+  name: "user-signup",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
+
       // Move user DB interaction to dedicated service
       const success = await ctx
         .serviceClient(userService)
@@ -84,54 +86,61 @@ export const userSignup = restate.workflow({
       // Execute other steps inline
       await ctx.run("activate", () => activateUser(userId));
       await ctx.run("welcome", () => sendWelcomeEmail(user));
-      
+
       return { success: true };
-    }
-  }
+    },
+  },
 });
 ```
 
 ### Durable State and Queries
 Store workflow state that survives crashes and can be queried from external systems:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/workflow-actions.ts#state"} 
 // Store intermediate results
 ctx.set("payment-status", "completed");
 ctx.set("order-details", order);
+```
 
+```typescript {"CODE_LOAD::ts/src/use-cases/workflow-actions.ts#state_get"} 
 // Query from external handler
-getOrderStatus: async (ctx) => {
+getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
   return {
     payment: await ctx.get("payment-status"),
-    order: await ctx.get("order-details")
+    order: await ctx.get("order-details"),
   };
-}
+},
 ```
 
 ### Event-Driven Coordination
 Handle external events and signals without complex event sourcing infrastructure:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/workflow-actions.ts#approval"} 
 // Wait for external approval
 const approval = await ctx.promise<boolean>("manager-approval");
-
+```
+```typescript {"CODE_LOAD::ts/src/use-cases/workflow-actions.ts#approve"} 
 // External system resolves the promise
-approve: async (ctx, decision: boolean) => {
+approve: async (ctx: restate.WorkflowSharedContext, decision: boolean) => {
   await ctx.promise<boolean>("manager-approval").resolve(decision);
-}
+},
 ```
 
 ### Durable Timers and Scheduling
 Long-running processes with built-in timer management:
 
-```typescript
+```typescript {"CODE_LOAD::ts/src/use-cases/workflow-actions.ts#timers"} 
 // Wait for user action with timeout
-const userAction = ctx.promise<string>("user-response");
-const timeout = ctx.sleep({ hours: 24 });
-
-const result = await RestatePromise.race([userAction, timeout]);
-if (result === timeout) {
-  // Handle timeout scenario
+try {
+  const userAction = ctx
+    .promise<string>("user-response")
+    .get()
+    .orTimeout({ hours: 24 });
+} catch (error) {
+  if (error instanceof restate.TimeoutError) {
+    // Handle timeout
+  }
+  // Handle other errors
 }
 ```
 
