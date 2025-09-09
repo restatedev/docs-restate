@@ -3,6 +3,7 @@ import { durableCalls } from "./middleware";
 
 import { openai } from "@ai-sdk/openai";
 import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
+import {RestatePromise} from "@restatedev/restate-sdk";
 
 function sendApprovalRequest(id: string, decision: string) {
   return undefined;
@@ -39,7 +40,7 @@ const agent = restate.service({
       // <end_approval>
 
       // <start_multi>
-      const [eligibility, fraud, cost] = await Promise.all([
+      const [eligibility, fraud, cost] = await RestatePromise.all([
         ctx.serviceClient(eligibilityAgent).analyze(claim),
         ctx.serviceClient(fraudAgent).analyze(claim),
         ctx.serviceClient(costAgent).analyze(claim),

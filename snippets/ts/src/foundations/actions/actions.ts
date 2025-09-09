@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { v4 as uuid } from "uuid";
-import { rpc, WorkflowSharedContext } from "@restatedev/restate-sdk";
+import {RestatePromise, rpc, WorkflowSharedContext} from "@restatedev/restate-sdk";
 import sendOpts = rpc.sendOpts;
 
 // Type definitions for examples
@@ -237,9 +237,9 @@ const WorkflowExampleWorkflow = restate.workflow({
       const approved = await ctx.promise<boolean>("manager-approval");
 
       // Wait for multiple events
-      const [payment, inventory] = await Promise.all([
-        ctx.promise<PaymentResult>("payment"),
-        ctx.promise<InventoryResult>("inventory"),
+      const [payment, inventory] = await RestatePromise.all([
+        ctx.promise<PaymentResult>("payment").get(),
+        ctx.promise<InventoryResult>("inventory").get(),
       ]);
       // <end_workflow_promises>
     },
