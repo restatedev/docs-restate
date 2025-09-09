@@ -34,23 +34,23 @@ A basic signup workflow looks like this:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/getstarted/workflow.ts?collapse_prequel"}
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/getstarted/workflow.ts?collapse_prequel"} 
 export const signupWorkflow = restate.workflow({
-name: "user-signup",
-handlers: {
-run: async (ctx: WorkflowContext, user: User) => {
-const userId = ctx.key; // workflow ID = user ID
+  name: "user-signup",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key; // workflow ID = user ID
 
-// Write to database
-const success = await ctx.run("create", () => createUser(userId, user));
-if (!success) return { success };
+      // Write to database
+      const success = await ctx.run("create", () => createUser(userId, user));
+      if (!success) return { success };
 
-// Call APIs
-await ctx.run("activate", () => activateUser(userId));
-await ctx.run("welcome", () => sendWelcomeEmail(user));
-return { success };
-},
-},
+      // Call APIs
+      await ctx.run("activate", () => activateUser(userId));
+      await ctx.run("welcome", () => sendWelcomeEmail(user));
+      return { success };
+    },
+  },
 });
 ```
 
@@ -116,14 +116,14 @@ curl localhost:8080/user-signup/johndoe/run \
         <GlobalTabs>
             <GlobalTab title="TypeScript">
 
-                ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/client.ts#submit"}
-                const restateClient = clients.connect({ url: "http://localhost:8080" });
+                ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/client.ts#submit"} 
+const restateClient = clients.connect({ url: "http://localhost:8080" });
 
-                const handle = await restateClient
-                .workflowClient(signupWorkflow, id)
-                .workflowSubmit({ name, email });
-                const result = await restateClient.result(handle);
-                ```
+const handle = await restateClient
+  .workflowClient(signupWorkflow, id)
+  .workflowSubmit({ name, email });
+const result = await restateClient.result(handle);
+```
 
                 The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
 
@@ -196,10 +196,10 @@ To fix the problem, remove the line `failOnAlice` from the `sendWelcomeEmail` fu
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"} 
 export function sendWelcomeEmail(user: User) {
-failOnAlice(user.name, "send welcome email");
-console.log(`Welcome email sent: ${user.email}`);
+  failOnAlice(user.name, "send welcome email");
+  console.log(`Welcome email sent: ${user.email}`);
 }
 ```
 
@@ -231,11 +231,11 @@ Restate workflows can execute operations inline or delegate to separate services
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/activities/workflow.ts#activities"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/activities/workflow.ts#activities"} 
 // Move user DB interaction to dedicated service
 const success = await ctx
-.serviceClient(userService)
-.createUser({ userId, user });
+  .serviceClient(userService)
+  .createUser({ userId, user });
 if (!success) return { success };
 
 // Execute other steps inline
@@ -292,35 +292,35 @@ Workflows can store state in Restate, which can be queried later by other handle
 <GlobalTabs>
     <GlobalTab title="TypeScript">
 
-        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/queries/workflow.ts?collapse_prequel"}
-        export const signupWithQueries = restate.workflow({
-        name: "signup-with-queries",
-        handlers: {
-        run: async (ctx: WorkflowContext, user: User) => {
-        const userId = ctx.key;
+        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/queries/workflow.ts?collapse_prequel"} 
+export const signupWithQueries = restate.workflow({
+  name: "signup-with-queries",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
 
-        ctx.set("user", user);
-        const success = await ctx.run("create", () => createUser(userId, user));
-        if (!success) {
+      ctx.set("user", user);
+      const success = await ctx.run("create", () => createUser(userId, user));
+      if (!success) {
         ctx.set("status", "failed");
         return { success };
-    }
-        ctx.set("status", "created");
+      }
+      ctx.set("status", "created");
 
-        await ctx.run("activate", () => activateUser(userId));
-        await ctx.run("welcome", () => sendWelcomeEmail(user));
-        return { success };
+      await ctx.run("activate", () => activateUser(userId));
+      await ctx.run("welcome", () => sendWelcomeEmail(user));
+      return { success };
     },
 
-        getStatus: async (ctx: WorkflowSharedContext) => {
-        return {
+    getStatus: async (ctx: WorkflowSharedContext) => {
+      return {
         status: await ctx.get("status"),
         user: await ctx.get("user"),
-    };
+      };
     },
-    },
-    });
-        ```
+  },
+});
+```
 
     </GlobalTab>
     <GlobalTab title="Java">
@@ -359,31 +359,31 @@ Pause workflow execution waiting for external events using durable promises:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/signals/workflow.ts?collapse_prequel"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/signals/workflow.ts?collapse_prequel"} 
 export const signupWithSignals = restate.workflow({
-name: "signup-with-signals",
-handlers: {
-run: async (ctx: WorkflowContext, user: User) => {
-const userId = ctx.key;
+  name: "signup-with-signals",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
 
-// Generate verification secret and send email
-const secret = ctx.rand.uuidv4();
-await ctx.run("verify", () =>
-sendVerificationEmail(userId, user, secret),
-);
+      // Generate verification secret and send email
+      const secret = ctx.rand.uuidv4();
+      await ctx.run("verify", () =>
+        sendVerificationEmail(userId, user, secret),
+      );
 
-// Wait for user to click verification link
-const clickedSecret = await ctx.promise<string>("email-verified");
-return { success: clickedSecret === secret };
-},
-verifyEmail: async (
-ctx: WorkflowSharedContext,
-req: { secret: string },
-) => {
-// Resolve the promise to continue the main workflow
-await ctx.promise<string>("email-verified").resolve(req.secret);
-},
-},
+      // Wait for user to click verification link
+      const clickedSecret = await ctx.promise<string>("email-verified");
+      return { success: clickedSecret === secret };
+    },
+    verifyEmail: async (
+      ctx: WorkflowSharedContext,
+      req: { secret: string },
+    ) => {
+      // Resolve the promise to continue the main workflow
+      await ctx.promise<string>("email-verified").resolve(req.secret);
+    },
+  },
 });
 ```
 
@@ -435,29 +435,29 @@ You can also use promises the other way around: to send events from the workflow
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/events/workflow.ts?collapse_prequel"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/events/workflow.ts?collapse_prequel"} 
 export const signupWithEvents = restate.workflow({
-name: "signup-with-events",
-handlers: {
-run: async (ctx: WorkflowContext, user: User) => {
-const userId = ctx.key;
+  name: "signup-with-events",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
 
-const success = await ctx.run("create", () => createUser(userId, user));
-if (!success) {
-await ctx.promise<string>("user-created").reject("Creation failed.");
-return { success };
-}
-await ctx.promise<string>("user-created").resolve("User created.");
+      const success = await ctx.run("create", () => createUser(userId, user));
+      if (!success) {
+        await ctx.promise<string>("user-created").reject("Creation failed.");
+        return { success };
+      }
+      await ctx.promise<string>("user-created").resolve("User created.");
 
-await ctx.run("activate", () => activateUser(userId));
-await ctx.run("welcome", () => sendWelcomeEmail(user));
-return { success };
-},
+      await ctx.run("activate", () => activateUser(userId));
+      await ctx.run("welcome", () => sendWelcomeEmail(user));
+      return { success };
+    },
 
-waitForUserCreation: async (ctx: WorkflowSharedContext) => {
-return ctx.promise<string>("user-created");
-},
-},
+    waitForUserCreation: async (ctx: WorkflowSharedContext) => {
+      return ctx.promise<string>("user-created");
+    },
+  },
 });
 ```
 
@@ -500,51 +500,51 @@ Use durable timers for long-running workflows with timeouts and retries:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/timers/workflow.ts?collapse_prequel"}
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/timers/workflow.ts?collapse_prequel"} 
 export const signupWithTimers = restate.workflow({
-name: "signup-with-timers",
-handlers: {
-run: async (ctx: WorkflowContext, user: User) => {
-const userId = ctx.key;
+  name: "signup-with-timers",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
 
-const secret = ctx.rand.uuidv4();
-await ctx.run("verify", () =>
-sendVerificationEmail(userId, user, secret),
-);
+      const secret = ctx.rand.uuidv4();
+      await ctx.run("verify", () =>
+        sendVerificationEmail(userId, user, secret),
+      );
 
-const clickedPromise = ctx.promise<string>("email-verified").get();
-const verificationTimeout = ctx.sleep({ days: 1 });
-while (true) {
-const reminderTimer = ctx.sleep({ seconds: 15 });
+      const clickedPromise = ctx.promise<string>("email-verified").get();
+      const verificationTimeout = ctx.sleep({ days: 1 });
+      while (true) {
+        const reminderTimer = ctx.sleep({ seconds: 15 });
 
-// Wait for email verification, reminder timer or timeout
-const result = await RestatePromise.race([
-clickedPromise.map(() => "verified"),
-reminderTimer.map(() => "reminder"),
-verificationTimeout.map(() => "timeout"),
-]);
+        // Wait for email verification, reminder timer or timeout
+        const result = await RestatePromise.race([
+          clickedPromise.map(() => "verified"),
+          reminderTimer.map(() => "reminder"),
+          verificationTimeout.map(() => "timeout"),
+        ]);
 
-switch (result) {
-case "verified":
-const clickedSecret = await ctx.promise<string>("email-verified");
-return { success: clickedSecret === secret };
-case "reminder":
-await ctx.run("remind", () => sendReminderEmail(user));
-break;
-case "timeout":
-throw new TerminalError(
-"Email verification timed out after 24 hours",
-);
-}
-}
-},
-verifyEmail: async (
-ctx: WorkflowSharedContext,
-req: { secret: string },
-) => {
-await ctx.promise<string>("email-verified").resolve(req.secret);
-},
-},
+        switch (result) {
+          case "verified":
+            const clickedSecret = await ctx.promise<string>("email-verified");
+            return { success: clickedSecret === secret };
+          case "reminder":
+            await ctx.run("remind", () => sendReminderEmail(user));
+            break;
+          case "timeout":
+            throw new TerminalError(
+              "Email verification timed out after 24 hours",
+            );
+        }
+      }
+    },
+    verifyEmail: async (
+      ctx: WorkflowSharedContext,
+      req: { secret: string },
+    ) => {
+      await ctx.promise<string>("email-verified").resolve(req.secret);
+    },
+  },
 });
 ```
 
@@ -612,7 +612,7 @@ Throw a `TerminalError` in your handler to indicate a terminal failure:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```typescript {"CODE_LOAD::ts/src/tour/workflows/terminal_error.ts#terminal_error"}
+```typescript {"CODE_LOAD::ts/src/tour/workflows/terminal_error.ts#terminal_error"} 
 throw new TerminalError("Invalid credit card");
 ```
 
@@ -635,15 +635,15 @@ Some actions let you configure their retry behavior, for example to limit the nu
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/retries/workflow.ts#retries"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/retries/workflow.ts#retries"} 
 try {
-const retryPolicy = {
-maxRetryAttempts: 3,
-initialRetryIntervalMillis: 1000,
-};
-await ctx.run("welcome", () => sendWelcomeEmail(user), retryPolicy);
+  const retryPolicy = {
+    maxRetryAttempts: 3,
+    initialRetryIntervalMillis: 1000,
+  };
+  await ctx.run("welcome", () => sendWelcomeEmail(user), retryPolicy);
 } catch (error) {
-console.error("Failed to send welcome email after retries:", error);
+  console.error("Failed to send welcome email after retries:", error);
 }
 ```
 
@@ -696,38 +696,38 @@ On a terminal failure, you execute them in reverse order:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/sagas/workflow.ts?collapse_prequel"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/sagas/workflow.ts?collapse_prequel"} 
 export const signupWithSagas = restate.workflow({
-name: "signup-with-sagas",
-handlers: {
-run: async (ctx: WorkflowContext, user: User) => {
-const userId = ctx.key;
-const compensations = [];
+  name: "signup-with-sagas",
+  handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key;
+      const compensations = [];
 
-try {
-compensations.push(() => ctx.run("delete", () => deleteUser(userId)));
-await ctx.run("create", () => createUser(userId, user));
+      try {
+        compensations.push(() => ctx.run("delete", () => deleteUser(userId)));
+        await ctx.run("create", () => createUser(userId, user));
 
-compensations.push(() =>
-ctx.run("deactivate", () => deactivateUser(userId)),
-);
-await ctx.run("activate", () => activateUser(userId));
+        compensations.push(() =>
+          ctx.run("deactivate", () => deactivateUser(userId)),
+        );
+        await ctx.run("activate", () => activateUser(userId));
 
-compensations.push(() =>
-ctx.run("unsubscribe", () => cancelSubscription(user)),
-);
-await ctx.run("subscribe", () => subscribeToPaidPlan(user));
-} catch (e) {
-if (e instanceof restate.TerminalError) {
-for (const compensation of compensations.reverse()) {
-await compensation();
-}
-}
-return { success: false };
-}
-return { success: true };
-},
-},
+        compensations.push(() =>
+          ctx.run("unsubscribe", () => cancelSubscription(user)),
+        );
+        await ctx.run("subscribe", () => subscribeToPaidPlan(user));
+      } catch (e) {
+        if (e instanceof restate.TerminalError) {
+          for (const compensation of compensations.reverse()) {
+            await compensation();
+          }
+        }
+        return { success: false };
+      }
+      return { success: true };
+    },
+  },
 });
 ```
 
@@ -812,7 +812,7 @@ Turning your signup workflow into a serverless function is as simple as adapting
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```typescript {"CODE_LOAD::ts/src/tour/workflows/serving_lambda.ts#lambda"}
+```typescript {"CODE_LOAD::ts/src/tour/workflows/serving_lambda.ts#lambda"} 
 import * as restate from "@restatedev/restate-sdk/lambda";
 export const handler = restate.endpoint().bind(signupWorkflow).handler();
 ```

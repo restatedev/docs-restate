@@ -51,6 +51,9 @@ public class IngressClient {
 
     // To message a virtual object with a delay
     MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi", Duration.ofDays(5));
+
+    // To submit a workflow with a delay
+    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi", Duration.ofDays(5));
     // <end_delayed_call>
 
   }

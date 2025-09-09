@@ -13,7 +13,7 @@ public class App {
             .bind(new ShoppingCartObject())
             .bind(new UserAccount())
             .bind(new OrderWorkflow())
-            .bind(new ActionsExample())
+            .bind(new Actions())
             .bind(new StateExample())
             .bind(new WorkflowExample()));
   }
