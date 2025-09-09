@@ -123,26 +123,18 @@ func (c *IngressClient) attach() {
 	// ---------------------------------
 	// OPTION 1: With the invocation Id
 	invocationId := handle.Id
-
-	// - Attach
 	result1, err := restateingress.AttachInvocation[*MyOutput](
 		restateClient, invocationId).
 		Attach(context.Background())
 
-	// - Peek
-	output, err := restateingress.AttachInvocation[*MyOutput](
-		restateClient, invocationId).
-		Output(context.Background())
-
 	// ---------------------------------
-	// OPTION 3: With the idempotency key
+	// OPTION 2: With the idempotency key
 	result2, err := restateingress.AttachService[*MyOutput](
 		restateClient, "MyService", "MyHandler", "my-idempotency-key").
 		Attach(context.Background())
 	// <end_service_attach>
 
 	_ = result1
-	_ = output
 	_ = result2
 	_ = err
 }
@@ -163,15 +155,9 @@ func (c *IngressClient) workflowAttach() {
 
 	// ---------------------------------
 	// OPTION 1: With the handle returned by the workflow submission
-	// - Attach
 	result, err := restateingress.AttachInvocation[*MyOutput](
 		restateClient, wfHandle.Id).
 		Attach(context.Background())
-
-	// - Peek
-	output, err := restateingress.AttachInvocation[*MyOutput](
-		restateClient, wfHandle.Id).
-		Output(context.Background())
 
 	// ---------------------------------
 	// OPTION 2: With the workflow ID
@@ -181,7 +167,6 @@ func (c *IngressClient) workflowAttach() {
 	// <end_workflow_attach>
 
 	_ = result
-	_ = output
 	_ = wfHandle2
 	_ = err
 }
