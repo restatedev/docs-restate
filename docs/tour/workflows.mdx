@@ -16,10 +16,10 @@ In this guide, you'll learn how to:
 - Build resilient, observable workflows without external dependencies
 Select your SDK:
 <GlobalTabs>
-    <GlobalTab title="TypeScript"/>
-    <GlobalTab title="Java"/>
-    <GlobalTab title="Go"/>
-    <GlobalTab title="Python"/>
+<GlobalTab title="TypeScript"/>
+<GlobalTab title="Java"/>
+<GlobalTab title="Go"/>
+<GlobalTab title="Python"/>
 </GlobalTabs>
 
 ## Getting Started
@@ -34,9 +34,9 @@ A basic signup workflow looks like this:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/getstarted/workflow.ts?collapse_prequel"} 
+```typescript signup-workflow.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-workflow.ts?collapse_prequel"} 
 export const signupWorkflow = restate.workflow({
-  name: "user-signup",
+  name: "SignupWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key; // workflow ID = user ID
@@ -57,11 +57,89 @@ export const signupWorkflow = restate.workflow({
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWorkflow {
+
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key(); // workflow ID = user ID
+
+    // Write to database
+    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    if (!success) {
+      return false;
+    }
+
+    // Call APIs
+    ctx.run("activate", () -> activateUser(userId));
+    ctx.run("welcome", () -> sendWelcomeEmail(user));
+
+    return true;
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go getstarted.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/getstarted.go?collapse_prequel"} 
+type SignupWorkflow struct{}
+
+func (SignupWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  userID := restate.Key(ctx) // workflow ID = user ID
+
+  // Write to database
+  success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+  })
+  if err != nil {
+    return false, err
+  }
+  if !success {
+    return false, nil
+  }
+
+  // Call APIs
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, ActivateUser(userID)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendWelcomeEmail(user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  return true, nil
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_workflow.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_workflow.py?collapse_prequel"} 
+signup_workflow = restate.Workflow("SignupWorkflow")
+
+
+@signup_workflow.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()  # workflow ID = user ID
+
+    # Write to database
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+        return success
+
+    # Call APIs
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+    await ctx.run_typed("welcome", send_welcome_email, user=user)
+    return success
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -79,44 +157,123 @@ You don't need to run your services in any special way. Restate works with how y
 restate-server
 ```
 
-Get the example:
-```bash
-restate example typescript-tour-of-workflows && cd typescript-tour-of-workflows
-npm install
-```
-<GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/typescript/tutorials/tour-of-workflows-typescript" />
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+        Get the example:
+        ```bash
+        restate example typescript-tour-of-workflows && cd typescript-tour-of-workflows
+        npm install
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/typescript/tutorials/tour-of-workflows-typescript" />
 
-Run the example:
-```bash
-npm run dev
-```
+        Run the example:
+        ```bash
+        npm run dev
+        ```
 
-Then, tell Restate where your workflow is running via the UI (`http://localhost:9070`) or CLI:
-```bash
-restate deployments register http://localhost:9080
-```
+        Then, tell Restate where your workflow is running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+    </GlobalTab>
+    <GlobalTab title="Java">
+        Get the example:
+        ```bash
+        restate example java-tour-of-workflows && cd java-tour-of-workflows
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/java/tutorials/tour-of-workflows-java" />
+
+        Run the example:
+        ```bash
+        mvn compile exec:java
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+
+    </GlobalTab>
+    <GlobalTab title="Go">
+        Get the example:
+        ```bash
+        restate example go-tour-of-workflows && cd go-tour-of-workflows
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/go/tutorials/tour-of-workflows-go/examples" />
+
+        Run the example:
+        ```bash
+        go run .
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+
+    </GlobalTab>
+    <GlobalTab title="Python">
+        Get the example:
+        ```bash
+        restate example python-tour-of-workflows && cd python-tour-of-workflows
+        ```
+        <GitHubLink url="https://github.com/restatedev/examples/tree/new_tours/python/tutorials/tour-of-workflows-python" />
+
+        Run the example:
+        ```bash
+        uv run .
+        ```
+
+        Then, tell Restate where your services are running via the UI (`http://localhost:9070`) or CLI:
+        ```bash
+        restate deployments register http://localhost:9080
+        ```
+    </GlobalTab>
+</GlobalTabs>
 
 ## Submitting Workflows
 The workflow can be submitted over HTTP, Kafka, programmatically, or via the UI.
 
 To submit the workflow via HTTP send the request to `restate-ingress/workflow-name/key/run`, in our case:
-```bash
-curl localhost:8080/user-signup/johndoe/run \
-  --json '{"name": "John Doe", "email": "john@mail.com"}'
-```
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+        ```bash
+        curl localhost:8080/SignupWorkflow/johndoe/run \
+        --json '{"name": "John Doe", "email": "john@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/SignupWorkflow/johndoe/run \
+        --json '{"name": "John Doe", "email": "john@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/SignupWorkflow/johndoe/Run \
+        --json '{"name": "John Doe", "email": "john@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/SignupWorkflow/johndoe/run \
+        --json '{"name": "John Doe", "email": "john@mail.com"}'
+        ```
+    </GlobalTab>
+</GlobalTabs>
 
 <Info>
-    Restate deduplicates workflow executions on the key, here `johndoe`.
-    Make sure you use another key, if you want to try a request multiple times.
+Restate deduplicates workflow executions on the key, here `johndoe`.
+Make sure you use another key, if you want to try a request multiple times.
 </Info>
 
 <AccordionGroup>
-    <Accordion title={"Programmatic invocation"}>
-        You can invoke a workflow programmatically with the Restate SDK:
-        <GlobalTabs>
-            <GlobalTab title="TypeScript">
+<Accordion title={"Programmatic invocation"}>
+You can invoke a workflow programmatically with the Restate SDK:
+<GlobalTabs>
+<GlobalTab title="TypeScript">
 
-                ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/client.ts#submit"} 
+```ts client.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/client.ts#submit"} 
 const restateClient = clients.connect({ url: "http://localhost:8080" });
 
 const handle = await restateClient
@@ -125,43 +282,68 @@ const handle = await restateClient
 const result = await restateClient.result(handle);
 ```
 
-                The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
+The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
 
-                Run the client script via:
-                ```bash
-                npm run client
-                ```
+Run the client script via:
+```bash
+npm run client
+```
 
-            </GlobalTab>
-            <GlobalTab title="Java">
+</GlobalTab>
+<GlobalTab title="Java">
 
-            </GlobalTab>
-            <GlobalTab title="Go">
 
-            </GlobalTab>
-            <GlobalTab title="Python">
 
-            </GlobalTab>
-        </GlobalTabs>
+</GlobalTab>
+<GlobalTab title="Go">
 
-    </Accordion>
-    <Accordion title={"Scheduling for later"}>
-        You can schedule a workflow to run at a later time by specifying a delay:
+</GlobalTab>
+<GlobalTab title="Python">
+
+</GlobalTab>
+</GlobalTabs>
+
+</Accordion>
+<Accordion title={"Scheduling for later"}>
+You can schedule a workflow to run at a later time by specifying a delay:
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
         ```bash
-        curl localhost:8080/user-signup/petewhite/run/send?delay=5m \
-            --json '{"name": "Pete White", "age": 25}'
+        curl localhost:8080/SignupWorkflow/petewhite/run/send?delay=5m \
+        --json '{"name": "Pete White", "age": 25}'
         ```
-        There is no limit to how long you can delay a workflow (works for months, even years).
-
-        Have a look at the SDK docs to learn how to schedule workflows programmatically ([TS](/services/invocation/clients/typescript-sdk) / [Java](/services/invocation/clients/java-sdk) / [Go](/services/invocation/clients/go-sdk)).
-    </Accordion>
-    <Accordion title={"Attach to ongoing workflow"}>
-        If a workflow is already ongoing, you can also attach to it to get the result once it finishes:
+    </GlobalTab>
+    <GlobalTab title="Java">
         ```bash
-        curl localhost:8080/restate/workflow/user-signup/johndoe/attach
+        curl localhost:8080/SignupWorkflow/petewhite/run/send?delay=5m \
+        --json '{"name": "Pete White", "age": 25}'
         ```
-        Have a look at the SDK docs to learn how to attach to workflows programmatically ([TS](/services/invocation/clients/typescript-sdk) / [Java](/services/invocation/clients/java-sdk) / [Go](/services/invocation/clients/go-sdk)).
-    </Accordion>
+    </GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/SignupWorkflow/petewhite/Run/send?delay=5m \
+        --json '{"name": "Pete White", "age": 25}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/SignupWorkflow/petewhite/run/send?delay=5m \
+        --json '{"name": "Pete White", "age": 25}'
+        ```
+    </GlobalTab>
+</GlobalTabs>
+
+There is no limit to how long you can delay a workflow (works for months, even years).
+
+Have a look at the SDK docs to learn how to schedule workflows programmatically ([TS](/services/invocation/clients/typescript-sdk) / [Java](/services/invocation/clients/java-sdk) / [Go](/services/invocation/clients/go-sdk)).
+</Accordion>
+<Accordion title={"Attach to ongoing workflow"}>
+If a workflow is already ongoing, you can also attach to it to get the result once it finishes:
+```bash
+curl localhost:8080/restate/workflow/user-signup/johndoe/attach
+```
+Have a look at the SDK docs to learn how to attach to workflows programmatically ([TS](/services/invocation/clients/typescript-sdk) / [Java](/services/invocation/clients/java-sdk) / [Go](/services/invocation/clients/go-sdk)).
+</Accordion>
 </AccordionGroup>
 
 ## Durable Execution
@@ -181,10 +363,32 @@ To persist a workflow step, you use the `WorkflowContext` actions:
 
 <Accordion title={"Try it out"}>
 Send a request for Alice:
-```bash
-curl localhost:8080/user-signup/alicedoe/run \
---json '{"name": "Alice", "email": "alice@mail.com"}'
-```
+<GlobalTabs>
+    <GlobalTab title="TypeScript">
+        ```bash
+        curl localhost:8080/SignupWorkflow/alicedoe/run \
+        --json '{"name": "Alice", "email": "alice@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Java">
+        ```bash
+        curl localhost:8080/SignupWorkflow/alicedoe/run \
+        --json '{"name": "Alice", "email": "alice@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Go">
+        ```bash
+        curl localhost:8080/SignupWorkflow/alicedoe/Run \
+        --json '{"name": "Alice", "email": "alice@mail.com"}'
+        ```
+    </GlobalTab>
+    <GlobalTab title="Python">
+        ```bash
+        curl localhost:8080/SignupWorkflow/alicedoe/run \
+        --json '{"name": "Alice", "email": "alice@mail.com"}'
+        ```
+    </GlobalTab>
+</GlobalTabs>
 Go to the UI at `http://localhost:9070`, on the invocations page, and click on the invocation ID of the retrying invocation:
 <Frame>
 <img src="/img/tour/workflows/workflow_retries.png" alt="Workflow Retries"/>
@@ -196,7 +400,7 @@ To fix the problem, remove the line `failOnAlice` from the `sendWelcomeEmail` fu
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"} 
+```ts utils.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/utils.ts#here"} 
 export function sendWelcomeEmail(user: User) {
   failOnAlice(user.name, "send welcome email");
   console.log(`Welcome email sent: ${user.email}`);
@@ -206,11 +410,37 @@ export function sendWelcomeEmail(user: User) {
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java Utils.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/utils/Utils.java#here"} 
+private static void failOnAlice(String name, String action) {
+  if ("Alice".equals(name)) {
+    System.err.println("[👻 SIMULATED] Failed to " + action + ": " + name);
+    throw new RuntimeException("[👻 SIMULATED] Failed to " + action + ": " + name);
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go utils.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/utils.go#here"} 
+func SendWelcomeEmail(user User) error {
+  err := failOnAlice(user.Name, "send welcome email")
+  if err != nil {
+    return err
+  }
+  fmt.Printf("Welcome email sent: %s\n", user.Email)
+  return nil
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/utils.py#here"} 
+def send_welcome_email(user: User):
+    fail_on_alice(user.name, "send welcome email")
+    print(f"Welcome email sent: {user.email}")
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -231,7 +461,7 @@ Restate workflows can execute operations inline or delegate to separate services
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/activities/workflow.ts#activities"} 
+```ts signup-with-activities.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-activities.ts#activities"} 
 // Move user DB interaction to dedicated service
 const success = await ctx
   .serviceClient(userService)
@@ -246,11 +476,65 @@ await ctx.run("welcome", () => sendWelcomeEmail(user));
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithActivitiesWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithActivitiesWorkflow.java#activities"} 
+// Move user DB interaction to dedicated service
+CreateUserRequest createUserReq = new CreateUserRequest(userId, user);
+boolean success = true;//UserServiceClient.fromContext(ctx).createUser(createUserReq).await();
+
+if (!success) {
+  return false;
+}
+
+// Execute other steps inline
+ctx.run("activate", () -> activateUser(userId));
+ctx.run("welcome", () -> sendWelcomeEmail(user));
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go activities.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/activities.go#activities"} 
+// Move user DB interaction to dedicated service
+success, err := restate.Service[bool](ctx, "UserService", "CreateUser").
+  Request(CreateUserRequest{UserID: userID, User: user})
+if err != nil {
+  return false, err
+}
+if !success {
+  return false, nil
+}
+
+// Execute other steps inline
+_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return restate.Void{}, ActivateUser(userID)
+})
+if err != nil {
+  return false, err
+}
+
+_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return restate.Void{}, SendWelcomeEmail(user)
+})
+if err != nil {
+  return false, err
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_activities.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_activities.py#activities"}
+# Move user DB interaction to dedicated service
+success = await ctx.service_call(
+    create_user_handler, arg=CreateUserRequest(user_id=user_id, user=user)
+)
+if not success:
+return success
+
+# Execute other steps inline
+await ctx.run_typed("activate", activate_user, user_id=user_id)
+await ctx.run_typed("welcome", send_welcome_email, user=user)
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -268,16 +552,16 @@ To learn more, follow at the [Microservice Orchestration Tour](/tour/microservic
 
 <Accordion title={"Try it out"}>
 
-    Submit the workflow:
-    ```bash
-    curl localhost:8080/signup-with-activities/carl/run \
-        --json '{"name": "Carl", "email": "carl@mail.com"}'
-    ```
+Submit the workflow:
+```bash
+curl localhost:8080/signup-with-activities/carl/run \
+--json '{"name": "Carl", "email": "carl@mail.com"}'
+```
 
-    In the UI, you can see how the invocation called another service called user service:
-    <Frame>
-        <img src="/img/tour/workflows/activities.png" alt="Workflow Success"/>
-    </Frame>
+In the UI, you can see how the invocation called another service called user service:
+<Frame>
+<img src="/img/tour/workflows/activities.png" alt="Workflow Success"/>
+</Frame>
 
 </Accordion>
 
@@ -290,11 +574,11 @@ Restate provides powerful patterns for building complex workflows using familiar
 Workflows can store state in Restate, which can be queried later by other handlers:
 
 <GlobalTabs>
-    <GlobalTab title="TypeScript">
+<GlobalTab title="TypeScript">
 
-        ```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/queries/workflow.ts?collapse_prequel"} 
+```ts signup-with-queries.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-queries.ts?collapse_prequel"} 
 export const signupWithQueries = restate.workflow({
-  name: "signup-with-queries",
+  name: "SignupWithQueriesWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
@@ -322,16 +606,124 @@ export const signupWithQueries = restate.workflow({
 });
 ```
 
-    </GlobalTab>
-    <GlobalTab title="Java">
+</GlobalTab>
+<GlobalTab title="Java">
 
-    </GlobalTab>
-    <GlobalTab title="Go">
+```java SignupWithQueriesWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithQueriesWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWithQueriesWorkflow {
 
-    </GlobalTab>
-    <GlobalTab title="Python">
+  private static final StateKey<User> USER = StateKey.of("user", User.class);
+  private static final StateKey<String> STATUS = StateKey.of("status", String.class);
 
-    </GlobalTab>
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key();
+
+    ctx.set(USER, user);
+    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    if (!success) {
+      ctx.set(STATUS, "failed");
+      return false;
+    }
+    ctx.set(STATUS, "created");
+
+    ctx.run("activate", () -> activateUser(userId));
+    ctx.run("welcome", () -> sendWelcomeEmail(user));
+
+    return true;
+  }
+
+  @Shared
+  public StatusResponse getStatus(SharedWorkflowContext ctx) {
+    String status = ctx.get(STATUS).orElse("unknown");
+    User user = ctx.get(USER).orElse(null);
+    return new StatusResponse(status, user);
+  }
+}
+```
+
+</GlobalTab>
+<GlobalTab title="Go">
+
+```go queries.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/queries.go?collapse_prequel"} 
+type SignupWithQueriesWorkflow struct{}
+
+func (SignupWithQueriesWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  userID := restate.Key(ctx)
+
+  restate.Set(ctx, "user", user)
+  success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+  })
+  if err != nil {
+    return false, err
+  }
+  if !success {
+    restate.Set(ctx, "status", "failed")
+    return success, nil
+  }
+  restate.Set(ctx, "status", "created")
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, ActivateUser(userID)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendWelcomeEmail(user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  return success, nil
+}
+
+func (SignupWithQueriesWorkflow) GetStatus(ctx restate.WorkflowSharedContext) (StatusResponse, error) {
+  status, err := restate.Get[string](ctx, "status")
+  if err != nil {
+    return StatusResponse{}, err
+  }
+  user, err := restate.Get[User](ctx, "user")
+  if err != nil {
+    return StatusResponse{}, err
+  }
+  return StatusResponse{Status: &status, User: &user}, nil
+}
+```
+
+</GlobalTab>
+<GlobalTab title="Python">
+
+```python signup_with_queries.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_queries.py?collapse_prequel"} 
+signup_with_queries = restate.Workflow("SignupWithQueriesWorkflow")
+
+
+@signup_with_queries.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+
+    ctx.set("user", user.model_dump())
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+        ctx.set("status", "failed")
+        return success
+    ctx.set("status", "created")
+
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+    await ctx.run_typed("welcome", send_welcome_email, user=user)
+    return success
+
+
+@signup_with_queries.handler()
+async def get_status(ctx: WorkflowSharedContext) -> StatusResponse:
+    return StatusResponse(status=await ctx.get("status"), user=await ctx.get("user"))
+```
+
+</GlobalTab>
 </GlobalTabs>
 
 Key characteristics:
@@ -340,16 +732,16 @@ Key characteristics:
 - State is queryable from other handlers or the Restate UI.
 
 <Frame>
-    <img src="/img/tour/workflows/queries.png" alt="Workflow Queries"/>
+<img src="/img/tour/workflows/queries.png" alt="Workflow Queries"/>
 </Frame>
 
 <Accordion title="Try it out">
-    Submit the workflow:
-    ```bash
-    curl localhost:8080/signup-with-queries/janedoe/run \
-        --json '{"name": "Jane Doe", "email": "jane@mail.com"}'
-    ```
-    In the UI, look at the state tab and filter on the `signup-with-queries` workflow.
+Submit the workflow:
+```bash
+curl localhost:8080/signup-with-queries/janedoe/run \
+--json '{"name": "Jane Doe", "email": "jane@mail.com"}'
+```
+In the UI, look at the state tab and filter on the `signup-with-queries` workflow.
 </Accordion>
 
 ### Signaling
@@ -359,9 +751,9 @@ Pause workflow execution waiting for external events using durable promises:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/signals/workflow.ts?collapse_prequel"} 
+```ts signup-with-signals.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-signals.ts?collapse_prequel"} 
 export const signupWithSignals = restate.workflow({
-  name: "signup-with-signals",
+  name: "SignupWithSignalsWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
@@ -390,11 +782,97 @@ export const signupWithSignals = restate.workflow({
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithSignalsWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithSignalsWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWithSignalsWorkflow {
+
+  private static final DurablePromiseKey<String> EMAIL_VERIFIED_PROMISE =
+      DurablePromiseKey.of("email-verified", String.class);
+
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key();
+
+    // Generate verification secret and send email
+    String secret = ctx.random().nextUUID().toString();
+    ctx.run("verify", () -> sendVerificationEmail(userId, user, secret));
+
+    // Wait for user to click verification link
+    String clickedSecret = ctx.promise(EMAIL_VERIFIED_PROMISE).future().await();
+    return secret.equals(clickedSecret);
+  }
+
+  @Shared
+  public void verifyEmail(SharedWorkflowContext ctx, VerifyEmailRequest req) {
+    ctx.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go signals.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/signals.go?collapse_prequel"} 
+type SignupWithSignalsWorkflow struct{}
+
+func (SignupWithSignalsWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  userID := restate.Key(ctx)
+
+  // Generate verification secret and send email
+  secret := restate.Rand(ctx).UUID().String()
+  _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendVerificationEmail(userID, user, secret)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  // Wait for user to click verification link
+  clickedSecret, err := restate.Promise[string](ctx, "email-verified").Result()
+  if err != nil {
+    return false, err
+  }
+
+  return clickedSecret == secret, nil
+}
+
+func (SignupWithSignalsWorkflow) VerifyEmail(ctx restate.WorkflowSharedContext, req VerifyEmailRequest) error {
+  // Resolve the promise to continue the main workflow
+  return restate.Promise[string](ctx, "email-verified").Resolve(req.Secret)
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_signals.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_signals.py?collapse_prequel"} 
+signup_with_signals = restate.Workflow("SignupWithSignalsWorkflow")
+
+
+@signup_with_signals.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+
+    # Generate verification secret and send email
+    secret = str(ctx.uuid())
+    await ctx.run_typed(
+        "verify",
+        send_verification_email,
+        user_id=user_id,
+        user=user,
+        verification_secret=secret,
+    )
+
+    # Wait for user to click verification link
+    clicked_secret = await ctx.promise("email-verified").value()
+    return clicked_secret == secret
+
+
+@signup_with_signals.handler()
+async def verify_email(ctx: WorkflowSharedContext, req: VerifyEmailRequest) -> None:
+    # Resolve the promise to continue the main workflow
+    await ctx.promise("email-verified").resolve(req.secret)
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -407,25 +885,25 @@ You can use `ctx.promise()` to handle asynchronous events without complex messag
 Promises can be resolved before the workflow waits for them, avoiding complex synchronization issues.
 
 <Accordion title={"Try it out"}>
-    Submit the workflow:
-    ```bash
-    curl localhost:8080/signup-with-signals/johndoe/run \
-        --json '{"name": "John Doe", "email": "john@mail.com"}'
-    ```
-    In the UI, you can see the workflow waiting for the `email-verified` promise to be resolved.
-    <Frame>
-        <img src="/img/tour/workflows/signals.png" alt="Workflow Queries"/>
-    </Frame>
+Submit the workflow:
+```bash
+curl localhost:8080/signup-with-signals/johndoe/run \
+--json '{"name": "John Doe", "email": "john@mail.com"}'
+```
+In the UI, you can see the workflow waiting for the `email-verified` promise to be resolved.
+<Frame>
+<img src="/img/tour/workflows/signals.png" alt="Workflow Queries"/>
+</Frame>
 
-    Try killing the service and restarting it. The workflow will continue waiting for the promise to be resolved.
+Try killing the service and restarting it. The workflow will continue waiting for the promise to be resolved.
 
-    To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
-    ```bash
-    curl localhost:8080/signup-with-signals/johndoe/verifyEmail \
-        --json '{"secret": "the-secret-from-email"}'
-    ```
+To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
+```bash
+curl localhost:8080/signup-with-signals/johndoe/verifyEmail \
+--json '{"secret": "the-secret-from-email"}'
+```
 
-    Now the UI will show the workflow completed successfully.
+Now the UI will show the workflow completed successfully.
 </Accordion>
 
 ### Workflow Events
@@ -435,9 +913,9 @@ You can also use promises the other way around: to send events from the workflow
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/events/workflow.ts?collapse_prequel"} 
+```ts signup-with-events.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-events.ts?collapse_prequel"} 
 export const signupWithEvents = restate.workflow({
-  name: "signup-with-events",
+  name: "SignupWithEventsWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
@@ -464,11 +942,113 @@ export const signupWithEvents = restate.workflow({
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithEventsWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithEventsWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWithEventsWorkflow {
+
+  private static final DurablePromiseKey<String> USER_CREATED_PROMISE =
+      DurablePromiseKey.of("user-created", String.class);
+
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key();
+
+    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    if (!success) {
+      ctx.promiseHandle(USER_CREATED_PROMISE).reject("Creation failed.");
+      return false;
+    }
+
+    ctx.promiseHandle(USER_CREATED_PROMISE).resolve("User created.");
+
+    ctx.run("activate", () -> activateUser(userId));
+    ctx.run("welcome", () -> sendWelcomeEmail(user));
+
+    return true;
+  }
+
+  @Shared
+  public String waitForUserCreation(SharedWorkflowContext ctx) {
+    return ctx.promise(USER_CREATED_PROMISE).future().await();
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go events.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/events.go?collapse_prequel"} 
+type SignupWithEventsWorkflow struct{}
+
+func (SignupWithEventsWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  userID := restate.Key(ctx)
+
+  success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+  })
+  if err != nil {
+    return false, err
+  }
+  if !success {
+    if err := restate.Promise[string](ctx, "user-created").Reject(fmt.Errorf("creation failed")); err != nil {
+      return false, err
+    }
+    return false, nil
+  }
+
+  if err := restate.Promise[string](ctx, "user-created").Resolve("User created."); err != nil {
+    return false, err
+  }
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, ActivateUser(userID)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendWelcomeEmail(user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  return true, nil
+}
+
+func (SignupWithEventsWorkflow) WaitForUserCreation(ctx restate.WorkflowSharedContext) (string, error) {
+  return restate.Promise[string](ctx, "user-created").Result()
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_events.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_events.py?collapse_prequel"} 
+signup_with_events = restate.Workflow("SignupWithEventsWorkflow")
+
+
+@signup_with_events.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+        await ctx.promise("user-created").reject("Creation failed.")
+        return success
+
+    await ctx.promise("user-created").resolve("User created.")
+
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+    await ctx.run_typed("welcome", send_welcome_email, user=user)
+    return success
+
+
+@signup_with_events.handler()
+async def wait_for_user_creation(ctx: WorkflowSharedContext) -> str:
+    return await ctx.promise("user-created").value()
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -479,18 +1059,18 @@ Here, external clients can wait for the user to be created in the database.
 These handlers can be called up to the workflow's retention period ([default one day](/operate/configuration/services#retention-policies)).
 
 <Accordion title={"Try it out"}>
-    Submit the workflow:
-    ```bash
-    curl localhost:8080/signup-with-events/johndoe/run \
-        --json '{"name": "John Doe", "email": "john@mail.com"}'
-    ```
+Submit the workflow:
+```bash
+curl localhost:8080/signup-with-events/johndoe/run \
+--json '{"name": "John Doe", "email": "john@mail.com"}'
+```
 
-    Then wait for the user creation event:
-    ```bash
-    curl localhost:8080/signup-with-events/johndoe/waitForUserCreation
-    ```
+Then wait for the user creation event:
+```bash
+curl localhost:8080/signup-with-events/johndoe/waitForUserCreation
+```
 
-    You will get a response like `"User created."`
+You will get a response like `"User created."`
 </Accordion>
 
 ### Timers and Scheduling
@@ -500,9 +1080,9 @@ Use durable timers for long-running workflows with timeouts and retries:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/timers/workflow.ts?collapse_prequel"} 
+```ts signup-with-timers.ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-timers.ts?collapse_prequel"} 
 export const signupWithTimers = restate.workflow({
-  name: "signup-with-timers",
+  name: "SignupWithTimersWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
@@ -551,11 +1131,159 @@ export const signupWithTimers = restate.workflow({
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithTimersWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithTimersWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWithTimersWorkflow {
+
+  private static final DurablePromiseKey<String> EMAIL_VERIFIED_PROMISE =
+      DurablePromiseKey.of("email-verified", String.class);
+
+    @Workflow
+    public String run(WorkflowContext ctx, User user) {
+        String userId = ctx.key();
+
+        var confirmationFuture = ctx.awakeable(Boolean.class);
+        ctx.run(
+                "verify",
+                () -> sendVerificationEmail(userId, user, confirmationFuture.id()));
+
+        var verificationTimeout = ctx.timer(Duration.ofDays(1));
+
+        while (true) {
+            var reminderTimer = ctx.timer(Duration.ofSeconds(10));
+
+            var selected =
+                    Select.<String>select()
+                            .when(confirmationFuture, res -> res ? "success" : "failure")
+                            .when(reminderTimer, unused -> "reminder")
+                            .when(verificationTimeout, unused -> "timeout")
+                            .await();
+
+            switch (selected) {
+                case "success":
+                    return "Email verified";
+                case "failure":
+                    return "Email rejected";
+                case "reminder":
+                    ctx.run(
+                            "send reminder",
+                            () -> sendReminderEmail(user));
+                    break;
+                case "timeout":
+                    throw new TerminalException("Verification timed out");
+            }
+        }
+    }
+
+  @Shared
+  public void verifyEmail(SharedWorkflowContext ctx, VerifyEmailRequest req) {
+    ctx.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go timers.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/timers.go?collapse_prequel"} 
+type SignupWithTimersWorkflow struct{}
+
+func (SignupWithTimersWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  userID := restate.Key(ctx)
+
+  secret := restate.Rand(ctx).UUID().String()
+  _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendVerificationEmail(userID, user, secret)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  clickedPromise := restate.Promise[string](ctx, "email-verified")
+  verificationTimeoutFuture := restate.After(ctx, 24*time.Hour)
+
+  for {
+    reminderTimerFuture := restate.After(ctx, 15*time.Second)
+
+    // Create futures for racing
+    selector := restate.Select(ctx,
+      clickedPromise,
+      reminderTimerFuture,
+      verificationTimeoutFuture,
+    )
+
+    switch selector.Select() {
+    case clickedPromise:
+      clickedSecret, err := clickedPromise.Result()
+      if err != nil {
+        return false, err
+      }
+      return clickedSecret == secret, nil
+    case reminderTimerFuture:
+      _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+        return restate.Void{}, SendReminderEmail(user)
+      })
+      if err != nil {
+        return false, err
+      }
+      break // Break out of selector loop to continue main loop
+    case verificationTimeoutFuture:
+      return false, restate.TerminalError(fmt.Errorf("email verification timed out after 24 hours"))
+    }
+  }
+}
+
+func (SignupWithTimersWorkflow) VerifyEmail(ctx restate.WorkflowSharedContext, req VerifyEmailRequest) error {
+  return restate.Promise[string](ctx, "email-verified").Resolve(req.Secret)
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_timers.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_timers.py?collapse_prequel"} 
+signup_with_timers = restate.Workflow("SignupWithTimersWorkflow")
+
+
+@signup_with_timers.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+
+    secret = str(ctx.uuid())
+    await ctx.run_typed(
+        "verify",
+        send_verification_email,
+        user_id=user_id,
+        user=user,
+        verification_secret=secret,
+    )
+
+    clicked_promise = ctx.promise("email-verified")
+    verification_timeout = ctx.sleep(timedelta(days=1))
+
+    while True:
+        reminder_timer = ctx.sleep(timedelta(seconds=15))
+
+        # Wait for email verification, reminder timer or timeout
+        result = await restate.select(
+            verification=clicked_promise.value(),
+            reminder=reminder_timer,
+            timeout=verification_timeout,
+        )
+
+        match result:
+            case ["verification", clicked_secret]:
+                return clicked_secret == secret
+            case ["reminder", _]:
+                await ctx.run_typed("remind", send_reminder_email, user=user)
+            case ["timeout", _]:
+                raise TerminalError("Email verification timed out after 24 hours")
+
+
+@signup_with_timers.handler()
+async def verify_email(ctx: WorkflowSharedContext, req: VerifyEmailRequest) -> None:
+    await ctx.promise("email-verified").resolve(req.secret)
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -564,27 +1292,27 @@ Because Restate lets you write workflows as regular functions, you can use your 
 This makes it easy to implement complex logic with timers, loops, and conditional execution.
 
 <Accordion title={"Try it out"}>
-    Submit the workflow:
-    ```bash
-    curl localhost:8080/signup-with-timers/johndoe/run \
-        --json '{"name": "John Doe", "email": "john@mail.com"}'
-    ```
+Submit the workflow:
+```bash
+curl localhost:8080/signup-with-timers/johndoe/run \
+--json '{"name": "John Doe", "email": "john@mail.com"}'
+```
 
-    See in the UI how the workflow is waiting for the email verification to be resolved, and sends reminder emails every 15 seconds:
+See in the UI how the workflow is waiting for the email verification to be resolved, and sends reminder emails every 15 seconds:
 
-    <Frame>
-        <img src="/img/tour/workflows/timers.png" alt="Workflow Timers"/>
-    </Frame>
+<Frame>
+<img src="/img/tour/workflows/timers.png" alt="Workflow Timers"/>
+</Frame>
 
-    Try killing the service and restarting it. The workflow will continue sending reminders as if it never stopped.
+Try killing the service and restarting it. The workflow will continue sending reminders as if it never stopped.
 
-    To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
-    ```bash
-    curl localhost:8080/signup-with-timers/johndoe/verifyEmail \
-        --json '{"secret": "the-secret-from-email"}'
-    ```
+To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
+```bash
+curl localhost:8080/signup-with-timers/johndoe/verifyEmail \
+--json '{"secret": "the-secret-from-email"}'
+```
 
-    Now the UI will show the workflow completed successfully.
+Now the UI will show the workflow completed successfully.
 </Accordion>
 
 ### Parallel Execution
@@ -613,17 +1341,31 @@ Throw a `TerminalError` in your handler to indicate a terminal failure:
 <GlobalTab title="TypeScript">
 
 ```typescript {"CODE_LOAD::ts/src/tour/workflows/terminal_error.ts#terminal_error"} 
-throw new TerminalError("Invalid credit card");
+throw new TerminalError("Subscription plan not available");
 ```
 
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java {"CODE_LOAD::java/src/main/java/tour/workflows/WorkflowErrorHandler.java#here"} 
+throw new TerminalException("Subscription plan not available");
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go {"CODE_LOAD::go/tour/workflows/errorhandling.go#here"} 
+return restate.TerminalError(fmt.Errorf("subscription plan not available"))
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python {"CODE_LOAD::python/src/tour/workflows/terminal_error.py#here"} 
+from restate.exceptions import TerminalError
+
+raise TerminalError("Invalid credit card")
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -635,7 +1377,7 @@ Some actions let you configure their retry behavior, for example to limit the nu
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/retries/workflow.ts#retries"} 
+```ts signup-with-retries.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-retries.ts#retries"} 
 try {
   const retryPolicy = {
     maxRetryAttempts: 3,
@@ -650,11 +1392,70 @@ try {
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithRetriesWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithRetriesWorkflow.java#retries"} 
+try {
+  RetryPolicy myRunRetryPolicy =
+      RetryPolicy.defaultPolicy()
+          .setInitialDelay(Duration.ofMillis(500))
+          .setExponentiationFactor(2)
+          .setMaxDelay(Duration.ofSeconds(10))
+          .setMaxAttempts(3)
+          .setMaxDuration(Duration.ofSeconds(30));
+
+  ctx.run("welcome", myRunRetryPolicy, () -> sendWelcomeEmail(user));
+} catch (TerminalException error) {
+  System.err.println("Failed to send welcome email after retries: " + error.getMessage());
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go retries.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/retries.go#retries"} 
+_, err = restate.Run(ctx,
+  func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, SendWelcomeEmail(user)
+  },
+  restate.WithMaxRetryAttempts(3),
+  restate.WithInitialRetryInterval(1000),
+)
+if err != nil {
+  return false, err
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_retries.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_retries.py?collapse_prequel"} 
+signup_with_retries = restate.Workflow("SignupWithRetriesWorkflow")
+
+
+@signup_with_retries.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+        return success
+
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+
+    # Configure retry policy
+    try:
+        await ctx.run_typed(
+            "welcome",
+            send_welcome_email,
+            restate.RunOptions(
+                max_attempts=3, max_retry_duration=timedelta(seconds=30)
+            ),
+            user=user,
+        )
+    except TerminalError as error:
+        print(f"Failed to send welcome email after retries: {error}")
+
+    return success
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -663,20 +1464,20 @@ try {
 When the retries are exhausted, the run block will throw a `TerminalError`, that you can handle in your handler logic.
 
 <Accordion title={"Try it out"}>
-    Submit the workflow for Alice:
-    ```bash
-    curl localhost:8080/signup-with-retries/alice/run \
-        --json '{"name": "Alice", "email": "alice@mail.com"}'
-    ```
+Submit the workflow for Alice:
+```bash
+curl localhost:8080/signup-with-retries/alice/run \
+--json '{"name": "Alice", "email": "alice@mail.com"}'
+```
 
-    In the UI, you can see how the workflow is waiting for the `welcome` step to finish, and how it retries sending the welcome email up to 3 times across three seconds:
-    <Frame>
-        <img src="/img/tour/workflows/retry-policy.png" alt="Workflow Retries"/>
-    </Frame>
-    After three attempts, the workflow continues without failing:
-    <Frame>
-        <img src="/img/tour/workflows/retry-policy-failed.png" alt="Workflow Retries"/>
-    </Frame>
+In the UI, you can see how the workflow is waiting for the `welcome` step to finish, and how it retries sending the welcome email up to 3 times across three seconds:
+<Frame>
+<img src="/img/tour/workflows/retry-policy.png" alt="Workflow Retries"/>
+</Frame>
+After three attempts, the workflow continues without failing:
+<Frame>
+<img src="/img/tour/workflows/retry-policy-failed.png" alt="Workflow Retries"/>
+</Frame>
 
 </Accordion>
 
@@ -696,9 +1497,9 @@ On a terminal failure, you execute them in reverse order:
 <GlobalTabs>
 <GlobalTab title="TypeScript">
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/sagas/workflow.ts?collapse_prequel"} 
+```ts signup-with-sagas.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/typescript/tutorials/tour-of-workflows-typescript/src/workflows/signup-with-sagas.ts?collapse_prequel"} 
 export const signupWithSagas = restate.workflow({
-  name: "signup-with-sagas",
+  name: "SignupWithSagasWorkflow",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
       const userId = ctx.key;
@@ -711,7 +1512,9 @@ export const signupWithSagas = restate.workflow({
         compensations.push(() =>
           ctx.run("deactivate", () => deactivateUser(userId)),
         );
-        await ctx.run("activate", () => activateUser(userId));
+        await ctx
+          .run("activate", () => activateUser(userId))
+          .orTimeout({ minutes: 5 });
 
         compensations.push(() =>
           ctx.run("unsubscribe", () => cancelSubscription(user)),
@@ -734,11 +1537,143 @@ export const signupWithSagas = restate.workflow({
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java SignupWithSagasWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithSagasWorkflow.java?collapse_prequel"} 
+@Workflow
+public class SignupWithSagasWorkflow {
+
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key();
+    List<Runnable> compensations = new ArrayList<>();
+
+    try {
+      compensations.add(() -> ctx.run("delete", () -> deleteUser(userId)));
+      ctx.run("create", () -> createUser(userId, user));
+
+      compensations.add(() -> ctx.run("deactivate", () -> deactivateUser(userId)));
+      ctx.run("activate", () -> activateUser(userId));
+
+      compensations.add(() -> ctx.run("unsubscribe", () -> cancelSubscription(user)));
+      ctx.run("subscribe", () -> subscribeToPaidPlan(user));
+
+    } catch (TerminalException e) {
+      // Run compensations in reverse order
+      Collections.reverse(compensations);
+      for (Runnable compensation : compensations) {
+        compensation.run();
+      }
+      return false;
+    }
+
+    return true;
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go sagas.go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/go/tutorials/tour-of-workflows-go/examples/sagas.go?collapse_prequel"} 
+type SagasWorkflow struct{}
+
+func (SagasWorkflow) Run(ctx restate.WorkflowContext, user User) (res bool, err error) {
+  userID := restate.Key(ctx)
+  var compensations []func() error
+
+  defer func() {
+    if err != nil {
+      for i := len(compensations) - 1; i >= 0; i-- {
+        if compErr := compensations[i](); compErr != nil {
+          err = compErr
+        }
+      }
+    }
+  }()
+
+  // Add compensation for user creation
+  compensations = append(compensations, func() error {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, DeleteUser(userID)
+    })
+    return err
+  })
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  // Add compensation for user activation
+  compensations = append(compensations, func() error {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, DeactivateUser(userID)
+    })
+    return err
+  })
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return restate.Void{}, ActivateUser(userID)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  // Add compensation for subscription
+  compensations = append(compensations, func() error {
+    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return restate.Void{}, CancelSubscription(user)
+    })
+    return err
+  })
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return SubscribeToPaidPlan(user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  return true, nil
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python signup_with_sagas.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/new_tours/python/tutorials/tour-of-workflows-python/app/workflows/signup_with_sagas.py?collapse_prequel"} 
+signup_with_sagas = restate.Workflow("SignupWithSagasWorkflow")
+
+
+@signup_with_sagas.main()
+async def run(ctx: WorkflowContext, user: User) -> bool:
+    user_id = ctx.key()
+    compensations = []
+
+    try:
+        compensations.append(
+            lambda: ctx.run_typed("delete", delete_user, user_id=user_id)
+        )
+        await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+
+        compensations.append(
+            lambda: ctx.run_typed("deactivate", deactivate_user, user_id=user_id)
+        )
+        await ctx.run_typed("activate", activate_user, user_id=user_id)
+
+        compensations.append(
+            lambda: ctx.run_typed("unsubscribe", cancel_subscription, user=user)
+        )
+        await ctx.run_typed("subscribe", subscribe_to_paid_plan, user=user)
+    except TerminalError:
+        # Run compensations in reverse order
+        for compensation in reversed(compensations):
+            await compensation()
+        return False
+
+    return True
+```
 
 </GlobalTab>
 </GlobalTabs>
@@ -751,16 +1686,16 @@ export const signupWithSagas = restate.workflow({
 - No complex state machines needed
 
 <Accordion title={"Try it out"}>
-    Submit the workflow for Alice:
-    ```bash
-    curl localhost:8080/signup-with-sagas/alice/run \
-        --json '{"name": "Alice", "email": "alice@mail.com"}'
-    ```
+Submit the workflow for Alice:
+```bash
+curl localhost:8080/signup-with-sagas/alice/run \
+--json '{"name": "Alice", "email": "alice@mail.com"}'
+```
 
-    Alice is not able to get a subscription, so the workflow will fail and run compensations:
-    <Frame>
-        <img src="/img/tour/workflows/sagas.png" alt="Workflow Sagas"/>
-    </Frame>
+Alice is not able to get a subscription, so the workflow will fail and run compensations:
+<Frame>
+<img src="/img/tour/workflows/sagas.png" alt="Workflow Sagas"/>
+</Frame>
 </Accordion>
 
 Learn more with the [Sagas Guide](/guides/sagas).
@@ -777,22 +1712,22 @@ This allows your handler to run compensating actions or clean up resources.
 Start the workflow asynchronously with `/send`:
 ```bash
 curl localhost:8080/signup-with-signals/eve/run/send \
-    --json '{"name": "Eve", "email": "eve@mail.com"}'
+--json '{"name": "Eve", "email": "eve@mail.com"}'
 ```
 This returns the invocation ID, which you can use to cancel the workflow later via the CLI or HTTP request:
 <CodeGroup>
-    ```bash CLI
-    restate invocations kill inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
-    ```
-    ```bash curl
-    curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/kill
-    ```
+```bash CLI
+restate invocations kill inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+```
+```bash curl
+curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/kill
+```
 </CodeGroup>
 
 You can see the cancellation in the UI:
 
 <Frame>
-    <img src="/img/tour/workflows/cancellation.png" alt="Workflow Cancellation"/>
+<img src="/img/tour/workflows/cancellation.png" alt="Workflow Cancellation"/>
 </Frame>
 
 </Accordion>
@@ -820,11 +1755,38 @@ export const handler = restate.endpoint().bind(signupWorkflow).handler();
 </GlobalTab>
 <GlobalTab title="Java">
 
+```java {"CODE_LOAD::java/src/main/java/tour/workflows/WorkflowServingLambda.java#here"} 
+import dev.restate.sdk.endpoint.Endpoint;
+import dev.restate.sdk.lambda.BaseRestateLambdaHandler;
+
+class MyLambdaHandler extends BaseRestateLambdaHandler {
+  @Override
+  public void register(Endpoint.Builder builder) {
+    builder.bind(new SignupWorkflow());
+  }
+}
+```
+
 </GlobalTab>
 <GlobalTab title="Go">
 
+```go {"CODE_LOAD::go/tour/workflows/servinglambda.go#here"} 
+handler, err := server.NewRestate().
+  Bind(restate.Reflect(SignupWorkflow{})).
+  Bidirectional(false).
+  LambdaHandler()
+if err != nil {
+  log.Fatal(err)
+}
+lambda.Start(handler)
+```
+
 </GlobalTab>
 <GlobalTab title="Python">
+
+```python {"CODE_LOAD::python/src/tour/workflows/lambda_handler.py#here"} 
+app = restate.app(services=[signup_workflow])
+```
 
 </GlobalTab>
 </GlobalTabs>

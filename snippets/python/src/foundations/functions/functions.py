@@ -7,9 +7,11 @@ from typing import Dict, Any
 class MyInput:
     pass
 
+
 class ProcessingResult(BaseModel):
     success: bool
     result: Any
+
 
 def process_data(req: MyInput) -> ProcessingResult:
     return ProcessingResult(success=True, result="result")

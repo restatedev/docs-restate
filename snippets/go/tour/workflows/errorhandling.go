@@ -1,4 +1,4 @@
-package microservices
+package workflows
 
 import (
 	"fmt"
@@ -10,6 +10,6 @@ type ErrorHanding struct{}
 
 func (ErrorHanding) Greet(ctx restate.Context, name string) error {
 	// <start_here>
-	return restate.TerminalError(fmt.Errorf("invalid credit card"))
+	return restate.TerminalError(fmt.Errorf("subscription plan not available"))
 	// <end_here>
 }

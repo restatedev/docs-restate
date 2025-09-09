@@ -6,7 +6,7 @@ restate.service({
   handlers: {
     run: async (ctx: restate.Context) => {
       // <start_terminal_error>
-      throw new TerminalError("Invalid credit card");
+      throw new TerminalError("Subscription plan not available");
       // <end_terminal_error>
     },
   },

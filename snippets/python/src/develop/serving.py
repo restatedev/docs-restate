@@ -35,20 +35,3 @@ app = FastAPI()
 
 app.mount("/restate/v1", restate.app(services=[my_service, my_object]))
 # <end_fastapi>
-
-
-# <start_lifespan>
-from contextlib import asynccontextmanager
-import asyncio
-
-
-@asynccontextmanager
-async def lifespan_fn():
-    print("perform startup tasks")
-    yield
-    print("perform shutdown tasks")
-    await asyncio.sleep(1)
-
-
-app = restate.app(services=[my_service], lifespan=lifespan_fn)
-# <end_lifespan>
