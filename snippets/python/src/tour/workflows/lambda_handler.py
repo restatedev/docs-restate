@@ -11,5 +11,5 @@ async def run(ctx: WorkflowContext, user: User) -> bool:
 
 
 # <start_here>
-app = restate.app(services=[signup_workflow])
+handler = restate.app(services=[signup_workflow])
 # <end_here>
