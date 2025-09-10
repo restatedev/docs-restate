@@ -1,6 +1,10 @@
 import * as restate from "@restatedev/restate-sdk";
 import { v4 as uuid } from "uuid";
-import {RestatePromise, rpc, WorkflowSharedContext} from "@restatedev/restate-sdk";
+import {
+  RestatePromise,
+  rpc,
+  WorkflowSharedContext,
+} from "@restatedev/restate-sdk";
 import sendOpts = rpc.sendOpts;
 
 // Type definitions for examples

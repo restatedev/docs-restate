@@ -1,9 +1,9 @@
-package develop;
+package tour.workflows;
 
 import dev.restate.sdk.Context;
 import dev.restate.sdk.common.TerminalException;
 
-public class ErrorHandler {
+public class WorkflowErrorHandler {
 
   public void errorHandling(Context ctx) {
 

@@ -14,8 +14,9 @@ It is recommended to configure services directly in your code, using the SDKs.
 
 To configure your services:
 
-```ts {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#options"} 
-restate.workflow({
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::ts/src/services/configuration/my_advanced_service.ts#options"} 
+const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.Context) => {},
@@ -24,20 +25,66 @@ restate.workflow({
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
+    workflowRetention: { days: 3 },
     journalRetention: { days: 7 },
     ingressPrivate: true,
     enableLazyState: true, // only for Virtual Objects and Workflows
-    workflowRetention: { days: 3 }, // only for workflows
   },
 });
 ```
+```java Java {"CODE_LOAD::java/src/main/java/services/configuration/MyWorkflow.java#options"} 
+RestateHttpServer.listen(
+    Endpoint.builder()
+        .bind(
+            new MyWorkflow(),
+            conf ->
+                conf.abortTimeout(Duration.ofMinutes(15))
+                    .inactivityTimeout(Duration.ofMinutes(15))
+                    .idempotencyRetention(Duration.ofDays(3))
+                    .journalRetention(Duration.ofDays(7))
+                    .ingressPrivate(true)
+                    .enableLazyState(true))
+        .build());
+```
+
+```python Python {"CODE_LOAD::python/src/services/configuration.py#options"} 
+my_workflow = restate.Workflow(
+    "MyWorkflow",
+    inactivity_timeout=timedelta(minutes=15),
+    abort_timeout=timedelta(minutes=15),
+    idempotency_retention=timedelta(days=3),
+    journal_retention=timedelta(days=7),
+    ingress_private=True,
+    enable_lazy_state=True, # only for Objects/Workflows
+)
+```
+
+```go Go {"CODE_LOAD::go/services/configuration.go#options"} 
+if err := server.NewRestate().
+  Bind(
+    restate.Reflect(
+      MyWorkflow{},
+      restate.WithInactivityTimeout(15*time.Minute),
+      restate.WithAbortTimeout(15*time.Minute),
+      restate.WithIdempotencyRetention(3*24*time.Hour),
+      restate.WithJournalRetention(7*24*time.Hour),
+      restate.WithIngressPrivate(true),
+      restate.WithEnableLazyState(true),
+    ),
+  ).
+  Start(context.Background(), "0.0.0.0:9080"); err != nil {
+  log.Fatal(err)
+}
+```
+</CodeGroup>
+
 
 ### Handler-level configuration
 
 To set configuration at the handler level:
 
 <CodeGroup>
-```ts service {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_service"} 
+```ts TypeScript {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts"}
 restate.service({
   name: "MyService",
   handlers: {
@@ -54,53 +101,36 @@ restate.service({
   },
 });
 ````
-```ts virtual_object {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_object"} 
-restate.object({
-  name: "MyService",
-  handlers: {
-    myHandler: restate.handlers.object.exclusive(
-      {
-        abortTimeout: { minutes: 15 },
-        inactivityTimeout: { minutes: 15 },
-        idempotencyRetention: { days: 3 },
-        journalRetention: { days: 7 },
-        ingressPrivate: true,
-        enableLazyState: true,
-      },
-      async (ctx: restate.Context) => {}
-    ),
-    mySharedHandler: restate.handlers.object.shared(
-      {
-        /*... my options ...*/
-      },
-      async (ctx: restate.Context) => {}
-    ),
-  },
-});
+```java Java {"CODE_LOAD::java/src/main/java/services/configuration/MyWorkflow.java#handleropts"} 
+RestateHttpServer.listen(
+        Endpoint.builder()
+                .bind(
+                        new MyWorkflow(),
+                        conf ->
+                                conf.configureHandler("run", handlerConf ->
+                                        handlerConf.abortTimeout(Duration.ofMinutes(15))
+                                                .inactivityTimeout(Duration.ofMinutes(15))
+                                                .workflowRetention(Duration.ofDays(3))
+                                                // or idempotencyRetention for Services/Objects
+                                                .journalRetention(Duration.ofDays(7))
+                                                .ingressPrivate(true)
+                                                .enableLazyState(true)))
+                .build());
 ```
-```ts workflow {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts_workflow"} 
-restate.workflow({
-  name: "MyWorkflow",
-  handlers: {
-    run: restate.handlers.workflow.workflow(
-      {
-        abortTimeout: { minutes: 15 },
-        inactivityTimeout: { minutes: 15 },
-        idempotencyRetention: { days: 3 },
-        journalRetention: { days: 7 },
-        ingressPrivate: true,
-        enableLazyState: true,
-      },
-      async (ctx: restate.Context) => {}
-    ),
-    signal: restate.handlers.workflow.shared(
-      {
-        /*... my options ...*/
-      },
-      async (ctx: restate.Context) => {}
-    ),
-  },
-});
+
+```python Python {"CODE_LOAD::python/src/services/configuration.py#handleropts"} 
+@my_workflow.main(
+    inactivity_timeout=timedelta(minutes=15),
+    abort_timeout=timedelta(minutes=15),
+    workflow_retention=timedelta(days=3),
+    # -> or idempotency_retention for Services/Objects
+    journal_retention=timedelta(days=7),
+    ingress_private=True,
+    enable_lazy_state=True, # only for Objects/Workflows
+)
+async def run(ctx: restate.WorkflowContext, req: str) -> str:
+    # ... implement workflow logic here ---
+    return "success"
 ```
 </CodeGroup>
 
@@ -122,17 +152,17 @@ restate services config edit <SERVICE_NAME>
 ## Configuration options
 
 <AccordionGroup>
-  <Accordion title="Timeout settings">
+  <Accordion title="Inactivity timeout">
 
-    #### Inactivity timeout
     The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
     After this timeout, Restate will ask the service to suspend.
 
     **Default**: 1 minute
 
     **When to adjust:** For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
+  </Accordion>
 
-    #### Abort timeout
+  <Accordion title="Abort timeout">
     Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
     So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
 
@@ -141,8 +171,7 @@ restate services config edit <SERVICE_NAME>
     **Example:** For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
   </Accordion>
 
-  <Accordion title="Retention policies">
-    #### Idempotency retention
+  <Accordion title="Idempotency retention">
     How long Restate retains idempotency keys to prevent duplicate request processing.
 
     You can see the status of the completed invocation in the UI.
@@ -150,8 +179,9 @@ restate services config edit <SERVICE_NAME>
     **Default:** 24 hours
 
     **When to adjust:** For services that need longer idempotency windows, such as financial transactions or critical business operations.
+  </Accordion>
 
-    #### Workflow retention
+<Accordion title="Workflow retention">
     The workflow retention describes for how long you will be able to call the shared handlers on a workflow after the run handler has finished.
     The retention time starts counting down from the moment the run handler completes.
 
@@ -160,8 +190,9 @@ restate services config edit <SERVICE_NAME>
     **Default:** 24 hours
 
     **When to adjust:** For workflows that need longer retention windows, to retrieve state or the result of a [Durable Promise](/develop/ts/external-events#durable-promises).
-    
-    #### Journal retention
+</Accordion>
+
+<Accordion title="Journal retention">
     How long Restate keeps invocation journals after completion for debugging and auditing.
 
     Increase to see journals of completed invocations in the log.
@@ -175,8 +206,7 @@ restate services config edit <SERVICE_NAME>
     **When to adjust:** For workflows, AI agents, or any service where you need to inspect the execution history after completion.
   </Accordion>
 
-  <Accordion title="Privacy and access control">
-    #### Private services
+  <Accordion title="Private services">
     Mark services as private to prevent external access while allowing internal service-to-service communication.
     
     **Use cases:**
@@ -184,15 +214,6 @@ restate services config edit <SERVICE_NAME>
     - Backend services that only other Restate services should access
     
     **Configuration:** Set `ingressPrivate: true` in service options.
-  </Accordion>
-
-  <Accordion title="Error handling">
-    #### Error mapping
-    Provide a function to map specific errors to terminal errors, preventing infinite retries.
-    
-    **Example:** Map validation failures to terminal errors.
-    
-    See the [error handling docs](/develop/ts/error-handling#mapping-errors-to-terminalerror) for detailed examples.
   </Accordion>
 </AccordionGroup>
 

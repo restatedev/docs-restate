@@ -3,7 +3,7 @@ import { durableCalls } from "./middleware";
 
 import { openai } from "@ai-sdk/openai";
 import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
-import {RestatePromise} from "@restatedev/restate-sdk";
+import { RestatePromise } from "@restatedev/restate-sdk";
 
 function sendApprovalRequest(id: string, decision: string) {
   return undefined;

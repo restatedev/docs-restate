@@ -1,6 +1,4 @@
-package develop;
-
-import com.example.workflows.workflows.SignupWorkflow;
+package tour.workflows;
 
 // <start_here>
 import dev.restate.sdk.endpoint.Endpoint;

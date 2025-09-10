@@ -2,7 +2,7 @@ import * as restate from "@restatedev/restate-sdk";
 import type { Duration } from "@restatedev/restate-sdk-core";
 
 // <start_options>
-restate.workflow({
+const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.Context) => {},
@@ -11,16 +11,17 @@ restate.workflow({
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
+    workflowRetention: { days: 3 },
     journalRetention: { days: 7 },
     ingressPrivate: true,
     enableLazyState: true, // only for Virtual Objects and Workflows
-    workflowRetention: { days: 3 }, // only for workflows
   },
 });
 // <end_options>
 
-// <start_handleropts_service>
-restate.service({
+// <start_handleropts>
+// For services:
+const myService = restate.service({
   name: "MyService",
   handlers: {
     myHandler: restate.handlers.handler(
@@ -35,11 +36,10 @@ restate.service({
     ),
   },
 });
-// <end_handleropts_service>
 
-// <start_handleropts_object>
-restate.object({
-  name: "MyService",
+// For Virtual Objects:
+const myObject = restate.object({
+  name: "MyObject",
   handlers: {
     myHandler: restate.handlers.object.exclusive(
       {
@@ -60,17 +60,15 @@ restate.object({
     ),
   },
 });
-// <end_handleropts_object>
 
-// <start_handleropts_workflow>
-restate.workflow({
-  name: "MyWorkflow",
+// For Workflows:
+const myWf = restate.workflow({
+  name: "MyWf",
   handlers: {
     run: restate.handlers.workflow.workflow(
       {
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
-        idempotencyRetention: { days: 3 },
         journalRetention: { days: 7 },
         ingressPrivate: true,
         enableLazyState: true,
@@ -85,4 +83,12 @@ restate.workflow({
     ),
   },
 });
-// <end_handleropts_workflow>
+// <end_handleropts>
+
+restate
+  .endpoint()
+  .bind(myObject)
+  .bind(myWf)
+  .bind(myService)
+  .bind(myWorkflow)
+  .listen();
