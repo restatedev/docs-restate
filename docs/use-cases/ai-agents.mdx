@@ -37,16 +37,10 @@ const { text } = await generateText({
     createTicket: tool({
       description: "Create support ticket for issues needing follow-up",
       inputSchema: z.object({ issue: z.string() }),
-      execute: async ({ issue }) =>
-          // Tool step with retries and success/failure persistence
-          restateContext.run(`create ticket ${issue}`, () => createTicket(issue)),
-    }),
-    logToCrm: tool({
-      description: "Log interaction and executed actions to CRM",
-      inputSchema: InteractionSummary,
-      execute: async ({ customerId, summary, actions }) => {
+      execute: async ({ summary }) => {
         // Workflow with multiple steps, each with retries and persistence
-        const interactionId = await restateContext.run("log interaction", () => logInteraction(customerId, summary));
+        const ticketId = await restateContext.run(`create ticket ${issue}`, () => createTicket(issue))
+        await restateContext.run("log interaction", () => logInCRM(customerId, ticketId, issue));
         await restateContext.run("log actions", () => updateAuditTrail(interactionId, actions));
       },
     }),
@@ -55,9 +49,9 @@ const { text } = await generateText({
 ```
 
 - **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses automatically
-- **Data integrity**: Wrap CRM logging in `ctx.run` to prevent duplicate records and maintain audit trails
-- **Automatic retries**: Each external service call is retried with exponential backoff until it succeeds
-- **No lost progress**: Agent resumes from the last successful step, avoiding duplicate costly operations
+- **Tool execution**: Make tool execution steps resilient Restate Context actions like `ctx.run`
+- **Flexibility**: Works with your existing deployment - Docker, Kubernetes, AWS Lambda, or any serverless platform
+- **Integration**: From simple agents to complex multi-agent orchestration systems
 
 ### Built-in Observability
 
