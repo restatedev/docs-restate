@@ -18,14 +18,14 @@ async function runAgent(ctx: restate.ObjectContext, messages: Message[]) {
   return res;
 }
 
-type Message = {}
+type Message = {};
 
 // <start_here>
-const chat = restate.object({
+restate.object({
   name: "Chat",
   handlers: {
     message: async (ctx: restate.ObjectContext, message: string) => {
-      const messages = await ctx.get<Message[]>("messages") ?? [];
+      const messages = (await ctx.get<Message[]>("messages")) ?? [];
       messages.push({ role: "user", content: message });
 
       const result = await runAgent(ctx, messages);

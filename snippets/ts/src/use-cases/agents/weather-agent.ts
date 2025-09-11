@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk";
 import { openai } from "@ai-sdk/openai";
-import {generateText, stepCountIs, tool, wrapLanguageModel} from "ai";
+import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
 import { z } from "zod";
 import { durableCalls } from "./middleware";
 
@@ -10,7 +10,7 @@ async function createEmailAccount(name: string, team: string) {
     email: `${name.toLowerCase()}@company.com`,
     userId: `user_${Math.random().toString(36).substr(2, 9)}`,
     team: team,
-    status: "created"
+    status: "created",
   };
 }
 
@@ -26,7 +26,7 @@ async function createKeyCard(name: string, team: string) {
     cardId: `card_${Math.random().toString(36).substr(2, 8)}`,
     name: name,
     permissions: [`team-${team}`, "building-main"],
-    status: "ordered"
+    status: "ordered",
   };
 }
 
@@ -37,7 +37,7 @@ async function orderHoodie(name: string, team: string) {
     name: name,
     team: team,
     size: "M", // Default size
-    status: "ordered"
+    status: "ordered",
   };
 }
 
@@ -46,7 +46,7 @@ async function addToTeamGroups(userId: string, team: string) {
   return {
     groups: [`${team}@company.com`, `${team}-announcements@company.com`],
     slackChannels: [`#${team}`, `#${team}-random`],
-    status: "added"
+    status: "added",
   };
 }
 
@@ -56,7 +56,7 @@ async function sendWelcomeEmail(email: string, name: string) {
     to: email,
     subject: `Welcome to the company, ${name}!`,
     templateId: "welcome-template-v2",
-    status: "sent"
+    status: "sent",
   };
 }
 
@@ -68,47 +68,60 @@ function getOnboardingPlan(name: string, team: string, job: string) {
     role: job,
     checklist: [
       "Reserve laptop and setup",
-      "Order building access card", 
+      "Order building access card",
       "Order team hoodie",
-      "Create email account"
+      "Create email account",
     ],
   };
 }
 
-const OnboardingInfo = z.object({ name: z.string(), team: z.string(), job: z.string() })
+const OnboardingInfo = z.object({
+  name: z.string(),
+  team: z.string(),
+  job: z.string(),
+});
 
-const runOnboardingAgent = async (restateContext: restate.Context, name: string, team: string, job: string) => {
-
+const runOnboardingAgent = async (
+  restateContext: restate.Context,
+  name: string,
+  team: string,
+  job: string
+) => {
   const createEmail = tool({
     description: "Create company email account for new employee",
     inputSchema: z.object({ name: z.string(), team: z.string() }),
     execute: async ({ name, team }) => {
       // Multi-step workflow: each step is durable and retried independently
-      const account = await restateContext.run("create email account", () => createEmailAccount(name, team));
-      await restateContext.run("add to team groups", () => addToTeamGroups(account.userId, team));
-      await restateContext.run("send welcome email", () => sendWelcomeEmail(account.email, name));
+      const account = await restateContext.run("create email account", () =>
+        createEmailAccount(name, team)
+      );
+      await restateContext.run("add to team groups", () =>
+        addToTeamGroups(account.userId, team)
+      );
+      await restateContext.run("send welcome email", () =>
+        sendWelcomeEmail(account.email, name)
+      );
       return account;
     },
-  })
+  });
   const reserveLaptop = tool({
     description: "Reserve laptop and equipment for employee",
     inputSchema: z.object({ name: z.string(), job: z.string() }),
     execute: async ({ name, job }) =>
-        restateContext.run("reserve laptop", () => orderLaptop(name, job))
-  })
+      restateContext.run("reserve laptop", () => orderLaptop(name, job)),
+  });
   const orderKeyCard = tool({
     description: "Order building access card for employee",
     inputSchema: z.object({ name: z.string(), team: z.string() }),
     execute: async ({ name, team }) =>
-        restateContext.run("create keycard", () => createKeyCard(name, team)),
-  })
+      restateContext.run("create keycard", () => createKeyCard(name, team)),
+  });
   const orderPersonalizedHoodie = tool({
     description: "Order building access card for employee",
     inputSchema: z.object({ name: z.string(), team: z.string() }),
     execute: async ({ name, team }) =>
-        restateContext.run("order hoodie", () => orderHoodie(name, team)),
-  })
-
+      restateContext.run("order hoodie", () => orderHoodie(name, team)),
+  });
 
   // <start_here>
   const model = wrapLanguageModel({
@@ -116,7 +129,7 @@ const runOnboardingAgent = async (restateContext: restate.Context, name: string,
     middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
   });
 
-  const {text} = await generateText({
+  await generateText({
     model,
     system: "You are an employee onboarding agent.",
     prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
@@ -125,26 +138,51 @@ const runOnboardingAgent = async (restateContext: restate.Context, name: string,
         description: "Get onboarding plan for team and job",
         inputSchema: OnboardingInfo,
         execute: async ({ name, team, job }) =>
-            restateContext.run("get plan", () => getOnboardingPlan(name, team, job)),
+          restateContext.run("get plan", () =>
+            getOnboardingPlan(name, team, job)
+          ),
       }),
       createEmail,
       reserveLaptop,
       orderKeyCard,
-      orderPersonalizedHoodie
+      orderPersonalizedHoodie,
+    },
+  });
+  // <end_here>
+
+  await generateText({
+    model,
+    system: "You are an employee onboarding agent.",
+    prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
+    tools: {
+      getOnboardingPlan: tool({
+        description: "Get onboarding plan for team and job",
+        inputSchema: OnboardingInfo,
+        execute: async ({ name, team, job }) =>
+          restateContext.run("get plan", () =>
+            getOnboardingPlan(name, team, job)
+          ),
+      }),
+      createEmail,
+      reserveLaptop,
+      orderKeyCard,
+      orderPersonalizedHoodie,
     },
     stopWhen: [stepCountIs(10)],
     providerOptions: { openai: { parallelToolCalls: false } },
   });
-  // <end_here>
 
-  return text;
-}
+  return "done!";
+};
 
 // Alternative example: Employee Onboarding Agent
 const onboardingAgent = restate.service({
-  name: "OnboardingAgent", 
+  name: "OnboardingAgent",
   handlers: {
-    run: async (ctx: restate.Context, { name, team, job }: { name: string, team: string, job: string }) => {
+    run: async (
+      ctx: restate.Context,
+      { name, team, job }: { name: string; team: string; job: string }
+    ) => {
       return runOnboardingAgent(ctx, name, team, job);
     },
   },

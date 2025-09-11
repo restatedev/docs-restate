@@ -29,7 +29,7 @@ const model = wrapLanguageModel({
   middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
 });
 
-const {text} = await generateText({
+await generateText({
   model,
   system: "You are an employee onboarding agent.",
   prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
@@ -38,15 +38,15 @@ const {text} = await generateText({
       description: "Get onboarding plan for team and job",
       inputSchema: OnboardingInfo,
       execute: async ({ name, team, job }) =>
-          restateContext.run("get plan", () => getOnboardingPlan(name, team, job)),
+        restateContext.run("get plan", () =>
+          getOnboardingPlan(name, team, job)
+        ),
     }),
     createEmail,
     reserveLaptop,
     orderKeyCard,
-    orderPersonalizedHoodie
+    orderPersonalizedHoodie,
   },
-  stopWhen: [stepCountIs(10)],
-  providerOptions: { openai: { parallelToolCalls: false } },
 });
 ```
 
@@ -74,11 +74,11 @@ Track every step of your agent's execution with detailed traces and state inspec
 Maintain conversation history and context across multiple interactions using Virtual Objects:
 
 ```typescript {"CODE_LOAD::ts/src/use-cases/agents/chat.ts#here"} 
-const chat = restate.object({
+restate.object({
   name: "Chat",
   handlers: {
     message: async (ctx: restate.ObjectContext, message: string) => {
-      const messages = await ctx.get<Message[]>("messages") ?? [];
+      const messages = (await ctx.get<Message[]>("messages")) ?? [];
       messages.push({ role: "user", content: message });
 
       const result = await runAgent(ctx, messages);
