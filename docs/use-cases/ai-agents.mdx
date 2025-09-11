@@ -29,27 +29,29 @@ const model = wrapLanguageModel({
   middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
 });
 
-const { text } = await generateText({
+const {text} = await generateText({
   model,
-  system: "You are a support agent. Help customers by creating tickets .",
-  prompt: `Customer ${customerId} reported: ${issue}`,
+  system: "You are an employee onboarding agent.",
+  prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
   tools: {
-    createTicket: tool({
-      description: "Create support ticket for issues needing follow-up",
-      inputSchema: z.object({ issue: z.string() }),
-      execute: async ({ summary }) => {
-        // Workflow with multiple steps, each with retries and persistence
-        const ticketId = await restateContext.run(`create ticket ${issue}`, () => createTicket(issue))
-        await restateContext.run("log interaction", () => logInCRM(customerId, ticketId, issue));
-        await restateContext.run("log actions", () => updateAuditTrail(interactionId, actions));
-      },
+    getOnboardingPlan: tool({
+      description: "Get onboarding plan for team and job",
+      inputSchema: OnboardingInfo,
+      execute: async ({ name, team, job }) =>
+          restateContext.run("get plan", () => getOnboardingPlan(name, team, job)),
     }),
+    createEmail,
+    reserveLaptop,
+    orderKeyCard,
+    orderPersonalizedHoodie
   },
+  stopWhen: [stepCountIs(10)],
+  providerOptions: { openai: { parallelToolCalls: false } },
 });
 ```
 
 - **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses automatically
-- **Tool execution**: Make tool execution steps resilient Restate Context actions like `ctx.run`
+- **Tool execution**: Make tool execution steps resilient Restate Context actions
 - **Flexibility**: Works with your existing deployment - Docker, Kubernetes, AWS Lambda, or any serverless platform
 - **Integration**: From simple agents to complex multi-agent orchestration systems
 
