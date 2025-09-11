@@ -88,8 +88,10 @@ if err := server.NewRestate().
 To set configuration at the handler level:
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::ts/src/develop/my_advanced_service.ts#handleropts"}
-restate.service({
+```ts TypeScript {"CODE_LOAD::ts/src/services/configuration/my_advanced_service.ts#handleropts"} 
+// Add handler options to the handler definition
+// For services:
+const myService = restate.service({
   name: "MyService",
   handlers: {
     myHandler: restate.handlers.handler(
@@ -101,6 +103,53 @@ restate.service({
         ingressPrivate: true,
       },
       async (ctx: restate.Context) => {}
+    ),
+  },
+});
+
+// For Virtual Objects:
+const myObject = restate.object({
+  name: "MyObject",
+  handlers: {
+    myHandler: restate.handlers.object.exclusive(
+      {
+        abortTimeout: { minutes: 15 },
+        inactivityTimeout: { minutes: 15 },
+        idempotencyRetention: { days: 3 },
+        journalRetention: { days: 7 },
+        ingressPrivate: true,
+        enableLazyState: true,
+      },
+      async (ctx: restate.ObjectContext) => {}
+    ),
+    mySharedHandler: restate.handlers.object.shared(
+      {
+        /*... my options ...*/
+      },
+      async (ctx: restate.ObjectSharedContext) => {}
+    ),
+  },
+});
+
+// For Workflows:
+const myWf = restate.workflow({
+  name: "MyWf",
+  handlers: {
+    run: restate.handlers.workflow.workflow(
+      {
+        abortTimeout: { minutes: 15 },
+        inactivityTimeout: { minutes: 15 },
+        journalRetention: { days: 7 },
+        ingressPrivate: true,
+        enableLazyState: true,
+      },
+      async (ctx: restate.WorkflowContext) => {}
+    ),
+    signal: restate.handlers.workflow.shared(
+      {
+        /*... my options ...*/
+      },
+      async (ctx: restate.WorkflowSharedContext) => {}
     ),
   },
 });

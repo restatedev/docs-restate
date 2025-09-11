@@ -52,13 +52,13 @@ const myObject = restate.object({
         ingressPrivate: true,
         enableLazyState: true,
       },
-      async (ctx: restate.Context) => {}
+      async (ctx: restate.ObjectContext) => {}
     ),
     mySharedHandler: restate.handlers.object.shared(
       {
         /*... my options ...*/
       },
-      async (ctx: restate.Context) => {}
+      async (ctx: restate.ObjectSharedContext) => {}
     ),
   },
 });
@@ -75,13 +75,13 @@ const myWf = restate.workflow({
         ingressPrivate: true,
         enableLazyState: true,
       },
-      async (ctx: restate.Context) => {}
+      async (ctx: restate.WorkflowContext) => {}
     ),
     signal: restate.handlers.workflow.shared(
       {
         /*... my options ...*/
       },
-      async (ctx: restate.Context) => {}
+      async (ctx: restate.WorkflowSharedContext) => {}
     ),
   },
 });
