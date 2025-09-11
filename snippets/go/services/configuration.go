@@ -21,6 +21,7 @@ func (MyWorkflow) MyHandler(ctx restate.WorkflowContext, greeting string) (strin
 
 func main() {
 	// <start_options>
+	// Specify service options when binding them to an endpoint
 	if err := server.NewRestate().
 		Bind(
 			restate.Reflect(

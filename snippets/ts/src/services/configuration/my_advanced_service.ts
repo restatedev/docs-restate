@@ -2,6 +2,7 @@ import * as restate from "@restatedev/restate-sdk";
 import type { Duration } from "@restatedev/restate-sdk-core";
 
 // <start_options>
+// Add service options to the service definition
 const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
@@ -20,6 +21,7 @@ const myWorkflow = restate.workflow({
 // <end_options>
 
 // <start_handleropts>
+// Add handler options to the handler definition
 // For services:
 const myService = restate.service({
   name: "MyService",

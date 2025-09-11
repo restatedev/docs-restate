@@ -3,6 +3,7 @@ from datetime import timedelta
 import restate
 
 # <start_options>
+# Specify service options when you create them
 my_workflow = restate.Workflow(
     "MyWorkflow",
     inactivity_timeout=timedelta(minutes=15),
@@ -16,6 +17,7 @@ my_workflow = restate.Workflow(
 
 
 # <start_handleropts>
+# Specify handler options via the decorator
 @my_workflow.main(
     inactivity_timeout=timedelta(minutes=15),
     abort_timeout=timedelta(minutes=15),

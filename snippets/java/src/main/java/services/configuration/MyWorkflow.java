@@ -16,6 +16,7 @@ public class MyWorkflow {
 
   public static void main(String[] args) {
     // <start_options>
+    // Specify service options when binding them to an endpoint
     RestateHttpServer.listen(
         Endpoint.builder()
             .bind(
@@ -33,6 +34,7 @@ public class MyWorkflow {
 
   public static void secondOption(String[] args) {
     // <start_handleropts>
+    // Or specify handler options when binding their service to an endpoint
     RestateHttpServer.listen(
             Endpoint.builder()
                     .bind(
