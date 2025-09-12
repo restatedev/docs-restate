@@ -8,7 +8,7 @@ When you send a request to a service, Restate initializes an entity called _Invo
 
 You can list invocations, introspect their status and progress, execute operations on them such as cancel/kill.
 
-<!-- Image of UI invocations page with few invocations in different statuses -->
+{/* Image of UI invocations page with few invocations in different statuses */}
 
 ## Invocation ID
 
@@ -22,8 +22,11 @@ _Invocation_s have a unique **Invocation ID** starting with `inv_`. You can find
 
 All Invocations follow a well-defined lifecycle:
 
-<!-- this is roughy the graph nik should create here -->
+<img src="/img/invocation_lifecycle.png" alt="Invocation lifecycle" />
 
+{/* this is roughy the graph nik should create here */}
+
+{/*
 @startuml
 
 Scheduled: Waiting delay timer
@@ -32,7 +35,7 @@ Running: Invocation is executing making progress
 Paused: Invocation is waiting to be manually resumed after too many retries
 BackingOff: Attempt failed, waiting to retry
 Suspended: Invocation is waiting for events to resume
-Completed: Invocation completed, retained for observability
+Completed: Invocation completed (succeeded or failed), retained for observability
 
 [*] --> Scheduled: Delayed request
 Scheduled --> Pending
@@ -59,8 +62,8 @@ Running --> [*]: If journal/idempotency retention disabled
 Completed --> [*]: Retention timer expired
 Completed --> [*]: Manually purged
 
-
 @enduml
+*/}
 
 ## Interacting with invocations
 
@@ -75,7 +78,7 @@ At any point in time during the lifecycle, you can cancel an invocation. Cancell
 - Allows proper cleanup
 
 <CodeGroup>
-    <!-- TODO add UI example -->
+    {/* TODO add UI example */}
     ```shell CLI
     restate invocations cancel inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
 
@@ -113,7 +116,7 @@ Killing immediately stops all calls in the invocation tree **without executing c
 Note that one-way calls and delayed calls are not killed because they're detached from the originating call tree.
 
 <CodeGroup>
-    <!-- TODO add UI example -->
+    {/* TODO add UI example */}
     ```shell CLI
     restate invocations kill inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
 
@@ -128,10 +131,11 @@ Note that one-way calls and delayed calls are not killed because they're detache
 ## Resume / Retry now
 
 If an invocation retries for too many times, Restate will _Pause_ it.
+
 When an invocation is paused, you need to resume it manually:
 
 <CodeGroup>
-    <!-- TODO add UI example -->
+    {/* TODO add UI example */}
     ```shell CLI
     restate invocations resume inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
 
@@ -146,6 +150,22 @@ When an invocation is paused, you need to resume it manually:
 Check out the [service configuration docs](/services/configuration) to tune the invocation retry policy,
 including the retry interval and how many attempts to perform before pausing.
 
+<Accordion title="Resuming on a different deployment">
+    When resuming, the invocation will run on the same deployment where it started.
+
+    If the invocation failed due to some bug you fixed on a new/different deployment,
+    you can override on which deployment the invocation should be resumed:
+
+    <CodeGroup>
+        {/* TODO add UI example */}
+        ```shell curl
+        curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/resume\?deployment=dp_17sztQp4gnEC1L0OCFM9aEh
+        ```
+    </CodeGroup>
+
+    Be aware that if the business logic/flow between the old and the new deployment code differ, once resumed the invocation will start fail with **non-determinism errors**!
+</Accordion>
+
 ## Purge
 
 After an invocation completes, it will be retained by Restate for some time, in order to introspect it and, in case of idempotent requests, to perform deduplication.
@@ -155,7 +175,7 @@ Check out the [service configuration docs](/services/configuration) to tune the 
 You can also manually purge invocations if you need to free up disk space:
 
 <CodeGroup>
-    <!-- TODO add UI example -->
+    {/* TODO add UI example */}
     ```shell CLI
     restate invocations purge inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
 
@@ -169,3 +189,19 @@ You can also manually purge invocations if you need to free up disk space:
 
 ## Restart as new
 
+Invocations, once completed, can be **restarted as new invocations**:
+
+<CodeGroup>
+    {/* TODO add UI example */}
+    ```shell CLI
+    restate invocations restart-as-new inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+
+    # Or bulk restart as new, e.g. per service
+    restate invocations restart-as-new Greeter
+    ```
+    ```shell curl
+    curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/restart-as-new
+    ```
+</CodeGroup>
+
+The new invocation will have a different invocation ID, but the input and headers of the original request.
