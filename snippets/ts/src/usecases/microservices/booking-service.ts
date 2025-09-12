@@ -22,7 +22,7 @@ type BookingRequest = {
 };
 
 // <start_here>
-export default restate.service({
+const bookingService = restate.service({
   name: "BookingService",
   handlers: {
     reserve: async (ctx: restate.Context, request: BookingRequest) => {
@@ -49,3 +49,5 @@ export default restate.service({
   },
 });
 // <end_here>
+
+restate.endpoint().bind(bookingService).listen();

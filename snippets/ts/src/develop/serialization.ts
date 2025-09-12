@@ -49,15 +49,17 @@ const myService = restate.service({
 let ctx: WorkflowContext = undefined as unknown as WorkflowContext;
 let input = new Uint8Array();
 
-// <start_client>
-ctx.serviceClient(myService).myHandler(
-  input,
-  restate.rpc.opts({
-    input: restate.serde.binary,
-    output: restate.serde.binary,
-  })
-);
-// <end_client>
+async function callOtherService(ctx: restate.ObjectContext) {
+  // <start_client>
+    ctx.serviceClient(myService).myHandler(
+        input,
+        restate.rpc.opts({
+          input: restate.serde.binary,
+          output: restate.serde.binary,
+        })
+    );
+  // <end_client>
+}
 
 async function tryOut(ctx: restate.ObjectContext) {
   // <start_actions>
