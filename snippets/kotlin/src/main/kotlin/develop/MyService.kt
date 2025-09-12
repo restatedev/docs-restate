@@ -9,10 +9,7 @@ import dev.restate.sdk.kotlin.endpoint.*
 
 @Service
 class MyService {
-  @Handler
-  suspend fun myHandler(ctx: Context, greeting: String): String {
-    return "$greeting!"
-  }
+  @Handler suspend fun myHandler(ctx: Context, greeting: String) = "$greeting!"
 }
 
 fun main() {

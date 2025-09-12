@@ -4,10 +4,8 @@ import signupWorkflow from "./workflow";
 import cartObject from "./object";
 
 // <start_here>
-restate
-  .endpoint()
-  .bind(subscriptionService)
-  .bind(cartObject)
-  .bind(signupWorkflow)
-  .listen(9080);
+restate.serve({
+    services: [subscriptionService, cartObject, signupWorkflow],
+    port: 9080
+});
 // <end_here>

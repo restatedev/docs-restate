@@ -189,4 +189,4 @@ const onboardingAgent = restate.service({
 });
 // <end_here>
 
-restate.endpoint().bind(onboardingAgent).listen();
+restate.serve({ services: [onboardingAgent] });

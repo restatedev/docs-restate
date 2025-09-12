@@ -18,10 +18,7 @@ class MyObject {
     return "$greeting $objectKey!"
   }
 
-  @Shared
-  suspend fun myConcurrentHandler(ctx: SharedObjectContext, input: String): String {
-    return "my-output"
-  }
+  @Shared suspend fun myConcurrentHandler(ctx: SharedObjectContext, input: String) = "my-output"
 }
 
 fun main() {

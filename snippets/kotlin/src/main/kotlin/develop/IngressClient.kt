@@ -1,10 +1,10 @@
 package develop
 
 import dev.restate.client.Client
-import dev.restate.common.Target
-import kotlin.time.Duration.Companion.days
 import dev.restate.client.kotlin.*
+import dev.restate.common.Target
 import dev.restate.serde.kotlinx.*
+import kotlin.time.Duration.Companion.days
 
 class IngressClient {
 

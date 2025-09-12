@@ -14,4 +14,4 @@ export const myObject = restate.object({
   },
 });
 
-restate.endpoint().bind(myObject).listen();
+restate.serve({ services: [myObject] });

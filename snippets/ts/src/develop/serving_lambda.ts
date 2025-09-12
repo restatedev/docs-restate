@@ -15,10 +15,7 @@ const myWorkflow = restate.workflow({
 
 // <start_lambda>
 import * as restate from "@restatedev/restate-sdk/lambda";
-export const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
+export const handler = restate.createEndpointHandler({
+    services: [myService, myVirtualObject, myWorkflow],
+});
 // <end_lambda>

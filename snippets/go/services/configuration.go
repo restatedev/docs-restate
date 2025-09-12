@@ -32,6 +32,7 @@ func main() {
 				restate.WithJournalRetention(7*24*time.Hour),
 				restate.WithIngressPrivate(true),
 				restate.WithEnableLazyState(true),
+				restate.WithWorkflowRetention(10*24*time.Hour), // Only for workflows
 			),
 		).
 		Start(context.Background(), "0.0.0.0:9080"); err != nil {

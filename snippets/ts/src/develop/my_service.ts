@@ -13,4 +13,4 @@ export const myService = restate.service({
 export type MyService = typeof myService;
 // <end_api_export>
 
-restate.endpoint().bind(myService).listen();
+restate.serve({ services: [myService] });

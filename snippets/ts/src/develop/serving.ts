@@ -17,29 +17,22 @@ const myWorkflow = restate.workflow({
 
 // <start_endpoint>
 import * as restate from "@restatedev/restate-sdk";
-restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .listen();
+restate.serve({
+    services: [myService, myVirtualObject, myWorkflow]
+});
 // <end_endpoint>
 
 // <start_custom_endpoint>
-const http2Handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .http2Handler();
+const http2Handler = restate.createEndpointHandler({
+    services: [myService, myVirtualObject, myWorkflow]
+});
 const httpServer = http2.createServer(http2Handler);
 httpServer.listen();
 // <end_custom_endpoint>
 
 // <start_identity>
-restate
-  .endpoint()
-  .bind(myService)
-  .withIdentityV1("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
-  .listen();
+restate.serve({
+    services: [myService],
+    identityKeys: ["publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"]
+});
 // <end_identity>

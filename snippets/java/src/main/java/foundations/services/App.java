@@ -7,11 +7,9 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 public class App {
   public static void main(String[] args) {
     RestateHttpServer.listen(
-        Endpoint.builder()
-            .bind(new SubscriptionService())
+        Endpoint.bind(new SubscriptionService())
             .bind(new ShoppingCartObject())
-            .bind(new SignupWorkflow())
-            .build());
+            .bind(new SignupWorkflow()));
   }
 }
 // <end_here>

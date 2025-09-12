@@ -5,5 +5,5 @@ const signupWorkflow = restate.workflow({
 
 // <start_lambda>
 import * as restate from "@restatedev/restate-sdk/lambda";
-export const handler = restate.endpoint().bind(signupWorkflow).handler();
+export const handler = restate.createEndpointHandler({ services: [signupWorkflow] });
 // <end_lambda>

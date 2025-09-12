@@ -36,4 +36,4 @@ const bookingWorkflow = restate.service({
   },
 });
 
-restate.endpoint().bind(bookingWorkflow).listen(9080);
+restate.serve({ services: [bookingWorkflow], port: 9080 });

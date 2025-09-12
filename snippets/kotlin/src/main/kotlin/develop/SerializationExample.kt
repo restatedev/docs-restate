@@ -1,31 +1,15 @@
 package develop
 
-import dev.restate.sdk.annotation.CustomSerdeFactory
-import dev.restate.sdk.annotation.Handler
-import dev.restate.sdk.annotation.Service
-import dev.restate.sdk.kotlin.Context
-import kotlinx.serialization.json.Json
+// <start_state_keys>
+// These imports provide extension methods with reified generics
+import dev.restate.sdk.kotlin.*
 
-// <start_import>
-import dev.restate.serde.kotlinx.*
-// <end_import>
+// Primitive types
+val myString = stateKey<String>("my-string")
+// Generic types
+val myMap = stateKey<Map<String, String>>("my-map")
+// Custom generic type
+val myPerson = stateKey<Person<String>>("my-person")
+// <end_state_keys>
 
-
-class Util {
-  // <start_typetag>
-  var myType = typeTag<String>()
-  // <end_typetag>
-}
-
-
-// <start_custom>
-class MyJsonSerdeFactory : KotlinSerializationSerdeFactory(json = Json { prettyPrint = true })
-// <end_custom>
-
-// <start_custom_service>
-@CustomSerdeFactory(MyJsonSerdeFactory::class)
-@Service
-class ServiceWithCustomSerdeFactory {
-  @Handler suspend fun greet(ctx: Context) = "Hello world!"
-}
-// <end_custom_service>
+data class Person<T>(val t: T)

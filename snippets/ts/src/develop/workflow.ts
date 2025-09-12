@@ -16,4 +16,4 @@ export const myWorkflow = restate.workflow({
   },
 });
 
-restate.endpoint().bind(myWorkflow).listen();
+restate.serve({ services: [myWorkflow] });

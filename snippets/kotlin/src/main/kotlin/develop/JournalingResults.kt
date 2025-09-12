@@ -3,16 +3,15 @@ package develop
 import dev.restate.sdk.annotation.Handler
 import dev.restate.sdk.annotation.Service
 import dev.restate.sdk.kotlin.*
-import java.util.UUID
 
 internal class SideEffects {
   suspend fun sideEffect(ctx: Context) {
     // <start_side_effect>
-    val output: String = ctx.runBlock { doDbRequest() }
+    val output = ctx.runBlock { doDbRequest() }
     // <end_side_effect>
 
     // <start_async_side_effect>
-    val myRunFuture: DurableFuture<String> = ctx.runAsync { doSomethingSlow() }
+    val myRunFuture = ctx.runAsync { doSomethingSlow() }
     // <end_async_side_effect>
 
     val paymentClient = PaymentClient()
@@ -49,11 +48,11 @@ internal class SideEffects {
     // <end_combine_any>
 
     // <start_uuid>
-    val uuid: UUID = ctx.random().nextUUID()
+    val uuid = ctx.random().nextUUID()
     // <end_uuid>
 
     // <start_random_nb>
-    val value: Int = ctx.random().nextInt()
+    val value = ctx.random().nextInt()
     // <end_random_nb>
   }
 
