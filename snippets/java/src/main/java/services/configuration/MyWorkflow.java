@@ -36,19 +36,22 @@ public class MyWorkflow {
     // <start_handleropts>
     // Or specify handler options when binding their service to an endpoint
     RestateHttpServer.listen(
-            Endpoint.builder()
-                    .bind(
-                            new MyWorkflow(),
-                            conf ->
-                                    conf.configureHandler("run", handlerConf ->
-                                            handlerConf.abortTimeout(Duration.ofMinutes(15))
-                                                    .inactivityTimeout(Duration.ofMinutes(15))
-                                                    .workflowRetention(Duration.ofDays(3))
-                                                    // or idempotencyRetention for Services/Objects
-                                                    .journalRetention(Duration.ofDays(7))
-                                                    .ingressPrivate(true)
-                                                    .enableLazyState(true)))
-                    .build());
+        Endpoint.builder()
+            .bind(
+                new MyWorkflow(),
+                conf ->
+                    conf.configureHandler(
+                        "run",
+                        handlerConf ->
+                            handlerConf
+                                .abortTimeout(Duration.ofMinutes(15))
+                                .inactivityTimeout(Duration.ofMinutes(15))
+                                .workflowRetention(Duration.ofDays(3))
+                                // or idempotencyRetention for Services/Objects
+                                .journalRetention(Duration.ofDays(7))
+                                .ingressPrivate(true)
+                                .enableLazyState(true)))
+            .build());
     // <end_handleropts>
   }
 }

@@ -17,12 +17,13 @@ function updateUserFeed(userId: string, postId: any) {
 const PENDING = "pending";
 
 // <start_here>
-const userFeed = restate.object({
+export default restate.object({
   name: "userFeed",
   handlers: {
     processPost: async (ctx: restate.ObjectContext, post: SocialMediaPost) => {
       const userId = ctx.key;
 
+      // Durable side effect: persisted and replayed on retries
       const postId = await ctx.run(() => createPost(userId, post));
 
       // Wait for processing to complete with durable timers

@@ -11,7 +11,7 @@ my_workflow = restate.Workflow(
     idempotency_retention=timedelta(days=3),
     journal_retention=timedelta(days=7),
     ingress_private=True,
-    enable_lazy_state=True, # only for Objects/Workflows
+    enable_lazy_state=True,  # only for Objects/Workflows
 )
 # <end_options>
 
@@ -25,13 +25,14 @@ my_workflow = restate.Workflow(
     # -> or idempotency_retention for Services/Objects
     journal_retention=timedelta(days=7),
     ingress_private=True,
-    enable_lazy_state=True, # only for Objects/Workflows
+    enable_lazy_state=True,  # only for Objects/Workflows
 )
 async def run(ctx: restate.WorkflowContext, req: str) -> str:
     # ... implement workflow logic here ---
     return "success"
-#  <end_handleropts>
 
+
+#  <end_handleropts>
 
 
 app = restate.app([my_workflow])
