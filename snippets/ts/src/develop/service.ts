@@ -9,4 +9,4 @@ export const myService = restate.service({
   },
 });
 
-restate.endpoint().bind(myService).listen();
+restate.serve({ services: [myService] });

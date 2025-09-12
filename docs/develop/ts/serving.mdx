@@ -9,31 +9,24 @@ Lambda handler, or on other Javascript runtimes like Bun, Deno and Cloudflare
 Workers.
 
 ## Creating a Node.js HTTP handler
-1. Create the endpoint
-2. Bind one or multiple services to it.
-3. Listen on the specified port (default `9080`) for connections and requests.
+
+Use `restate.serve` to serve the provided services, starting an HTTP/2 server on port `9080`.
 
 ```typescript {"CODE_LOAD::ts/src/develop/serving.ts#endpoint"} 
 import * as restate from "@restatedev/restate-sdk";
-restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .listen();
+restate.serve({
+    services: [myService, myVirtualObject, myWorkflow]
+});
 ```
 
 <Accordion title="Customizing the HTTP2 server">
 
-If you need to manually control or customize the HTTP2 server, you can call `http2Handler()` instead of `listen()`, and then use it to manually instantiate the HTTP server:
+If you need to manually control or customize the HTTP2 server, use `restate.createEndpointHandler` to create a Node HTTP/2 handler, and then use it to manually instantiate the HTTP server:
 
 ```ts {"CODE_LOAD::ts/src/develop/serving.ts#custom_endpoint"} 
-const http2Handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .http2Handler();
+const http2Handler = restate.createEndpointHandler({
+    services: [myService, myVirtualObject, myWorkflow]
+});
 const httpServer = http2.createServer(http2Handler);
 httpServer.listen();
 ```
@@ -43,15 +36,13 @@ httpServer.listen();
 ## Creating a Lambda handler
 
 To register your service as a Lambda function, use the `/lambda` import
-component and change the endpoint into a Lambda handler.
+component and use `restate.createEndpointHandler`:
+
 ```typescript {"CODE_LOAD::ts/src/develop/serving_lambda.ts#lambda"} 
 import * as restate from "@restatedev/restate-sdk/lambda";
-export const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
+export const handler = restate.createEndpointHandler({
+    services: [myService, myVirtualObject, myWorkflow],
+});
 ```
 
 The implementation of your services and handlers remains the same for both deployment options.
@@ -59,32 +50,30 @@ The implementation of your services and handlers remains the same for both deplo
 Have a look at the [deployment section](/services/deploy/lambda)
 for guidance on how to deploy your services on AWS Lambda.
 
-## Creating a fetch handler
+## Creating a Deno/Cloudflare Workers handler
+
 Other Javascript runtimes like Deno and Cloudflare Workers have
 built on top of the [Fetch Standard](https://github.com/whatwg/fetch) for
 defining HTTP server handlers. To register your service as a fetch handler, use
 the `/fetch` import component.
+
 ```typescript {"CODE_LOAD::ts/src/develop/serving_fetch.ts#fetch"} 
 import * as restate from "@restatedev/restate-sdk/fetch";
-const handler = restate
-  .endpoint()
-  .bind(myService)
-  .bind(myVirtualObject)
-  .bind(myWorkflow)
-  .handler();
+const handler = restate.createEndpointHandler({
+    services: [myService, myVirtualObject, myWorkflow],
+});
 // Cloudflare expects the handler as a default export
 export default handler;
 // Deno expects to be passed the fetch function
-Deno.serve({ port: 9080 }, handler.fetch);
+Deno.serve({ port: 9080 }, handler);
 ```
 By default, a fetch handler will not advertise itself as working
 bidirectionally; the SDK will end the HTTP request at each suspension point,
 and the Restate runtime will re-invoke the service when there is more work to
 do.
 
-However, you can use the method `.bidirectional()` on the endpoint builder to
-change this on supported platforms, which will improve latencies once the
-service is re-registered with the runtime.
+However, you can use the option `bidirectional: true` to change this on supported platforms,
+which will improve latencies once the service is re-registered with the runtime.
 - Deno (including Deno Deploy) supports HTTP2 and therefore bidirectional mode can be enabled.
 - Cloudflare Workers do not support end-to-end HTTP2 or bidirectional HTTP1.1,
 and enabling bidirectional mode will cause invocations to stall and time out.
@@ -108,9 +97,8 @@ SDKs can validate that incoming requests come from a particular Restate
 instance. You can find out more about request identity in the [Security docs](/services/security#locking-down-service-access)
 
 ```typescript {"CODE_LOAD::ts/src/develop/serving.ts#identity"} 
-restate
-  .endpoint()
-  .bind(myService)
-  .withIdentityV1("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f")
-  .listen();
+restate.serve({
+    services: [myService],
+    identityKeys: ["publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"]
+});
 ```

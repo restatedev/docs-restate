@@ -7,8 +7,23 @@ import dev.restate.sdk.Context;
 import dev.restate.sdk.annotation.CustomSerdeFactory;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
+import dev.restate.sdk.common.StateKey;
 import dev.restate.serde.Serde;
+import dev.restate.serde.TypeRef;
+import dev.restate.serde.TypeTag;
 import dev.restate.serde.jackson.JacksonSerdeFactory;
+import java.util.Map;
+
+class Wrapper {
+  void fn() {
+    // <start_state_keys>
+    // Primitive types
+    var myString = StateKey.of("myString", String.class);
+    // Generic types need TypeRef (similar to Jackson's TypeReference)
+    var myMap = StateKey.of("myMap", TypeTag.of(new TypeRef<Map<String, String>>() {}));
+    // <end_state_keys>
+  }
+}
 
 // <start_custom_jackson>
 class MyJacksonSerdeFactory extends JacksonSerdeFactory {

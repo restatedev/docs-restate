@@ -174,4 +174,4 @@ const emailCreationWorkflow = restate.workflow({
   }
 })
 
-restate.endpoint().bind(onboardingAgent).bind(emailCreationWorkflow).listen();
+restate.serve({ services: [onboardingAgent, emailCreationWorkflow] });

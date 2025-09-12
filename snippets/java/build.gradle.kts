@@ -1,9 +1,20 @@
-import java.net.URI
-
 plugins {
     java
     application
-    id("com.diffplug.spotless") version "6.25.0"
+    id("com.diffplug.spotless") version "7.2.1"
+}
+
+repositories {
+  // Snapshots repo
+  maven {
+    name = "Central Portal Snapshots"
+    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
+  }
+
+  // Maven local for local testing
+  //  mavenLocal()
+
+  mavenCentral()
 }
 
 dependencies {
@@ -34,12 +45,6 @@ tasks.withType<JavaCompile> {
     // https://github.com/FasterXML/jackson-modules-java8/tree/2.14/parameter-names
     options.compilerArgs.add("-parameters")
 }
-
-// Set main class
-application {
-    mainClass.set("develop.Greeter")
-}
-
 
 spotless {
     java {

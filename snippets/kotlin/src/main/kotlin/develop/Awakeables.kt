@@ -7,13 +7,13 @@ class Awakeables {
     // <start_here>
     // Create awakeable and get unique ID
     val awakeable = ctx.awakeable<String>()
-    val awakeableId: String = awakeable.id
+    val awakeableId = awakeable.id
 
     // Send ID to external system (email, queue, webhook, etc.)
     ctx.runBlock { requestHumanReview(awakeableId) }
 
     // Handler suspends here until external completion
-    val review: String = awakeable.await()
+    val review = awakeable.await()
     // <end_here>
 
     // <start_resolve>

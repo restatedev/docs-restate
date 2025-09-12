@@ -26,7 +26,7 @@ const myWorkflow = restate.workflow({
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
-    workflowRetention: { days: 3 },
+    workflowRetention: { days: 3 }, // only for workflows
     journalRetention: { days: 7 },
     ingressPrivate: true,
     enableLazyState: true, // only for Virtual Objects and Workflows
@@ -36,17 +36,16 @@ const myWorkflow = restate.workflow({
 ```java Java {"CODE_LOAD::java/src/main/java/services/configuration/MyWorkflow.java#options"} 
 // Specify service options when binding them to an endpoint
 RestateHttpServer.listen(
-    Endpoint.builder()
-        .bind(
-            new MyWorkflow(),
-            conf ->
-                conf.abortTimeout(Duration.ofMinutes(15))
-                    .inactivityTimeout(Duration.ofMinutes(15))
-                    .idempotencyRetention(Duration.ofDays(3))
-                    .journalRetention(Duration.ofDays(7))
-                    .ingressPrivate(true)
-                    .enableLazyState(true))
-        .build());
+    Endpoint.bind(
+        new MyWorkflow(),
+        conf ->
+            conf.abortTimeout(Duration.ofMinutes(15))
+                .inactivityTimeout(Duration.ofMinutes(15))
+                .idempotencyRetention(Duration.ofDays(3))
+                .workflowRetention(Duration.ofDays(10)) // Only for workflows
+                .journalRetention(Duration.ofDays(7))
+                .ingressPrivate(true)
+                .enableLazyState(true)));
 ```
 
 ```python Python {"CODE_LOAD::python/src/services/configuration.py#options"} 
@@ -74,6 +73,7 @@ if err := server.NewRestate().
       restate.WithJournalRetention(7*24*time.Hour),
       restate.WithIngressPrivate(true),
       restate.WithEnableLazyState(true),
+      restate.WithWorkflowRetention(10*24*time.Hour), // Only for workflows
     ),
   ).
   Start(context.Background(), "0.0.0.0:9080"); err != nil {
@@ -157,22 +157,18 @@ const myWf = restate.workflow({
 ```java Java {"CODE_LOAD::java/src/main/java/services/configuration/MyWorkflow.java#handleropts"} 
 // Or specify handler options when binding their service to an endpoint
 RestateHttpServer.listen(
-    Endpoint.builder()
-        .bind(
-            new MyWorkflow(),
-            conf ->
-                conf.configureHandler(
-                    "run",
-                    handlerConf ->
-                        handlerConf
-                            .abortTimeout(Duration.ofMinutes(15))
-                            .inactivityTimeout(Duration.ofMinutes(15))
-                            .workflowRetention(Duration.ofDays(3))
-                            // or idempotencyRetention for Services/Objects
-                            .journalRetention(Duration.ofDays(7))
-                            .ingressPrivate(true)
-                            .enableLazyState(true)))
-        .build());
+    Endpoint.bind(
+        new MyWorkflow(),
+        conf ->
+            conf.configureHandler(
+                "run",
+                handlerConf ->
+                    handlerConf
+                        .abortTimeout(Duration.ofMinutes(15))
+                        .inactivityTimeout(Duration.ofMinutes(15))
+                        .journalRetention(Duration.ofDays(7))
+                        .ingressPrivate(true)
+                        .enableLazyState(true))));
 ```
 
 ```python Python {"CODE_LOAD::python/src/services/configuration.py#handleropts"} 

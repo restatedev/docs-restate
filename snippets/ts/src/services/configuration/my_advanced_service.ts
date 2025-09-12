@@ -12,7 +12,7 @@ const myWorkflow = restate.workflow({
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
-    workflowRetention: { days: 3 },
+    workflowRetention: { days: 3 }, // only for workflows
     journalRetention: { days: 7 },
     ingressPrivate: true,
     enableLazyState: true, // only for Virtual Objects and Workflows
@@ -87,10 +87,11 @@ const myWf = restate.workflow({
 });
 // <end_handleropts>
 
-restate
-  .endpoint()
-  .bind(myObject)
-  .bind(myWf)
-  .bind(myService)
-  .bind(myWorkflow)
-  .listen();
+restate.serve({
+    services: [
+        myObject,
+        myWf,
+        myService,
+        myWorkflow
+    ]
+});
