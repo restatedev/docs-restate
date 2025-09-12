@@ -1,0 +1,109 @@
+package main
+
+import (
+	"fmt"
+	"time"
+
+	restate "github.com/restatedev/sdk-go"
+)
+
+type PaymentResult struct{}
+
+func StartPayment(order Order, awakeableID string) (restate.Void, error) {
+	// Simulate starting payment with awakeable ID
+	return restate.Void{}, nil
+}
+
+func ProcessItem(item Item) (restate.Void, error) {
+	// Simulate item processing
+	return restate.Void{}, nil
+}
+
+type MyService struct{}
+
+func (MyService) Process(ctx restate.Context, order Order) error {
+	item := "item-123"
+
+	// <start_communication>
+	// Request-response: Wait for result
+	itemAvailable, err := restate.Service[bool](ctx, "InventoryService", "CheckStock").Request(item)
+
+	// Fire-and-forget: Guaranteed delivery without waiting
+	restate.ServiceSend(ctx, "EmailService", "SendConfirmation").Send(order)
+
+	// Delayed execution: Schedule for later
+	restate.ServiceSend(ctx, "ReminderService", "SendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
+	// <end_communication>
+	_ = itemAvailable
+	if err != nil {
+		return err
+	}
+
+	// <start_awakeables>
+	// Wait for external payment confirmation
+	confirmation := restate.Awakeable[PaymentResult](ctx)
+	_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+		return StartPayment(order, confirmation.Id())
+	})
+	if err != nil {
+		return err
+	}
+
+	result, err := confirmation.Result()
+	if err != nil {
+		return err
+	}
+	// <end_awakeables>
+
+	_ = result
+
+	// <start_parallel>
+	// Process all items in parallel
+	var subscriptionFutures []restate.Selectable
+	for _, item := range order.Items {
+		future := restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+			return ProcessItem(item)
+		})
+		subscriptionFutures = append(subscriptionFutures, future)
+	}
+
+	selector := restate.Select(ctx, subscriptionFutures...)
+
+	for selector.Remaining() {
+		_, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
+		if err != nil {
+			return err
+		}
+	}
+	// <end_parallel>
+
+	return nil
+}
+
+type StockResult struct {
+	Item    string `json:"item"`
+	InStock bool   `json:"in_stock"`
+}
+
+type InventoryService struct{}
+
+func (InventoryService) CheckStock(ctx restate.Context, item string) (StockResult, error) {
+	// Simulate stock check
+	return StockResult{Item: item, InStock: true}, nil
+}
+
+type EmailService struct{}
+
+func (EmailService) SendConfirmation(ctx restate.Context, order Order) error {
+	// Simulate sending email
+	fmt.Printf("Sending confirmation for order %s\n", order.ID)
+	return nil
+}
+
+type ReminderService struct{}
+
+func (ReminderService) SendReminder(ctx restate.Context, order Order) error {
+	// Simulate sending reminder
+	fmt.Printf("Sending reminder for order %s\n", order.ID)
+	return nil
+}

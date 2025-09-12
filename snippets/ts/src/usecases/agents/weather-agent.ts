@@ -67,9 +67,7 @@ function getOnboardingPlan(name: string, team: string, job: string) {
     team: team,
     role: job,
     checklist: [
-      "Reserve laptop and setup",
-      "Order building access card",
-      "Order team hoodie",
+      "Reserve laptop",
       "Create email account",
     ],
   };
@@ -91,17 +89,7 @@ const runOnboardingAgent = async (
     description: "Create company email account for new employee",
     inputSchema: z.object({ name: z.string(), team: z.string() }),
     execute: async ({ name, team }) => {
-      // Multi-step workflow: each step is durable and retried independently
-      const account = await restateContext.run("create email account", () =>
-        createEmailAccount(name, team)
-      );
-      await restateContext.run("add to team groups", () =>
-        addToTeamGroups(account.userId, team)
-      );
-      await restateContext.run("send welcome email", () =>
-        sendWelcomeEmail(account.email, name)
-      );
-      return account;
+      return await restateContext.workflowClient(emailCreationWorkflow, name).run({name, team})
     },
   });
   const reserveLaptop = tool({
@@ -132,34 +120,13 @@ const runOnboardingAgent = async (
   await generateText({
     model,
     system: "You are an employee onboarding agent.",
-    prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
+    prompt: `Onboard employee ${name} in team ${team}, as ${job}. First get the onboarding plan and then execute it.`,
     tools: {
       getOnboardingPlan: tool({
         description: "Get onboarding plan for team and job",
         inputSchema: OnboardingInfo,
         execute: async ({ name, team, job }) =>
-          restateContext.run("get plan", () =>
-            getOnboardingPlan(name, team, job)
-          ),
-      }),
-      createEmail,
-      reserveLaptop,
-      orderKeyCard,
-      orderPersonalizedHoodie,
-    },
-  });
-  // <end_here>
-
-  await generateText({
-    model,
-    system: "You are an employee onboarding agent.",
-    prompt: `Onboard employee ${name} in team ${team}, as ${job}`,
-    tools: {
-      getOnboardingPlan: tool({
-        description: "Get onboarding plan for team and job",
-        inputSchema: OnboardingInfo,
-        execute: async ({ name, team, job }) =>
-          restateContext.run("get plan", () =>
+          restateContext.run("get onboarding plan", () =>
             getOnboardingPlan(name, team, job)
           ),
       }),
@@ -171,6 +138,8 @@ const runOnboardingAgent = async (
     stopWhen: [stepCountIs(10)],
     providerOptions: { openai: { parallelToolCalls: false } },
   });
+  // <end_here>
+
 
   return "done!";
 };
@@ -189,4 +158,20 @@ const onboardingAgent = restate.service({
 });
 // <end_here>
 
-restate.serve({ services: [onboardingAgent] });
+const emailCreationWorkflow = restate.workflow({
+  name: "EmailCreationWorkflow",
+  handlers: {
+    run: async(ctx: restate.WorkflowContext, {name, team}: {name: string, team: string}) => {
+      // Multi-step workflow: each step is durable and retried independently
+      const account = await ctx.run("create email account", () =>
+          createEmailAccount(name, team)
+      );
+      await ctx.run("add to team groups", () =>
+          addToTeamGroups(account.userId, team)
+      );
+      return account;
+    },
+  }
+})
+
+restate.serve({ services: [onboardingAgent, emailCreationWorkflow] });
