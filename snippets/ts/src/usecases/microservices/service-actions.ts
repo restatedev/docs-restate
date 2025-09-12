@@ -40,16 +40,14 @@ export const myService = restate.service({
       // <start_awakeables>
       // Wait for external payment confirmation
       const confirmation = ctx.awakeable<PaymentResult>();
-      await ctx.run("initiate-payment", () =>
-        startPayment(order, confirmation.id)
-      );
+      await ctx.run(() => startPayment(order, confirmation.id));
       await confirmation.promise.orTimeout({ minutes: 30 });
       // <end_awakeables>
 
       // <start_parallel>
       // Process all items in parallel
       const itemPromises = order.items.map((item) =>
-        ctx.run(`process-${item.id}`, () => processItem(item))
+        ctx.run(() => processItem(item))
       );
 
       await RestatePromise.all(itemPromises);

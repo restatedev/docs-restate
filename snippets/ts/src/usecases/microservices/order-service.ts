@@ -22,16 +22,11 @@ export const orderService = restate.service({
       // Each step is automatically durable and resumable
       const paymentId = ctx.rand.uuidv4();
 
-      const payment = await ctx.run("charge", () =>
-        chargePayment(order.creditCard, paymentId)
-      );
+      await ctx.run(() => chargePayment(order.creditCard, paymentId));
 
       for (const item of order.items) {
-        await ctx.run(`reserve-${item.id}`, () =>
-          reserveInventory(item.id, item.quantity)
-        );
+        await ctx.run(() => reserveInventory(item.id, item.quantity));
       }
-
       return { success: true, paymentId };
     },
   },

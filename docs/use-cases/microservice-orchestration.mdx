@@ -6,7 +6,7 @@ icon: "circle-nodes"
 
 Traditional microservice orchestration requires complex infrastructure: message brokers, workflow engines, state stores, and retry mechanisms. Restate simplifies this by providing **durable execution primitives** that make distributed systems resilient by default, without the operational overhead.
 
-### Durable Execution Model
+### Durable Execution
 
 Build microservices that automatically recover from failures without losing progress:
 
@@ -18,16 +18,11 @@ export const orderService = restate.service({
       // Each step is automatically durable and resumable
       const paymentId = ctx.rand.uuidv4();
 
-      const payment = await ctx.run("charge", () =>
-        chargePayment(order.creditCard, paymentId)
-      );
+      await ctx.run(() => chargePayment(order.creditCard, paymentId));
 
       for (const item of order.items) {
-        await ctx.run(`reserve-${item.id}`, () =>
-          reserveInventory(item.id, item.quantity)
-        );
+        await ctx.run(() => reserveInventory(item.id, item.quantity));
       }
-
       return { success: true, paymentId };
     },
   },
@@ -67,7 +62,7 @@ ctx
 Manage stateful entities without external databases or complex consistency mechanisms:
 
 ```typescript {"CODE_LOAD::ts/src/usecases/microservices/user-account.ts#here"} 
-export const userAccount = restate.object({
+export default restate.object({
   name: "UserAccount",
   handlers: {
     updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
@@ -82,11 +77,9 @@ export const userAccount = restate.object({
       return newBalance;
     },
 
-    getBalance: restate.handlers.object.shared(
-      async (ctx: restate.ObjectSharedContext) => {
-        return (await ctx.get<number>("balance")) ?? 0;
-      }
-    ),
+    getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
+      return (await ctx.get<number>("balance")) ?? 0;
+    }),
   },
 });
 ```
@@ -104,7 +97,7 @@ export const userAccount = restate.object({
 Implement resilient rollback logic for non-transient failures (e.g. flight fully booked):
 
 ```typescript {"CODE_LOAD::ts/src/usecases/microservices/booking-service.ts#here"} 
-export const bookingService = restate.service({
+export default restate.service({
   name: "BookingService",
   handlers: {
     reserve: async (ctx: restate.Context, request: BookingRequest) => {
@@ -112,22 +105,18 @@ export const bookingService = restate.service({
 
       try {
         // Reserve hotel
-        compensations.push(() =>
-          ctx.run("cancel-hotel", () => cancelHotel(request.hotelId))
-        );
-        await ctx.run("book-hotel", () => bookHotel(request));
+        compensations.push(() => cancelHotel(request.hotelId));
+        await ctx.run(() => bookHotel(request));
 
         // Reserve flight
-        compensations.push(() =>
-          ctx.run("cancel-flight", () => cancelFlight(request.flightId))
-        );
-        await ctx.run("book-flight", () => bookFlight(request));
+        compensations.push(() => cancelFlight(request.flightId));
+        await ctx.run(() => bookFlight(request));
 
         return { success: true };
       } catch (error) {
         // Run compensations in reverse order
         for (const compensation of compensations.reverse()) {
-          await compensation();
+          await ctx.run(() => compensation());
         }
         throw error;
       }
@@ -143,13 +132,11 @@ Wait for external events and webhooks with promises that survive crashes:
 ```typescript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#awakeables"} 
 // Wait for external payment confirmation
 const confirmation = ctx.awakeable<PaymentResult>();
-await ctx.run("initiate-payment", () =>
-  startPayment(order, confirmation.id)
-);
+await ctx.run(() => startPayment(order, confirmation.id));
 await confirmation.promise.orTimeout({ minutes: 30 });
 ```
 
-And resolve with the SDK from another handler or via HTTP.
+Resolve them from another handler via the SDK or via HTTP.
 
 ### Parallel Processing
 
@@ -158,7 +145,7 @@ Execute independent operations concurrently while maintaining durability:
 ```typescript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#parallel"} 
 // Process all items in parallel
 const itemPromises = order.items.map((item) =>
-  ctx.run(`process-${item.id}`, () => processItem(item))
+  ctx.run(() => processItem(item))
 );
 
 await RestatePromise.all(itemPromises);
@@ -168,13 +155,13 @@ await RestatePromise.all(itemPromises);
 
 **✅ Choose Restate when you need:**
 
+- **Fault-tolerant systems**: Automatic recovery from service failures
 - **Reliable microservice communication**: Guaranteed delivery without extra infrastructure
 - **Distributed transaction handling**: Implement sagas without complex state machines  
 - **Consistent, stateful services**: Stateful objects with a simple concurrency model
 - **Workflow orchestration**: Coordinate long-running business processes
-- **Fault-tolerant systems**: Automatic recovery from service failures
 - **Event-driven architectures**: Handle webhooks and external events reliably
-- **Operational simplicity**: Reduce infrastructure complexity
+- **Operational simplicity**: Reduce infrastructure complexity (no need for queues + state stores + schedulers, etc.). A single binary including everything you need.
 - **Gradual adoption**: Integrate with existing services incrementally
 
 <Info>
@@ -214,8 +201,8 @@ Ready to build resilient microservices with Restate? Here are your next steps:
 Explore specific patterns and best practices:
 
 - **Service Communication**: Reliable RPC and messaging patterns ([TS](/develop/ts/service-communication)/[Python](/develop/python/service-communication)/[Go](/develop/go/service-communication)/[Java/Kotlin](/develop/java/service-communication)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/context/trait.ContextClient.html))
-- **Error Handling**: [Retries, timeouts, and saga compensation](/guides/error-handling) 
-- **State Management**: [Virtual Objects and consistency patterns](/foundations/services#virtual-object)
-- **Event Processing**: Webhooks, external events, and awakeables ([TS](/develop/ts/external-events)/[Python](/develop/python/external-events)/[Go](/develop/go/external-events)/[Java/Kotlin](/develop/java/external-events)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/context/trait.ContextClient.html)))
-- **Distributed Transactions**: [Saga pattern implementation](/guides/sagas)
+- **[Error Handling](/guides/error-handling)**: Retries, timeouts, and saga compensation
+- **[Stateful Entities](/foundations/services#virtual-object)**: Virtual Objects and consistency patterns
+- **Event Processing**: Webhooks, external events, and awakeables ([TS](/develop/ts/external-events)/[Python](/develop/python/external-events)/[Go](/develop/go/external-events)/[Java/Kotlin](/develop/java/external-events)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/context/trait.ContextClient.html))
+- **[Saga pattern](/guides/sagas)**: Implement resilient rollback of distributed operations
 - **Concurrent tasks**: Execute multiple tasks concurrently and gather results ([TS](/develop/ts/concurrent-tasks)/[Python](/develop/python/concurrent-tasks)/[Go](/develop/go/concurrent-tasks)/[Java/Kotlin](/develop/java/concurrent-tasks)/[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/macro.select.html))

@@ -1,8 +1,9 @@
 import * as restate from "@restatedev/restate-sdk";
 import { TerminalError } from "@restatedev/restate-sdk";
+import shared = restate.handlers.object.shared;
 
 // <start_here>
-export const userAccount = restate.object({
+export default restate.object({
   name: "UserAccount",
   handlers: {
     updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
@@ -17,11 +18,9 @@ export const userAccount = restate.object({
       return newBalance;
     },
 
-    getBalance: restate.handlers.object.shared(
-      async (ctx: restate.ObjectSharedContext) => {
-        return (await ctx.get<number>("balance")) ?? 0;
-      }
-    ),
+    getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
+      return (await ctx.get<number>("balance")) ?? 0;
+    }),
   },
 });
 // <end_here>

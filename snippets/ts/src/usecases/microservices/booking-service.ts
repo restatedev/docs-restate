@@ -22,7 +22,7 @@ type BookingRequest = {
 };
 
 // <start_here>
-export const bookingService = restate.service({
+export default restate.service({
   name: "BookingService",
   handlers: {
     reserve: async (ctx: restate.Context, request: BookingRequest) => {
@@ -30,22 +30,18 @@ export const bookingService = restate.service({
 
       try {
         // Reserve hotel
-        compensations.push(() =>
-          ctx.run("cancel-hotel", () => cancelHotel(request.hotelId))
-        );
-        await ctx.run("book-hotel", () => bookHotel(request));
+        compensations.push(() => cancelHotel(request.hotelId));
+        await ctx.run(() => bookHotel(request));
 
         // Reserve flight
-        compensations.push(() =>
-          ctx.run("cancel-flight", () => cancelFlight(request.flightId))
-        );
-        await ctx.run("book-flight", () => bookFlight(request));
+        compensations.push(() => cancelFlight(request.flightId));
+        await ctx.run(() => bookFlight(request));
 
         return { success: true };
       } catch (error) {
         // Run compensations in reverse order
         for (const compensation of compensations.reverse()) {
-          await compensation();
+          await ctx.run(() => compensation());
         }
         throw error;
       }
