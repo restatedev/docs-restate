@@ -4,9 +4,9 @@ import (
 	restate "github.com/restatedev/sdk-go"
 )
 
+// <start_here>
 type UserSignup struct{}
 
-// <start_here>
 func (UserSignup) Run(ctx restate.WorkflowContext, user User) (bool, error) {
 	// unique workflow key
 	userID := restate.Key(ctx)
