@@ -66,10 +66,7 @@ function getOnboardingPlan(name: string, team: string, job: string) {
     employee: name,
     team: team,
     role: job,
-    checklist: [
-      "Reserve laptop",
-      "Create email account",
-    ],
+    checklist: ["Reserve laptop", "Create email account"],
   };
 }
 
@@ -89,7 +86,9 @@ const runOnboardingAgent = async (
     description: "Create company email account for new employee",
     inputSchema: z.object({ name: z.string(), team: z.string() }),
     execute: async ({ name, team }) => {
-      return await restateContext.workflowClient(emailCreationWorkflow, name).run({name, team})
+      return await restateContext
+        .workflowClient(emailCreationWorkflow, name)
+        .run({ name, team });
     },
   });
   const reserveLaptop = tool({
@@ -140,7 +139,6 @@ const runOnboardingAgent = async (
   });
   // <end_here>
 
-
   return "done!";
 };
 
@@ -161,17 +159,20 @@ const onboardingAgent = restate.service({
 const emailCreationWorkflow = restate.workflow({
   name: "EmailCreationWorkflow",
   handlers: {
-    run: async(ctx: restate.WorkflowContext, {name, team}: {name: string, team: string}) => {
+    run: async (
+      ctx: restate.WorkflowContext,
+      { name, team }: { name: string; team: string }
+    ) => {
       // Multi-step workflow: each step is durable and retried independently
       const account = await ctx.run("create email account", () =>
-          createEmailAccount(name, team)
+        createEmailAccount(name, team)
       );
       await ctx.run("add to team groups", () =>
-          addToTeamGroups(account.userId, team)
+        addToTeamGroups(account.userId, team)
       );
       return account;
     },
-  }
-})
+  },
+});
 
 restate.serve({ services: [onboardingAgent, emailCreationWorkflow] });

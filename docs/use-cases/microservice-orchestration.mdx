@@ -33,7 +33,7 @@ export const orderService = restate.service({
 ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/OrderService.java#here"} 
 @Service
 public class OrderService {
-  
+
   @Handler
   public OrderResult process(Context ctx, Order order) {
     // Each step is automatically durable and resumable
@@ -44,7 +44,7 @@ public class OrderService {
     for (var item : order.items) {
       ctx.run(() -> reserveInventory(item.id, item.quantity));
     }
-    
+
     return new OrderResult(true, paymentId);
   }
 }
@@ -125,18 +125,13 @@ ctx
 
 ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
 // Request-response: Wait for result
-var result = InventoryServiceClient.fromContext(ctx)
-    .checkStock(item);
+var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
 
 // Fire-and-forget: Guaranteed delivery without waiting
-EmailServiceClient.fromContext(ctx)
-    .send()
-    .sendConfirmation(order);
+EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
 
 // Delayed execution: Schedule for later
-ReminderServiceClient.fromContext(ctx)
-    .send()
-    .sendReminder(order, Duration.ofDays(7));
+ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
 ```
 
 ```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
@@ -152,17 +147,17 @@ ctx.service_send(send_reminder, order, send_delay=timedelta(days=7))
 
 ```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"} 
 // Request-response: Wait for result
-result, err := restate.Service[InventoryService](ctx, "InventoryService").CheckStock(item)
+result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
 if err != nil {
   return err
 }
 _ = result
 
 // Fire-and-forget: Guaranteed delivery without waiting
-restate.ServiceSend(ctx, restate.Service[EmailService](ctx, "EmailService")).SendConfirmation(order)
+restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
 
 // Delayed execution: Schedule for later
-restate.ServiceSendWithDelay(ctx, restate.Service[ReminderService](ctx, "ReminderService"), 7*24*time.Hour).SendReminder(order)
+restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
 ```
 </CodeGroup>
 
@@ -233,7 +228,7 @@ async def update_balance(ctx: restate.ObjectContext, amount: float):
     balance = await ctx.get("balance") or 0.0
     new_balance = balance + amount
 
-    if new_balance < 0:
+    if new_balance < 0.0:
         raise TerminalError("Insufficient funds")
 
     ctx.set("balance", new_balance)
@@ -251,18 +246,12 @@ type UserAccount struct{}
 func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (float64, error) {
   balance, err := restate.Get[float64](ctx, "balance")
   if err != nil {
-    return 0, err
+    return 0.0, err
   }
 
-  currentBalance := 0.0
-  if balance != nil {
-    currentBalance = balance
-  }
-
-  newBalance := currentBalance + amount
-
-  if newBalance < 0 {
-    return 0, restate.TerminalError(errors.New("insufficient funds"))
+  newBalance := balance + amount
+  if newBalance < 0.0 {
+    return 0.0, restate.TerminalError(errors.New("insufficient funds"))
   }
 
   restate.Set(ctx, "balance", newBalance)
@@ -270,16 +259,7 @@ func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (flo
 }
 
 func (UserAccount) GetBalance(ctx restate.ObjectSharedContext) (float64, error) {
-  balance, err := restate.Get[float64](ctx, "balance")
-  if err != nil {
-    return 0, err
-  }
-
-  if balance == nil {
-    return 0.0, nil
-  }
-
-  return balance, nil
+  return restate.Get[float64](ctx, "balance")
 }
 ```
 </CodeGroup>
@@ -329,7 +309,7 @@ const bookingService = restate.service({
 ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/BookingService.java#here"} 
 @Service
 public class BookingService {
-  
+
   @Handler
   public BookingResult reserve(Context ctx, BookingRequest request) {
     List<Runnable> compensations = new ArrayList<>();
@@ -339,14 +319,13 @@ public class BookingService {
       compensations.add(() -> cancelHotel(request.hotelId));
       ctx.run("book-hotel", () -> bookHotel(request));
 
-      // Reserve flight  
+      // Reserve flight
       compensations.add(() -> cancelFlight(request.flightId));
       ctx.run("book-flight", () -> bookFlight(request));
 
       return new BookingResult(true);
     } catch (Exception error) {
       // Run compensations in reverse order
-      Collections.reverse(compensations);
       for (Runnable compensation : compensations) {
         ctx.run("compensation", compensation::run);
       }
@@ -404,51 +383,36 @@ async def reserve(ctx: restate.Context, request: BookingRequest):
 ```go Go {"CODE_LOAD::go/usecases/microservices/bookingservice.go#here"} 
 type BookingService struct{}
 
-func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (BookingResult, error) {
+func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res BookingResult, err error) {
   var compensations []func() error
-
   defer func() {
-    if r := recover(); r != nil {
-      // Run compensations in reverse order
+    if err != nil {
       for i := len(compensations) - 1; i >= 0; i-- {
-        restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-          compensations[i]()
-          return restate.Void{}, nil
+        _, compErr := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+          return restate.Void{}, compensations[i]()
         })
+        if compErr != nil {
+          err = compErr
+        }
       }
-      panic(r)
     }
   }()
 
   // Reserve hotel
   compensations = append(compensations, func() error { return CancelHotel(request.HotelID) })
-  _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return restate.Void{}, BookHotel(request)
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return BookHotel(request)
   })
   if err != nil {
-    // Run compensations in reverse order
-    for i := len(compensations) - 1; i >= 0; i-- {
-      restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-        compensations[i]()
-        return restate.Void{}, nil
-      })
-    }
     return BookingResult{}, err
   }
 
   // Reserve flight
   compensations = append(compensations, func() error { return CancelFlight(request.FlightID) })
   _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return restate.Void{}, BookFlight(request)
+    return BookFlight(request)
   })
   if err != nil {
-    // Run compensations in reverse order
-    for i := len(compensations) - 1; i >= 0; i-- {
-      restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-        compensations[i]()
-        return restate.Void{}, nil
-      })
-    }
     return BookingResult{}, err
   }
 
@@ -489,13 +453,13 @@ await confirmation_promise
 // Wait for external payment confirmation
 confirmation := restate.Awakeable[PaymentResult](ctx)
 _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return restate.Void{}, StartPayment(order, confirmation.Id())
+  return StartPayment(order, confirmation.Id())
 })
 if err != nil {
   return err
 }
 
-_, err = confirmation.Result(ctx, 30*time.Minute)
+_, err = confirmation.Result()
 if err != nil {
   return err
 }
@@ -522,7 +486,7 @@ await RestatePromise.all(itemPromises);
 // Process all items in parallel
 List<DurableFuture<?>> itemFutures = new ArrayList<>();
 for (Item item : order.items) {
-  itemFutures.add(ctx.runAsync( () -> processItem(item)));
+  itemFutures.add(ctx.runAsync(() -> processItem(item)));
 }
 
 DurableFuture.all(itemFutures).await();
@@ -540,26 +504,18 @@ await restate.gather(*item_promises)
 
 ```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#parallel"} 
 // Process all items in parallel
-var wg sync.WaitGroup
-errChan := make(chan error, len(order.Items))
-
+var itemFutures []restate.Selectable
 for _, item := range order.Items {
-  wg.Add(1)
-  go func(item Item) {
-    defer wg.Done()
-    _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-      return restate.Void{}, ProcessItem(item)
-    })
-    if err != nil {
-      errChan <- err
-    }
-  }(item)
+  itemFutures = append(itemFutures,
+    restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+      return ProcessItem(item)
+    }))
 }
 
-wg.Wait()
-close(errChan)
+selector := restate.Select(ctx, itemFutures...)
 
-for err := range errChan {
+for selector.Remaining() {
+  _, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
   if err != nil {
     return err
   }

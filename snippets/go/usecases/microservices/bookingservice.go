@@ -18,9 +18,9 @@ func CancelHotel(hotelID string) error {
 	return nil
 }
 
-func BookHotel(request BookingRequest) error {
+func BookHotel(request BookingRequest) (restate.Void, error) {
 	// Simulate hotel booking
-	return nil
+	return restate.Void{}, nil
 }
 
 func CancelFlight(flightID string) error {
@@ -28,59 +28,44 @@ func CancelFlight(flightID string) error {
 	return nil
 }
 
-func BookFlight(request BookingRequest) error {
+func BookFlight(request BookingRequest) (restate.Void, error) {
 	// Simulate flight booking
-	return nil
+	return restate.Void{}, nil
 }
 
 // <start_here>
 type BookingService struct{}
 
-func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (BookingResult, error) {
+func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res BookingResult, err error) {
 	var compensations []func() error
-
 	defer func() {
-		if r := recover(); r != nil {
-			// Run compensations in reverse order
+		if err != nil {
 			for i := len(compensations) - 1; i >= 0; i-- {
-				restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-					compensations[i]()
-					return restate.Void{}, nil
+				_, compErr := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+					return restate.Void{}, compensations[i]()
 				})
+				if compErr != nil {
+					err = compErr
+				}
 			}
-			panic(r)
 		}
 	}()
 
 	// Reserve hotel
 	compensations = append(compensations, func() error { return CancelHotel(request.HotelID) })
-	_, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-		return restate.Void{}, BookHotel(request)
+	_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+		return BookHotel(request)
 	})
 	if err != nil {
-		// Run compensations in reverse order
-		for i := len(compensations) - 1; i >= 0; i-- {
-			restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-				compensations[i]()
-				return restate.Void{}, nil
-			})
-		}
 		return BookingResult{}, err
 	}
 
 	// Reserve flight
 	compensations = append(compensations, func() error { return CancelFlight(request.FlightID) })
 	_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-		return restate.Void{}, BookFlight(request)
+		return BookFlight(request)
 	})
 	if err != nil {
-		// Run compensations in reverse order
-		for i := len(compensations) - 1; i >= 0; i-- {
-			restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-				compensations[i]()
-				return restate.Void{}, nil
-			})
-		}
 		return BookingResult{}, err
 	}
 

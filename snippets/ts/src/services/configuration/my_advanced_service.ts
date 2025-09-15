@@ -88,10 +88,5 @@ const myWf = restate.workflow({
 // <end_handleropts>
 
 restate.serve({
-    services: [
-        myObject,
-        myWf,
-        myService,
-        myWorkflow
-    ]
+  services: [myObject, myWf, myService, myWorkflow],
 });

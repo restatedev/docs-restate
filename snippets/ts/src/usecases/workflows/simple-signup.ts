@@ -11,39 +11,27 @@ function sendWelcomeEmail(user: User) {
   return undefined;
 }
 
+function createUser(userId: string, user: User) {
+  return undefined;
+}
+
+// <start_here>
 export const userSignup = restate.workflow({
   name: "user-signup",
   handlers: {
     run: async (ctx: WorkflowContext, user: User) => {
-      const userId = ctx.key;
+      const userId = ctx.key; // unique workflow key
 
-      // <start_here>
-      // Move user DB interaction to dedicated service
-      const success = await ctx
-        .serviceClient(userService)
-        .createUser({ userId, user });
+      // Use regular if/else, loops, and functions
+      const success = await ctx.run("create", () => createUser(userId, user));
       if (!success) return { success };
 
-      // Execute other steps inline
+      // Execute durable steps
       await ctx.run("activate", () => activateUser(userId));
       await ctx.run("welcome", () => sendWelcomeEmail(user));
-      // <end_here>
 
       return { success: true };
     },
   },
 });
-
-const userService = restate.service({
-  name: "user-service",
-  handlers: {
-    createUser: async (
-      ctx: restate.Context,
-      req: { userId: string; user: User }
-    ) => {
-      // Simulate DB call
-      console.log(`Creating user ${req.userId}`);
-      return true;
-    },
-  },
-});
+// <end_here>

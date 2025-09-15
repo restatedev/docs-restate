@@ -7,7 +7,7 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 class MyApp {
   public static void main(String[] args) {
     RestateHttpServer.listen(
-        Endpoint.bind(new MyService()).bind(new MyObject()).bind(new MyWorkflow()));
+        Endpoint.bind(new MyService()).bind(new MyObject()).bind(new MyWorkflow()), 8080);
   }
 }
 // <end_here>

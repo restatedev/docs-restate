@@ -5,7 +5,7 @@ import cartObject from "./object";
 
 // <start_here>
 restate.serve({
-    services: [subscriptionService, cartObject, signupWorkflow],
-    port: 9080
+  services: [subscriptionService, cartObject, signupWorkflow],
+  port: 9080,
 });
 // <end_here>

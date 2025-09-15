@@ -16,7 +16,7 @@ const myWorkflow = restate.workflow({
 // <start_fetch>
 import * as restate from "@restatedev/restate-sdk/fetch";
 const handler = restate.createEndpointHandler({
-    services: [myService, myVirtualObject, myWorkflow],
+  services: [myService, myVirtualObject, myWorkflow],
 });
 // Cloudflare expects the handler as a default export
 export default handler;

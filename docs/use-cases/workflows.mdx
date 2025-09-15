@@ -10,27 +10,104 @@ Traditional workflow orchestrators require you to learn new DSLs, manage complex
 
 Write workflows using familiar programming constructs instead of YAML or JSON configurations:
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/order-processing.ts#here"} 
-export const orderProcessing = restate.workflow({
-  name: "order-processing",
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/simple-signup.ts#here"} 
+export const userSignup = restate.workflow({
+  name: "user-signup",
   handlers: {
-    run: async (ctx: WorkflowContext, order: Order) => {
+    run: async (ctx: WorkflowContext, user: User) => {
+      const userId = ctx.key; // unique workflow key
+
       // Use regular if/else, loops, and functions
-      if (order.amount > 1000) {
-        await ctx.run("fraud-check", () => checkForFraud(order));
-      }
+      const success = await ctx.run("create", () => createUser(userId, user));
+      if (!success) return { success };
 
-      // Parallel execution with Promise.all equivalent
-      const [payment, inventory] = await RestatePromise.all([
-        ctx.run("charge", () => chargePayment(order)),
-        ctx.run("reserve", () => reserveInventory(order)),
-      ]);
+      // Execute durable steps
+      await ctx.run("activate", () => activateUser(userId));
+      await ctx.run("welcome", () => sendWelcomeEmail(user));
 
-      return { success: payment.success && inventory.success };
+      return { success: true };
     },
   },
 });
 ```
+
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/UserSignup.java#here"} 
+@Workflow
+public class UserSignup {
+
+  @Workflow
+  public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key(); // unique workflow key
+
+    // Use regular if/else, loops, and functions
+    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    if (!success) {
+      return false;
+    }
+
+    // Execute durable steps
+    ctx.run("activate", () -> activateUser(userId));
+    ctx.run("welcome", () -> sendWelcomeEmail(user));
+
+    return true;
+  }
+}
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/signup.py#here"} 
+user_signup = restate.Workflow("user-signup")
+
+
+@user_signup.main()
+async def run(ctx: restate.WorkflowContext, user: User) -> Dict[str, bool]:
+    # Unique workflow key
+    user_id = ctx.key()
+
+    # Use regular if/else, loops, and functions
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+        return {"success": False}
+
+    # Execute durable steps
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+    await ctx.run_typed("welcome", send_welcome_email, user=user)
+
+    return {"success": True}
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/signup.go#here"} 
+func (UserSignup) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+  // unique workflow key
+  userID := restate.Key(ctx)
+
+  // Use regular if/else, loops, and functions
+  success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+  })
+  if err != nil || !success {
+    return false, err
+  }
+
+  // Execute durable steps
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return ActivateUser(userID)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return SendWelcomeEmail(user)
+  })
+  if err != nil {
+    return false, err
+  }
+
+  return true, nil
+}
+```
+</CodeGroup>
 
 **Familiar Programming Model:**
 - Use standard language constructs (if/else, loops, promises) instead of DSLs
@@ -68,39 +145,101 @@ Restate is built from the ground up for low-latency workflow execution. Unlike t
 
 Restate gives you the flexibility to structure your workflows however makes sense for your application. You can execute steps inline within the workflow or split them out into separate services that can scale independently or are owned by different teams:
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/signup.ts#here"} 
-export const userSignup = restate.workflow({
-  name: "user-signup",
-  handlers: {
-    run: async (ctx: WorkflowContext, user: User) => {
-      const userId = ctx.key;
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/signup.ts#here"} 
+// Move user DB interaction to dedicated service
+const success = await ctx
+  .serviceClient(userService)
+  .createUser({ userId, user });
+if (!success) return { success };
 
-      // Move user DB interaction to dedicated service
-      const success = await ctx
-        .serviceClient(userService)
-        .createUser({ userId, user });
-      if (!success) return { success };
-
-      // Execute other steps inline
-      await ctx.run("activate", () => activateUser(userId));
-      await ctx.run("welcome", () => sendWelcomeEmail(user));
-
-      return { success: true };
-    },
-  },
-});
+// Execute other steps inline
+await ctx.run("activate", () => activateUser(userId));
+await ctx.run("welcome", () => sendWelcomeEmail(user));
 ```
+
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/ExternalUserSignup.java#here"} 
+// Move user DB interaction to dedicated service
+boolean success =
+    UserServiceClient.fromContext(ctx).createUser(new CreateUserRequest(userId, user));
+if (!success) return new SignupResult(false);
+
+// Execute other steps inline
+ctx.run("activate", () -> activateUser(userId));
+ctx.run("welcome", () -> sendWelcomeEmail(user));
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/external_signup.py#here"} 
+# Move user DB interaction to dedicated service
+success = await ctx.service_call(
+    create_user, CreateUserRequest(user_id=user_id, user=user)
+)
+if not success:
+    return {"success": False}
+
+# Execute other steps inline
+await ctx.run_typed("activate", activate_user, user_id=user_id)
+await ctx.run_typed("welcome", send_welcome_email, user=user)
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/externalsignup.go#here"} 
+// Move user DB interaction to dedicated service
+success, err := restate.Service[bool](ctx, "UserService", "createUser").Request(CreateUserRequest{
+  UserID: userID,
+  User:   user,
+})
+if err != nil || !success {
+  return false, err
+}
+
+// Execute other steps inline
+_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return ActivateUser(userID)
+})
+if err != nil {
+  return false, err
+}
+
+_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+  return SendWelcomeEmail(user)
+})
+if err != nil {
+  return false, err
+}
+```
+</CodeGroup>
 
 ### Durable State and Queries
 Store workflow state that survives crashes and can be queried from external systems:
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state"} 
 // Store intermediate results
 ctx.set("payment-status", "completed");
 ctx.set("order-details", order);
 ```
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state_get"} 
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state"} 
+// Store intermediate results
+ctx.set(PAYMENT_STATUS, "completed");
+ctx.set(ORDER_DETAILS, order);
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state"} 
+# Store intermediate results
+ctx.set("payment-status", "completed")
+ctx.set("order-details", order)
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state"} 
+// Store intermediate results
+restate.Set(ctx, "payment-status", "completed")
+restate.Set(ctx, "order-details", order)
+```
+</CodeGroup>
+
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state_get"} 
 // Query from external handler
 getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
   return {
@@ -110,24 +249,90 @@ getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
 },
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state_get"} 
+// Query from external handler
+@Shared
+public OrderDetails getOrderDetails(SharedWorkflowContext ctx) {
+  return ctx.get(ORDER_DETAILS).orElseThrow(() -> new TerminalException("Order not found"));
+}
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state_get"} 
+# Query from external handler
+@order_workflow.handler()
+async def get_order_details(ctx: restate.WorkflowSharedContext) -> OrderDetails:
+    return await ctx.get("order-details")
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state_get"} 
+// Query from external handler
+func (OrderWorkflow) GetOrderDetails(ctx restate.WorkflowSharedContext) (OrderDetails, error) {
+  return restate.Get[OrderDetails](ctx, "order-details")
+}
+```
+</CodeGroup>
+
 ### Event-Driven Coordination
 Handle external events and signals without complex event sourcing infrastructure:
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approval"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approval"} 
 // Wait for external approval
 const approval = await ctx.promise<boolean>("manager-approval");
 ```
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approve"} 
+
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approval"} 
+// Wait for external approval
+var approval = ctx.promise(APPROVAL_PROMISE);
+Boolean decision = approval.future().await();
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approval"} 
+# Wait for external approval
+approval = await ctx.promise("manager-approval")
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approval"} 
+// Wait for external approval
+approval, err := restate.Promise[bool](ctx, "manager-approval").Result()
+```
+</CodeGroup>
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approve"} 
 // External system resolves the promise
 approve: async (ctx: restate.WorkflowSharedContext, decision: boolean) => {
   await ctx.promise<boolean>("manager-approval").resolve(decision);
 },
 ```
 
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approve"} 
+// External system resolves the promise
+@Shared
+public void approve(SharedWorkflowContext ctx, boolean decision) {
+  ctx.promiseHandle(APPROVAL_PROMISE).resolve(decision);
+}
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approve"} 
+# External system resolves the promise
+@approval_workflow.handler()
+async def approve(ctx: restate.WorkflowSharedContext, decision: bool):
+    await ctx.promise("manager-approval").resolve(decision)
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approve"} 
+// External system resolves the promise
+func (ApprovalWorkflow) Approve(ctx restate.WorkflowSharedContext, decision bool) error {
+  return restate.Promise[bool](ctx, "manager-approval").Resolve(decision)
+}
+```
+</CodeGroup>
+
 ### Durable Timers and Scheduling
 Long-running processes with built-in timer management:
 
-```typescript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#timers"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#timers"} 
 // Wait for user action with timeout
 try {
   const userAction = ctx
@@ -141,6 +346,42 @@ try {
   // Handle other errors
 }
 ```
+
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#timers"} 
+// Wait for user action with timeout
+try {
+  var userResponse = ctx.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
+} catch (TimeoutException e) {
+  // Handle timeout
+}
+```
+
+```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#timers"} 
+# Wait for user action with timeout
+match await restate.select(
+    user_response = ctx.promise("user-response").value(),
+    timeout=ctx.sleep(timedelta(days=1)),
+):
+    case ["user_response", response]:
+        print("Response:", response)
+    case _:
+        print("Timeout occurred")
+```
+
+```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#timers"} 
+// Wait for user action with timeout
+userResponse := restate.Promise[string](ctx, "user-response")
+timeout := restate.After(ctx, 24*time.Hour)
+
+selector := restate.Select(ctx, userResponse, timeout)
+switch selector.Select() {
+case userResponse:
+  return userResponse.Result()
+case timeout:
+  return "timed out", nil
+}
+```
+</CodeGroup>
 
 ## When to Choose Restate
 
@@ -193,3 +434,4 @@ Explore workflow patterns for common use cases:
 - **[Human-in-the-loop workflows](/tour/workflows)**: Multi-step signup with email verification
 - **Infrastructure provisioning**: Retry until resources are up, handle timeouts, rollbacks, etc.
 - **[AI workflows](https://github.com/restatedev/ai-examples) and [Workflow interpreters](https://github.com/restatedev/examples/tree/main/typescript/end-to-end-applications/ai-image-workflows)**: Dynamically follow different paths based on LLM decisions or external data
+- **[Parallelize work](/guides/parallelizing-work)**: Speed up multi-step workflows with recoverable parallel tasks

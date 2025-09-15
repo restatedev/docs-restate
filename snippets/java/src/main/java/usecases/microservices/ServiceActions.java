@@ -6,13 +6,11 @@ import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
-import usecases.microservices.utils.Order;
-import usecases.microservices.utils.Order.Item;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import usecases.microservices.utils.Order;
+import usecases.microservices.utils.Order.Item;
 
 class PaymentResult {}
 
@@ -25,18 +23,13 @@ public class ServiceActions {
 
     // <start_communication>
     // Request-response: Wait for result
-    var result = InventoryServiceClient.fromContext(ctx)
-        .checkStock(item);
+    var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
 
     // Fire-and-forget: Guaranteed delivery without waiting
-    EmailServiceClient.fromContext(ctx)
-        .send()
-        .sendConfirmation(order);
+    EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
 
     // Delayed execution: Schedule for later
-    ReminderServiceClient.fromContext(ctx)
-        .send()
-        .sendReminder(order, Duration.ofDays(7));
+    ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
     // <end_communication>
 
     // <start_awakeables>
@@ -53,7 +46,7 @@ public class ServiceActions {
     // Process all items in parallel
     List<DurableFuture<?>> itemFutures = new ArrayList<>();
     for (Item item : order.items) {
-      itemFutures.add(ctx.runAsync( () -> processItem(item)));
+      itemFutures.add(ctx.runAsync(() -> processItem(item)));
     }
 
     DurableFuture.all(itemFutures).await();
@@ -76,7 +69,7 @@ class InventoryService {
   public static class StockResult {
     public String item;
     public boolean inStock;
-    
+
     public StockResult(String item, boolean inStock) {
       this.item = item;
       this.inStock = inStock;
@@ -100,12 +93,10 @@ class EmailService {
 
   public static void main(String[] args) {
     RestateHttpServer.listen(
-            Endpoint
-                    .bind(new EmailService())
-                    .bind(new ReminderService())
-                    .bind(new ServiceActions())
-                    .build()
-    );
+        Endpoint.bind(new EmailService())
+            .bind(new ReminderService())
+            .bind(new ServiceActions())
+            .build());
   }
 }
 

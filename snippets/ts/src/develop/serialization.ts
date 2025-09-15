@@ -51,13 +51,13 @@ let input = new Uint8Array();
 
 async function callOtherService(ctx: restate.ObjectContext) {
   // <start_client>
-    ctx.serviceClient(myService).myHandler(
-        input,
-        restate.rpc.opts({
-          input: restate.serde.binary,
-          output: restate.serde.binary,
-        })
-    );
+  ctx.serviceClient(myService).myHandler(
+    input,
+    restate.rpc.opts({
+      input: restate.serde.binary,
+      output: restate.serde.binary,
+    })
+  );
   // <end_client>
 }
 

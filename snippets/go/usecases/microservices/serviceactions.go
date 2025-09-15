@@ -9,6 +9,11 @@ import (
 
 type PaymentResult struct{}
 
+type StockResult struct {
+	Item    string `json:"item"`
+	InStock bool   `json:"in_stock"`
+}
+
 func StartPayment(order Order, awakeableID string) (restate.Void, error) {
 	// Simulate starting payment with awakeable ID
 	return restate.Void{}, nil
@@ -26,18 +31,18 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 
 	// <start_communication>
 	// Request-response: Wait for result
-	itemAvailable, err := restate.Service[bool](ctx, "InventoryService", "CheckStock").Request(item)
-
-	// Fire-and-forget: Guaranteed delivery without waiting
-	restate.ServiceSend(ctx, "EmailService", "SendConfirmation").Send(order)
-
-	// Delayed execution: Schedule for later
-	restate.ServiceSend(ctx, "ReminderService", "SendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
-	// <end_communication>
-	_ = itemAvailable
+	result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
 	if err != nil {
 		return err
 	}
+	_ = result
+
+	// Fire-and-forget: Guaranteed delivery without waiting
+	restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
+
+	// Delayed execution: Schedule for later
+	restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
+	// <end_communication>
 
 	// <start_awakeables>
 	// Wait for external payment confirmation
@@ -49,25 +54,23 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 		return err
 	}
 
-	result, err := confirmation.Result()
+	_, err = confirmation.Result()
 	if err != nil {
 		return err
 	}
 	// <end_awakeables>
 
-	_ = result
-
 	// <start_parallel>
 	// Process all items in parallel
-	var subscriptionFutures []restate.Selectable
+	var itemFutures []restate.Selectable
 	for _, item := range order.Items {
-		future := restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-			return ProcessItem(item)
-		})
-		subscriptionFutures = append(subscriptionFutures, future)
+		itemFutures = append(itemFutures,
+			restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+				return ProcessItem(item)
+			}))
 	}
 
-	selector := restate.Select(ctx, subscriptionFutures...)
+	selector := restate.Select(ctx, itemFutures...)
 
 	for selector.Remaining() {
 		_, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
@@ -78,11 +81,6 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 	// <end_parallel>
 
 	return nil
-}
-
-type StockResult struct {
-	Item    string `json:"item"`
-	InStock bool   `json:"in_stock"`
 }
 
 type InventoryService struct{}

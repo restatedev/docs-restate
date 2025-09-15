@@ -3,18 +3,15 @@ package usecases.microservices;
 import dev.restate.sdk.Context;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
+import java.util.ArrayList;
+import java.util.List;
 import usecases.microservices.utils.BookingRequest;
 import usecases.microservices.utils.BookingResult;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
 
 // <start_here>
 @Service
 public class BookingService {
-  
+
   @Handler
   public BookingResult reserve(Context ctx, BookingRequest request) {
     List<Runnable> compensations = new ArrayList<>();
@@ -24,7 +21,7 @@ public class BookingService {
       compensations.add(() -> cancelHotel(request.hotelId));
       ctx.run("book-hotel", () -> bookHotel(request));
 
-      // Reserve flight  
+      // Reserve flight
       compensations.add(() -> cancelFlight(request.flightId));
       ctx.run("book-flight", () -> bookFlight(request));
 
