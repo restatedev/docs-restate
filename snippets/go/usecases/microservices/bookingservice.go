@@ -33,11 +33,12 @@ func BookFlight(request BookingRequest) (restate.Void, error) {
 	return restate.Void{}, nil
 }
 
-// <start_here>
 type BookingService struct{}
 
+// <start_here>
 func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res BookingResult, err error) {
 	var compensations []func() error
+	// Register defer that executes compensations
 	defer func() {
 		if err != nil {
 			for i := len(compensations) - 1; i >= 0; i-- {

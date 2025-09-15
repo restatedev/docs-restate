@@ -27,10 +27,10 @@ def book_flight(request: BookingRequest):
     pass
 
 
-# <start_here>
 booking_service = restate.Service("BookingService")
 
 
+# <start_here>
 @booking_service.handler()
 async def reserve(ctx: restate.Context, request: BookingRequest):
     compensations = []
