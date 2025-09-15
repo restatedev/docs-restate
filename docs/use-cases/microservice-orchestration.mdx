@@ -307,58 +307,31 @@ const bookingService = restate.service({
 ```
 
 ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/BookingService.java#here"} 
-@Service
-public class BookingService {
+@Handler
+public BookingResult reserve(Context ctx, BookingRequest request) {
+  List<Runnable> compensations = new ArrayList<>();
 
-  @Handler
-  public BookingResult reserve(Context ctx, BookingRequest request) {
-    List<Runnable> compensations = new ArrayList<>();
+  try {
+    // Reserve hotel
+    compensations.add(() -> cancelHotel(request.hotelId));
+    ctx.run("book-hotel", () -> bookHotel(request));
 
-    try {
-      // Reserve hotel
-      compensations.add(() -> cancelHotel(request.hotelId));
-      ctx.run("book-hotel", () -> bookHotel(request));
+    // Reserve flight
+    compensations.add(() -> cancelFlight(request.flightId));
+    ctx.run("book-flight", () -> bookFlight(request));
 
-      // Reserve flight
-      compensations.add(() -> cancelFlight(request.flightId));
-      ctx.run("book-flight", () -> bookFlight(request));
-
-      return new BookingResult(true);
-    } catch (Exception error) {
-      // Run compensations in reverse order
-      for (Runnable compensation : compensations) {
-        ctx.run("compensation", compensation::run);
-      }
-      throw error;
+    return new BookingResult(true);
+  } catch (Exception error) {
+    // Run compensations in reverse order
+    for (Runnable compensation : compensations.reversed()) {
+      ctx.run("compensation", compensation::run);
     }
-  }
-
-  private Void cancelHotel(String hotelId) {
-    // Simulate hotel cancellation
-    return null;
-  }
-
-  private Void bookHotel(BookingRequest request) {
-    // Simulate hotel booking
-    return null;
-  }
-
-  private Void cancelFlight(String flightId) {
-    // Simulate flight cancellation
-    return null;
-  }
-
-  private Void bookFlight(BookingRequest request) {
-    // Simulate flight booking
-    return null;
+    throw error;
   }
 }
 ```
 
 ```python Python {"CODE_LOAD::python/src/usecases/microservices/booking_service.py#here"} 
-booking_service = restate.Service("BookingService")
-
-
 @booking_service.handler()
 async def reserve(ctx: restate.Context, request: BookingRequest):
     compensations = []
@@ -381,10 +354,9 @@ async def reserve(ctx: restate.Context, request: BookingRequest):
 ```
 
 ```go Go {"CODE_LOAD::go/usecases/microservices/bookingservice.go#here"} 
-type BookingService struct{}
-
 func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res BookingResult, err error) {
   var compensations []func() error
+  // Register defer that executes compensations
   defer func() {
     if err != nil {
       for i := len(compensations) - 1; i >= 0; i-- {

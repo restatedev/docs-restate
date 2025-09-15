@@ -8,10 +8,10 @@ import java.util.List;
 import usecases.microservices.utils.BookingRequest;
 import usecases.microservices.utils.BookingResult;
 
-// <start_here>
 @Service
 public class BookingService {
 
+  // <start_here>
   @Handler
   public BookingResult reserve(Context ctx, BookingRequest request) {
     List<Runnable> compensations = new ArrayList<>();
@@ -28,12 +28,13 @@ public class BookingService {
       return new BookingResult(true);
     } catch (Exception error) {
       // Run compensations in reverse order
-      for (Runnable compensation : compensations) {
+      for (Runnable compensation : compensations.reversed()) {
         ctx.run("compensation", compensation::run);
       }
       throw error;
     }
   }
+  // <end_here>
 
   private Void cancelHotel(String hotelId) {
     // Simulate hotel cancellation
@@ -55,4 +56,3 @@ public class BookingService {
     return null;
   }
 }
-// <end_here>
