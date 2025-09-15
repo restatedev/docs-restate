@@ -4,116 +4,87 @@ description: "Build resilient, observable AI agents that recover from failures a
 icon: "robot"
 ---
 
-Restate helps to make your AI agents resilient and scalable, so you can build long running agents with complex interaction patterns easily.
+## What Restate does for AI Agents
 
-### Resilient Agent Execution
+Restate transforms AI agents into resilient, long-running processes with:
 
-Restate uses Durable Execution to make your agents withstand failures without losing progress.
-The Restate SDK records the steps the agent executes and recovers them if the process crashes or is restarted.
+- **🔄 Durable Execution**: Automatic recovery from failures without losing progress
+- **⚡ Resilient Workflow Patterns**: Parallelization, sub-workflows, scheduling, and multi-agent orchestration
+- **👤 Human-in-the-Loop**: Crash-proof approval workflows with timeouts and suspensions
+- **⏸️ Suspend & Resume**: Long-lived agents that suspend when waiting (e.g. human approval) and resume when the input arrives
+- **👁️ Detailed Observability**: Complete traces of LLM calls, tool executions, and state changes
+- **🔗 Flexible Integration**: Use existing AI SDKs, build custom agents from scratch, or implement pure AI workflows
+- **🧠 Persistent Memory**: Stateful conversations and context across interactions
 
 <img src="/img/usecases/agents/durable-execution-animation-agents.gif" alt="Durable AI Agent Execution" />
 
-**Automatic Recovery Features:**
-- **LLM call persistence**: Every model response is saved and replayed during recovery
-- **Tool execution durability**: Steps within tool executions are retried until they succeed
-- **State consistency**: Agent state remains consistent across failures and restarts
-
-Restate lets you build agents any way you prefer:
-
 <AccordionGroup>
-    <Accordion title={"Integrate with AI SDKs to make brittle agents fault-tolerant"}>
-
-        Combine the Restate SDK with popular AI frameworks like Vercel AI SDK and OpenAI Agent SDK and turn brittle agents in to fault-tolerant workflows:
+    <Accordion title={"AI SDK Integration"}>
+        Combine Restate with popular AI frameworks:
         ```typescript {"CODE_LOAD::ts/src/usecases/agents/weather-agent.ts#here"}
         const model = wrapLanguageModel({
         model: openai("gpt-4o"),
         middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
     });
         ```
-
-        - **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses automatically
-        - **Tool execution**: Make tool execution steps resilient Restate Context actions
-        - **Flexibility**: Works with your existing deployment - Docker, Kubernetes, AWS Lambda, or any serverless platform
-        - **Integration**: From simple agents to complex multi-agent orchestration systems
+        Works with Vercel AI SDK, OpenAI, PyDantic AI. Deploy on Docker, Kubernetes, AWS Lambda, or any platform.
     </Accordion>
-    <Accordion title={"Build resilient AI workflows with unrestricted control flow"}>
-
+    <Accordion title={"Complete Observability"}>
+        <Frame>
+        <img src="/img/usecases/agents/observability.png" alt="AI Agent Execution Trace" />
+        </Frame>
+        View every LLM call, tool execution, and state change. Debug failures and export traces via OpenTelemetry.
     </Accordion>
 </AccordionGroup>
 
+## Core Patterns
 
-
-### Built-in Observability
-
-Track every step of your agent's execution with detailed traces and state inspection:
-
-<Frame>
-<img src="/img/usecases/agents/observability.png" alt="AI Agent Execution Trace" />
-</Frame>
-
-- **Complete execution timeline**: See every LLM call, tool execution, and state change
-- **Debug failed agents**: Inspect exactly where and why agents failed
-- **OpenTelemetry integration**: Export traces to Langfuse, DataDog, or custom systems
-
-## Key AI Agent Patterns
-
-### Human-in-the-Loop Workflows
-
-Implement resilient approval workflows and human oversight without complex infrastructure:
-
-- **Durable waiting**: Waiting continues across crashes and restarts
-- **Timeout handling**: Set crash-proof timeouts with automatic escalation paths
-- **Cost efficiency**: No compute costs while waiting on serverless platforms
-
-<Accordion title="Code example">
+<AccordionGroup>
+<Accordion title="Human-in-the-Loop Workflows">
+    Resilient approval workflows with durable waiting and cost-efficient suspensions:
     ```typescript {"CODE_LOAD::ts/src/usecases/agents/agent-actions.ts#approval"}
     const approval = ctx.awakeable<boolean>();
     await ctx.run("request-approval", () =>
-    sendApprovalRequest(approval.id, request)
+        sendApprovalRequest(approval.id, request)
     );
     const approved = await approval.promise;
     ```
 </Accordion>
 
-### Stateful Conversational Agents
+<Accordion title="Stateful Conversational Agents">
+    Persistent conversation history using Virtual Objects:
+    ```typescript {"CODE_LOAD::ts/src/usecases/agents/chat.ts#here"} 
+    restate.object({
+      name: "Chat",
+      handlers: {
+        message: async (ctx: restate.ObjectContext, message: string) => {
+          const messages = (await ctx.get<Message[]>("messages")) ?? [];
+          messages.push({ role: "user", content: message });
+          const result = await runAgent(ctx, messages);
+          ctx.set("messages", [...messages, ...result.response.messages]);
+          return result.text;
+        },
+      },
+    });
+    ```
+</Accordion>
 
-Maintain conversation history and context across multiple interactions using Virtual Objects:
-
-```typescript {"CODE_LOAD::ts/src/usecases/agents/chat.ts#here"} 
-restate.object({
-  name: "Chat",
-  handlers: {
-    message: async (ctx: restate.ObjectContext, message: string) => {
-      const messages = (await ctx.get<Message[]>("messages")) ?? [];
-      messages.push({ role: "user", content: message });
-
-      const result = await runAgent(ctx, messages);
-
-      ctx.set("messages", [...messages, ...result.response.messages]);
-      return result.text;
-    },
-  },
-});
-```
-
-### Multi-Agent Orchestration
-
-Coordinate specialized agents for complex tasks with reliable communication:
-
-```typescript {"CODE_LOAD::ts/src/usecases/agents/agent-actions.ts#multi"} 
-const [eligibility, fraud, cost] = await RestatePromise.all([
-  ctx.serviceClient(eligibilityAgent).analyze(claim),
-  ctx.serviceClient(fraudAgent).analyze(claim),
-  ctx.serviceClient(costAgent).analyze(claim),
-]);
-
-const decision = await generateText({
-  model,
-  prompt: `Make decision based on: ${eligibility}, ${fraud}, ${cost}`,
-});
-```
-
-Restate acts as durable queue and RPC layer between agents running in separate processes.
+<Accordion title="Multi-Agent Orchestration">
+    Coordinate specialized agents with durable queuing and RPC:
+    ```typescript {"CODE_LOAD::ts/src/usecases/agents/agent-actions.ts#multi"} 
+    const [eligibility, fraud, cost] = await RestatePromise.all([
+      ctx.serviceClient(eligibilityAgent).analyze(claim),
+      ctx.serviceClient(fraudAgent).analyze(claim),
+      ctx.serviceClient(costAgent).analyze(claim),
+    ]);
+    
+    const decision = await generateText({
+      model,
+      prompt: `Make decision based on: ${eligibility}, ${fraud}, ${cost}`,
+    });
+    ```
+</Accordion>
+</AccordionGroup>
 
 ### Advanced Agent Patterns
 
@@ -138,22 +109,7 @@ Restate acts as durable queue and RPC layer between agents running in separate p
     </Card>
 </CardGroup>
 
-## When to Choose Restate
-
-**✅ Choose Restate when you need:**
-- **Durable Execution**: Crash-safe LLM/tool calls and deterministic retries. Agents resume at the last successful step.
-- **Journal Observability**: Auto-captured journal of every step, retry, and message for easy debugging and auditing.
-- **Human-in-the-loop & long waits**: Suspend while waiting for user approval or slow jobs; pay for compute, not wall-clock time.
-- **Stateful sessions / memory**: Virtual Objects keep multi-turn conversations and other state isolated and consistent.
-- **Multi-agent orchestration**: Reliable RPC, queuing, and scheduling between agents running in separate processes.
-
-<Info>
-    Building AI agents with Restate? Join our community on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) to share your use case and get help from other developers.
-</Info>
-
 ## Getting Started
-
-Ready to build resilient AI agents with Restate? Here are your next steps:
 
 <CardGroup cols={3}>
   <Card title="Quickstart" icon="rocket" href="/installation">
@@ -162,18 +118,12 @@ Ready to build resilient AI agents with Restate? Here are your next steps:
   <Card title="Hands-on Tutorial" icon="pen" href="/tour/ai-agents">
     Build durable agents, chatbots, and multi-agent systems
   </Card>
-  <Card title="Need help?" icon="thought-bubble">
-    Discuss your AI agent use case on <strong>[Discord](https://discord.gg/skW3AZ6uGd)</strong> or <strong>[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA)</strong>.
+  <Card title="AI Examples" icon="code" href="https://github.com/restatedev/ai-examples">
+    Explore insurance claims, chat sessions, and coding agents
   </Card>
 </CardGroup>
 
-## Examples
-
-Explore AI agent patterns for common scenarios:
-
-- **[Durable agent templates](/tour/ai-agents)** that recover from API failures and rate limits
-- **[Insurance claims](/tour/ai-agents)**: Multi-agent analysis with human approval workflows and compensation patterns
-- **[Chat sessions](/tour/ai-agents)**: Stateful conversational agents with persistent memory
-- **[Code generation](https://github.com/igalshilman/agent47/tree/main)**: Interactive coding agents with interruption and streaming
-- [Complete AI examples repository](https://github.com/restatedev/ai-examples/tree/main)
+<Info>
+    Questions? Join our community on [Discord](https://discord.gg/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Info>
 
