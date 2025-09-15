@@ -3,8 +3,6 @@ title: "HTTP"
 description: "Learn how to invoke, monitor, and manage Restate services."
 ---
 
-An invocation is a request to execute a service handler. You can invoke handlers through:
-
 You can invoke handlers over HTTP with or without waiting for a response, and with or without an idempotency key.
 
 Make sure to first [register the handler](/services/versioning) you want to invoke.
@@ -136,97 +134,6 @@ curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey
 curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/attach
 curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/output
 ```
-
-
-## Invocation ID
-
-Restate assigns every invocation a unique **Invocation ID** starting with `inv_`. You can find this ID in:
-
-- The [Restate UI](/installation#restate-ui)
-- Logs and traces (`restate.invocation.id`)
-- CLI output
-
-List all invocations to see their IDs:
-
-```shell
-restate invocations list
-```
-
-## Canceling Invocations
-
-Cancel an invocation when it takes too long or is no longer needed. Cancellation:
-
-- Frees held resources
-- Rolls back any changes made so far
-- Allows proper cleanup
-
-### Cancel by Invocation ID
-
-Use the UI, CLI, or Admin API:
-
-<CodeGroup>
-    ```shell CLI
-    restate invocations cancel inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
-    ```
-    ```shell curl
-    curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/cancel
-    ```
-</CodeGroup>
-
-<Info>
-    For proper rollback, handlers must include compensation logic to maintain service state consistency. Check the [sagas guide](/guides/sagas).
-</Info>
-
-<Accordion title="How Cancellation Works">
-
-    When an invocation is canceled, Restate propagates the cancellation recursively through the call graph:
-
-    1. **Propagate to leaves**: Cancellation first reaches the leaves of the call graph. Restate interrupts any ongoing sleeps, awakeables, or other context actions at those points.
-    2. **Throw terminal error**: At the cancellation point, Restate throws a terminal error, signaling that normal execution cannot continue.
-    3. **Run compensation**: The handler runs its defined compensation logic to undo or mitigate side effects.
-    4. **Propagate upward**: The cancellation response then flows back up the call graph, ensuring that each parent invocation also executes its compensation logic if defined.
-
-</Accordion>
-
-### Cancel in Bulk
-
-Cancel multiple invocations by specifying service and handler patterns:
-
-- `serviceName` or `serviceName/handler`
-- `virtualObjectName` or `virtualObjectName/key` or `virtualObjectName/key/handler`
-- `workflowName` or `workflowName/key` or `workflowName/key/handler`
-
-**Example:** Cancel all `CartObject/add` invocations:
-```shell
-restate invocations cancel CartObject/add
-```
-
-Cancellation is non-blocking. The API call may return before cancellation completes. In rare cases, cancellation may not take effect - retry the operation if needed.
-
-
-## Killing Invocations
-
-Use kill when cancellation fails (e.g., when endpoints are permanently unavailable).
-
-Killing immediately stops all calls in the invocation tree **without executing compensation logic**. This may leave your service in an inconsistent state. Only use as a last resort after trying other fixes.
-
-Note that one-way calls and delayed calls are not killed because they're detached from the originating call tree.
-
-### Kill by Invocation ID
-
-<CodeGroup>
-    ```shell CLI
-    restate invocations kill inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
-    ```
-    ```shell curl
-    curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/kill
-    ```
-</CodeGroup>
-
-### Kill in Bulk
-
-Like cancellation, you can kill multiple invocations using service/handler patterns.
-
 
 ## OpenAPI support
 
