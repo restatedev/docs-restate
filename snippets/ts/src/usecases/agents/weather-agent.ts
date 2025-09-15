@@ -115,6 +115,7 @@ const runOnboardingAgent = async (
     model: openai("gpt-4o"),
     middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
   });
+  // <end_here>
 
   await generateText({
     model,
@@ -137,7 +138,6 @@ const runOnboardingAgent = async (
     stopWhen: [stepCountIs(10)],
     providerOptions: { openai: { parallelToolCalls: false } },
   });
-  // <end_here>
 
   return "done!";
 };

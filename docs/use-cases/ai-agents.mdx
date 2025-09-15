@@ -4,8 +4,7 @@ description: "Build resilient, observable AI agents that recover from failures a
 icon: "robot"
 ---
 
-AI agents make multiple LLM calls and tool executions that can fail due to rate limits, network issues, or service outages.
-Restate solves these challenges by making agents **resilient to failures**, **stateful across conversations**, and **observable** without managing complex retry logic or external state stores.
+Restate helps to make your AI agents resilient and scalable, so you can build long running agents with complex interaction patterns easily.
 
 ### Resilient Agent Execution
 
@@ -19,42 +18,30 @@ The Restate SDK records the steps the agent executes and recovers them if the pr
 - **Tool execution durability**: Steps within tool executions are retried until they succeed
 - **State consistency**: Agent state remains consistent across failures and restarts
 
-### Simple Integration with AI SDKs
+Restate lets you build agents any way you prefer:
 
-Combine the Restate SDK with popular AI frameworks like Vercel AI SDK and OpenAI Agent SDK and turn brittle agents in to fault-tolerant workflows:
-```typescript {"CODE_LOAD::ts/src/usecases/agents/weather-agent.ts#here"} 
-const model = wrapLanguageModel({
-  model: openai("gpt-4o"),
-  middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
-});
+<AccordionGroup>
+    <Accordion title={"Integrate with AI SDKs to make brittle agents fault-tolerant"}>
 
-await generateText({
-  model,
-  system: "You are an employee onboarding agent.",
-  prompt: `Onboard employee ${name} in team ${team}, as ${job}. First get the onboarding plan and then execute it.`,
-  tools: {
-    getOnboardingPlan: tool({
-      description: "Get onboarding plan for team and job",
-      inputSchema: OnboardingInfo,
-      execute: async ({ name, team, job }) =>
-        restateContext.run("get onboarding plan", () =>
-          getOnboardingPlan(name, team, job)
-        ),
-    }),
-    createEmail,
-    reserveLaptop,
-    orderKeyCard,
-    orderPersonalizedHoodie,
-  },
-  stopWhen: [stepCountIs(10)],
-  providerOptions: { openai: { parallelToolCalls: false } },
-});
-```
+        Combine the Restate SDK with popular AI frameworks like Vercel AI SDK and OpenAI Agent SDK and turn brittle agents in to fault-tolerant workflows:
+        ```typescript {"CODE_LOAD::ts/src/usecases/agents/weather-agent.ts#here"}
+        const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
+    });
+        ```
 
-- **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses automatically
-- **Tool execution**: Make tool execution steps resilient Restate Context actions
-- **Flexibility**: Works with your existing deployment - Docker, Kubernetes, AWS Lambda, or any serverless platform
-- **Integration**: From simple agents to complex multi-agent orchestration systems
+        - **Vercel AI SDK**: Use Restate's `durableCalls` middleware to persist LLM responses automatically
+        - **Tool execution**: Make tool execution steps resilient Restate Context actions
+        - **Flexibility**: Works with your existing deployment - Docker, Kubernetes, AWS Lambda, or any serverless platform
+        - **Integration**: From simple agents to complex multi-agent orchestration systems
+    </Accordion>
+    <Accordion title={"Build resilient AI workflows with unrestricted control flow"}>
+
+    </Accordion>
+</AccordionGroup>
+
+
 
 ### Built-in Observability
 
@@ -69,6 +56,24 @@ Track every step of your agent's execution with detailed traces and state inspec
 - **OpenTelemetry integration**: Export traces to Langfuse, DataDog, or custom systems
 
 ## Key AI Agent Patterns
+
+### Human-in-the-Loop Workflows
+
+Implement resilient approval workflows and human oversight without complex infrastructure:
+
+- **Durable waiting**: Waiting continues across crashes and restarts
+- **Timeout handling**: Set crash-proof timeouts with automatic escalation paths
+- **Cost efficiency**: No compute costs while waiting on serverless platforms
+
+<Accordion title="Code example">
+    ```typescript {"CODE_LOAD::ts/src/usecases/agents/agent-actions.ts#approval"}
+    const approval = ctx.awakeable<boolean>();
+    await ctx.run("request-approval", () =>
+    sendApprovalRequest(approval.id, request)
+    );
+    const approved = await approval.promise;
+    ```
+</Accordion>
 
 ### Stateful Conversational Agents
 
@@ -90,25 +95,6 @@ restate.object({
   },
 });
 ```
-
-Query state via the UI:
-<img src="/img/usecases/agents/conversations.png" alt="Chat Agent State" />
-
-### Human-in-the-Loop Workflows
-
-Implement resilient approval workflows and human oversight without complex infrastructure:
-
-```typescript {"CODE_LOAD::ts/src/usecases/agents/agent-actions.ts#approval"} 
-const approval = ctx.awakeable<boolean>();
-await ctx.run("request-approval", () =>
-  sendApprovalRequest(approval.id, request)
-);
-const approved = await approval.promise;
-```
-
-- **Durable waiting**: Waiting continues across crashes and restarts
-- **Timeout handling**: Set crash-proof timeouts with automatic escalation paths
-- **Cost efficiency**: No compute costs while waiting on serverless platforms
 
 ### Multi-Agent Orchestration
 
