@@ -143,247 +143,255 @@ Restate is built from the ground up for low-latency workflow execution. Unlike t
 
 ## Key Workflow Patterns
 
-### Flexible Activity Execution
 
-Restate gives you the flexibility to structure your workflows however makes sense for your application. You can execute steps inline within the workflow or split them out into separate services that can scale independently or are owned by different teams:
+<AccordionGroup>
+    <Accordion title={"Flexible Activity Execution: inline or separate services"}>
+        Restate gives you the flexibility to structure your workflows however makes sense for your application. You can execute steps inline within the workflow or split them out into separate services that can scale independently or are owned by different teams:
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/signup.ts#here"} 
-// Move user DB interaction to dedicated service
-const success = await ctx
-  .serviceClient(userService)
-  .createUser({ userId, user });
-if (!success) return { success };
+        <CodeGroup>
+            ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/signup.ts#here"}
+            // Move user DB interaction to dedicated service
+            const success = await ctx
+            .serviceClient(userService)
+            .createUser({ userId, user });
+            if (!success) return { success };
 
-// Execute other steps inline
-await ctx.run("activate", () => activateUser(userId));
-await ctx.run("welcome", () => sendWelcomeEmail(user));
-```
+            // Execute other steps inline
+            await ctx.run("activate", () => activateUser(userId));
+            await ctx.run("welcome", () => sendWelcomeEmail(user));
+            ```
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/ExternalUserSignup.java#here"} 
-// Move user DB interaction to dedicated service
-boolean success =
-    UserServiceClient.fromContext(ctx).createUser(new CreateUserRequest(userId, user));
-if (!success) return new SignupResult(false);
+            ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/ExternalUserSignup.java#here"}
+            // Move user DB interaction to dedicated service
+            boolean success =
+            UserServiceClient.fromContext(ctx).createUser(new CreateUserRequest(userId, user));
+            if (!success) return new SignupResult(false);
 
-// Execute other steps inline
-ctx.run("activate", () -> activateUser(userId));
-ctx.run("welcome", () -> sendWelcomeEmail(user));
-```
+            // Execute other steps inline
+            ctx.run("activate", () -> activateUser(userId));
+            ctx.run("welcome", () -> sendWelcomeEmail(user));
+            ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/external_signup.py#here"} 
-# Move user DB interaction to dedicated service
-success = await ctx.service_call(
-    create_user, CreateUserRequest(user_id=user_id, user=user)
-)
-if not success:
-    return {"success": False}
+            ```python Python {"CODE_LOAD::python/src/usecases/workflows/external_signup.py#here"}
+            # Move user DB interaction to dedicated service
+            success = await ctx.service_call(
+            create_user, CreateUserRequest(user_id=user_id, user=user)
+            )
+            if not success:
+            return {"success": False}
 
-# Execute other steps inline
-await ctx.run_typed("activate", activate_user, user_id=user_id)
-await ctx.run_typed("welcome", send_welcome_email, user=user)
-```
+            # Execute other steps inline
+            await ctx.run_typed("activate", activate_user, user_id=user_id)
+            await ctx.run_typed("welcome", send_welcome_email, user=user)
+            ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/externalsignup.go#here"} 
-// Move user DB interaction to dedicated service
-success, err := restate.Service[bool](ctx, "UserService", "createUser").Request(CreateUserRequest{
-  UserID: userID,
-  User:   user,
-})
-if err != nil || !success {
-  return false, err
-}
+            ```go Go {"CODE_LOAD::go/usecases/workflows/externalsignup.go#here"}
+            // Move user DB interaction to dedicated service
+            success, err := restate.Service[bool](ctx, "UserService", "createUser").Request(CreateUserRequest{
+            UserID: userID,
+            User:   user,
+        })
+            if err != nil || !success {
+            return false, err
+        }
 
-// Execute other steps inline
-_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return ActivateUser(userID)
-})
-if err != nil {
-  return false, err
-}
+            // Execute other steps inline
+            _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+            return ActivateUser(userID)
+        })
+            if err != nil {
+            return false, err
+        }
 
-_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return SendWelcomeEmail(user)
-})
-if err != nil {
-  return false, err
-}
-```
-</CodeGroup>
+            _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+            return SendWelcomeEmail(user)
+        })
+            if err != nil {
+            return false, err
+        }
+            ```
+        </CodeGroup>
+    </Accordion>
 
-### Durable State and Queries
-Store workflow state that survives crashes and can be queried from external systems:
+    <Accordion title={"Durable State and Queries"}>
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state"} 
-// Store intermediate results
-ctx.set("payment-status", "completed");
-ctx.set("order-details", order);
-```
+        Store workflow state that survives crashes and can be queried from external systems:
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state"} 
-// Store intermediate results
-ctx.set(PAYMENT_STATUS, "completed");
-ctx.set(ORDER_DETAILS, order);
-```
+        <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state"}
+        // Store intermediate results
+        ctx.set("payment-status", "completed");
+        ctx.set("order-details", order);
+        ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state"} 
-# Store intermediate results
-ctx.set("payment-status", "completed")
-ctx.set("order-details", order)
-```
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state"}
+        // Store intermediate results
+        ctx.set(PAYMENT_STATUS, "completed");
+        ctx.set(ORDER_DETAILS, order);
+        ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state"} 
-// Store intermediate results
-restate.Set(ctx, "payment-status", "completed")
-restate.Set(ctx, "order-details", order)
-```
-</CodeGroup>
+        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state"}
+        # Store intermediate results
+        ctx.set("payment-status", "completed")
+        ctx.set("order-details", order)
+        ```
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state_get"} 
-// Query from external handler
-getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
-  return {
-    payment: await ctx.get("payment-status"),
-    order: await ctx.get("order-details"),
-  };
-},
-```
+        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state"}
+        // Store intermediate results
+        restate.Set(ctx, "payment-status", "completed")
+        restate.Set(ctx, "order-details", order)
+        ```
+        </CodeGroup>
+        <CodeGroup>
+            ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state_get"}
+            // Query from external handler
+            getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
+            return {
+            payment: await ctx.get("payment-status"),
+            order: await ctx.get("order-details"),
+        };
+        },
+            ```
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state_get"} 
-// Query from external handler
-@Shared
-public OrderDetails getOrderDetails(SharedWorkflowContext ctx) {
-  return ctx.get(ORDER_DETAILS).orElseThrow(() -> new TerminalException("Order not found"));
-}
-```
+            ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state_get"}
+            // Query from external handler
+            @Shared
+            public OrderDetails getOrderDetails(SharedWorkflowContext ctx) {
+            return ctx.get(ORDER_DETAILS).orElseThrow(() -> new TerminalException("Order not found"));
+        }
+            ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state_get"} 
-# Query from external handler
-@order_workflow.handler()
-async def get_order_details(ctx: restate.WorkflowSharedContext) -> OrderDetails:
-    return await ctx.get("order-details")
-```
+            ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state_get"}
+            # Query from external handler
+            @order_workflow.handler()
+            async def get_order_details(ctx: restate.WorkflowSharedContext) -> OrderDetails:
+            return await ctx.get("order-details")
+            ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state_get"} 
-// Query from external handler
-func (OrderWorkflow) GetOrderDetails(ctx restate.WorkflowSharedContext) (OrderDetails, error) {
-  return restate.Get[OrderDetails](ctx, "order-details")
-}
-```
-</CodeGroup>
+            ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state_get"}
+            // Query from external handler
+            func (OrderWorkflow) GetOrderDetails(ctx restate.WorkflowSharedContext) (OrderDetails, error) {
+            return restate.Get[OrderDetails](ctx, "order-details")
+        }
+            ```
+        </CodeGroup>
+    </Accordion>
 
-### Event-Driven Coordination
-Handle external events and signals without complex event sourcing infrastructure:
+    <Accordion title={"Event-Driven Coordination"}>
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approval"} 
-// Wait for external approval
-const approval = await ctx.promise<boolean>("manager-approval");
-```
+        Handle external events and signals without complex event sourcing infrastructure:
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approval"} 
-// Wait for external approval
-var approval = ctx.promise(APPROVAL_PROMISE);
-Boolean decision = approval.future().await();
-```
+        <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approval"}
+        // Wait for external approval
+        const approval = await ctx.promise<boolean>("manager-approval");
+        ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approval"} 
-# Wait for external approval
-approval = await ctx.promise("manager-approval")
-```
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approval"}
+        // Wait for external approval
+        var approval = ctx.promise(APPROVAL_PROMISE);
+        Boolean decision = approval.future().await();
+        ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approval"} 
-// Wait for external approval
-approval, err := restate.Promise[bool](ctx, "manager-approval").Result()
-```
-</CodeGroup>
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approve"} 
-// External system resolves the promise
-approve: async (ctx: restate.WorkflowSharedContext, decision: boolean) => {
-  await ctx.promise<boolean>("manager-approval").resolve(decision);
-},
-```
+        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approval"}
+        # Wait for external approval
+        approval = await ctx.promise("manager-approval")
+        ```
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approve"} 
-// External system resolves the promise
-@Shared
-public void approve(SharedWorkflowContext ctx, boolean decision) {
-  ctx.promiseHandle(APPROVAL_PROMISE).resolve(decision);
-}
-```
+        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approval"}
+        // Wait for external approval
+        approval, err := restate.Promise[bool](ctx, "manager-approval").Result()
+        ```
+        </CodeGroup>
+        <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approve"}
+        // External system resolves the promise
+        approve: async (ctx: restate.WorkflowSharedContext, decision: boolean) => {
+          await ctx.promise<boolean>("manager-approval").resolve(decision);
+        },
+        ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approve"} 
-# External system resolves the promise
-@approval_workflow.handler()
-async def approve(ctx: restate.WorkflowSharedContext, decision: bool):
-    await ctx.promise("manager-approval").resolve(decision)
-```
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approve"}
+        // External system resolves the promise
+        @Shared
+        public void approve(SharedWorkflowContext ctx, boolean decision) {
+          ctx.promiseHandle(APPROVAL_PROMISE).resolve(decision);
+        }
+        ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approve"} 
-// External system resolves the promise
-func (ApprovalWorkflow) Approve(ctx restate.WorkflowSharedContext, decision bool) error {
-  return restate.Promise[bool](ctx, "manager-approval").Resolve(decision)
-}
-```
-</CodeGroup>
+        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approve"}
+        # External system resolves the promise
+        @approval_workflow.handler()
+        async def approve(ctx: restate.WorkflowSharedContext, decision: bool):
+            await ctx.promise("manager-approval").resolve(decision)
+        ```
 
-### Durable Timers and Scheduling
-Long-running processes with built-in timer management:
+        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approve"}
+        // External system resolves the promise
+        func (ApprovalWorkflow) Approve(ctx restate.WorkflowSharedContext, decision bool) error {
+          return restate.Promise[bool](ctx, "manager-approval").Resolve(decision)
+        }
+        ```
+        </CodeGroup>
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#timers"} 
-// Wait for user action with timeout
-try {
-  const userAction = ctx
-    .promise<string>("user-response")
-    .get()
-    .orTimeout({ hours: 24 });
-} catch (error) {
-  if (error instanceof restate.TimeoutError) {
-    // Handle timeout
-  }
-  // Handle other errors
-}
-```
+    </Accordion>
+    <Accordion title={"Durable Timers and Scheduling"}>
+        Long-running processes with built-in timer management:
 
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#timers"} 
-// Wait for user action with timeout
-try {
-  var userResponse = ctx.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
-} catch (TimeoutException e) {
-  // Handle timeout
-}
-```
+        <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#timers"}
+        // Wait for user action with timeout
+        try {
+          const userAction = ctx
+            .promise<string>("user-response")
+            .get()
+            .orTimeout({ hours: 24 });
+        } catch (error) {
+          if (error instanceof restate.TimeoutError) {
+            // Handle timeout
+          }
+          // Handle other errors
+        }
+        ```
 
-```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#timers"} 
-# Wait for user action with timeout
-match await restate.select(
-    user_response=ctx.promise("user-response").value(),
-    timeout=ctx.sleep(timedelta(days=1)),
-):
-    case ["user_response", response]:
-        print("Response:", response)
-    case _:
-        print("Timeout occurred")
-```
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#timers"}
+        // Wait for user action with timeout
+        try {
+          var userResponse = ctx.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
+        } catch (TimeoutException e) {
+          // Handle timeout
+        }
+        ```
 
-```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#timers"} 
-// Wait for user action with timeout
-userResponse := restate.Promise[string](ctx, "user-response")
-timeout := restate.After(ctx, 24*time.Hour)
+        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#timers"}
+        # Wait for user action with timeout
+        match await restate.select(
+            user_response=ctx.promise("user-response").value(),
+            timeout=ctx.sleep(timedelta(days=1)),
+        ):
+            case ["user_response", response]:
+                print("Response:", response)
+            case _:
+                print("Timeout occurred")
+        ```
 
-selector := restate.Select(ctx, userResponse, timeout)
-switch selector.Select() {
-case userResponse:
-  return userResponse.Result()
-case timeout:
-  return "timed out", nil
-}
-```
-</CodeGroup>
+        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#timers"}
+        // Wait for user action with timeout
+        userResponse := restate.Promise[string](ctx, "user-response")
+        timeout := restate.After(ctx, 24*time.Hour)
+
+        selector := restate.Select(ctx, userResponse, timeout)
+        switch selector.Select() {
+        case userResponse:
+          return userResponse.Result()
+        case timeout:
+          return "timed out", nil
+        }
+        ```
+        </CodeGroup>
+    </Accordion>
+
+</AccordionGroup>
 
 ## When to Choose Restate
 

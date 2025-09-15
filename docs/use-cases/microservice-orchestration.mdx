@@ -108,392 +108,185 @@ func (OrderService) Process(ctx restate.Context, order Order) (OrderResult, erro
 ### Resilient Service Communication
 
 Flexible communication patterns with strong delivery guarantees:
-
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#communication"} 
-// Request-response: Wait for result
-const result = await ctx.serviceClient(inventoryService).checkStock(item);
-
-// Fire-and-forget: Guaranteed delivery without waiting
-ctx.serviceSendClient(emailService).sendConfirmation(order);
-
-// Delayed execution: Schedule for later
-ctx
-  .serviceSendClient(reminderService)
-  .sendReminder(order, sendOpts({ delay: { days: 7 } }));
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
-// Request-response: Wait for result
-var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
-
-// Fire-and-forget: Guaranteed delivery without waiting
-EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
-
-// Delayed execution: Schedule for later
-ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
-# Request-response: Wait for result
-result = await ctx.service_call(check_stock, item)
-
-# Fire-and-forget: Guaranteed delivery without waiting
-ctx.service_send(send_confirmation_email, order)
-
-# Delayed execution: Schedule for later
-ctx.service_send(send_reminder, order, send_delay=timedelta(days=7))
-```
-
-```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"} 
-// Request-response: Wait for result
-result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
-if err != nil {
-  return err
-}
-_ = result
-
-// Fire-and-forget: Guaranteed delivery without waiting
-restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
-
-// Delayed execution: Schedule for later
-restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
-```
-</CodeGroup>
-
-**Communication Guarantees:**
 - **Exactly-once delivery**: Messages are never lost or duplicated
 - **Built-in retries**: Automatic exponential backoff for transient failures  
 - **Request deduplication**: Idempotency keys prevent duplicate processing
+
+<Accordion title="Code example">
+    <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#communication"}
+        // Request-response: Wait for result
+        const result = await ctx.serviceClient(inventoryService).checkStock(item);
+
+        // Fire-and-forget: Guaranteed delivery without waiting
+        ctx.serviceSendClient(emailService).sendConfirmation(order);
+
+        // Delayed execution: Schedule for later
+        ctx
+        .serviceSendClient(reminderService)
+        .sendReminder(order, sendOpts({ delay: { days: 7 } }));
+        ```
+
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"}
+        // Request-response: Wait for result
+        var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
+
+        // Fire-and-forget: Guaranteed delivery without waiting
+        EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
+
+        // Delayed execution: Schedule for later
+        ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
+        ```
+
+        ```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"}
+        # Request-response: Wait for result
+        result = await ctx.service_call(check_stock, item)
+
+        # Fire-and-forget: Guaranteed delivery without waiting
+        ctx.service_send(send_confirmation_email, order)
+
+        # Delayed execution: Schedule for later
+        ctx.service_send(send_reminder, order, send_delay=timedelta(days=7))
+        ```
+
+        ```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"}
+        // Request-response: Wait for result
+        result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
+        if err != nil {
+        return err
+    }
+        _ = result
+
+        // Fire-and-forget: Guaranteed delivery without waiting
+        restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
+
+        // Delayed execution: Schedule for later
+        restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
+        ```
+    </CodeGroup>
+
+</Accordion>
 
 ### State Management
 
 Manage stateful entities without external databases or complex consistency mechanisms:
 
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/user-account.ts#here"} 
-export default restate.object({
-  name: "UserAccount",
-  handlers: {
-    updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
-      const balance = (await ctx.get<number>("balance")) ?? 0;
-      const newBalance = balance + amount;
-
-      if (newBalance < 0) {
-        throw new TerminalError("Insufficient funds");
-      }
-
-      ctx.set("balance", newBalance);
-      return newBalance;
-    },
-
-    getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
-      return (await ctx.get<number>("balance")) ?? 0;
-    }),
-  },
-});
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/UserAccount.java#here"} 
-@VirtualObject
-public class UserAccount {
-  private static final StateKey<Double> BALANCE = StateKey.of("balance", Double.class);
-
-  @Handler
-  public double updateBalance(ObjectContext ctx, double amount) {
-    double balance = ctx.get(BALANCE).orElse(0.0);
-    double newBalance = balance + amount;
-
-    if (newBalance < 0) {
-      throw new TerminalException("Insufficient funds");
-    }
-
-    ctx.set(BALANCE, newBalance);
-    return newBalance;
-  }
-
-  @Shared
-  public double getBalance(SharedObjectContext ctx) {
-    return ctx.get(BALANCE).orElse(0.0);
-  }
-}
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/microservices/user_account.py#here"} 
-user_account = restate.VirtualObject("UserAccount")
-
-
-@user_account.handler()
-async def update_balance(ctx: restate.ObjectContext, amount: float):
-    balance = await ctx.get("balance") or 0.0
-    new_balance = balance + amount
-
-    if new_balance < 0.0:
-        raise TerminalError("Insufficient funds")
-
-    ctx.set("balance", new_balance)
-    return new_balance
-
-
-@user_account.handler(kind="shared")
-async def get_balance(ctx: restate.ObjectSharedContext):
-    return await ctx.get("balance") or 0.0
-```
-
-```go Go {"CODE_LOAD::go/usecases/microservices/useraccount.go#here"} 
-type UserAccount struct{}
-
-func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (float64, error) {
-  balance, err := restate.Get[float64](ctx, "balance")
-  if err != nil {
-    return 0.0, err
-  }
-
-  newBalance := balance + amount
-  if newBalance < 0.0 {
-    return 0.0, restate.TerminalError(errors.New("insufficient funds"))
-  }
-
-  restate.Set(ctx, "balance", newBalance)
-  return newBalance, nil
-}
-
-func (UserAccount) GetBalance(ctx restate.ObjectSharedContext) (float64, error) {
-  return restate.Get[float64](ctx, "balance")
-}
-```
-</CodeGroup>
-
-**State Guarantees:**
 - **Strict consistency**: Single-writer semantics prevent race conditions
 - **Durable persistence**: State survives crashes and deployments
 - **Horizontal scaling**: Different entity keys process independently
 - **Built-in querying**: Access state via UI and APIs
 
+<Accordion title="Code example">
+    <CodeGroup>
+        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/user-account.ts#here"}
+        export default restate.object({
+        name: "UserAccount",
+        handlers: {
+        updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
+        const balance = (await ctx.get<number>("balance")) ?? 0;
+        const newBalance = balance + amount;
+
+        if (newBalance < 0) {
+        throw new TerminalError("Insufficient funds");
+    }
+
+        ctx.set("balance", newBalance);
+        return newBalance;
+    },
+
+        getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
+        return (await ctx.get<number>("balance")) ?? 0;
+    }),
+    },
+    });
+        ```
+
+        ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/UserAccount.java#here"}
+        @VirtualObject
+        public class UserAccount {
+        private static final StateKey<Double> BALANCE = StateKey.of("balance", Double.class);
+
+        @Handler
+        public double updateBalance(ObjectContext ctx, double amount) {
+        double balance = ctx.get(BALANCE).orElse(0.0);
+        double newBalance = balance + amount;
+
+        if (newBalance < 0) {
+        throw new TerminalException("Insufficient funds");
+    }
+
+        ctx.set(BALANCE, newBalance);
+        return newBalance;
+    }
+
+        @Shared
+        public double getBalance(SharedObjectContext ctx) {
+        return ctx.get(BALANCE).orElse(0.0);
+    }
+    }
+        ```
+
+        ```python Python {"CODE_LOAD::python/src/usecases/microservices/user_account.py#here"}
+        user_account = restate.VirtualObject("UserAccount")
+
+
+        @user_account.handler()
+        async def update_balance(ctx: restate.ObjectContext, amount: float):
+        balance = await ctx.get("balance") or 0.0
+        new_balance = balance + amount
+
+        if new_balance < 0.0:
+        raise TerminalError("Insufficient funds")
+
+        ctx.set("balance", new_balance)
+        return new_balance
+
+
+        @user_account.handler(kind="shared")
+        async def get_balance(ctx: restate.ObjectSharedContext):
+        return await ctx.get("balance") or 0.0
+        ```
+
+        ```go Go {"CODE_LOAD::go/usecases/microservices/useraccount.go#here"}
+        type UserAccount struct{}
+
+        func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (float64, error) {
+        balance, err := restate.Get[float64](ctx, "balance")
+        if err != nil {
+        return 0.0, err
+    }
+
+        newBalance := balance + amount
+        if newBalance < 0.0 {
+        return 0.0, restate.TerminalError(errors.New("insufficient funds"))
+    }
+
+        restate.Set(ctx, "balance", newBalance)
+        return newBalance, nil
+    }
+
+        func (UserAccount) GetBalance(ctx restate.ObjectSharedContext) (float64, error) {
+        return restate.Get[float64](ctx, "balance")
+    }
+        ```
+    </CodeGroup>
+
+</Accordion>
+
 ## Key Orchestration Patterns
 
-### Saga Pattern Implementation
+<CardGroup cols={3}>
+    <Card title="Sagas" icon="backward" href="/guides/sagas">
+        Implement resilient rollback logic for non-transient failures.
+    </Card>
+    <Card title="Event-Driven Coordination" icon="messages" href="/tour/ai-agents#advanced-patterns">
+        Wait for external events and webhooks with promises that survive crashes
+    </Card>
+    <Card title="Parallel Processing" icon="grip-lines" href="/tour/ai-agents#error-handling">
+        Execute independent operations concurrently while maintaining durability
+    </Card>
+</CardGroup>
 
-Implement resilient rollback logic for non-transient failures (e.g. flight fully booked):
-
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/booking-service.ts#here"} 
-const bookingService = restate.service({
-  name: "BookingService",
-  handlers: {
-    reserve: async (ctx: restate.Context, request: BookingRequest) => {
-      const compensations = [];
-
-      try {
-        // Reserve hotel
-        compensations.push(() => cancelHotel(request.hotelId));
-        await ctx.run(() => bookHotel(request));
-
-        // Reserve flight
-        compensations.push(() => cancelFlight(request.flightId));
-        await ctx.run(() => bookFlight(request));
-
-        return { success: true };
-      } catch (error) {
-        // Run compensations in reverse order
-        for (const compensation of compensations.reverse()) {
-          await ctx.run(() => compensation());
-        }
-        throw error;
-      }
-    },
-  },
-});
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/BookingService.java#here"} 
-@Handler
-public BookingResult reserve(Context ctx, BookingRequest request) {
-  List<Runnable> compensations = new ArrayList<>();
-
-  try {
-    // Reserve hotel
-    compensations.add(() -> cancelHotel(request.hotelId));
-    ctx.run("book-hotel", () -> bookHotel(request));
-
-    // Reserve flight
-    compensations.add(() -> cancelFlight(request.flightId));
-    ctx.run("book-flight", () -> bookFlight(request));
-
-    return new BookingResult(true);
-  } catch (Exception error) {
-    // Run compensations in reverse order
-    for (Runnable compensation : compensations.reversed()) {
-      ctx.run("compensation", compensation::run);
-    }
-    throw error;
-  }
-}
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/microservices/booking_service.py#here"} 
-@booking_service.handler()
-async def reserve(ctx: restate.Context, request: BookingRequest):
-    compensations = []
-
-    try:
-        # Reserve hotel
-        compensations.append(lambda: cancel_hotel(request.hotel_id))
-        await ctx.run_typed("book_hotel", book_hotel, request=request)
-
-        # Reserve flight
-        compensations.append(lambda: cancel_flight(request.flight_id))
-        await ctx.run_typed("book_flight", book_flight, request=request)
-
-        return {"success": True}
-    except Exception as error:
-        # Run compensations in reverse order
-        for i, compensation in enumerate(reversed(compensations)):
-            await ctx.run_typed(f"compensation_{i}", compensation)
-        raise error
-```
-
-```go Go {"CODE_LOAD::go/usecases/microservices/bookingservice.go#here"} 
-func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res BookingResult, err error) {
-  var compensations []func() error
-  // Register defer that executes compensations
-  defer func() {
-    if err != nil {
-      for i := len(compensations) - 1; i >= 0; i-- {
-        _, compErr := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-          return restate.Void{}, compensations[i]()
-        })
-        if compErr != nil {
-          err = compErr
-        }
-      }
-    }
-  }()
-
-  // Reserve hotel
-  compensations = append(compensations, func() error { return CancelHotel(request.HotelID) })
-  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return BookHotel(request)
-  })
-  if err != nil {
-    return BookingResult{}, err
-  }
-
-  // Reserve flight
-  compensations = append(compensations, func() error { return CancelFlight(request.FlightID) })
-  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return BookFlight(request)
-  })
-  if err != nil {
-    return BookingResult{}, err
-  }
-
-  return BookingResult{Success: true}, nil
-}
-```
-</CodeGroup>
-
-### Event-Driven Coordination  
-
-Wait for external events and webhooks with promises that survive crashes:
-
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#awakeables"} 
-// Wait for external payment confirmation
-const confirmation = ctx.awakeable<PaymentResult>();
-await ctx.run(() => startPayment(order, confirmation.id));
-await confirmation.promise.orTimeout({ minutes: 30 });
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#awakeables"} 
-// Wait for external payment confirmation
-var confirmation = ctx.<PaymentResult>awakeable(PaymentResult.class);
-ctx.run("start-payment", () -> startPayment(order, confirmation.id()));
-confirmation.await(Duration.ofMinutes(30));
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#awakeables"} 
-# Wait for external payment confirmation
-confirmation_id, confirmation_promise = ctx.awakeable()
-await ctx.run_typed(
-    "start_payment", start_payment, order=order, confirmation_id=confirmation_id
-)
-await confirmation_promise
-```
-
-```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#awakeables"} 
-// Wait for external payment confirmation
-confirmation := restate.Awakeable[PaymentResult](ctx)
-_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return StartPayment(order, confirmation.Id())
-})
-if err != nil {
-  return err
-}
-
-_, err = confirmation.Result()
-if err != nil {
-  return err
-}
-```
-</CodeGroup>
-
-Resolve them from another handler via the SDK or via HTTP.
-
-### Parallel Processing
-
-Execute independent operations concurrently while maintaining durability:
-
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#parallel"} 
-// Process all items in parallel
-const itemPromises = order.items.map((item) =>
-  ctx.run(() => processItem(item))
-);
-
-await RestatePromise.all(itemPromises);
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#parallel"} 
-// Process all items in parallel
-List<DurableFuture<?>> itemFutures = new ArrayList<>();
-for (Item item : order.items) {
-  itemFutures.add(ctx.runAsync(() -> processItem(item)));
-}
-
-DurableFuture.all(itemFutures).await();
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#parallel"} 
-# Process all items in parallel
-item_promises = [
-    ctx.run_typed(f"process_item_{item['id']}", process_item, item=item)
-    for item in order.items
-]
-
-await restate.gather(*item_promises)
-```
-
-```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#parallel"} 
-// Process all items in parallel
-var itemFutures []restate.Selectable
-for _, item := range order.Items {
-  itemFutures = append(itemFutures,
-    restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-      return ProcessItem(item)
-    }))
-}
-
-selector := restate.Select(ctx, itemFutures...)
-
-for selector.Remaining() {
-  _, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
-  if err != nil {
-    return err
-  }
-}
-```
-</CodeGroup>
 
 ## When to Choose Restate
 
