@@ -133,9 +133,42 @@ Note that one-way calls and delayed calls are not killed because they're detache
     ```
 </CodeGroup>
 
-## Resume / Retry now
+## Retry policy
 
-If an invocation retries for too many times, Restate will _Pause_ it.
+Restate retries executing invocations that can't make any progress according to a _retry policy_.
+This policy controls the retry intervals, the maximum number of attempts and whether to _Pause_ or _Kill_ the invocation when the attempts are exhausted.
+
+You can configure a global default retry policy for all invocations in your cluster as follows:
+
+```toml
+[default-retry-policy]
+initial-interval = "10s"
+max-attempts = 100
+max-interval = "60s"
+```
+
+This will retry the invocation 100 times, after which the invocation will be _paused_ if no progress can be made. To resume a paused invocation, check the paragraph below.
+
+You can also retry forever, without ever pausing or killing the invocation:
+
+```toml
+[default-retry-policy]
+max-attempts = "unlimited"
+```
+
+Check the [configuration reference](/references/server-config) for more details.
+
+You can override the global default retry policy on individual service/handlers as well, as described in the [service configuration docs](/services/configuration).
+
+When a retry policy is unset, Restate by default will retry undefinitely, alike setting `max-attempts = "unlimited"`.
+
+<Accordion title={"Users upgrading from 1.4 to 1.5"}>
+    <Warning>
+        When opting-in `default-retry-policy`, you can’t rollback to Restate v1.4.x, therefore, it’s safe to use this configuration only after upgrading all cluster nodes to v1.5.0.
+    </Warning>
+</Accordion>
+
+## Resume
 
 When an invocation is paused, you need to resume it manually:
 
@@ -151,9 +184,6 @@ When an invocation is paused, you need to resume it manually:
     curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz/resume
     ```
 </CodeGroup>
-
-Check out the [service configuration docs](/services/configuration) to tune the invocation retry policy,
-including the retry interval and how many attempts to perform before pausing.
 
 <Accordion title="Resuming on a different deployment">
     When resuming, the invocation will run on the same deployment where it started.
