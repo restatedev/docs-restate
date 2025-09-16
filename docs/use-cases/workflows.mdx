@@ -1,14 +1,31 @@
 ---
 title: "Workflows"
-description: "Build resilient, low-latency workflows with code, not configuration."
+description: "Build resilient, low-latency workflows with code."
 icon: "diagram-subtask"
 ---
 
-Traditional workflow orchestrators require you to learn new DSLs, manage complex infrastructure, and work around platform limitations. Restate takes a different approach: **write workflows as regular code** in your preferred programming language, with automatic durability and resilience built in.
+Restate lets you **write workflows as regular code** in your preferred programming language, with automatic resilience.
 
-### Code-First Development
 
-Write workflows using familiar programming constructs instead of YAML or JSON configurations:
+## Low-Latency Workflows
+
+Restate is built from the ground up for low-latency workflow execution. Restate workflows can be placed directly in the latency-sensitive path of user interactions:
+
+- **Lightweight execution**: Workflows run like regular functions with minimal overhead
+- **Event-driven foundation**: Built in Rust for high-performance, low-latency operations
+- **No coordination delays**: Immediate workflow execution via a push-based model
+
+<Info>
+    [Benchmark results Restate v1.2](https://restate.dev/blog/building-a-modern-durable-execution-engine-from-first-principles/#some-performance-numbers)
+</Info>
+
+## Familiar Programming Model
+
+Write resilient workflows using familiar programming constructs:
+- Automatically retry transient errors like infrastructure crashes and network failures
+- Use standard language constructs (if/else, loops) and durable versions of familiar building blocks (e.g., timers, promises)
+- Handle errors naturally with try/catch blocks and automatic retries
+- Test and debug with your existing IDE and standard development tools
 
 <CodeGroup>
 ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/simple-signup.ts#here"} 
@@ -111,318 +128,54 @@ func (UserSignup) Run(ctx restate.WorkflowContext, user User) (bool, error) {
 ```
 </CodeGroup>
 
-**Familiar Programming Model:**
-- Use standard language constructs (if/else, loops, promises) instead of DSLs
-- Handle errors naturally with try/catch blocks and automatic retries
-- Test and debug with your existing IDE and tools
-- Deploy workflows like regular HTTP services
-- Available in TypeScript, Python, Go, Java, Kotlin, and Rust
-
-### Low-Latency Performance
-
-Restate is built from the ground up for low-latency workflow execution. Unlike traditional orchestrators that add significant overhead, Restate workflows can be placed directly in the latency-sensitive path of user interactions:
-
-- **Lightweight execution**: Workflows run like regular functions with minimal overhead
-- **Event-driven foundation**: Built in Rust for high-performance, low-latency operations
-- **No coordination delays**: Direct workflow execution via a push-based model
-
-<Info>
-[Benchmark results Restate v1.2](https://restate.dev/blog/building-a-modern-durable-execution-engine-from-first-principles/#some-performance-numbers)
-</Info>
-
-### Simple Deployment Model
+## Simple Deployment Model
 
 <img src="/img/tour/app_layout.svg" alt="Application Structure"/>
-**Restate Server**: Unlike other orchestrators that require separate worker pools, message queues, and databases, Restate packages everything in a single binary with built-in persistence and messaging.
+**Restate Server**: Restate is packaged as a single binary with built-in persistence and messaging. Run it as a single instance or in a high-availability cluster.
 
-**Service Deployment**:
-- Deploy your workflows using your existing deployment pipeline: containers, Kubernetes, serverless functions, or any HTTP-capable platform.
-- No platform-specific configurations or worker management required.
-- Deploy on FaaS and use Restate's smart suspension mechanism to avoid paying for wait/idle time.
+**Service Deployment**: Deploy your workflows using your existing deployment pipeline: containers, Kubernetes, serverless functions, or any HTTP-capable platform.
 
+On FaaS, Restate's suspends workflows while they are waiting (e.g. timer) to reduce costs.
 
-## Key Workflow Patterns
-
-
-<AccordionGroup>
-    <Accordion title={"Flexible Activity Execution: inline or separate services"}>
-        Restate gives you the flexibility to structure your workflows however makes sense for your application. You can execute steps inline within the workflow or split them out into separate services that can scale independently or are owned by different teams:
-
-        <CodeGroup>
-            ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/signup.ts#here"} 
-// Move user DB interaction to dedicated service
-const success = await ctx
-  .serviceClient(userService)
-  .createUser({ userId, user });
-if (!success) return { success };
-
-// Execute other steps inline
-await ctx.run("activate", () => activateUser(userId));
-await ctx.run("welcome", () => sendWelcomeEmail(user));
-```
-
-            ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/ExternalUserSignup.java#here"} 
-// Move user DB interaction to dedicated service
-boolean success =
-    UserServiceClient.fromContext(ctx).createUser(new CreateUserRequest(userId, user));
-if (!success) return new SignupResult(false);
-
-// Execute other steps inline
-ctx.run("activate", () -> activateUser(userId));
-ctx.run("welcome", () -> sendWelcomeEmail(user));
-```
-
-            ```python Python {"CODE_LOAD::python/src/usecases/workflows/external_signup.py#here"} 
-# Move user DB interaction to dedicated service
-success = await ctx.service_call(
-    create_user, CreateUserRequest(user_id=user_id, user=user)
-)
-if not success:
-    return {"success": False}
-
-# Execute other steps inline
-await ctx.run_typed("activate", activate_user, user_id=user_id)
-await ctx.run_typed("welcome", send_welcome_email, user=user)
-```
-
-            ```go Go {"CODE_LOAD::go/usecases/workflows/externalsignup.go#here"} 
-// Move user DB interaction to dedicated service
-success, err := restate.Service[bool](ctx, "UserService", "createUser").Request(CreateUserRequest{
-  UserID: userID,
-  User:   user,
-})
-if err != nil || !success {
-  return false, err
-}
-
-// Execute other steps inline
-_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return ActivateUser(userID)
-})
-if err != nil {
-  return false, err
-}
-
-_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-  return SendWelcomeEmail(user)
-})
-if err != nil {
-  return false, err
-}
-```
-        </CodeGroup>
-    </Accordion>
-
-    <Accordion title={"Durable State and Queries"}>
-
-        Store workflow state that survives crashes and can be queried from external systems:
-
-        <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state"} 
-// Store intermediate results
-ctx.set("payment-status", "completed");
-ctx.set("order-details", order);
-```
-
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state"} 
-// Store intermediate results
-ctx.set(PAYMENT_STATUS, "completed");
-ctx.set(ORDER_DETAILS, order);
-```
-
-        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state"} 
-# Store intermediate results
-ctx.set("payment-status", "completed")
-ctx.set("order-details", order)
-```
-
-        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state"} 
-// Store intermediate results
-restate.Set(ctx, "payment-status", "completed")
-restate.Set(ctx, "order-details", order)
-```
-        </CodeGroup>
-        <CodeGroup>
-            ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#state_get"} 
-// Query from external handler
-getOrderStatus: async (ctx: restate.WorkflowSharedContext) => {
-  return {
-    payment: await ctx.get("payment-status"),
-    order: await ctx.get("order-details"),
-  };
-},
-```
-
-            ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#state_get"} 
-// Query from external handler
-@Shared
-public OrderDetails getOrderDetails(SharedWorkflowContext ctx) {
-  return ctx.get(ORDER_DETAILS).orElseThrow(() -> new TerminalException("Order not found"));
-}
-```
-
-            ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#state_get"} 
-# Query from external handler
-@order_workflow.handler()
-async def get_order_details(ctx: restate.WorkflowSharedContext) -> OrderDetails:
-    return await ctx.get("order-details")
-```
-
-            ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#state_get"} 
-// Query from external handler
-func (OrderWorkflow) GetOrderDetails(ctx restate.WorkflowSharedContext) (OrderDetails, error) {
-  return restate.Get[OrderDetails](ctx, "order-details")
-}
-```
-        </CodeGroup>
-    </Accordion>
-
-    <Accordion title={"Event-Driven Coordination"}>
-
-        Handle external events and signals without complex event sourcing infrastructure:
-
-        <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approval"} 
-// Wait for external approval
-const approval = await ctx.promise<boolean>("manager-approval");
-```
-
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approval"} 
-// Wait for external approval
-var approval = ctx.promise(APPROVAL_PROMISE);
-Boolean decision = approval.future().await();
-```
-
-        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approval"} 
-# Wait for external approval
-approval = await ctx.promise("manager-approval")
-```
-
-        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approval"} 
-// Wait for external approval
-approval, err := restate.Promise[bool](ctx, "manager-approval").Result()
-```
-        </CodeGroup>
-        <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#approve"} 
-// External system resolves the promise
-approve: async (ctx: restate.WorkflowSharedContext, decision: boolean) => {
-  await ctx.promise<boolean>("manager-approval").resolve(decision);
-},
-```
-
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#approve"} 
-// External system resolves the promise
-@Shared
-public void approve(SharedWorkflowContext ctx, boolean decision) {
-  ctx.promiseHandle(APPROVAL_PROMISE).resolve(decision);
-}
-```
-
-        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#approve"} 
-# External system resolves the promise
-@approval_workflow.handler()
-async def approve(ctx: restate.WorkflowSharedContext, decision: bool):
-    await ctx.promise("manager-approval").resolve(decision)
-```
-
-        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#approve"} 
-// External system resolves the promise
-func (ApprovalWorkflow) Approve(ctx restate.WorkflowSharedContext, decision bool) error {
-  return restate.Promise[bool](ctx, "manager-approval").Resolve(decision)
-}
-```
-        </CodeGroup>
-
-    </Accordion>
-    <Accordion title={"Durable Timers and Scheduling"}>
-        Long-running processes with built-in timer management:
-
-        <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/workflow-actions.ts#timers"} 
-// Wait for user action with timeout
-try {
-  const userAction = ctx
-    .promise<string>("user-response")
-    .get()
-    .orTimeout({ hours: 24 });
-} catch (error) {
-  if (error instanceof restate.TimeoutError) {
-    // Handle timeout
-  }
-  // Handle other errors
-}
-```
-
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/WorkflowActions.java#timers"} 
-// Wait for user action with timeout
-try {
-  var userResponse = ctx.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
-} catch (TimeoutException e) {
-  // Handle timeout
-}
-```
-
-        ```python Python {"CODE_LOAD::python/src/usecases/workflows/workflow_actions.py#timers"} 
-# Wait for user action with timeout
-match await restate.select(
-    user_response=ctx.promise("user-response").value(),
-    timeout=ctx.sleep(timedelta(days=1)),
-):
-    case ["user_response", response]:
-        print("Response:", response)
-    case _:
-        print("Timeout occurred")
-```
-
-        ```go Go {"CODE_LOAD::go/usecases/workflows/workflowactions.go#timers"} 
-// Wait for user action with timeout
-userResponse := restate.Promise[string](ctx, "user-response")
-timeout := restate.After(ctx, 24*time.Hour)
-
-selector := restate.Select(ctx, userResponse, timeout)
-switch selector.Select() {
-case userResponse:
-  return userResponse.Result()
-case timeout:
-  return "timed out", nil
-}
-```
-        </CodeGroup>
-    </Accordion>
-
-</AccordionGroup>
-
-## When to Choose Restate
-
-**✅ Choose Restate when you need:**
-- **Low-latency workflows**: Place workflows in latency-sensitive user interactions
-- **Familiar programming model**: Use promises, timers, and control flow you already know
-- **Flexible architecture**: Mix inline execution with separate services as needed
-- **Operational simplicity**: Focus on business logic, not managing complex infrastructure
-- **Language flexibility**: Use TypeScript, Python, Go, Java, Kotlin, or Rust
-- **Serverless compatibility**: Run long workflows on FaaS platforms cost-effectively
-- **Testing and debugging**: Standard development tools and practices
-- **Gradual adoption**: Start with simple workflows, extend to your entire microservices application over time
-
-<Info>
-    Evaluating Restate and missing a feature? Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
-</Info>
 
 ## Comparison with Other Solutions
 
 | Feature | Restate                                    | Traditional Orchestrators |
 |---------|--------------------------------------------|--------------------------|
 | **Performance** | Low-latency, lightweight execution         | High overhead, poll-for-work delays |
-| **Language** | Native code (TS, Python, Go, Java, Kotlin, Rust)   | DSLs, YAML, or proprietary languages |
+| **Language** | Native code (TS, Python, Go, Java, Kotlin, Rust)   | DSLs or YAML |
 | **Development** | Standard IDE, testing, debugging           | Platform-specific tooling |
 | **Infrastructure** | Single binary, no dependencies             | Separate databases and queues |
 | **Service Deployment** | Any platform (containers, serverless, K8s) | Worker-based deployment models |
 | **State Management** | Built-in K/V state store                     | External state stores required |
 
+## Key Workflow Patterns
+
+<CardGroup cols={3}>
+    <Card title="Query Workflow State" icon="database" href={"/tour/workflows#querying-workflow-state"}>
+        Store workflow state that survives crashes and can be queried from external systems
+    </Card>
+    <Card title="Event-Driven Coordination" icon="bolt" href={"/tour/workflows#signaling"}>
+        Handle external events and signals without complex event sourcing infrastructure
+    </Card>
+    <Card title="Durable Timers and Scheduling" icon="clock" href={"/tour/workflows#timers-and-scheduling"}>
+        Long-running processes with built-in timer management and timeout handling
+    </Card>
+    <Card title="Flexible Activity Execution" icon="code-branch" href={"/tour/workflows#in-line-steps-vs-separate-activities"}>
+        Execute steps inline within the workflow or split them out into separate services
+    </Card>
+    <Card title="Parallelize Work" icon="arrows-split-up-and-left" href="/guides/parallelizing-work">
+        Speed up multi-step workflows with recoverable parallel tasks
+    </Card>
+    <Card title="Resilient rollback" icon="backward" href="/guides/sagas">
+        Automatically undo previous actions when later steps fail
+    </Card>
+</CardGroup>
+
 ## Getting Started
 
 Ready to build workflows with Restate? Here are your next steps:
+
 
 <CardGroup cols={3}>
   <Card title="Quickstart" icon="rocket" href="/guides/error-handling">
@@ -431,17 +184,11 @@ Ready to build workflows with Restate? Here are your next steps:
   <Card title="Hands-on Tutorial" icon="pen" href="/tour/workflows">
     Explore the APIs to build workflows with Restate
   </Card>
-  <Card title="Need help?" icon="thought-bubble">
-    Discuss your use case with us via <strong>[Discord](https://discord.gg/skW3AZ6uGd)</strong> or <strong>[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA)</strong>.
+  <Card title="Examples" icon="code" href="https://github.com/restatedev/examples">
+     Explore templates, patterns, and end-to-end applications
   </Card>
 </CardGroup>
 
-## Examples
-
-Explore workflow patterns for common use cases:
-
-- **E-commerce**: Order processing with payments and inventory
-- **[Human-in-the-loop workflows](/tour/workflows)**: Multi-step signup with email verification
-- **Infrastructure provisioning**: Retry until resources are up, handle timeouts, rollbacks, etc.
-- **[AI workflows](https://github.com/restatedev/ai-examples) and [Workflow interpreters](https://github.com/restatedev/examples/tree/main/typescript/end-to-end-applications/ai-image-workflows)**: Dynamically follow different paths based on LLM decisions or external data
-- **[Parallelize work](/guides/parallelizing-work)**: Speed up multi-step workflows with recoverable parallel tasks
+<Info>
+    Evaluating Restate and missing a feature? Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Info>
