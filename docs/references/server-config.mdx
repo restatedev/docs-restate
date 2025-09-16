@@ -20,10 +20,8 @@ import Intro from "/snippets/common/default-configuration.mdx"
             The number of timers in memory limit is used to bound the amount of timers loaded in memory. If this limit is set, when exceeding it, the timers farther in the future will be spilled to disk.
         </ResponseField>
 
-        <ResponseField name="cleanup-interval" type="string" default={"1h"}>
-            In order to clean up completed invocations, that is invocations invoked with an idempotency id, or workflows, Restate periodically scans among the completed invocations to check whether they need to be removed or not. This interval sets the scan interval of the cleanup procedure. Default: 1 hour.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+        <ResponseField name="cleanup-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="storage" type="object">
@@ -56,14 +54,6 @@ The total is divided evenly across partitions. The divisor is defined in `num-pa
                     The memory budget for rocksdb memtables as ratio
 
 This defines the total memory for rocksdb as a ratio of all memory available to memtables (See `rocksdb-total-memtables-ratio` in common). The budget is then divided evenly across partitions. The divisor is defined in `num-partitions-to-share-memory-budget`
-                </ResponseField>
-
-                <ResponseField name="persist-lsn-interval" type="string">
-                    This configuration option is deprecated and ignored in Restate >= 1.3.3.
-                </ResponseField>
-
-                <ResponseField name="persist-lsn-threshold" type="integer">
-                    This configuration option is deprecated and ignored in Restate >= 1.3.3.
                 </ResponseField>
 
                 <ResponseField name="rocksdb-disable-direct-io-for-reads" type="boolean">
@@ -207,85 +197,97 @@ Default: 64KiB
             Invoker options
             
             <Expandable title="Properties">
-                <ResponseField name="retry-policy" type="oneOf">
-                    Definition of a retry policy
+                <ResponseField name="retry-policy" type="anyOf">
+                    This is **deprecated** and will be removed in the next Restate releases.
+
+Please refer to `default-retry-policy` for the new configuration options.
                     
                     <Expandable title="Options">
-                        <ResponseField name="None" type="object">
-                            No retry strategy.
+                        <ResponseField name="Retry policy" type="oneOf">
+                            Definition of a retry policy
                             
-                            <Expandable title="Properties">
-                                <ResponseField name="type" type="string" required>
+                            <Expandable title="Options">
+                                <ResponseField name="None" type="object">
+                                    No retry strategy.
+                                    
+                                    <Expandable title="Properties">
+                                        <ResponseField name="type" type="string" required>
+                                        </ResponseField>
+
+                                    </Expandable>
+                                </ResponseField>
+
+                                <ResponseField name="Fixed delay" type="object">
+                                    Retry with a fixed delay strategy.
+                                    
+                                    <Expandable title="Properties">
+                                        <ResponseField name="type" type="string" required>
+                                        </ResponseField>
+
+                                        <ResponseField name="interval" type="string" required>
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="max_attempts" type="integer">
+                                            Number of maximum attempts before giving up. Infinite retries if unset.
+                                        </ResponseField>
+
+                                    </Expandable>
+                                </ResponseField>
+
+                                <ResponseField name="Exponential" type="object">
+                                    Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
+                                    
+                                    <Expandable title="Properties">
+                                        <ResponseField name="type" type="string" required>
+                                        </ResponseField>
+
+                                        <ResponseField name="initial_interval" type="string" required>
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="factor" type="number" required>
+                                            The factor to use to compute the next retry attempt.
+                                        </ResponseField>
+
+                                        <ResponseField name="max_attempts" type="integer">
+                                            Number of maximum attempts before giving up. Infinite retries if unset.
+                                        </ResponseField>
+
+                                        <ResponseField name="max_interval" type="anyOf">
+                                            Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                                            
+                                            <Expandable title="Options">
+                                                <ResponseField name="Human-readable duration" type="string">
+                                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                                </ResponseField>
+
+                                                <ResponseField name="option-2" type="null">
+                                                </ResponseField>
+
+                                            </Expandable>
+                                        </ResponseField>
+
+                                    </Expandable>
                                 </ResponseField>
 
                             </Expandable>
                         </ResponseField>
 
-                        <ResponseField name="Fixed delay" type="object">
-                            Retry with a fixed delay strategy.
-                            
-                            <Expandable title="Properties">
-                                <ResponseField name="type" type="string" required>
-                                </ResponseField>
-
-                                <ResponseField name="interval" type="string" required>
-                                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
-                                </ResponseField>
-
-                                <ResponseField name="max_attempts" type="integer">
-                                    Number of maximum attempts before giving up. Infinite retries if unset.
-                                </ResponseField>
-
-                            </Expandable>
-                        </ResponseField>
-
-                        <ResponseField name="Exponential" type="object">
-                            Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
-                            
-                            <Expandable title="Properties">
-                                <ResponseField name="type" type="string" required>
-                                </ResponseField>
-
-                                <ResponseField name="initial_interval" type="string" required>
-                                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
-                                </ResponseField>
-
-                                <ResponseField name="factor" type="number" required>
-                                    The factor to use to compute the next retry attempt.
-                                </ResponseField>
-
-                                <ResponseField name="max_attempts" type="integer">
-                                    Number of maximum attempts before giving up. Infinite retries if unset.
-                                </ResponseField>
-
-                                <ResponseField name="max_interval" type="string">
-                                    Maximum interval between retries.
-                                </ResponseField>
-
-                            </Expandable>
+                        <ResponseField name="option-2" type="null">
                         </ResponseField>
 
                     </Expandable>
                 </ResponseField>
 
-                <ResponseField name="inactivity-timeout" type="string" default={"1m"}>
-                    This timer guards against stalled service/handler invocations. Once it expires, Restate triggers a graceful termination by asking the service invocation to suspend (which preserves intermediate progress).
-
-The 'abort timeout' is used to abort the invocation, in case it doesn't react to the request to suspend.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                <ResponseField name="inactivity-timeout" type="string">
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
-                <ResponseField name="abort-timeout" type="string" default={"1m"}>
-                    This timer guards against stalled service/handler invocations that are supposed to terminate. The abort timeout is started after the 'inactivity timeout' has expired and the service/handler invocation has been asked to gracefully terminate. Once the timer expires, it will abort the service/handler invocation.
-
-This timer potentially **interrupts** user code. If the user code needs longer to gracefully terminate, then this value needs to be set accordingly.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                <ResponseField name="abort-timeout" type="string">
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
                 <ResponseField name="message-size-warning" type="string">
@@ -318,6 +320,64 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                     Number of concurrent invocations that can be processed by the invoker.
                 </ResponseField>
 
+                <ResponseField name="invocation-throttling" type="anyOf">
+                    Configures throttling for service invocations at the node level. This throttling mechanism uses a token bucket algorithm to control the rate at which invocations can be processed, helping to prevent resource exhaustion and maintain system stability under high load.
+
+The throttling limit is shared across all partitions running on this node, providing a global rate limit for the entire node rather than per-partition limits. When `unset`, no throttling is applied and invocations are processed without throttling.
+                    
+                    <Expandable title="Options">
+                        <ResponseField name="Throttling options" type="object">
+                            Throttling options per invoker.
+                            
+                            <Expandable title="Properties">
+                                <ResponseField name="rate" type="string" required>
+                                    The rate at which the tokens are replenished.
+
+Syntax: `<rate>/<unit>` where `<unit>` is `s|sec|second`, `m|min|minute`, or `h|hr|hour`. unit defaults to per second if not specified.
+                                </ResponseField>
+
+                                <ResponseField name="capacity" type="integer">
+                                    The maximum number of tokens the bucket can hold. Default to the rate value if not specified.
+                                </ResponseField>
+
+                            </Expandable>
+                        </ResponseField>
+
+                        <ResponseField name="option-2" type="null">
+                        </ResponseField>
+
+                    </Expandable>
+                </ResponseField>
+
+                <ResponseField name="action-throttling" type="anyOf">
+                    Configures rate limiting for service actions at the node level. This throttling mechanism uses a token bucket algorithm to control the rate at which actions can be processed, helping to prevent resource exhaustion and maintain system stability under high load.
+
+The throttling limit is shared across all partitions running on this node, providing a global rate limit for the entire node rather than per-partition limits. When `unset`, no throttling is applied and actions are processed without throttling.
+                    
+                    <Expandable title="Options">
+                        <ResponseField name="Throttling options" type="object">
+                            Throttling options per invoker.
+                            
+                            <Expandable title="Properties">
+                                <ResponseField name="rate" type="string" required>
+                                    The rate at which the tokens are replenished.
+
+Syntax: `<rate>/<unit>` where `<unit>` is `s|sec|second`, `m|min|minute`, or `h|hr|hour`. unit defaults to per second if not specified.
+                                </ResponseField>
+
+                                <ResponseField name="capacity" type="integer">
+                                    The maximum number of tokens the bucket can hold. Default to the rate value if not specified.
+                                </ResponseField>
+
+                            </Expandable>
+                        </ResponseField>
+
+                        <ResponseField name="option-2" type="null">
+                        </ResponseField>
+
+                    </Expandable>
+                </ResponseField>
+
             </Expandable>
         </ResponseField>
 
@@ -326,7 +386,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
         </ResponseField>
 
         <ResponseField name="snapshots" type="object">
-            Partition store snapshotting settings. At a minimum, set `destination` and `snapshot-interval-num-records` to enable snapshotting. For a complete example, see [Snapshots](https://docs.restate.dev/server/snapshots).
+            Partition store snapshotting settings. At a minimum, set `destination` and `snapshot-interval-num-records` to enable snapshotting. For a complete example, see [Snapshots](https://docs.restate.dev/operate/snapshots).
             
             <Expandable title="Properties">
                 <ResponseField name="destination" type="string">
@@ -367,9 +427,7 @@ Default: `None` - automatic snapshots are disabled
                                 </ResponseField>
 
                                 <ResponseField name="interval" type="string" required>
-                                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="max_attempts" type="integer">
@@ -387,9 +445,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                 </ResponseField>
 
                                 <ResponseField name="initial_interval" type="string" required>
-                                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="factor" type="number" required>
@@ -400,8 +456,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                     Number of maximum attempts before giving up. Infinite retries if unset.
                                 </ResponseField>
 
-                                <ResponseField name="max_interval" type="string">
+                                <ResponseField name="max_interval" type="anyOf">
                                     Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                                    
+                                    <Expandable title="Options">
+                                        <ResponseField name="Human-readable duration" type="string">
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="option-2" type="null">
+                                        </ResponseField>
+
+                                    </Expandable>
                                 </ResponseField>
 
                             </Expandable>
@@ -473,24 +541,18 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                 </ResponseField>
 
                 <ResponseField name="query-parallelism" type="integer">
-                    The number of parallel partitions to use for a query execution
-                </ResponseField>
-
-                <ResponseField name="pgsql-bind-address" type="string">
-                    The address to bind for the psql service.
+                    The degree of parallelism to use for query execution (Defaults to the number of available cores).
                 </ResponseField>
 
             </Expandable>
         </ResponseField>
 
-        <ResponseField name="heartbeat-interval" type="string" default={"1s 500ms"}>
-            Controls the interval at which cluster controller polls nodes of the cluster.
+        <ResponseField name="heartbeat-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="log-trim-check-interval" type="string" default={"1h"}>
-            Controls the interval at which cluster controller tries to trim the logs. Log trimming can be disabled by setting it to \"0s\".
-
-Note that this is only the interval at which logs are checked, and does not guarantee that trim will be performed. The conditions for safely trim the log vary depending on the deployment. For single nodes, the log records must be durably persisted to disk. In distributed deployments, automatic trimming requires an external snapshot destination - see `worker.snapshots` for more.
+        <ResponseField name="log-trim-check-interval" type="string">
+            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="disable-web-ui" type="boolean" default={false}>
@@ -605,9 +667,7 @@ Note that this will be increased to fit the biggest batch of records being enque
                                 </ResponseField>
 
                                 <ResponseField name="interval" type="string" required>
-                                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="max_attempts" type="integer">
@@ -625,9 +685,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                 </ResponseField>
 
                                 <ResponseField name="initial_interval" type="string" required>
-                                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="factor" type="number" required>
@@ -638,8 +696,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                     Number of maximum attempts before giving up. Infinite retries if unset.
                                 </ResponseField>
 
-                                <ResponseField name="max_interval" type="string">
+                                <ResponseField name="max_interval" type="anyOf">
                                     Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                                    
+                                    <Expandable title="Options">
+                                        <ResponseField name="Human-readable duration" type="string">
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="option-2" type="null">
+                                        </ResponseField>
+
+                                    </Expandable>
                                 </ResponseField>
 
                             </Expandable>
@@ -648,18 +718,12 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                     </Expandable>
                 </ResponseField>
 
-                <ResponseField name="sequencer-inactivity-timeout" type="string" default={"15s"}>
-                    Sequencer inactivity timeout
-
-The sequencer is allowed to consider itself quiescent if it did not commit records for this period of time. It may use this to sends pre-emptive release/seal check requests to log-servers.
-
-The sequencer is also allowed to use this value as interval to send seal/release checks even if it's not quiescent.
+                <ResponseField name="sequencer-inactivity-timeout" type="string">
+                    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
-                <ResponseField name="log-server-rpc-timeout" type="string" default={"2s"}>
-                    Log Server RPC timeout
-
-Timeout waiting on log server response
+                <ResponseField name="log-server-rpc-timeout" type="string">
+                    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
                 <ResponseField name="log-server-retry-policy" type="oneOf">
@@ -684,9 +748,7 @@ Timeout waiting on log server response
                                 </ResponseField>
 
                                 <ResponseField name="interval" type="string" required>
-                                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="max_attempts" type="integer">
@@ -704,9 +766,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                 </ResponseField>
 
                                 <ResponseField name="initial_interval" type="string" required>
-                                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="factor" type="number" required>
@@ -717,8 +777,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                     Number of maximum attempts before giving up. Infinite retries if unset.
                                 </ResponseField>
 
-                                <ResponseField name="max_interval" type="string">
+                                <ResponseField name="max_interval" type="anyOf">
                                     Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                                    
+                                    <Expandable title="Options">
+                                        <ResponseField name="Human-readable duration" type="string">
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="option-2" type="null">
+                                        </ResponseField>
+
+                                    </Expandable>
                                 </ResponseField>
 
                             </Expandable>
@@ -727,10 +799,14 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                     </Expandable>
                 </ResponseField>
 
-                <ResponseField name="readahead-records" type="integer" default={100}>
+                <ResponseField name="readahead-records" type="integer" default={20}>
                     Maximum number of records to prefetch from log servers
 
 The number of records bifrost will attempt to prefetch from replicated loglet's log-servers for every loglet reader (e.g. partition processor). Note that this mainly impacts readers that are not co-located with the loglet sequencer (i.e. partition processor followers).
+                </ResponseField>
+
+                <ResponseField name="read-batch-size" type="string">
+                    Non-zero human-readable bytes
                 </ResponseField>
 
                 <ResponseField name="readahead-trigger-ratio" type="number" default={0.5}>
@@ -770,9 +846,7 @@ Value must be between 0 and 1. It will be clamped at `1.0`.
                         </ResponseField>
 
                         <ResponseField name="interval" type="string" required>
-                            Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="max_attempts" type="integer">
@@ -790,9 +864,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                         </ResponseField>
 
                         <ResponseField name="initial_interval" type="string" required>
-                            Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="factor" type="number" required>
@@ -803,8 +875,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                             Number of maximum attempts before giving up. Infinite retries if unset.
                         </ResponseField>
 
-                        <ResponseField name="max_interval" type="string">
+                        <ResponseField name="max_interval" type="anyOf">
                             Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                            
+                            <Expandable title="Options">
+                                <ResponseField name="Human-readable duration" type="string">
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                </ResponseField>
+
+                                <ResponseField name="option-2" type="null">
+                                </ResponseField>
+
+                            </Expandable>
                         </ResponseField>
 
                     </Expandable>
@@ -813,20 +897,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
             </Expandable>
         </ResponseField>
 
-        <ResponseField name="seal-retry-interval" type="string" default={"2s"}>
-            Interval to wait between retries of loglet seal failures
+        <ResponseField name="seal-retry-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="auto-recovery-interval" type="string" default={"15s"}>
-            Time interval after which bifrost's auto-recovery mechanism will kick in. This is triggered in scenarios where the control plane took too long to complete loglet reconfigurations.
+        <ResponseField name="auto-recovery-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="append-retry-min-interval" type="string" default={"10ms"}>
-            Minimum retry duration used by the exponential backoff mechanism for bifrost appends.
+        <ResponseField name="append-retry-min-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="append-retry-max-interval" type="string" default={"1s"}>
-            Maximum retry duration used by the exponential backoff mechanism for bifrost appends.
+        <ResponseField name="append-retry-max-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="record-cache-memory-size" type="string">
@@ -872,6 +956,12 @@ If this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.
             The memory budget for rocksdb memtables as ratio
 
 This defines the total memory for rocksdb as a ratio of all memory available to memtables (See `rocksdb-total-memtables-ratio` in common).
+        </ResponseField>
+
+        <ResponseField name="auto-join" type="boolean" default={true}>
+            Auto join the metadata cluster when being started
+
+Defines whether this node should auto join the metadata store cluster when being started for the first time.
         </ResponseField>
 
         <ResponseField name="rocksdb-disable-direct-io-for-reads" type="boolean">
@@ -1020,16 +1110,12 @@ The number of ticks before triggering an election. The value must be larger than
 A leader sends heartbeat messages to maintain its leadership every heartbeat ticks. Decrease this value to send heartbeats more often.
         </ResponseField>
 
-        <ResponseField name="raft-tick-interval" type="string" default={"100ms"}>
-            The raft tick interval
-
-The interval at which the raft node will tick. Decrease this value in order to let the Raft node react more quickly to changes. Note, that every tick comes with an overhead. Moreover, the tick interval directly affects the election timeout. If the election timeout becomes too small, then this can cause cluster instabilities due to frequent leader changes.
+        <ResponseField name="raft-tick-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="status-update-interval" type="string" default={"5s"}>
-            The status update interval
-
-The interval at which the raft node will update its status. Decrease this value in order to see more recent status updates.
+        <ResponseField name="status-update-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="log-trim-threshold" type="integer" default={1000}>
@@ -1043,8 +1129,8 @@ The interval at which the raft node will update its status. Decrease this value 
     Common network configuration options for communicating with Restate cluster nodes. Note that similar keys are present in other config sections, such as in Service Client options.
     
     <Expandable title="Properties">
-        <ResponseField name="connect-timeout" type="string" default={"3s"}>
-            TCP connection timeout for Restate cluster node-to-node network connections.
+        <ResponseField name="connect-timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="connect-retry-policy" type="oneOf">
@@ -1069,9 +1155,7 @@ The interval at which the raft node will update its status. Decrease this value 
                         </ResponseField>
 
                         <ResponseField name="interval" type="string" required>
-                            Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="max_attempts" type="integer">
@@ -1089,9 +1173,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                         </ResponseField>
 
                         <ResponseField name="initial_interval" type="string" required>
-                            Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="factor" type="number" required>
@@ -1102,8 +1184,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                             Number of maximum attempts before giving up. Infinite retries if unset.
                         </ResponseField>
 
-                        <ResponseField name="max_interval" type="string">
+                        <ResponseField name="max_interval" type="anyOf">
                             Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                            
+                            <Expandable title="Options">
+                                <ResponseField name="Human-readable duration" type="string">
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                </ResponseField>
+
+                                <ResponseField name="option-2" type="null">
+                                </ResponseField>
+
+                            </Expandable>
                         </ResponseField>
 
                     </Expandable>
@@ -1112,20 +1206,24 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
             </Expandable>
         </ResponseField>
 
-        <ResponseField name="handshake-timeout" type="string" default={"3s"}>
-            Timeout for receiving a handshake response from Restate cluster peers.
+        <ResponseField name="handshake-timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="http2-keep-alive-interval" type="string" default={"1s"}>
-            HTTP/2 Keep Alive Interval
+        <ResponseField name="http2-keep-alive-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="http2-keep-alive-timeout" type="string" default={"3s"}>
-            HTTP/2 Keep Alive Timeout
+        <ResponseField name="http2-keep-alive-timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="http2-adaptive-window" type="boolean" default={true}>
             HTTP/2 Adaptive Window
+        </ResponseField>
+
+        <ResponseField name="disable-compression" type="boolean" default={false}>
+            Disables Zstd compression for internal gRPC network connections
         </ResponseField>
 
         <ResponseField name="data-stream-window-size" type="string">
@@ -1364,7 +1462,7 @@ Default: 64KiB
 </ResponseField>
 
 <ResponseField name="location" type="string">
-    [PREVIEW FEATURE] Setting the location allows Restate to form a tree-like cluster topology. The value is written in the format of `\"<region>[.zone]\"` to assign this node to a specific region, or to a zone within a region.
+    [PREVIEW FEATURE] Setting the location allows Restate to form a tree-like cluster topology. The value is written in the format of \"region[.zone]\" to assign this node to a specific region, or to a zone within a region.
 
 The value of region and zone is arbitrary but whitespace and `.` are disallowed.
 
@@ -1372,7 +1470,7 @@ NOTE: It's _strongly_ recommended to not change the node's location string after
 
 When this value is not set, the node is considered to be in the _default_ location. The _default_ location means that the node is not assigned to any specific region or zone.
 
-**Examples** - `us-west` -- the node is in the `us-west` region. - `us-west.a1` -- the node is in the `us-west` region and in the `a1` zone. - `` -- [default] the node is in the default location
+## Examples - `us-west` -- the node is in the `us-west` region. - `us-west.a1` -- the node is in the `us-west` region and in the `a1` zone. - `` -- [default] the node is in the default location
 </ResponseField>
 
 <ResponseField name="force-node-id" type="integer">
@@ -1403,16 +1501,16 @@ Default: true
     The metadata client type to store metadata
     
     <Expandable title="Properties">
-        <ResponseField name="connect-timeout" type="string" default={"3s"}>
-            TCP connection timeout for connecting to the metadata store.
+        <ResponseField name="connect-timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="keep-alive-interval" type="string" default={"5s"}>
-            Metadata Store Keep Alive Interval
+        <ResponseField name="keep-alive-interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="keep-alive-timeout" type="string" default={"5s"}>
-            Metadata Store Keep Alive Timeout
+        <ResponseField name="keep-alive-timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
         <ResponseField name="backoff-policy" type="oneOf">
@@ -1437,9 +1535,7 @@ Default: true
                         </ResponseField>
 
                         <ResponseField name="interval" type="string" required>
-                            Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="max_attempts" type="integer">
@@ -1457,9 +1553,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                         </ResponseField>
 
                         <ResponseField name="initial_interval" type="string" required>
-                            Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                         </ResponseField>
 
                         <ResponseField name="factor" type="number" required>
@@ -1470,8 +1564,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                             Number of maximum attempts before giving up. Infinite retries if unset.
                         </ResponseField>
 
-                        <ResponseField name="max_interval" type="string">
+                        <ResponseField name="max_interval" type="anyOf">
                             Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                            
+                            <Expandable title="Options">
+                                <ResponseField name="Human-readable duration" type="string">
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                </ResponseField>
+
+                                <ResponseField name="option-2" type="null">
+                                </ResponseField>
+
+                            </Expandable>
                         </ResponseField>
 
                     </Expandable>
@@ -1554,9 +1660,7 @@ Example: `s3://bucket/prefix`
                                 </ResponseField>
 
                                 <ResponseField name="interval" type="string" required>
-                                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="max_attempts" type="integer">
@@ -1574,9 +1678,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                 </ResponseField>
 
                                 <ResponseField name="initial_interval" type="string" required>
-                                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                                 </ResponseField>
 
                                 <ResponseField name="factor" type="number" required>
@@ -1587,8 +1689,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                                     Number of maximum attempts before giving up. Infinite retries if unset.
                                 </ResponseField>
 
-                                <ResponseField name="max_interval" type="string">
+                                <ResponseField name="max_interval" type="anyOf">
                                     Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                                    
+                                    <Expandable title="Options">
+                                        <ResponseField name="Human-readable duration" type="string">
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
+
+                                        <ResponseField name="option-2" type="null">
+                                        </ResponseField>
+
+                                    </Expandable>
                                 </ResponseField>
 
                             </Expandable>
@@ -1659,10 +1773,8 @@ Note that this value only impacts the cluster initial provisioning and will not 
 To update existing clusters use the `restatectl` utility.
 </ResponseField>
 
-<ResponseField name="shutdown-timeout" type="string" default={"1m"}>
-    This timeout is used when shutting down the various Restate components to drain all the internal queues.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+<ResponseField name="shutdown-timeout" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="default-thread-pool-size" type="integer">
@@ -1700,12 +1812,6 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
     Address to bind for the tokio-console tracing subscriber. If unset and restate-server is built with tokio-console support, it'll listen on `0.0.0.0:6669`.
 </ResponseField>
 
-<ResponseField name="histogram-inactivity-timeout" type="string" default={"3m"}>
-    Timeout for idle histograms.
-
-The duration after which a histogram is considered idle and will be removed from metric responses to save memory. This value should be configured higher than the scrape interval of the telemetry collection system (e.g. Prometheus).
-</ResponseField>
-
 <ResponseField name="disable-prometheus" type="boolean" default={false}>
     Disable prometheus metric recording and reporting. Default is `false`.
 </ResponseField>
@@ -1738,8 +1844,8 @@ This configures the restate-managed storage thread pool for performing low-prior
     The number of threads to reserve to high priority Rocksdb background tasks.
 </ResponseField>
 
-<ResponseField name="rocksdb-write-stall-threshold" type="string" default={"3s"}>
-    This defines the duration after which a write is to be considered in \"stall\" state. For every write that meets this threshold, the system will increment the `restate.rocksdb_stall_flare` gauge, if the write is unstalled, the guage will be updated accordingly.
+<ResponseField name="rocksdb-write-stall-threshold" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="rocksdb-enable-stall-on-memory-limit" type="boolean" default={false}>
@@ -1772,12 +1878,12 @@ This configures the restate-managed storage thread pool for performing low-prior
     </Expandable>
 </ResponseField>
 
-<ResponseField name="metadata-update-interval" type="string" default={"10s"}>
-    The idle time after which the node will check for metadata updates from metadata store. This helps the node detect if it has been operating with stale metadata for extended period of time, primarily because it didn't interact with other peers in the cluster during that period.
+<ResponseField name="metadata-update-interval" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
-<ResponseField name="metadata-fetch-from-peer-timeout" type="string" default={"3s"}>
-    When a node detects that a new metadata version exists, it'll attempt to fetch it from its peers. After this timeout duration has passed, the node will attempt to fetch the metadata from metadata store as well. This is to ensure that the nodes converge quickly while reducing the load on the metadata store.
+<ResponseField name="metadata-fetch-from-peer-timeout" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="network-error-retry-policy" type="oneOf">
@@ -1802,9 +1908,7 @@ This configures the restate-managed storage thread pool for performing low-prior
                 </ResponseField>
 
                 <ResponseField name="interval" type="string" required>
-                    Interval between retries.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
                 <ResponseField name="max_attempts" type="integer">
@@ -1822,9 +1926,7 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                 </ResponseField>
 
                 <ResponseField name="initial_interval" type="string" required>
-                    Initial interval for the first retry attempt.
-
-Can be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
                 </ResponseField>
 
                 <ResponseField name="factor" type="number" required>
@@ -1835,8 +1937,20 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
                     Number of maximum attempts before giving up. Infinite retries if unset.
                 </ResponseField>
 
-                <ResponseField name="max_interval" type="string">
+                <ResponseField name="max_interval" type="anyOf">
                     Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+                    
+                    <Expandable title="Options">
+                        <ResponseField name="Human-readable duration" type="string">
+                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                        </ResponseField>
+
+                        <ResponseField name="option-2" type="null">
+                        </ResponseField>
+
+                    </Expandable>
                 </ResponseField>
 
             </Expandable>
@@ -1845,8 +1959,8 @@ Can be configured using the [`humantime`](https://docs.rs/humantime/latest/human
     </Expandable>
 </ResponseField>
 
-<ResponseField name="initialization-timeout" type="string" default={"5m"}>
-    The timeout until the node gives up joining a cluster and initializing itself.
+<ResponseField name="initialization-timeout" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="disable-telemetry" type="boolean" default={false}>
@@ -1901,22 +2015,22 @@ To inspect the traces, open the Jaeger UI and use the Upload JSON feature to loa
 This file is currently only read on client creation, but this may change in future. Parsed public keys will be logged at INFO level in the same format that SDKs expect.
 </ResponseField>
 
+<ResponseField name="additional-request-headers" type="object">
+    Headers that should be applied to all outgoing requests (HTTP and Lambda). Defaults to `x-restate-cluster-name: <cluster name>`.
+</ResponseField>
+
 <ResponseField name="http-keep-alive-options" type="object">
     Configuration for the HTTP/2 keep-alive mechanism, using PING frames.
 
 Please note: most gateways don't propagate the HTTP/2 keep-alive between downstream and upstream hosts. In those environments, you need to make sure the gateway can detect a broken connection to the upstream deployment(s).
     
     <Expandable title="Properties">
-        <ResponseField name="interval" type="string" default={"40s"}>
-            Sets an interval for HTTP/2 PING frames should be sent to keep a connection alive.
-
-You should set this timeout with a value lower than the `abort_timeout`.
+        <ResponseField name="interval" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
-        <ResponseField name="timeout" type="string" default={"20s"}>
-            Sets a timeout for receiving an acknowledgement of the keep-alive ping.
-
-If the ping is not acknowledged within the timeout, the connection will be closed.
+        <ResponseField name="timeout" type="string">
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
         </ResponseField>
 
     </Expandable>
@@ -1936,8 +2050,8 @@ If the ping is not acknowledged within the timeout, the connection will be close
     </Expandable>
 </ResponseField>
 
-<ResponseField name="connect-timeout" type="string" default={"10s"}>
-    How long to wait for a TCP connection to be established before considering it a failed attempt.
+<ResponseField name="connect-timeout" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="initial-max-send-streams" type="integer">
@@ -1956,6 +2070,22 @@ Default: None
 
 <ResponseField name="aws-assume-role-external-id" type="string">
     An external ID to apply to any AssumeRole operations taken by this client. https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html Can be overridden by the `AWS_EXTERNAL_ID` environment variable.
+</ResponseField>
+
+<ResponseField name="request-compression-threshold" type="anyOf" default={"4.0 MiB"}>
+    Request minimum size to enable compression. The request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.
+
+Default: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).
+    
+    <Expandable title="Options">
+        <ResponseField name="Human-readable bytes" type="string">
+            Human-readable bytes
+        </ResponseField>
+
+        <ResponseField name="option-2" type="null">
+        </ResponseField>
+
+    </Expandable>
 </ResponseField>
 
 <ResponseField name="rocksdb-disable-direct-io-for-reads" type="boolean">
@@ -2092,8 +2222,8 @@ Default: 64KiB
     </Expandable>
 </ResponseField>
 
-<ResponseField name="gossip-tick-interval" type="string" default={"100ms"}>
-    The interval at which the failure detector will tick. Decrease this value for faster reaction to node failures. Note, that every tick comes with an overhead.
+<ResponseField name="gossip-tick-interval" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="gossip-failure-threshold" type="integer" default={10}>
@@ -2108,10 +2238,8 @@ Default: 64KiB
     Gossips before failure detector is stable
 </ResponseField>
 
-<ResponseField name="gossip-suspect-interval" type="string" default={"5s"}>
-    How long to keep a node in a transient state (suspect) before marking it as available. Larger values mean that the cluster is less prone to flaky nodes but extends the time it takes for a node to participate.
-
-A node becomes a suspect if it has been previously marked as dead for a given generation number. If the node incremented its generation number, it will not be impacted by this threshold.
+<ResponseField name="gossip-suspect-interval" type="string">
+    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 </ResponseField>
 
 <ResponseField name="gossip-loneliness-threshold" type="integer" default={30}>
@@ -2126,7 +2254,97 @@ Note: this threshold does not apply to a cluster that's configured with a single
     In addition to basic health/liveness information, the gossip protocol is used to exchange extra information about the roles hosted by this node. For instance, which partitions are currently running, their configuration versions, and the durable LSN of the corresponding partition databases. This information is sent every Nth gossip message. This setting controls the frequency of this exchange. For instance, `10` means that every 10th gossip message will contain the extra information about.
 </ResponseField>
 
-<ResponseField name="gossip-time-skew-threshold" type="string" default={"1s"}>
-    The time skew is the maximum acceptable time difference between the local node and the time reported by peers via gossip messages. The time skew is also used to ignore gossip messages that are too old.
+<ResponseField name="gossip-time-skew-threshold" type="string">
+    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+</ResponseField>
+
+<ResponseField name="default-journal-retention" type="string">
+    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+</ResponseField>
+
+<ResponseField name="max-journal-retention" type="anyOf">
+    Maximum journal retention duration that can be configured. When discovering a service deployment, or when modifying the journal retention using the Admin API, the given value will be clamped.
+
+Unset means no limit.
+    
+    <Expandable title="Options">
+        <ResponseField name="Human-readable duration" type="string">
+            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+        </ResponseField>
+
+        <ResponseField name="option-2" type="null">
+        </ResponseField>
+
+    </Expandable>
+</ResponseField>
+
+<ResponseField name="default-retry-policy" type="anyOf">
+    The default retry policy to use for invocations.
+
+The retry policy can be customized on a service/handler basis, using the respective SDK APIs.
+    
+    <Expandable title="Options">
+        <ResponseField name="option-1" type="object">
+            
+            <Expandable title="Properties">
+                <ResponseField name="initial-interval" type="string">
+                    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                </ResponseField>
+
+                <ResponseField name="exponentiation-factor" type="number" default={2}>
+                    The factor to use to compute the next retry attempt. Default: `2.0`.
+                </ResponseField>
+
+                <ResponseField name="max-attempts" type="oneOf">
+                    
+                    <Expandable title="Options">
+                        <ResponseField name="option-1" type="string">
+                            Unlimited retries.
+                        </ResponseField>
+
+                        <ResponseField name="option-2" type="object">
+                            Bounded number of retries.
+                            
+                            <Expandable title="Properties">
+                                <ResponseField name="Bounded" type="integer" required>
+                                </ResponseField>
+
+                            </Expandable>
+                        </ResponseField>
+
+                    </Expandable>
+                </ResponseField>
+
+                <ResponseField name="on-max-attempts" type="oneOf">
+                    
+                    <Expandable title="Options">
+                        <ResponseField name="option-1" type="string">
+                            Pause the invocation when max attempts are reached.
+                        </ResponseField>
+
+                        <ResponseField name="option-2" type="string">
+                            Kill the invocation when max attempts are reached.
+                        </ResponseField>
+
+                    </Expandable>
+                </ResponseField>
+
+                <ResponseField name="max-interval" type="string">
+                    Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                </ResponseField>
+
+            </Expandable>
+        </ResponseField>
+
+        <ResponseField name="option-2" type="null">
+        </ResponseField>
+
+    </Expandable>
+</ResponseField>
+
+<ResponseField name="max-retry-policy-max-attempts" type="integer">
+    Maximum max attempts configurable in an invocation retry policy. When discovering a service deployment with configured retry policies, or when modifying the invocation retry policy using the Admin API, the given value will be clamped.
+
+`None` means no limit, that is infinite retries is enabled.
 </ResponseField>
 

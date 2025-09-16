@@ -13,18 +13,14 @@
         "internal-queue-length": 1000,
         "invoker": {
           "abort-timeout": "1m",
+          "action-throttling": null,
           "concurrent-invocations-limit": 1000,
           "in-memory-queue-length-limit": 66049,
           "inactivity-timeout": "1m",
+          "invocation-throttling": null,
           "message-size-limit": null,
           "message-size-warning": "10.0 MiB",
-          "retry-policy": {
-            "factor": 2.0,
-            "initial-interval": "50ms",
-            "max-attempts": null,
-            "max-interval": "10s",
-            "type": "exponential"
-          },
+          "retry-policy": null,
           "tmp-dir": null
         },
         "max-command-batch-size": 32,
@@ -57,7 +53,6 @@
         "concurrent-api-requests-limit": null,
         "disable-cluster-controller": false,
         "disable-web-ui": false,
-        "experimental-feature-force-journal-retention": null,
         "heartbeat-interval": "1s 500ms",
         "log-trim-check-interval": "1h",
         "query-engine": {
@@ -112,7 +107,8 @@
           },
           "log-server-rpc-timeout": "2s",
           "maximum-inflight-records": 1000,
-          "readahead-records": 100,
+          "read-batch-size": "32.0 KiB",
+          "readahead-records": 20,
           "readahead-trigger-ratio": 0.5,
           "sequencer-inactivity-timeout": "15s",
           "sequencer-retry-policy": {
@@ -129,6 +125,7 @@
     },
     "metadata-server": {
       "default": {
+        "auto-join": true,
         "log-trim-threshold": 1000,
         "raft-election-tick": 10,
         "raft-heartbeat-tick": 2,
@@ -154,6 +151,7 @@
         },
         "connect-timeout": "3s",
         "data-stream-window-size": "2.0 MiB",
+        "disable-compression": false,
         "handshake-timeout": "3s",
         "http2-adaptive-window": true,
         "http2-keep-alive-interval": "1s",
@@ -201,7 +199,7 @@
     },
     "location": {
       "title": "Node Location",
-      "description": "[PREVIEW FEATURE] Setting the location allows Restate to form a tree-like cluster topology. The value is written in the format of `\"<region>[.zone]\"` to assign this node to a specific region, or to a zone within a region.\n\nThe value of region and zone is arbitrary but whitespace and `.` are disallowed.\n\nNOTE: It's _strongly_ recommended to not change the node's location string after its initial registration. Changing the location may result in data loss or data inconsistency if `log-server` is enabled on this node.\n\nWhen this value is not set, the node is considered to be in the _default_ location. The _default_ location means that the node is not assigned to any specific region or zone.\n\n**Examples** - `us-west` -- the node is in the `us-west` region. - `us-west.a1` -- the node is in the `us-west` region and in the `a1` zone. - `` -- [default] the node is in the default location",
+      "description": "[PREVIEW FEATURE] Setting the location allows Restate to form a tree-like cluster topology. The value is written in the format of \"<region>[.zone]\" to assign this node to a specific region, or to a zone within a region.\n\nThe value of region and zone is arbitrary but whitespace and `.` are disallowed.\n\nNOTE: It's _strongly_ recommended to not change the node's location string after its initial registration. Changing the location may result in data loss or data inconsistency if `log-server` is enabled on this node.\n\nWhen this value is not set, the node is considered to be in the _default_ location. The _default_ location means that the node is not assigned to any specific region or zone.\n\n## Examples - `us-west` -- the node is in the `us-west` region. - `us-west.a1` -- the node is in the `us-west` region and in the `a1` zone. - `` -- [default] the node is in the default location",
       "type": "string"
     },
     "force-node-id": {
@@ -278,9 +276,9 @@
     },
     "shutdown-timeout": {
       "title": "Shutdown grace timeout",
-      "description": "This timeout is used when shutting down the various Restate components to drain all the internal queues.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
+      "description": "This timeout is used when shutting down the various Restate components to drain all the internal queues.",
       "default": "1m",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "default-thread-pool-size": {
       "title": "Default async runtime thread pool",
@@ -314,14 +312,6 @@
     "tokio-console-bind-address": {
       "description": "Address to bind for the tokio-console tracing subscriber. If unset and restate-server is built with tokio-console support, it'll listen on `0.0.0.0:6669`.",
       "type": "string"
-    },
-    "histogram-inactivity-timeout": {
-      "description": "Timeout for idle histograms.\n\nThe duration after which a histogram is considered idle and will be removed from metric responses to save memory. This value should be configured higher than the scrape interval of the telemetry collection system (e.g. Prometheus).",
-      "default": "3m",
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "disable-prometheus": {
       "description": "Disable prometheus metric recording and reporting. Default is `false`.",
@@ -381,7 +371,7 @@
       "title": "Rocksdb stall detection threshold",
       "description": "This defines the duration after which a write is to be considered in \"stall\" state. For every write that meets this threshold, the system will increment the `restate.rocksdb_stall_flare` gauge, if the write is unstalled, the guage will be updated accordingly.",
       "default": "3s",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "rocksdb-enable-stall-on-memory-limit": {
       "title": "Allow rocksdb writes to stall if memory limit is reached",
@@ -399,13 +389,13 @@
       "title": "Metadata update interval",
       "description": "The idle time after which the node will check for metadata updates from metadata store. This helps the node detect if it has been operating with stale metadata for extended period of time, primarily because it didn't interact with other peers in the cluster during that period.",
       "default": "10s",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "metadata-fetch-from-peer-timeout": {
       "title": "Timeout for metadata peer-to-peer fetching",
       "description": "When a node detects that a new metadata version exists, it'll attempt to fetch it from its peers. After this timeout duration has passed, the node will attempt to fetch the metadata from metadata store as well. This is to ensure that the nodes converge quickly while reducing the load on the metadata store.",
       "default": "3s",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "network-error-retry-policy": {
       "title": "Network error retry policy",
@@ -423,7 +413,7 @@
       "title": "Initialization timeout",
       "description": "The timeout until the node gives up joining a cluster and initializing itself.",
       "default": "5m",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "disable-telemetry": {
       "title": "Disable telemetry",
@@ -485,6 +475,17 @@
         "null"
       ]
     },
+    "additional-request-headers": {
+      "title": "Additional request headers",
+      "description": "Headers that should be applied to all outgoing requests (HTTP and Lambda). Defaults to `x-restate-cluster-name: <cluster name>`.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "http-keep-alive-options": {
       "title": "HTTP/2 Keep-alive",
       "description": "Configuration for the HTTP/2 keep-alive mechanism, using PING frames. If unset, HTTP/2 keep-alive are disabled.",
@@ -516,7 +517,7 @@
       "title": "Connect timeout",
       "description": "How long to wait for a TCP connection to be established before considering it a failed attempt.",
       "default": "10s",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "initial-max-send-streams": {
       "title": "Initial Max Send Streams",
@@ -545,6 +546,19 @@
       "type": [
         "string",
         "null"
+      ]
+    },
+    "request-compression-threshold": {
+      "title": "Request Compression threshold",
+      "description": "Request minimum size to enable compression. The request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.\n\nDefault: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).",
+      "default": "4.0 MiB",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HumanBytes"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "rocksdb-disable-direct-io-for-reads": {
@@ -665,7 +679,7 @@
       "title": "Gossip tick interval",
       "description": "The interval at which the failure detector will tick. Decrease this value for faster reaction to node failures. Note, that every tick comes with an overhead.",
       "default": "100ms",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
     },
     "gossip-failure-threshold": {
       "title": "Gossip failure threshold",
@@ -677,7 +691,7 @@
     },
     "gossip-num-peers": {
       "title": "Number of peers to gossip",
-      "description": "On every gossip interval, how many peers each node attempts to gossip with. The default is optimized for small clusters (less than 5). On larger clusters, if gossip overhead is noticeable, consider reducing this value to 1.",
+      "description": "On every gossip interval, how many peers each node attempts to gossip with. The default is optimized for small clusters (<5). On larger clusters, if gossip overhead is noticeable, consider reducing this value to 1.",
       "default": 2,
       "type": "integer",
       "format": "uint32",
@@ -694,7 +708,7 @@
       "title": "Suspect duration",
       "description": "How long to keep a node in a transient state (suspect) before marking it as available. Larger values mean that the cluster is less prone to flaky nodes but extends the time it takes for a node to participate.\n\nA node becomes a suspect if it has been previously marked as dead for a given generation number. If the node incremented its generation number, it will not be impacted by this threshold.",
       "default": "5s",
-      "type": "string"
+      "$ref": "#/definitions/FriendlyDuration"
     },
     "gossip-loneliness-threshold": {
       "title": "Gossip loneliness threshold",
@@ -716,7 +730,46 @@
       "title": "Gossips time skew threshold",
       "description": "The time skew is the maximum acceptable time difference between the local node and the time reported by peers via gossip messages. The time skew is also used to ignore gossip messages that are too old.",
       "default": "1s",
-      "type": "string"
+      "$ref": "#/definitions/NonZeroFriendlyDuration"
+    },
+    "default-journal-retention": {
+      "title": "Default journal retention",
+      "description": "Default journal retention for all invocations. A value of `0` means no retention by default.\n\nIn production setups, it is advisable to disable default journal retention, and configure journal retention per service using the respective SDK APIs.",
+      "$ref": "#/definitions/FriendlyDuration"
+    },
+    "max-journal-retention": {
+      "title": "Maximum journal retention duration",
+      "description": "Maximum journal retention duration that can be configured. When discovering a service deployment, or when modifying the journal retention using the Admin API, the given value will be clamped.\n\nUnset means no limit.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FriendlyDuration"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "default-retry-policy": {
+      "title": "Default retry policy",
+      "description": "The default retry policy to use for invocations.\n\nThe retry policy can be customized on a service/handler basis, using the respective SDK APIs.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InvocationRetryPolicyOptions"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "max-retry-policy-max-attempts": {
+      "title": "Max configurable value for retry policy max attempts",
+      "description": "Maximum max attempts configurable in an invocation retry policy. When discovering a service deployment with configured retry policies, or when modifying the invocation retry policy using the Admin API, the given value will be clamped.\n\n`None` means no limit, that is infinite retries is enabled.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint",
+      "minimum": 1.0
     }
   },
   "definitions": {
@@ -744,9 +797,9 @@
         },
         "cleanup-interval": {
           "title": "Cleanup interval",
-          "description": "In order to clean up completed invocations, that is invocations invoked with an idempotency id, or workflows, Restate periodically scans among the completed invocations to check whether they need to be removed or not. This interval sets the scan interval of the cleanup procedure. Default: 1 hour.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
+          "description": "In order to clean up completed invocations, that is invocations invoked with an idempotency id, or workflows, Restate periodically scans among the completed invocations to check whether they need to be removed or not. This interval sets the scan interval of the cleanup procedure. Default: 1 hour.",
           "default": "1h",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "storage": {
           "default": {
@@ -761,18 +814,14 @@
         "invoker": {
           "default": {
             "abort-timeout": "1m",
+            "action-throttling": null,
             "concurrent-invocations-limit": 1000,
             "in-memory-queue-length-limit": 66049,
             "inactivity-timeout": "1m",
+            "invocation-throttling": null,
             "message-size-limit": null,
             "message-size-warning": "10.0 MiB",
-            "retry-policy": {
-              "factor": 2.0,
-              "initial-interval": "50ms",
-              "max-attempts": null,
-              "max-interval": "10s",
-              "type": "exponential"
-            },
+            "retry-policy": null,
             "tmp-dir": null
           },
           "$ref": "#/definitions/InvokerOptions"
@@ -803,6 +852,19 @@
         }
       }
     },
+    "NonZeroFriendlyDuration": {
+      "title": "Non-zero human-readable duration",
+      "description": "Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.",
+      "examples": [
+        "10 hours",
+        "5 days",
+        "5d",
+        "1h 4m",
+        "P40D"
+      ],
+      "type": "string",
+      "minLength": 1
+    },
     "StorageOptions": {
       "title": "Storage options",
       "type": "object",
@@ -832,28 +894,6 @@
           "default": 0.49000000953674316,
           "type": "number",
           "format": "float"
-        },
-        "persist-lsn-interval": {
-          "title": "Persist LSN interval (deprecated)",
-          "description": "This configuration option is deprecated and ignored in Restate >= 1.3.3.",
-          "deprecated": true,
-          "writeOnly": true,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "persist-lsn-threshold": {
-          "title": "Persist LSN threshold (deprecated)",
-          "description": "This configuration option is deprecated and ignored in Restate >= 1.3.3.",
-          "deprecated": true,
-          "writeOnly": true,
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
         },
         "rocksdb-disable-direct-io-for-reads": {
           "title": "Disable Direct IO for reads",
@@ -1044,27 +1084,29 @@
       "properties": {
         "retry-policy": {
           "title": "Retry policy",
-          "description": "Retry policy to use for all the invocations handled by this invoker.",
-          "default": {
-            "factor": 2.0,
-            "initial-interval": "50ms",
-            "max-attempts": null,
-            "max-interval": "10s",
-            "type": "exponential"
-          },
-          "$ref": "#/definitions/RetryPolicy"
+          "description": "This is **deprecated** and will be removed in the next Restate releases.\n\nPlease refer to `default-retry-policy` for the new configuration options.",
+          "default": null,
+          "deprecated": true,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "inactivity-timeout": {
           "title": "Inactivity timeout",
-          "description": "This timer guards against stalled service/handler invocations. Once it expires, Restate triggers a graceful termination by asking the service invocation to suspend (which preserves intermediate progress).\n\nThe 'abort timeout' is used to abort the invocation, in case it doesn't react to the request to suspend.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
+          "description": "This timer guards against stalled service/handler invocations. Once it expires, Restate triggers a graceful termination by asking the service invocation to suspend (which preserves intermediate progress).\n\nThe 'abort timeout' is used to abort the invocation, in case it doesn't react to the request to suspend.",
           "default": "1m",
-          "type": "string"
+          "$ref": "#/definitions/FriendlyDuration"
         },
         "abort-timeout": {
           "title": "Abort timeout",
-          "description": "This timer guards against stalled service/handler invocations that are supposed to terminate. The abort timeout is started after the 'inactivity timeout' has expired and the service/handler invocation has been asked to gracefully terminate. Once the timer expires, it will abort the service/handler invocation.\n\nThis timer potentially **interrupts** user code. If the user code needs longer to gracefully terminate, then this value needs to be set accordingly.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
+          "description": "This timer guards against stalled service/handler invocations that are supposed to terminate. The abort timeout is started after the 'inactivity timeout' has expired and the service/handler invocation has been asked to gracefully terminate. Once the timer expires, it will abort the service/handler invocation.\n\nThis timer potentially **interrupts** user code. If the user code needs longer to gracefully terminate, then this value needs to be set accordingly.",
           "default": "1m",
-          "type": "string"
+          "$ref": "#/definitions/FriendlyDuration"
         },
         "message-size-warning": {
           "title": "Message size warning",
@@ -1112,6 +1154,32 @@
           ],
           "format": "uint",
           "minimum": 1.0
+        },
+        "invocation-throttling": {
+          "title": "Invocation throttling",
+          "description": "Configures throttling for service invocations at the node level. This throttling mechanism uses a token bucket algorithm to control the rate at which invocations can be processed, helping to prevent resource exhaustion and maintain system stability under high load.\n\nThe throttling limit is shared across all partitions running on this node, providing a global rate limit for the entire node rather than per-partition limits. When `unset`, no throttling is applied and invocations are processed without throttling.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThrottlingOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action-throttling": {
+          "title": "Action throttling",
+          "description": "Configures rate limiting for service actions at the node level. This throttling mechanism uses a token bucket algorithm to control the rate at which actions can be processed, helping to prevent resource exhaustion and maintain system stability under high load.\n\nThe throttling limit is shared across all partitions running on this node, providing a global rate limit for the entire node rather than per-partition limits. When `unset`, no throttling is applied and actions are processed without throttling.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThrottlingOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -1152,8 +1220,8 @@
             },
             "interval": {
               "title": "Interval",
-              "description": "Interval between retries.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
-              "type": "string"
+              "description": "Interval between retries.\n\nCan be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.",
+              "$ref": "#/definitions/FriendlyDuration"
             },
             "max_attempts": {
               "title": "Max attempts",
@@ -1185,8 +1253,8 @@
             },
             "initial_interval": {
               "title": "Initial Interval",
-              "description": "Initial interval for the first retry attempt.\n\nCan be configured using the [`humantime`](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html) format.",
-              "type": "string"
+              "description": "Initial interval for the first retry attempt.\n\nCan be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.",
+              "$ref": "#/definitions/FriendlyDuration"
             },
             "factor": {
               "title": "Factor",
@@ -1206,15 +1274,58 @@
             },
             "max_interval": {
               "title": "Max interval",
-              "description": "Maximum interval between retries.",
-              "type": [
-                "string",
-                "null"
+              "description": "Maximum interval between retries.\n\nCan be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/FriendlyDuration"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           }
         }
       ]
+    },
+    "FriendlyDuration": {
+      "title": "Human-readable duration",
+      "description": "Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.",
+      "examples": [
+        "10 hours",
+        "5 days",
+        "5d",
+        "1h 4m",
+        "P40D",
+        "0"
+      ],
+      "type": "string",
+      "minLength": 1
+    },
+    "ThrottlingOptions": {
+      "title": "Throttling options",
+      "description": "Throttling options per invoker.",
+      "type": "object",
+      "required": [
+        "rate"
+      ],
+      "properties": {
+        "rate": {
+          "title": "Refill rate",
+          "description": "The rate at which the tokens are replenished.\n\nSyntax: `<rate>/<unit>` where `<unit>` is `s|sec|second`, `m|min|minute`, or `h|hr|hour`. unit defaults to per second if not specified.",
+          "type": "string"
+        },
+        "capacity": {
+          "title": "Burst capacity",
+          "description": "The maximum number of tokens the bucket can hold. Default to the rate value if not specified.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      }
     },
     "SnapshotsOptions": {
       "title": "Snapshot options.",
@@ -1351,13 +1462,13 @@
           "title": "Controller heartbeats",
           "description": "Controls the interval at which cluster controller polls nodes of the cluster.",
           "default": "1s 500ms",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "log-trim-check-interval": {
           "title": "Log trim check interval",
-          "description": "Controls the interval at which cluster controller tries to trim the logs. Log trimming can be disabled by setting it to \"0s\".\n\nNote that this is only the interval at which logs are checked, and does not guarantee that trim will be performed. The conditions for safely trim the log vary depending on the deployment. For single nodes, the log records must be durably persisted to disk. In distributed deployments, automatic trimming requires an external snapshot destination - see `worker.snapshots` for more.",
+          "description": "Controls the interval at which cluster controller tries to trim the logs. Log trimming can be disabled by setting it to \"0\".\n\nNote that this is only the interval at which logs are checked, and does not guarantee that trim will be performed. The conditions for safely trim the log vary depending on the deployment. For single nodes, the log records must be durably persisted to disk. In distributed deployments, automatic trimming requires an external snapshot destination - see `worker.snapshots` for more.",
           "default": "1h",
-          "type": "string"
+          "$ref": "#/definitions/FriendlyDuration"
         },
         "disable-web-ui": {
           "description": "Disable serving the Restate Web UI on the admin port. Default is `false`.",
@@ -1391,7 +1502,7 @@
         },
         "query-parallelism": {
           "title": "Default query parallelism",
-          "description": "The number of parallel partitions to use for a query execution",
+          "description": "The degree of parallelism to use for query execution (Defaults to the number of available cores).",
           "default": null,
           "type": [
             "integer",
@@ -1399,16 +1510,6 @@
           ],
           "format": "uint",
           "minimum": 1.0
-        },
-        "pgsql-bind-address": {
-          "title": "Pgsql Bind address",
-          "description": "The address to bind for the psql service.",
-          "deprecated": true,
-          "writeOnly": true,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       }
     },
@@ -1508,7 +1609,8 @@
             },
             "log-server-rpc-timeout": "2s",
             "maximum-inflight-records": 1000,
-            "readahead-records": 100,
+            "read-batch-size": "32.0 KiB",
+            "readahead-records": 20,
             "readahead-trigger-ratio": 0.5,
             "sequencer-inactivity-timeout": "15s",
             "sequencer-retry-policy": {
@@ -1537,25 +1639,25 @@
           "title": "Seal retry interval",
           "description": "Interval to wait between retries of loglet seal failures",
           "default": "2s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "auto-recovery-interval": {
           "title": "Auto recovery threshold",
           "description": "Time interval after which bifrost's auto-recovery mechanism will kick in. This is triggered in scenarios where the control plane took too long to complete loglet reconfigurations.",
           "default": "15s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "append-retry-min-interval": {
           "title": "Append retry minimum interval",
           "description": "Minimum retry duration used by the exponential backoff mechanism for bifrost appends.",
           "default": "10ms",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "append-retry-max-interval": {
           "title": "Append retry maximum interval",
           "description": "Maximum retry duration used by the exponential backoff mechanism for bifrost appends.",
           "default": "1s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "record-cache-memory-size": {
           "title": "In-memory RecordCache memory limit",
@@ -1614,12 +1716,12 @@
         "sequencer-inactivity-timeout": {
           "description": "Sequencer inactivity timeout\n\nThe sequencer is allowed to consider itself quiescent if it did not commit records for this period of time. It may use this to sends pre-emptive release/seal check requests to log-servers.\n\nThe sequencer is also allowed to use this value as interval to send seal/release checks even if it's not quiescent.",
           "default": "15s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "log-server-rpc-timeout": {
           "description": "Log Server RPC timeout\n\nTimeout waiting on log server response",
           "default": "2s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "log-server-retry-policy": {
           "description": "Log Server RPC retry policy\n\nRetry policy for log server RPCs",
@@ -1634,10 +1736,16 @@
         },
         "readahead-records": {
           "description": "Maximum number of records to prefetch from log servers\n\nThe number of records bifrost will attempt to prefetch from replicated loglet's log-servers for every loglet reader (e.g. partition processor). Note that this mainly impacts readers that are not co-located with the loglet sequencer (i.e. partition processor followers).",
-          "default": 100,
+          "default": 20,
           "type": "integer",
           "format": "uint16",
           "minimum": 1.0
+        },
+        "read-batch-size": {
+          "title": "Limits memory per remote batch read",
+          "description": "When reading from a log-server, the server stops reading if the next record will tip over the total number of bytes allowed in this configuration option.\n\nNote the limit is not strict and the server will always allow at least a single record to be read even if that record exceeds the stated budget.",
+          "default": "32.0 KiB",
+          "$ref": "#/definitions/NonZeroHumanBytes"
         },
         "readahead-trigger-ratio": {
           "description": "Trigger to prefetch more records\n\nWhen read-ahead is used (readahead-records), this value (percentage in float) will determine when readers should trigger a prefetch for another batch to fill up the buffer. For instance, if this value is 0.3, then bifrost will trigger a prefetch when 30% or more of the read-ahead slots become available (e.g. partition processor consumed records and freed up enough slots).\n\nThe higher the value is, the longer bifrost will wait before it triggers the next fetch, potentially fetching more records as a result.\n\nTo illustrate, if readahead-records is set to 100 and readahead-trigger-ratio is 1.0. Then bifrost will prefetch up to 100 records from log-servers and will not trigger the next prefetch unless the consumer consumes 100% of this buffer. This means that bifrost will read in batches but will not do while the consumer is still reading the previous batch.\n\nValue must be between 0 and 1. It will be clamped at `1.0`.",
@@ -1683,6 +1791,11 @@
           "default": 0.009999999776482582,
           "type": "number",
           "format": "float"
+        },
+        "auto-join": {
+          "description": "Auto join the metadata cluster when being started\n\nDefines whether this node should auto join the metadata store cluster when being started for the first time.",
+          "default": true,
+          "type": "boolean"
         },
         "rocksdb-disable-direct-io-for-reads": {
           "title": "Disable Direct IO for reads",
@@ -1815,12 +1928,12 @@
         "raft-tick-interval": {
           "description": "The raft tick interval\n\nThe interval at which the raft node will tick. Decrease this value in order to let the Raft node react more quickly to changes. Note, that every tick comes with an overhead. Moreover, the tick interval directly affects the election timeout. If the election timeout becomes too small, then this can cause cluster instabilities due to frequent leader changes.",
           "default": "100ms",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "status-update-interval": {
           "description": "The status update interval\n\nThe interval at which the raft node will update its status. Decrease this value in order to see more recent status updates.",
           "default": "5s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "log-trim-threshold": {
           "title": "The raft log trim threshold",
@@ -1844,7 +1957,7 @@
           "title": "Connect timeout",
           "description": "TCP connection timeout for Restate cluster node-to-node network connections.",
           "default": "3s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "connect-retry-policy": {
           "title": "Connect retry policy",
@@ -1862,21 +1975,27 @@
           "title": "Handshake timeout",
           "description": "Timeout for receiving a handshake response from Restate cluster peers.",
           "default": "3s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "http2-keep-alive-interval": {
           "title": "HTTP/2 Keep Alive Interval",
           "default": "1s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "http2-keep-alive-timeout": {
           "title": "HTTP/2 Keep Alive Timeout",
           "default": "3s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "http2-adaptive-window": {
           "title": "HTTP/2 Adaptive Window",
           "default": true,
+          "type": "boolean"
+        },
+        "disable-compression": {
+          "title": "Disable Compression",
+          "description": "Disables Zstd compression for internal gRPC network connections",
+          "default": false,
           "type": "boolean"
         },
         "data-stream-window-size": {
@@ -2236,17 +2355,17 @@
           "title": "Connect timeout",
           "description": "TCP connection timeout for connecting to the metadata store.",
           "default": "3s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "keep-alive-interval": {
           "title": "Metadata Store Keep Alive Interval",
           "default": "5s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "keep-alive-timeout": {
           "title": "Metadata Store Keep Alive Timeout",
           "default": "5s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "backoff-policy": {
           "title": "Backoff policy used by the metadata client",
@@ -2339,15 +2458,95 @@
           "title": "HTTP/2 Keep-alive interval",
           "description": "Sets an interval for HTTP/2 PING frames should be sent to keep a connection alive.\n\nYou should set this timeout with a value lower than the `abort_timeout`.",
           "default": "40s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         },
         "timeout": {
           "title": "Timeout",
           "description": "Sets a timeout for receiving an acknowledgement of the keep-alive ping.\n\nIf the ping is not acknowledged within the timeout, the connection will be closed.",
           "default": "20s",
-          "type": "string"
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
         }
       }
+    },
+    "InvocationRetryPolicyOptions": {
+      "type": "object",
+      "properties": {
+        "initial-interval": {
+          "title": "Initial Interval",
+          "description": "Initial interval for the first retry attempt.",
+          "default": "500ms",
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
+        },
+        "exponentiation-factor": {
+          "title": "Factor",
+          "description": "The factor to use to compute the next retry attempt. Default: `2.0`.",
+          "default": 2.0,
+          "type": "number",
+          "format": "float"
+        },
+        "max-attempts": {
+          "title": "Max attempts",
+          "description": "Number of maximum attempts (including the initial) before giving up. No retries if set to 1.",
+          "default": 200,
+          "$ref": "#/definitions/MaxAttempts"
+        },
+        "on-max-attempts": {
+          "title": "On max attempts",
+          "description": "Behavior when max attempts are reached.",
+          "default": "pause",
+          "$ref": "#/definitions/OnMaxAttempts"
+        },
+        "max-interval": {
+          "title": "Max interval",
+          "description": "Maximum interval between retries.",
+          "default": "20s",
+          "$ref": "#/definitions/NonZeroFriendlyDuration"
+        }
+      }
+    },
+    "MaxAttempts": {
+      "oneOf": [
+        {
+          "description": "Unlimited retries.",
+          "type": "string",
+          "enum": [
+            "unlimited"
+          ]
+        },
+        {
+          "description": "Bounded number of retries.",
+          "type": "object",
+          "required": [
+            "Bounded"
+          ],
+          "properties": {
+            "Bounded": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 1.0
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "OnMaxAttempts": {
+      "oneOf": [
+        {
+          "description": "Pause the invocation when max attempts are reached.",
+          "type": "string",
+          "enum": [
+            "pause"
+          ]
+        },
+        {
+          "description": "Kill the invocation when max attempts are reached.",
+          "type": "string",
+          "enum": [
+            "kill"
+          ]
+        }
+      ]
     }
   }
 }
