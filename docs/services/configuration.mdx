@@ -2,13 +2,126 @@
 title: "Service Configuration"
 sidebarTitle: "Configuration"
 icon: "sliders-simple"
-description: "Configure service-level behavior like timeouts, idempotency retention, and privacy."
+description: "Configure service-level behavior like retries, timeouts, retentions, and privacy."
 ---
 
-Restate services support several configuration options to adapt their behavior for different use cases. These include timeout settings, retention policies, and privacy controls.
+Restate services support several configuration options to adapt their behavior for different use cases.
+These include timeout settings, retry policies, retention policies, and privacy controls.
 
-## **Programmatic Configuration**
-It is recommended to configure services directly in your code, using the SDKs.
+## Retention of completed invocations
+
+Restate allows to tune how long to retain metadata and progress of your invocations.
+Tune these down to save disk space, or tune them up to increase the retained history window of your invocations.
+
+<AccordionGroup>
+    <Accordion title="Idempotency retention">
+        How long Restate retains idempotency keys to prevent duplicate request processing.
+
+        You can see the status of the completed invocation in the UI.
+
+        **Default:** 24 hours
+
+        **When to adjust:** For services that need longer idempotency windows, such as financial transactions or critical business operations.
+    </Accordion>
+    <Accordion title="Workflow retention">
+        The workflow retention describes for how long you will be able to call the shared handlers on a workflow after the run handler has finished.
+        The retention time starts counting down from the moment the run handler completes.
+
+        After this time, the workflow's K/V state is cleared, you cannot call any shared handlers anymore, and any [Durable Promises](/develop/ts/external-events#durable-promises) are discarded.
+
+        **Default:** 24 hours
+
+        **When to adjust:** For workflows that need longer retention windows, to retrieve state or the result of a [Durable Promise](/develop/ts/external-events#durable-promises).
+    </Accordion>
+    <Accordion title="Journal retention">
+        How long Restate keeps invocation journals after completion for debugging and auditing.
+
+        Increase to see journals of completed invocations in the log.
+
+        For workflow executions or invocations with idempotency keys:
+        - the journal retention is capped by the workflow retention or idempotency retention time
+        - If the journal retention is set to 0, you can see completion status but not journal entries.
+
+        **Default:** 24 hours (tunable in self-hosted Restate as [`default-journal-retention`](/references/server-config#param-default-journal-retention))
+
+        **When to adjust:** For workflows, AI agents, or any service where you need to inspect the execution history after completion.
+    </Accordion>
+</AccordionGroup>
+
+## Retries
+
+Restate retries executing invocations that can't make any progress according to a _retry policy_.
+
+The retry policy always have an exponential back-off. You can tune the initial interval, the exponentiation factor and the maximum interval.
+
+Retry policy have a maximum number of attempts, which can be either _limited_ or _unlimited_.
+When attempts are exhausted, you can configure what Restate should do with the invocation:
+
+- _Pause_ it, requiring the user to [manually resume it](/services/invocation/managing-invocations#resume).
+- _Kill_ it, which automatically fails the invocation, replying back to the callers with a terminal error. Note: **compensation logic will not be executed**, thus this may leave your service in an inconsistent state. For more details, check [killing the invocation](/services/invocation/managing-invocations#kill).
+
+**Default:** Unlimited retries with exponential policy up to 10 seconds of interval (tunable in self-hosted Restate as [`default-retry-policy`](/references/server-config#param-default-retry-policy))
+
+**When to adjust:** Bound the maximum number of attempts when you deploy services on FaaS, avoiding incurring in extra costs for unnecessary retries, such as when an invocation is stuck constantly hitting the same bug in the code. Increase the retry policy back-off intervals when you want to reduce the retries load on the downstream services, or decrease them when you want snappier retries.
+
+## Timeouts
+
+There are two types of timeouts describing the behavior between Restate and the service deployment.
+You want to tune these values when you have long-running operations in your code.
+
+<AccordionGroup>
+    <Accordion title="Inactivity timeout">
+
+        The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
+        After this timeout, Restate will ask the service to suspend.
+
+        **Default**: 1 minute (tunable in self-hosted Restate as [`worker.invoker.inactivity-timeout`](/references/server-config#param-inactivity-timeout))
+
+        **When to adjust:** For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
+    </Accordion>
+
+    <Accordion title="Abort timeout">
+        Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
+        So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
+
+        **Default**: 1 minute (tunable in self-hosted Restate as [`worker.invoker.abort-timeout`](/references/server-config#param-abort-timeout))
+
+        **When to adjust:** For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
+    </Accordion>
+</AccordionGroup>
+
+## Privacy controls
+
+Restate provides some options to configure the visibility of your services and handlers.
+
+<AccordionGroup>
+    <Accordion title="Private services">
+        Mark services as private to prevent external access while allowing internal service-to-service communication.
+
+        **Default**: Public
+
+        **When to adjust:** When you want to forbid requests from 3rd party services through the Restate [HTTP API](/services/invocation/http), e.g. for an internal utility service that shouldn't be exposed externally, or for a backend service that only other Restate services should access.
+    </Accordion>
+</AccordionGroup>
+
+## State
+
+Virtual Objects and Workflow allow to store [persistante state](/foundations/key-concepts#consistent-state). You can tune the state access behavior in your services and handlers.
+
+<AccordionGroup>
+    <Accordion title="Eager/Lazy state access">
+        To access the Virtual object/Workflow embedded K/V store, there are two strategies:
+
+        - Eager: A full snapshot of all K/V entries of the invoked Virtual Object/Workflow instance is sent when an invocation is invoked.
+        - Lazy: Each K/V entry is individually loaded when read through `ctx.get`. On Lambda and other FaaS platforms that doesn't support bidirectional streaming, this requires the invocation to suspend and replay.
+
+        **Default**: Eager
+
+        **When to adjust:** Enable lazy state when you have potentially large state entries, but your handler doesn't get all of them. Enable eager state if your state is small, or you're on AWS Lambda and the cost of replay is too high.
+    </Accordion>
+</AccordionGroup>
+
+## How to configure
 
 ### Service-level configuration
 
@@ -188,87 +301,25 @@ async def run(ctx: restate.WorkflowContext, req: str) -> str:
 ```
 </CodeGroup>
 
-## **Temporary override**
-You can temporarily override the configurable options via the UI or CLI, until the revision of a service is registered.
+### Override configuration
 
-### 1. **Via the UI**
-Use the [Restate UI](/installation#restate-ui) to configure services interactively:
-- Navigate to your registered deployment
-- Click on the service you want to configure
-- Modify settings through the web interface
-
-### 2. **Via the CLI**
-Use the Restate CLI to edit configuration files:
-```bash
-restate services config edit <SERVICE_NAME>
-```
-
-## Configuration options
+You can override the service options configured in your code via the UI or CLI.
+These options apply until the next revision of the service is registered.
 
 <AccordionGroup>
-  <Accordion title="Inactivity timeout">
+    <Accordion title="UI">
+        Use the [Restate UI](/installation#restate-ui) to configure services interactively:
+        - Navigate to your registered deployment
+        - Click on the service you want to configure
+        - Modify settings through the web interface
+    </Accordion>
+    <Accordion title="CLI">
+        Use the Restate CLI to edit the configuration:
 
-    The maximum time Restate waits for new journal entries from a service before Restate considers it stalled.
-    After this timeout, Restate will ask the service to suspend.
-
-    **Default**: 1 minute
-
-    **When to adjust:** For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
-  </Accordion>
-
-  <Accordion title="Abort timeout">
-    Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
-    So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
-
-    **Default:** 1 minute
-
-    **Example:** For AI agents that might take 3-5 minutes to respond, set both timeouts to accommodate the expected duration.
-  </Accordion>
-
-  <Accordion title="Idempotency retention">
-    How long Restate retains idempotency keys to prevent duplicate request processing.
-
-    You can see the status of the completed invocation in the UI.
-
-    **Default:** 24 hours
-
-    **When to adjust:** For services that need longer idempotency windows, such as financial transactions or critical business operations.
-  </Accordion>
-
-<Accordion title="Workflow retention">
-    The workflow retention describes for how long you will be able to call the shared handlers on a workflow after the run handler has finished.
-    The retention time starts counting down from the moment the run handler completes.
-
-    After this time, the workflow's K/V state is cleared, you cannot call any shared handlers anymore, and any [Durable Promises](/develop/ts/external-events#durable-promises) are discarded.
-
-    **Default:** 24 hours
-
-    **When to adjust:** For workflows that need longer retention windows, to retrieve state or the result of a [Durable Promise](/develop/ts/external-events#durable-promises).
-</Accordion>
-
-<Accordion title="Journal retention">
-    How long Restate keeps invocation journals after completion for debugging and auditing.
-
-    Increase to see journals of completed invocations in the log.
-
-    For workflow executions or invocations with idempotency keys:
-    - the journal retention is capped by the workflow retention or idempotency retention time
-    - If the journal retention is set to 0, you can see completion status but not journal entries.
-
-    **Default:** Discarded immediately after completion
-    
-    **When to adjust:** For workflows, AI agents, or any service where you need to inspect the execution history after completion.
-  </Accordion>
-
-  <Accordion title="Private services">
-    Mark services as private to prevent external access while allowing internal service-to-service communication.
-    
-    **Use cases:**
-    - Internal utility services that shouldn't be exposed externally
-    - Backend services that only other Restate services should access
-    
-    **Configuration:** Set `ingressPrivate: true` in service options.
-  </Accordion>
+        ```bash
+        restate services config edit <SERVICE_NAME>
+        ```
+    </Accordion>
 </AccordionGroup>
 
 
