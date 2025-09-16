@@ -347,6 +347,31 @@ async def run(ctx: restate.WorkflowContext, req: str) -> str:
     # ... implement workflow logic here ---
     return "success"
 ```
+
+```go Go {"CODE_LOAD::go/services/configuration.go#handleropts"} 
+// Use ConfigureHandler to customize a handler configuration
+if err := server.NewRestate().
+  Bind(
+    restate.Reflect(MyWorkflow{}).
+      ConfigureHandler("run",
+        restate.WithInvocationRetryPolicy(
+          restate.WithInitialInterval(time.Second),
+          restate.WithMaxInterval(30*time.Second),
+          restate.WithMaxAttempts(10),
+          restate.PauseOnMaxAttempts()),
+        restate.WithInactivityTimeout(15*time.Minute),
+        restate.WithAbortTimeout(15*time.Minute),
+        restate.WithIdempotencyRetention(3*24*time.Hour),
+        restate.WithJournalRetention(7*24*time.Hour),
+        restate.WithIngressPrivate(true),
+        restate.WithEnableLazyState(true),
+        restate.WithWorkflowRetention(10*24*time.Hour), // Only for workflows
+      ),
+  ).
+  Start(context.Background(), "0.0.0.0:9080"); err != nil {
+  log.Fatal(err)
+}
+```
 </CodeGroup>
 
 ### Override configuration
