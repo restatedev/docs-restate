@@ -1,11 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 const chokidar = require("chokidar");
-const { generateGuidesOverview } = require("./generateOverview");
+const { generateGuidesOverview } = require("./generate-guides-overview");
 
 const MDX_DIR = path.resolve("./docs"); // Folder with your .mdx files
 const SNIPPET_DIR = path.resolve("./snippets"); // Folder with code to load
-const GUIDES_DIR = path.resolve("./docs/guides"); // Folder with guide files
 
 const LANGUAGE_SYMBOLS = {
     ts: {

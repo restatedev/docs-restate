@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const GUIDES_DIR = path.resolve("./docs/guides");
-const OVERVIEW_FILE = path.join(GUIDES_DIR, "overview.mdx");
+const OVERVIEW_FILE = path.join(GUIDES_DIR, "index.mdx");
 
 /**
  * Parses frontmatter from an MDX file
@@ -120,7 +120,7 @@ function getHeaderForTag(tag) {
 }
 
 /**
- * Generates the overview.mdx content
+ * Generates the guides/index.mdx content
  * @param {Array} guides - Array of guide objects
  * @returns {string} Complete MDX content
  */
@@ -222,7 +222,7 @@ function generateGuidesOverview() {
         const files = fs.readdirSync(GUIDES_DIR);
         const mdxFiles = files.filter(file => 
             file.endsWith('.mdx') && 
-            file !== 'overview.mdx' // Exclude the overview file itself
+            file !== 'index.mdx' // Exclude the overview file itself
         );
         
         console.log(`📁 Found ${mdxFiles.length} guide files:`, mdxFiles);
