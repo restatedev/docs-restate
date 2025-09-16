@@ -8,6 +8,22 @@ description: "Configure service-level behavior like retries, timeouts, retention
 Restate services support several configuration options to adapt their behavior for different use cases.
 These include timeout settings, retry policies, retention policies, and privacy controls.
 
+## Retries
+
+Restate retries executing invocations that can't make any progress according to a retry policy.
+
+The retry policy always uses exponential back-off. You can tune the initial interval, the exponentiation factor and the maximum interval.
+
+Retry policy have a maximum number of attempts, which can be either limited or unlimited.
+When attempts are exhausted, you can configure what Restate should do with the invocation:
+
+- **Pause** it, requiring the user to [manually resume it](/services/invocation/managing-invocations#resume).
+- **Kill** it, which automatically fails the invocation, replying back to the callers with a terminal error. Note: **compensation logic will not be executed**, thus this may leave your service in an inconsistent state. For more details, check [killing the invocation](/services/invocation/managing-invocations#kill).
+
+**Default:** Unlimited retries with exponential policy up to 10 seconds of interval (tunable in self-hosted Restate as [`default-retry-policy`](/references/server-config#param-default-retry-policy))
+
+**When to adjust:** Bound the maximum number of attempts when you deploy services on FaaS, avoiding incurring in extra costs for unnecessary retries, such as when an invocation is stuck constantly hitting the same bug in the code. Increase the retry policy back-off intervals when you want to reduce the retries load on the downstream services, or decrease them when you want snappier retries.
+
 ## Retention of completed invocations
 
 You can tune how long to retain metadata and progress of your invocations.
@@ -48,22 +64,6 @@ Tune these down to save disk space, or tune them up to increase the retained his
     </Accordion>
 </AccordionGroup>
 
-## Retries
-
-Restate retries executing invocations that can't make any progress according to a retry policy.
-
-The retry policy always uses exponential back-off. You can tune the initial interval, the exponentiation factor and the maximum interval.
-
-Retry policy have a maximum number of attempts, which can be either limited or unlimited.
-When attempts are exhausted, you can configure what Restate should do with the invocation:
-
-- **Pause** it, requiring the user to [manually resume it](/services/invocation/managing-invocations#resume).
-- **Kill** it, which automatically fails the invocation, replying back to the callers with a terminal error. Note: **compensation logic will not be executed**, thus this may leave your service in an inconsistent state. For more details, check [killing the invocation](/services/invocation/managing-invocations#kill).
-
-**Default:** Unlimited retries with exponential policy up to 10 seconds of interval (tunable in self-hosted Restate as [`default-retry-policy`](/references/server-config#param-default-retry-policy))
-
-**When to adjust:** Bound the maximum number of attempts when you deploy services on FaaS, avoiding incurring in extra costs for unnecessary retries, such as when an invocation is stuck constantly hitting the same bug in the code. Increase the retry policy back-off intervals when you want to reduce the retries load on the downstream services, or decrease them when you want snappier retries.
-
 ## Timeouts
 
 There are two types of timeouts describing the behavior between Restate and the service deployment.
@@ -90,13 +90,14 @@ You should tune these values if you have long-running operations in your code.
     </Accordion>
 </AccordionGroup>
 
-## Privacy controls
+## Visibility
 
 Restate provides some options to configure the visibility of your services and handlers.
 
 <AccordionGroup>
-    <Accordion title="Private services">
-        Mark services as private to prevent external access while allowing internal service-to-service communication.
+    <Accordion title="Service/handler visibility">
+        By default Restate allows requests to your service through HTTP, Kafka and via other services.
+        You can mark services as private to prevent external access while allowing internal service-to-service communication.
 
         **Default**: Public
 
