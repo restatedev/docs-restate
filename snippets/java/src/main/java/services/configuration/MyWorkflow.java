@@ -3,6 +3,7 @@ package services.configuration;
 import dev.restate.sdk.WorkflowContext;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.endpoint.Endpoint;
+import dev.restate.sdk.endpoint.definition.InvocationRetryPolicy;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
 import java.time.Duration;
 
@@ -21,7 +22,13 @@ public class MyWorkflow {
         Endpoint.bind(
             new MyWorkflow(),
             conf ->
-                conf.abortTimeout(Duration.ofMinutes(15))
+                conf.invocationRetryPolicy(
+                        InvocationRetryPolicy.builder()
+                            .initialInterval(Duration.ofSeconds(1))
+                            .maxInterval(Duration.ofSeconds(1))
+                            .maxAttempts(10)
+                            .onMaxAttempts(InvocationRetryPolicy.OnMaxAttempts.PAUSE))
+                    .abortTimeout(Duration.ofMinutes(15))
                     .inactivityTimeout(Duration.ofMinutes(15))
                     .idempotencyRetention(Duration.ofDays(3))
                     .workflowRetention(Duration.ofDays(10)) // Only for workflows
@@ -42,6 +49,12 @@ public class MyWorkflow {
                     "run",
                     handlerConf ->
                         handlerConf
+                            .invocationRetryPolicy(
+                                InvocationRetryPolicy.builder()
+                                    .initialInterval(Duration.ofSeconds(1))
+                                    .maxInterval(Duration.ofSeconds(1))
+                                    .maxAttempts(10)
+                                    .onMaxAttempts(InvocationRetryPolicy.OnMaxAttempts.PAUSE))
                             .abortTimeout(Duration.ofMinutes(15))
                             .inactivityTimeout(Duration.ofMinutes(15))
                             .journalRetention(Duration.ofDays(7))

@@ -9,6 +9,12 @@ const myWorkflow = restate.workflow({
     run: async (ctx: restate.Context) => {},
   },
   options: {
+    retryPolicy: {
+      initialInterval: { seconds: 1 },
+      maxInterval: { seconds: 30 },
+      maxAttempts: 10,
+      onMaxAttempts: "pause"
+    },
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
@@ -28,6 +34,12 @@ const myService = restate.service({
   handlers: {
     myHandler: restate.handlers.handler(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         idempotencyRetention: { days: 3 },
@@ -45,6 +57,12 @@ const myObject = restate.object({
   handlers: {
     myHandler: restate.handlers.object.exclusive(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         idempotencyRetention: { days: 3 },
@@ -69,6 +87,12 @@ const myWf = restate.workflow({
   handlers: {
     run: restate.handlers.workflow.workflow(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         journalRetention: { days: 7 },
