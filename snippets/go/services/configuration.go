@@ -48,7 +48,7 @@ func main() {
 	if err := server.NewRestate().
 		Bind(
 			restate.Reflect(MyWorkflow{}).
-				ConfigureHandler("run",
+				ConfigureHandler("MyHandler",
 					restate.WithInvocationRetryPolicy(
 						restate.WithInitialInterval(time.Second),
 						restate.WithMaxInterval(30*time.Second),
