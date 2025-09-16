@@ -1,0 +1,72 @@
+---
+title: "Durable Webhooks"
+description: "Process webhook events from external services with exactly-once delivery guarantees."
+tags: ["recipe"]
+---
+
+Restate handlers can be used as **durable processors of webhook events**.
+
+<img src={"/img/guides/durable-webhooks/durable-webhooks.png"} width={"400px"}/>
+
+## How does Restate help?
+- Restate persists all incoming events, and ensures that they are **processed exactly once**, across failures and restarts. Restate guarantees your handler runs till completion.
+- Let Restate **deduplicate** events on an [idempotency key](/invoke/http#invoke-a-handler-idempotently). If the sender of the event retries, Restate will not process the event again.
+- Use any of Restate's [**durable SDK constructs**](/concepts/durable_building_blocks) when processing the events: durable calls/messaging to other services, durable timers, scheduling tasks, K/V state, concurrency guarantees etc.
+- Any handler can be a durable webhook endpoint. **No need to do anything special or extra!**
+
+Just point your webhook endpoint to your handler: `restate:8080/MyService/myHandler`.
+
+## Example
+This example processes webhook callbacks from a payment provider.
+
+The payment provider notifies us about payment success or failure of invoices by sending webhook events to our handler.
+The handler then routes the event to the correct processor via a one-way message.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/webhookcallbacks/webhook_callback_router.ts?collapse_prequel"} 
+const webhookCallbackRouter = restate.service({
+  name: "WebhookCallbackRouter",
+  handlers: {
+    // Any handler can be a durable webhook processor that never loses events
+    // You don't need to do anything special for this.
+    // Just point your webhook to the handler endpoint: restate:8080/WebhookCallbackRouter/onStripeEvent
+    onStripeEvent: async (ctx: restate.Context, event: StripeEvent) => {
+      if (event.type === "invoice.payment_failed") {
+        ctx.objectSendClient(PaymentTracker, event.data.object.id).onPaymentFailed(event);
+      } else if (event.type === "invoice.payment_succeeded") {
+        ctx.objectSendClient(PaymentTracker, event.data.object.id).onPaymentSuccess(event);
+      }
+    },
+  },
+});
+
+restate.serve({
+  services: [webhookCallbackRouter],
+  port: 9080,
+});
+```
+
+```go Go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/webhookcallbacks/callbackrouter.go?collapse_prequel"} 
+type WebhookCallbackRouter struct{}
+
+// Any handler can be a durable webhook processor that never loses events
+// You don't need to do anything special for this.
+// Just point your webhook to the handler endpoint: restate:8080/WebhookCallbackRouter/OnStripeEvent
+
+func (WebhookCallbackRouter) OnStripeEvent(ctx restate.Context, event StripeEvent) error {
+  if event.Type == "invoice.payment_failed" {
+    restate.ObjectSend(ctx, "PaymentTracker", "onPaymentFailed", event.Data.Object.ID).
+      Send(event)
+  } else if event.Type == "invoice.payment_succeeded" {
+    restate.ObjectSend(ctx, "PaymentTracker", "onPaymentSuccess", event.Data.Object.ID).
+      Send(event)
+  }
+  return nil
+}
+```
+</CodeGroup>
+
+<Info>
+    This pattern is implementable with any of our SDKs. We are still working on translating all patterns to all SDK languages.
+    If you need help with a specific language, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Info>
