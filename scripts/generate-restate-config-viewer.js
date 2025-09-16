@@ -3,6 +3,9 @@
 const fs = require('fs');
 const path = require('path');
 
+const schemaPath = "docs/schemas/restate-server-configuration-schema.json";
+const outputPath = "docs/references/server-config.mdx";
+
 function parseJsonSchema(schemaPath) {
     const schemaContent = fs.readFileSync(schemaPath, 'utf8');
     const schema = JSON.parse(schemaContent);
@@ -190,15 +193,6 @@ function generateRestateConfigViewer(schema) {
 }
 
 function main() {
-    const args = process.argv.slice(2);
-    if (args.length < 1) {
-        console.error('Usage: node generate-schema-viewer.js <path-to-schema.json> [output-file.mdx]');
-        process.exit(1);
-    }
-    
-    const schemaPath = args[0];
-    const outputPath = args[1];
-    
     if (!fs.existsSync(schemaPath)) {
         console.error(`Schema file not found: ${schemaPath}`);
         process.exit(1);
@@ -224,4 +218,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = { parseJsonSchema, generateSchemaViewer: generateRestateConfigViewer };
+module.exports = { generateSchemaViewer: generateRestateConfigViewer };

@@ -33,7 +33,7 @@ node scripts/loadScripts.js
 To update the Restate configuration JSON schema, add it as `snippets/schemas/restate-server-configuration-schema.json` and run:
 
 ```shell
-node scripts/generate-restate-config-viewer.js snippets/schemas/restate-server-configuration-schema.json docs/references/server-config.mdx
+node scripts/generate-restate-config-viewer.js
 ```
 
 ## Adding guides 
