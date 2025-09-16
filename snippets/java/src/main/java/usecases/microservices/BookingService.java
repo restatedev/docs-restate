@@ -34,6 +34,7 @@ public class BookingService {
       throw error;
     }
   }
+
   // <end_here>
 
   private Void cancelHotel(String hotelId) {

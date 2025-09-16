@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	restate "github.com/restatedev/sdk-go"
-	"github.com/restatedev/sdk-go/server"
 	"log"
 	"time"
+
+	restate "github.com/restatedev/sdk-go"
+	"github.com/restatedev/sdk-go/server"
 )
 
 type MyWorkflow struct {
@@ -26,6 +27,11 @@ func main() {
 		Bind(
 			restate.Reflect(
 				MyWorkflow{},
+				restate.WithInvocationRetryPolicy(
+					restate.WithInitialInterval(time.Second),
+					restate.WithMaxInterval(30*time.Second),
+					restate.WithMaxAttempts(10),
+					restate.PauseOnMaxAttempts()),
 				restate.WithInactivityTimeout(15*time.Minute),
 				restate.WithAbortTimeout(15*time.Minute),
 				restate.WithIdempotencyRetention(3*24*time.Hour),

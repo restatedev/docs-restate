@@ -7,7 +7,7 @@ toolchain go1.24.6
 require (
 	github.com/aws/aws-lambda-go v1.49.0
 	github.com/google/uuid v1.6.0
-	github.com/restatedev/sdk-go v0.19.0
+	github.com/restatedev/sdk-go v0.19.1-0.20250916150447-90b2f31d673d
 	google.golang.org/protobuf v1.36.6
 )
 

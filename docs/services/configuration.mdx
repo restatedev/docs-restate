@@ -131,6 +131,12 @@ const myWorkflow = restate.workflow({
     run: async (ctx: restate.Context) => {},
   },
   options: {
+    retryPolicy: {
+      initialInterval: { seconds: 1 },
+      maxInterval: { seconds: 30 },
+      maxAttempts: 10,
+      onMaxAttempts: "pause"
+    },
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
     idempotencyRetention: { days: 3 },
@@ -147,7 +153,13 @@ RestateHttpServer.listen(
     Endpoint.bind(
         new MyWorkflow(),
         conf ->
-            conf.abortTimeout(Duration.ofMinutes(15))
+            conf.invocationRetryPolicy(
+                    InvocationRetryPolicy.builder()
+                        .initialInterval(Duration.ofSeconds(1))
+                        .maxInterval(Duration.ofSeconds(1))
+                        .maxAttempts(10)
+                        .onMaxAttempts(InvocationRetryPolicy.OnMaxAttempts.PAUSE))
+                .abortTimeout(Duration.ofMinutes(15))
                 .inactivityTimeout(Duration.ofMinutes(15))
                 .idempotencyRetention(Duration.ofDays(3))
                 .workflowRetention(Duration.ofDays(10)) // Only for workflows
@@ -166,6 +178,12 @@ my_workflow = restate.Workflow(
     journal_retention=timedelta(days=7),
     ingress_private=True,
     enable_lazy_state=True,  # only for Objects/Workflows
+    invocation_retry_policy=restate.InvocationRetryPolicy(
+        initial_interval=timedelta(seconds=1),
+        max_interval=timedelta(seconds=30),
+        max_attempts=10,
+        on_max_attempts="pause"
+    )
 )
 ```
 
@@ -175,6 +193,11 @@ if err := server.NewRestate().
   Bind(
     restate.Reflect(
       MyWorkflow{},
+      restate.WithInvocationRetryPolicy(
+        restate.WithInitialInterval(time.Second),
+        restate.WithMaxInterval(30*time.Second),
+        restate.WithMaxAttempts(10),
+        restate.PauseOnMaxAttempts()),
       restate.WithInactivityTimeout(15*time.Minute),
       restate.WithAbortTimeout(15*time.Minute),
       restate.WithIdempotencyRetention(3*24*time.Hour),
@@ -204,6 +227,12 @@ const myService = restate.service({
   handlers: {
     myHandler: restate.handlers.handler(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         idempotencyRetention: { days: 3 },
@@ -221,6 +250,12 @@ const myObject = restate.object({
   handlers: {
     myHandler: restate.handlers.object.exclusive(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         idempotencyRetention: { days: 3 },
@@ -245,6 +280,12 @@ const myWf = restate.workflow({
   handlers: {
     run: restate.handlers.workflow.workflow(
       {
+        retryPolicy: {
+          initialInterval: { seconds: 1 },
+          maxInterval: { seconds: 30 },
+          maxAttempts: 10,
+          onMaxAttempts: "pause"
+        },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
         journalRetention: { days: 7 },
@@ -272,6 +313,12 @@ RestateHttpServer.listen(
                 "run",
                 handlerConf ->
                     handlerConf
+                        .invocationRetryPolicy(
+                            InvocationRetryPolicy.builder()
+                                .initialInterval(Duration.ofSeconds(1))
+                                .maxInterval(Duration.ofSeconds(1))
+                                .maxAttempts(10)
+                                .onMaxAttempts(InvocationRetryPolicy.OnMaxAttempts.PAUSE))
                         .abortTimeout(Duration.ofMinutes(15))
                         .inactivityTimeout(Duration.ofMinutes(15))
                         .journalRetention(Duration.ofDays(7))
@@ -289,6 +336,12 @@ RestateHttpServer.listen(
     journal_retention=timedelta(days=7),
     ingress_private=True,
     enable_lazy_state=True,  # only for Objects/Workflows
+    invocation_retry_policy=restate.InvocationRetryPolicy(
+        initial_interval=timedelta(seconds=1),
+        max_interval=timedelta(seconds=30),
+        max_attempts=10,
+        on_max_attempts="pause"
+    )
 )
 async def run(ctx: restate.WorkflowContext, req: str) -> str:
     # ... implement workflow logic here ---
