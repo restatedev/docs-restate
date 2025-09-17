@@ -20,47 +20,56 @@ In Restate, we distinguish between two types of errors: transient errors and ter
 Restate assumes by default that all errors are transient errors and therefore retryable.
 If you do not want an error to be retried, you need to specifically label it as a terminal error ([see below](#application-errors-terminal)).
 
-Restate lets you configure the retry strategy at different levels: at the Restate-level (global) and at the run-block-level.
+Restate lets you configure the retry strategy at different levels: for the invocation and at the run-block-level.
 
-### At the Restate-Level (Global)
+### At Invocation level
 
-This defines the default retry policy that will be used for all invocations, unless overridden at the service-, or run-block-level.
+Restate retries executing invocations that can't make any progress according to a retry policy.
+This policy controls the retry intervals, the maximum number of attempts and whether to **pause** or **kill** the invocation when the attempts are exhausted.
 
-You can set the global retry policy in the [Restate Server configuration](/server/configuration).
-By default, Restate will use an **exponential backoff retry policy**:
+The retry policy can be set on each individual handler, or for all the handlers of a service, or globally in the Restate configuration directly.
 
-```toml restate.toml
-[worker.invoker.retry-policy]
-type = "exponential" # retry strategy; required
-initial-interval = "50ms" # time between the first and second retry; required
-factor = 2.0 # factor used to calculate the next retry interval; required
-max-interval = "10s" # max time between retries; default: unset (=interval keeps increasing)
-```
+<AccordionGroup>
+    <Accordion title={"Configure for services/handlers"}>
+        To configure the retry policy on a service/handler level, check [retry service configuration](/services/configuration#retries).
+    </Accordion>
+    <Accordion title={"Configure Restate server defaults"}>
+        Via the [`restate-server` configuration file](/server/configuration):
 
-You can tune this policy to your needs. Note that all durations should follow the [humantime format](https://docs.rs/humantime/latest/humantime/fn.parse_duration.html).
+        ```toml restate.toml
+        [default-retry-policy]
+        initial-interval = "10s"
+        max-attempts = 100
+        max-interval = "60s"
+        ```
 
-You can also use a **fixed-delay retry policy**:
-```toml restate.toml
-[worker.invoker.retry-policy]
-type = "fixed-delay" # retry strategy; required
-interval = "50ms" # time between retries; required
-max-attempts = "10" # max number of attempts before terminal error; default: unset (=infinite)
-```
+        Then run the Restate Server with:
 
-If you set a maximum number of attempts, then the handler will throw a terminal error once the retries are exhausted.
+        ```shell
+        restate-server --config-file restate.toml
+        ```
 
-Then run the Restate Server with:
+        Or you can set these options via env variables:
 
-```shell
-restate-server --config-file restate.toml
-```
+        ```dotenv
+        RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL="10s"
+        RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=100
+        RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL="10s"
+        ```
 
-Or set it [via environment variables](/server/configuration#environment-variables), for example:
-```shell
-RESTATE_WORKER__INVOKER__RETRY_POLICY__TYPE=fixed-delay \
-RESTATE_WORKER__INVOKER__RETRY_POLICY__INTERVAL=100ms \
-restate-server
-```
+        This retry policy will retry the invocation 100 times, after which the invocation will be paused if no progress can be made. To resume a paused invocation, check the paragraph below.
+
+        You can also retry forever, without ever pausing or killing the invocation:
+
+        ```dotenv
+        RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=unlimited
+        ```
+
+        Check the [configuration documentation](/server/configuration) and the [`default-retry-policy` reference](/references/server-config#param-default-retry-policy).
+
+        When a retry policy is unset, Restate by default will retry undefinitely, alike setting `max-attempts = "unlimited"`.
+    </Accordion>
+</AccordionGroup>
 
 ### At the Run-Block-Level
 
@@ -306,41 +315,36 @@ If the user code needs longer to gracefully terminate, then this value needs to 
 If you have long-running `ctx.run` blocks, you need to increase both timeouts to prevent the handler from terminating prematurely.
 
 ### Configuring the timeouts
-#### Per service and handler
-Have a look at the [service configuration docs](/services/configuration).
 
-#### Globally for the Restate Server
+As with the retry policy, you can configure these timeouts on specific handlers, on all the handlers of a service, or globally in the Restate configuration directly.
 
-You can set the inactivity timeout via the UI, the CLI or the [Restate Server configuration](/server/configuration).
+<AccordionGroup>
+    <Accordion title={"Configure for services/handlers"}>
+        To configure these timeouts on a service/handler level, check [timeouts service configuration](/services/configuration#timeouts).
+    </Accordion>
+    <Accordion title={"Configure Restate server defaults"}>
+        Via the [`restate-server` configuration file](/server/configuration):
 
-Via the CLI:
+        ```toml restate.toml
+        [worker.invoker]
+        inactivity-timeout = "1m"
+        abort-timeout = "1m"
+        ```
 
-```shell
-restate services config edit <SERVICE>
-```
-Then you can adapt the configuration file and save it for the new settings to take effect.
+        ```shell
+        restate-server --config-file restate.toml
+        ```
 
-Via the Restate Server Configuration:
+        Both timeouts follow the [jiff](https://docs.rs/jiff/latest/jiff/struct.Span.html) format.
 
-```toml restate.toml
-[worker.invoker]
-inactivity-timeout = "1m"
-abort-timeout = "1m"
-```
-
-```shell
-restate-server --config-file restate.toml
-```
-
-Both timeouts follow the [humantime](https://docs.rs/humantime/latest/humantime/) format.
-
-Or set it [via environment variables](/server/configuration#environment-variables), for example:
-```shell
-RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=5m \
-  RESTATE_WORKER__INVOKER__ABORT_TIMEOUT=5m \
-  restate-server
-```
-
+        Or set it [via environment variables](/server/configuration#environment-variables), for example:
+        ```shell
+        RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=5m \
+        RESTATE_WORKER__INVOKER__ABORT_TIMEOUT=5m \
+        restate-server
+        ```
+    </Accordion>
+</AccordionGroup>
 
 ## Common patterns
 
