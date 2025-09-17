@@ -7,6 +7,7 @@ import {
   InsuranceClaimSchema,
   requestHumanReview,
 } from "./utils";
+import { WorkflowContext } from "@restatedev/restate-sdk";
 
 function requestManagerApproval(request: string) {
   return undefined;
@@ -16,18 +17,12 @@ function requestManagerApproval(request: string) {
 restate.workflow({
   name: "ApprovalWorkflow",
   handlers: {
-    run: async (
-      ctx: restate.WorkflowContext,
-      request: string
-    ): Promise<boolean> => {
+    run: async (ctx: restate.WorkflowContext, request: string) => {
       await ctx.run(() => requestManagerApproval(request));
       // Wait for the durable promise in the workflow
       return ctx.promise("manager-approval");
     },
-    approveRequest: async (
-      ctx: restate.WorkflowSharedContext,
-      approved: boolean
-    ) => {
+    approve: async (ctx: restate.WorkflowSharedContext, approved: boolean) => {
       // Resolve the durable promise in a signal handler
       await ctx.promise("manager-approval").resolve(approved);
     },

@@ -17,7 +17,7 @@ const bookingWorkflow = restate.service({
       const compensations = [];
 
       try {
-        // For each action, we register a compensation that will be executed on failures
+        // Register rollback actions, for in case of failures
         compensations.push(() =>
           ctx.run(() => flightClient.cancel(customerId))
         );

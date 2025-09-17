@@ -4,9 +4,8 @@ import * as restate from "@restatedev/restate-sdk";
 restate.service({
   name: "WebhookProcessor",
   handlers: {
-    // Any handler can be a durable webhook processor that never loses events
+    // Any handler can be a durable webhook processor
     // You don't need to do anything special for this.
-    // Just point your webhook to the handler endpoint: restate:8080/WebhookProcessor/onStripeEvent
     onStripeEvent: async (ctx: restate.Context, event: StripeEvent) => {
       if (event.type === "invoice.payment_failed") {
         ctx
