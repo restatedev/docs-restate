@@ -1,8 +1,8 @@
 import * as restate from "@restatedev/restate-sdk";
-import { durableCalls } from "./middleware";
+import {durableCalls} from "@restatedev/vercel-ai-middleware";
 
 import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
+import { generateText, wrapLanguageModel } from "ai";
 import { RestatePromise } from "@restatedev/restate-sdk";
 
 function sendApprovalRequest(id: string, decision: string) {

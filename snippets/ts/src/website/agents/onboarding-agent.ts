@@ -2,7 +2,7 @@ import * as restate from "@restatedev/restate-sdk";
 import { openai } from "@ai-sdk/openai";
 import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
 import { z } from "zod";
-import { durableCalls } from "./middleware";
+import {durableCalls} from "@restatedev/vercel-ai-middleware";
 
 async function createEmailAccount(name: string, team: string) {
   // Mock: Simulate email account creation
@@ -115,12 +115,11 @@ const runOnboardingAgent = async (
     model: openai("gpt-4o"),
     middleware: durableCalls(restateContext, { maxRetryAttempts: 3 }),
   });
-  // <end_here>
 
   await generateText({
     model,
     system: "You are an employee onboarding agent.",
-    prompt: `Onboard employee ${name} in team ${team}, as ${job}. First get the onboarding plan and then execute it.`,
+    prompt: `Onboard employee ${name} in team ${team}, as ${job}.`,
     tools: {
       getOnboardingPlan: tool({
         description: "Get onboarding plan for team and job",
@@ -132,12 +131,9 @@ const runOnboardingAgent = async (
       }),
       createEmail,
       reserveLaptop,
-      orderKeyCard,
-      orderPersonalizedHoodie,
-    },
-    stopWhen: [stepCountIs(10)],
-    providerOptions: { openai: { parallelToolCalls: false } },
+    }
   });
+  // <end_here>
 
   return "done!";
 };
@@ -154,7 +150,6 @@ const onboardingAgent = restate.service({
     },
   },
 });
-// <end_here>
 
 const emailCreationWorkflow = restate.workflow({
   name: "EmailCreationWorkflow",
