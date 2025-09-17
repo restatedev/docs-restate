@@ -181,62 +181,10 @@ export const FlightBookingSchema = z.object({
 });
 export type FlightBooking = z.infer<typeof FlightBookingSchema>;
 
-export const CarBookingSchema = z.object({
-  location: z.string(),
-  dates: z.string(),
-  type: z.string(),
-});
-
-export type CarBooking = z.infer<typeof CarBookingSchema>;
-
-export async function reserveHotel({ name, guests, dates }: HotelBooking) {
-  const id = crypto.randomUUID().toString();
-  console.log(`Created hotel booking ${id}`);
-  return {
-    id,
-    confirmation: `Hotel ${name} booked for ${guests} guests on ${dates}`,
-  };
+export async function bookHotel(id: string, req: { arrivalDate: string; departureDate: string }) {
 }
 
-export async function reserveFlight({
-  from,
-  to,
-  date,
-  passengers,
-}: FlightBooking) {
-  const id = crypto.randomUUID().toString();
-  console.log(`Created flight booking ${id}`);
-  return {
-    id,
-    confirmation: `Flight from ${from} to ${to} on ${date} for ${passengers} passengers`,
-  };
-}
-
-export async function reserveCar({ type, location, dates }: CarBooking) {
-  if (type === "SUV") {
-    const message = `[👻 SIMULATED] "Car booking failed: No SUVs available..."`;
-    console.error(message);
-    throw new restate.TerminalError(message);
-  }
-
-  const id = crypto.randomUUID().toString();
-  console.log(`Created car booking ${id}`);
-  return {
-    id,
-    confirmation: `${type} car rental in ${location} for ${dates}`,
-  };
-}
-
-export async function confirmHotel(id: string) {
-  console.log(`Confirmed hotel booking ${id}`);
-}
-
-export async function confirmFlight(id: string) {
-  console.log(`Confirmed flight booking ${id}`);
-}
-
-export async function confirmCar(id: string) {
-  console.log(`Confirmed car booking ${id}`);
+export async function bookFlight(id: string, req: { flightId: string, passengerName: string }) {
 }
 
 export async function cancelHotel(id: string) {

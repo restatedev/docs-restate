@@ -1,20 +1,22 @@
 import * as restate from "@restatedev/restate-sdk";
 
+function onPaymentSuccess(ctx: restate.Context, event: StripeEvent) {
+
+}
+
+function onPaymentFailed(ctx: restate.Context, event: StripeEvent) {
+
+}
+
 // <start_here>
 restate.service({
   name: "WebhookProcessor",
   handlers: {
-    // Any handler can be a durable webhook processor
-    // You don't need to do anything special for this.
     onStripeEvent: async (ctx: restate.Context, event: StripeEvent) => {
       if (event.type === "invoice.payment_failed") {
-        ctx
-          .objectSendClient(paymentTracker, event.data.object.id)
-          .onPaymentFailed(event);
+        onPaymentFailed(ctx, event);
       } else if (event.type === "invoice.payment_succeeded") {
-        ctx
-          .objectSendClient(paymentTracker, event.data.object.id)
-          .onPaymentSuccess(event);
+        onPaymentSuccess(ctx, event);
       }
     },
   },
