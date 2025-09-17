@@ -6,6 +6,114 @@ icon: "diagram-subtask"
 
 Restate lets you **write workflows as regular code** in your preferred programming language, with automatic resilience.
 
+## Workflows as code
+
+Write resilient workflows using familiar programming constructs:
+- Automatically retry transient errors like infrastructure crashes and network failures
+- Use standard language constructs (if/else, loops) and durable versions of familiar building blocks (e.g., timers, promises)
+- Handle errors naturally with try/catch blocks and automatic retries
+- Test and debug with your existing IDE and standard development tools
+
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/simple-signup.ts#here"}
+    export const userSignup = restate.workflow({
+    name: "user-signup",
+    handlers: {
+    run: async (ctx: WorkflowContext, user: User) => {
+    const userId = ctx.key; // unique workflow key
+
+    // Use regular if/else, loops, and functions
+    const success = await ctx.run("create", () => createUser(userId, user));
+    if (!success) return { success };
+
+    // Execute durable steps
+    await ctx.run("activate", () => activateUser(userId));
+    await ctx.run("welcome", () => sendWelcomeEmail(user));
+
+    return { success: true };
+},
+},
+});
+    ```
+
+```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/UserSignup.java#here"}
+    @Workflow
+    public class UserSignup {
+
+    @Workflow
+    public boolean run(WorkflowContext ctx, User user) {
+    String userId = ctx.key(); // unique workflow key
+
+    // Use regular if/else, loops, and functions
+    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    if (!success) {
+    return false;
+}
+
+    // Execute durable steps
+    ctx.run("activate", () -> activateUser(userId));
+    ctx.run("welcome", () -> sendWelcomeEmail(user));
+
+    return true;
+}
+}
+    ```
+
+    ```python Python {"CODE_LOAD::python/src/usecases/workflows/signup.py#here"}
+    user_signup = restate.Workflow("user-signup")
+
+
+    @user_signup.main()
+    async def run(ctx: restate.WorkflowContext, user: User) -> Dict[str, bool]:
+    # Unique workflow key
+    user_id = ctx.key()
+
+    # Use regular if/else, loops, and functions
+    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
+    if not success:
+    return {"success": False}
+
+    # Execute durable steps
+    await ctx.run_typed("activate", activate_user, user_id=user_id)
+    await ctx.run_typed("welcome", send_welcome_email, user=user)
+
+    return {"success": True}
+    ```
+
+    ```go Go {"CODE_LOAD::go/usecases/workflows/signup.go#here"}
+    type UserSignup struct{}
+
+    func (UserSignup) Run(ctx restate.WorkflowContext, user User) (bool, error) {
+    // unique workflow key
+    userID := restate.Key(ctx)
+
+    // Use regular if/else, loops, and functions
+    success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
+    return CreateUser(userID, user)
+})
+    if err != nil || !success {
+    return false, err
+}
+
+    // Execute durable steps
+    _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return ActivateUser(userID)
+})
+    if err != nil {
+    return false, err
+}
+
+    _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
+    return SendWelcomeEmail(user)
+})
+    if err != nil {
+    return false, err
+}
+
+    return true, nil
+}
+    ```
+</CodeGroup>
 
 ## Low-Latency Workflows
 
@@ -19,125 +127,14 @@ Restate is built from the ground up for low-latency workflow execution. Restate 
     [Benchmark results Restate v1.2](https://restate.dev/blog/building-a-modern-durable-execution-engine-from-first-principles/#some-performance-numbers)
 </Info>
 
-## Familiar Programming Model
-
-Write resilient workflows using familiar programming constructs:
-- Automatically retry transient errors like infrastructure crashes and network failures
-- Use standard language constructs (if/else, loops) and durable versions of familiar building blocks (e.g., timers, promises)
-- Handle errors naturally with try/catch blocks and automatic retries
-- Test and debug with your existing IDE and standard development tools
-
-<CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/usecases/workflows/simple-signup.ts#here"} 
-export const userSignup = restate.workflow({
-  name: "user-signup",
-  handlers: {
-    run: async (ctx: WorkflowContext, user: User) => {
-      const userId = ctx.key; // unique workflow key
-
-      // Use regular if/else, loops, and functions
-      const success = await ctx.run("create", () => createUser(userId, user));
-      if (!success) return { success };
-
-      // Execute durable steps
-      await ctx.run("activate", () => activateUser(userId));
-      await ctx.run("welcome", () => sendWelcomeEmail(user));
-
-      return { success: true };
-    },
-  },
-});
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/usecases/workflows/UserSignup.java#here"} 
-@Workflow
-public class UserSignup {
-
-  @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key(); // unique workflow key
-
-    // Use regular if/else, loops, and functions
-    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
-    if (!success) {
-      return false;
-    }
-
-    // Execute durable steps
-    ctx.run("activate", () -> activateUser(userId));
-    ctx.run("welcome", () -> sendWelcomeEmail(user));
-
-    return true;
-  }
-}
-```
-
-```python Python {"CODE_LOAD::python/src/usecases/workflows/signup.py#here"} 
-user_signup = restate.Workflow("user-signup")
-
-
-@user_signup.main()
-async def run(ctx: restate.WorkflowContext, user: User) -> Dict[str, bool]:
-    # Unique workflow key
-    user_id = ctx.key()
-
-    # Use regular if/else, loops, and functions
-    success = await ctx.run_typed("create", create_user, user_id=user_id, user=user)
-    if not success:
-        return {"success": False}
-
-    # Execute durable steps
-    await ctx.run_typed("activate", activate_user, user_id=user_id)
-    await ctx.run_typed("welcome", send_welcome_email, user=user)
-
-    return {"success": True}
-```
-
-```go Go {"CODE_LOAD::go/usecases/workflows/signup.go#here"} 
-type UserSignup struct{}
-
-func (UserSignup) Run(ctx restate.WorkflowContext, user User) (bool, error) {
-  // unique workflow key
-  userID := restate.Key(ctx)
-
-  // Use regular if/else, loops, and functions
-  success, err := restate.Run(ctx, func(ctx restate.RunContext) (bool, error) {
-    return CreateUser(userID, user)
-  })
-  if err != nil || !success {
-    return false, err
-  }
-
-  // Execute durable steps
-  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return ActivateUser(userID)
-  })
-  if err != nil {
-    return false, err
-  }
-
-  _, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-    return SendWelcomeEmail(user)
-  })
-  if err != nil {
-    return false, err
-  }
-
-  return true, nil
-}
-```
-</CodeGroup>
-
 ## Simple Deployment Model
 
-<img src="/img/tour/app_layout.svg" alt="Application Structure"/>
+<img src="/img/usecases/workflows/workflow-app-layout.png" alt="Application Structure"/>
 **Restate Server**: Restate is packaged as a single binary with built-in persistence and messaging. Run it as a single instance or in a high-availability cluster.
 
 **Service Deployment**: Deploy your workflows using your existing deployment pipeline: containers, Kubernetes, serverless functions, or any HTTP-capable platform.
 
 On FaaS, Restate's suspends workflows while they are waiting (e.g. timer) to reduce costs.
-
-
 
 ## Key Workflow Patterns
 
