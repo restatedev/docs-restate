@@ -4,15 +4,14 @@ import dev.restate.sdk.Context;
 import dev.restate.sdk.DurableFuture;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
-import dev.restate.sdk.endpoint.Endpoint;
-import dev.restate.sdk.http.vertx.RestateHttpServer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import usecases.microservices.utils.EmailServiceClient;
+import usecases.microservices.utils.InventoryServiceClient;
 import usecases.microservices.utils.Order;
 import usecases.microservices.utils.Order.Item;
-
-class PaymentResult {}
+import usecases.microservices.utils.PaymentResult;
 
 @Service
 public class ServiceActions {
@@ -26,10 +25,10 @@ public class ServiceActions {
     var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
 
     // Fire-and-forget: Guaranteed delivery without waiting
-    EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
+    EmailServiceClient.fromContext(ctx).send().emailTicket(order);
 
     // Delayed execution: Schedule for later
-    ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
+    EmailServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(21));
     // <end_communication>
 
     // <start_awakeables>
@@ -61,50 +60,5 @@ public class ServiceActions {
   private Void processItem(Item item) {
     // Simulate item processing
     return null;
-  }
-}
-
-@Service
-class InventoryService {
-  public static class StockResult {
-    public String item;
-    public boolean inStock;
-
-    public StockResult(String item, boolean inStock) {
-      this.item = item;
-      this.inStock = inStock;
-    }
-  }
-
-  @Handler
-  public StockResult checkStock(Context ctx, String item) {
-    // Simulate stock check
-    return new StockResult(item, true);
-  }
-}
-
-@Service
-class EmailService {
-  @Handler
-  public void sendConfirmation(Context ctx, Order order) {
-    // Simulate sending email
-    System.out.println("Sending confirmation for order " + order.id);
-  }
-
-  public static void main(String[] args) {
-    RestateHttpServer.listen(
-        Endpoint.bind(new EmailService())
-            .bind(new ReminderService())
-            .bind(new ServiceActions())
-            .build());
-  }
-}
-
-@Service
-class ReminderService {
-  @Handler
-  public void sendReminder(Context ctx, Order order) {
-    // Simulate sending reminder
-    System.out.println("Sending reminder for order " + order.id);
   }
 }

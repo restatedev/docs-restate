@@ -118,15 +118,15 @@ Flexible communication patterns with strong delivery guarantees:
     <CodeGroup>
         ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#communication"} 
 // Request-response: Wait for result
-const result = await ctx.serviceClient(inventoryService).checkStock(item);
+const payRef = await ctx.serviceClient(paymentService).charge(req);
 
 // Fire-and-forget: Guaranteed delivery without waiting
-ctx.serviceSendClient(emailService).sendConfirmation(order);
+ctx.serviceSendClient(emailService).emailTicket(req);
 
 // Delayed execution: Schedule for later
 ctx
-  .serviceSendClient(reminderService)
-  .sendReminder(order, sendOpts({ delay: { days: 7 } }));
+  .serviceSendClient(emailService)
+  .sendReminder(order, sendOpts({ delay: dayBefore(req.concertDate) }));
 ```
 
         ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
@@ -134,36 +134,36 @@ ctx
 var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
 
 // Fire-and-forget: Guaranteed delivery without waiting
-EmailServiceClient.fromContext(ctx).send().sendConfirmation(order);
+EmailServiceClient.fromContext(ctx).send().emailTicket(order);
 
 // Delayed execution: Schedule for later
-ReminderServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(7));
+EmailServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(21));
 ```
 
         ```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
 # Request-response: Wait for result
-result = await ctx.service_call(check_stock, item)
+result = await ctx.service_call(charge_payment, req)
 
 # Fire-and-forget: Guaranteed delivery without waiting
-ctx.service_send(send_confirmation_email, order)
+ctx.service_send(send_ticket_email, ticket)
 
 # Delayed execution: Schedule for later
-ctx.service_send(send_reminder, order, send_delay=timedelta(days=7))
+ctx.service_send(send_reminder, ticket, send_delay=timedelta(days=7))
 ```
 
         ```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"} 
 // Request-response: Wait for result
-result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
+result, err := restate.Service[StockResult](ctx, "PaymentService", "Charge").Request(req)
 if err != nil {
   return err
 }
 _ = result
 
 // Fire-and-forget: Guaranteed delivery without waiting
-restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
+restate.ServiceSend(ctx, "EmailService", "EmailTicket").Send(ticket)
 
 // Delayed execution: Schedule for later
-restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
+restate.ServiceSend(ctx, "EmailService", "SendReminder").Send(ticket, restate.WithDelay(7*24*time.Hour))
 ```
     </CodeGroup>
 

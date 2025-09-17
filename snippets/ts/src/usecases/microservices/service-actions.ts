@@ -18,23 +18,27 @@ function processItem(item: { id: string; quantity: number }) {
   return undefined;
 }
 
+function dayBefore(concertDate: Date) {
+  return undefined;
+}
+
 export const myService = restate.service({
   name: "MyService",
   handlers: {
     process: async (ctx: restate.Context, order: Order) => {
-      const item = "item-123";
+      const req = { item: "item-123", concertDate: new Date(), id: order.id };
 
       // <start_communication>
       // Request-response: Wait for result
-      const result = await ctx.serviceClient(inventoryService).checkStock(item);
+      const payRef = await ctx.serviceClient(paymentService).charge(req);
 
       // Fire-and-forget: Guaranteed delivery without waiting
-      ctx.serviceSendClient(emailService).sendConfirmation(order);
+      ctx.serviceSendClient(emailService).emailTicket(req);
 
       // Delayed execution: Schedule for later
       ctx
-        .serviceSendClient(reminderService)
-        .sendReminder(order, sendOpts({ delay: { days: 7 } }));
+        .serviceSendClient(emailService)
+        .sendReminder(order, sendOpts({ delay: dayBefore(req.concertDate) }));
       // <end_communication>
 
       // <start_awakeables>
@@ -56,10 +60,10 @@ export const myService = restate.service({
   },
 });
 
-const inventoryService = restate.service({
+const paymentService = restate.service({
   name: "InventoryService",
   handlers: {
-    checkStock: async (ctx: restate.Context, item: string) => {
+    charge: async (ctx: restate.Context, item: object) => {
       // Simulate stock check
       return { item, inStock: true };
     },
@@ -69,16 +73,10 @@ const inventoryService = restate.service({
 const emailService = restate.service({
   name: "EmailService",
   handlers: {
-    sendConfirmation: async (ctx: restate.Context, order: Order) => {
+    emailTicket: async (ctx: restate.Context, order: object) => {
       // Simulate sending email
-      console.log(`Sending confirmation for order ${order.id}`);
+      console.log(`Sending confirmation for order`);
     },
-  },
-});
-
-const reminderService = restate.service({
-  name: "ReminderService",
-  handlers: {
     sendReminder: async (ctx: restate.Context, order: Order) => {
       // Simulate sending reminder
       console.log(`Sending reminder for order ${order.id}`);

@@ -4,6 +4,7 @@ import dev.restate.sdk.Context;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import usecases.microservices.utils.BookingRequest;
 import usecases.microservices.utils.BookingResult;
@@ -28,7 +29,8 @@ public class BookingService {
       return new BookingResult(true);
     } catch (Exception error) {
       // Run compensations in reverse order
-      for (Runnable compensation : compensations.reversed()) {
+      Collections.reverse(compensations);
+      for (Runnable compensation : compensations) {
         ctx.run("compensation", compensation::run);
       }
       throw error;
@@ -37,23 +39,19 @@ public class BookingService {
 
   // <end_here>
 
-  private Void cancelHotel(String hotelId) {
+  private void cancelHotel(String hotelId) {
     // Simulate hotel cancellation
-    return null;
   }
 
-  private Void bookHotel(BookingRequest request) {
+  private void bookHotel(BookingRequest request) {
     // Simulate hotel booking
-    return null;
   }
 
-  private Void cancelFlight(String flightId) {
+  private void cancelFlight(String flightId) {
     // Simulate flight cancellation
-    return null;
   }
 
-  private Void bookFlight(BookingRequest request) {
+  private void bookFlight(BookingRequest request) {
     // Simulate flight booking
-    return null;
   }
 }

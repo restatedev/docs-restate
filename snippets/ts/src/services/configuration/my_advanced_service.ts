@@ -13,7 +13,7 @@ const myWorkflow = restate.workflow({
       initialInterval: { seconds: 1 },
       maxInterval: { seconds: 30 },
       maxAttempts: 10,
-      onMaxAttempts: "pause"
+      onMaxAttempts: "pause",
     },
     abortTimeout: { minutes: 15 },
     inactivityTimeout: { minutes: 15 },
@@ -38,7 +38,7 @@ const myService = restate.service({
           initialInterval: { seconds: 1 },
           maxInterval: { seconds: 30 },
           maxAttempts: 10,
-          onMaxAttempts: "pause"
+          onMaxAttempts: "pause",
         },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
@@ -61,7 +61,7 @@ const myObject = restate.object({
           initialInterval: { seconds: 1 },
           maxInterval: { seconds: 30 },
           maxAttempts: 10,
-          onMaxAttempts: "pause"
+          onMaxAttempts: "pause",
         },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },
@@ -91,7 +91,7 @@ const myWf = restate.workflow({
           initialInterval: { seconds: 1 },
           maxInterval: { seconds: 30 },
           maxAttempts: 10,
-          onMaxAttempts: "pause"
+          onMaxAttempts: "pause",
         },
         abortTimeout: { minutes: 15 },
         inactivityTimeout: { minutes: 15 },

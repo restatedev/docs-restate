@@ -30,20 +30,21 @@ my_service = restate.Service("MyService")
 
 
 @my_service.handler()
-async def process(ctx: restate.Context, order: Order):
-    item = "item-123"
+async def process(ctx: restate.Context, ticket: Order):
+    req = "item-123"
 
     # <start_communication>
     # Request-response: Wait for result
-    result = await ctx.service_call(check_stock, item)
+    result = await ctx.service_call(charge_payment, req)
 
     # Fire-and-forget: Guaranteed delivery without waiting
-    ctx.service_send(send_confirmation_email, order)
+    ctx.service_send(send_ticket_email, ticket)
 
     # Delayed execution: Schedule for later
-    ctx.service_send(send_reminder, order, send_delay=timedelta(days=7))
+    ctx.service_send(send_reminder, ticket, send_delay=timedelta(days=7))
     # <end_communication>
 
+    order = ticket
     # <start_awakeables>
     # Wait for external payment confirmation
     confirmation_id, confirmation_promise = ctx.awakeable()
@@ -68,7 +69,7 @@ inventory_service = restate.Service("InventoryService")
 
 
 @inventory_service.handler()
-async def check_stock(ctx: restate.Context, item: str):
+async def charge_payment(ctx: restate.Context, item: str):
     # Simulate stock check
     return {"item": item, "in_stock": True}
 
@@ -77,7 +78,7 @@ email_service = restate.Service("EmailService")
 
 
 @email_service.handler()
-async def send_confirmation_email(ctx: restate.Context, order: Order):
+async def send_ticket_email(ctx: restate.Context, order: Order):
     # Simulate sending email
     print(f"Sending confirmation for order {order.id}")
 

@@ -27,21 +27,22 @@ func ProcessItem(item Item) (restate.Void, error) {
 type MyService struct{}
 
 func (MyService) Process(ctx restate.Context, order Order) error {
-	item := "item-123"
+	req := "item-123"
+	ticket := order
 
 	// <start_communication>
 	// Request-response: Wait for result
-	result, err := restate.Service[StockResult](ctx, "InventoryService", "checkStock").Request(item)
+	result, err := restate.Service[StockResult](ctx, "PaymentService", "Charge").Request(req)
 	if err != nil {
 		return err
 	}
 	_ = result
 
 	// Fire-and-forget: Guaranteed delivery without waiting
-	restate.ServiceSend(ctx, "EmailService", "sendConfirmation").Send(order)
+	restate.ServiceSend(ctx, "EmailService", "EmailTicket").Send(ticket)
 
 	// Delayed execution: Schedule for later
-	restate.ServiceSend(ctx, "ReminderService", "sendReminder").Send(order, restate.WithDelay(7*24*time.Hour))
+	restate.ServiceSend(ctx, "EmailService", "SendReminder").Send(ticket, restate.WithDelay(7*24*time.Hour))
 	// <end_communication>
 
 	// <start_awakeables>
@@ -83,24 +84,22 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 	return nil
 }
 
-type InventoryService struct{}
+type PaymentService struct{}
 
-func (InventoryService) CheckStock(ctx restate.Context, item string) (StockResult, error) {
+func (PaymentService) Charge(ctx restate.Context, item string) (StockResult, error) {
 	// Simulate stock check
 	return StockResult{Item: item, InStock: true}, nil
 }
 
 type EmailService struct{}
 
-func (EmailService) SendConfirmation(ctx restate.Context, order Order) error {
+func (EmailService) EmailTicket(ctx restate.Context, order Order) error {
 	// Simulate sending email
 	fmt.Printf("Sending confirmation for order %s\n", order.ID)
 	return nil
 }
 
-type ReminderService struct{}
-
-func (ReminderService) SendReminder(ctx restate.Context, order Order) error {
+func (EmailService) SendReminder(ctx restate.Context, order Order) error {
 	// Simulate sending reminder
 	fmt.Printf("Sending reminder for order %s\n", order.ID)
 	return nil

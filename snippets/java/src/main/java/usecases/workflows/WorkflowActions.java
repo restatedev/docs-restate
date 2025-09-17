@@ -4,7 +4,6 @@ import static usecases.workflows.utils.DomainModels.*;
 
 import dev.restate.sdk.SharedWorkflowContext;
 import dev.restate.sdk.WorkflowContext;
-import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.common.DurablePromiseKey;
@@ -25,7 +24,7 @@ public class WorkflowActions {
   private static final DurablePromiseKey<String> USER_RESPONSE_PROMISE =
       DurablePromiseKey.of("user-response", String.class);
 
-  @Handler
+  @Workflow
   public Map<String, Boolean> run(WorkflowContext ctx, User user) {
     OrderDetails order = new OrderDetails("order123", 1500);
 
