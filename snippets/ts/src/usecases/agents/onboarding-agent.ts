@@ -2,7 +2,7 @@ import * as restate from "@restatedev/restate-sdk";
 import { openai } from "@ai-sdk/openai";
 import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
 import { z } from "zod";
-import {durableCalls} from "@restatedev/vercel-ai-middleware";
+import { durableCalls } from "@restatedev/vercel-ai-middleware";
 
 async function createEmailAccount(name: string, team: string) {
   // Mock: Simulate email account creation

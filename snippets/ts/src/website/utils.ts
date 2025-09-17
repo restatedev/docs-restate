@@ -29,7 +29,7 @@ async function fetchWeatherFromAPI(city: string) {
   if (!res.ok) {
     if (res.status === 404 && output) {
       throw new TerminalError(
-        `Unknown location: ${city}. Please provide a valid city name.`,
+        `Unknown location: ${city}. Please provide a valid city name.`
       );
     }
     throw new Error(`Weather API returned status ${res.status}`);
@@ -57,8 +57,10 @@ async function parseWeatherResponse(output: string) {
   }
 }
 
-export function requestHumanReview(message: InsuranceClaim, responseId: string = "") {
-}
+export function requestHumanReview(
+  message: InsuranceClaim,
+  responseId: string = ""
+) {}
 
 export function emailCustomer(message: string, responseId: string = "") {
   console.log("Emailing customer:", message);
@@ -76,7 +78,7 @@ export function getMissingFields(claim: InsuranceClaim) {
       ([_, value]) =>
         value === null ||
         value === "" ||
-        (Array.isArray(value) && value.length === 0),
+        (Array.isArray(value) && value.length === 0)
     )
     .map(([key, _]) => key);
 }
