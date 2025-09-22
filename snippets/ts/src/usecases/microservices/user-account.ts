@@ -4,23 +4,23 @@ import shared = restate.handlers.object.shared;
 
 // <start_here>
 export default restate.object({
-    name: "UserAccount",
-    handlers: {
-        updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
-            const balance = (await ctx.get<number>("balance")) ?? 0;
-            const newBalance = balance + amount;
+  name: "UserAccount",
+  handlers: {
+    updateBalance: async (ctx: restate.ObjectContext, amount: number) => {
+      const balance = (await ctx.get<number>("balance")) ?? 0;
+      const newBalance = balance + amount;
 
-            if (newBalance < 0) {
-                throw new TerminalError("Insufficient funds");
-            }
+      if (newBalance < 0) {
+        throw new TerminalError("Insufficient funds");
+      }
 
-            ctx.set("balance", newBalance);
-            return newBalance;
-        },
-
-        getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
-            return (await ctx.get<number>("balance")) ?? 0;
-        }),
+      ctx.set("balance", newBalance);
+      return newBalance;
     },
+
+    getBalance: shared(async (ctx: restate.ObjectSharedContext) => {
+      return (await ctx.get<number>("balance")) ?? 0;
+    }),
+  },
 });
 // <end_here>
