@@ -23,7 +23,7 @@ The **limiter client interface**, which you can use in your services:
 
 <CodeGroup>
 
-```ts TypeScript expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/ratelimit/limiter_client.ts"}
+```ts TypeScript expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/ratelimit/limiter_client.ts"} 
 import { Context, TerminalError } from "@restatedev/restate-sdk";
 import type { Limiter as LimiterObject, Reservation as ReservationResponse } from "./limiter";
 
@@ -169,228 +169,655 @@ function delayFrom(r: ReservationResponse, date: number): number {
 }
 ```
 
+```go Go expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/ratelimit/client/limitclient.go"} 
+package client
+
+import (
+  "time"
+
+  "github.com/restatedev/examples/go/patterns-use-cases/src/ratelimit/types"
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Limiter struct {
+  ctx       restate.Context
+  limiterID string
+}
+
+func NewLimiter(ctx restate.Context, limiterID string) *Limiter {
+  return &Limiter{
+    ctx:       ctx,
+    limiterID: limiterID,
+  }
+}
+
+func (lim *Limiter) state() (types.LimiterState, error) {
+  return restate.Object[types.LimiterState](lim.ctx, "Limiter", lim.limiterID, "State").Request(restate.Void{})
+}
+
+// Limit returns the maximum overall event rate.
+func (lim *Limiter) Limit() (types.Limit, error) {
+  state, err := lim.state()
+  if err != nil {
+    return 0.0, err
+  }
+  return state.Limit, nil
+}
+
+// Burst returns the maximum burst size. Burst is the maximum number of tokens
+// that can be consumed in a single call to Allow, Reserve, or Wait, so higher
+// Burst values allow more events to happen at once.
+// A zero Burst allows no events, unless limit == Inf.
+func (lim *Limiter) Burst() (int, error) {
+  state, err := lim.state()
+  if err != nil {
+    return 0, err
+  }
+  return state.Burst, nil
+}
+
+// Tokens returns the number of tokens available now.
+func (lim *Limiter) Tokens() (float64, error) {
+  return restate.Object[float64](lim.ctx, "Limiter", lim.limiterID, "Tokens").Request(restate.Void{})
+}
+
+// Allow reports whether an event may happen now.
+func (lim *Limiter) Allow() (bool, error) {
+  return lim.AllowN(1)
+}
+
+// AllowN reports whether n events may happen now.
+// Use this method if you intend to drop / skip events that exceed the rate limit.
+// Otherwise use Reserve or Wait.
+func (lim *Limiter) AllowN(n int) (bool, error) {
+  r, err := restate.Object[types.Reservation](lim.ctx, "Limiter", lim.limiterID, "ReserveN").Request(types.ReserveRequest{
+    N:                n,
+    MaxFutureReserve: 0,
+  })
+  if err != nil {
+    return false, err
+  }
+  return r.Ok, nil
+}
+
+type Reservation struct {
+  lim *Limiter
+  r   types.Reservation
+}
+
+// Cancel indicates that the reservation holder will not perform the reserved action
+// and reverses the effects of this Reservation on the rate limit as much as possible,
+// considering that other reservations may have already been made.
+func (r *Reservation) Cancel() {
+  restate.ObjectSend(r.lim.ctx, "Limiter", r.lim.limiterID, "CancelReservation").Send(r.r)
+}
+
+// Reserve is shorthand for ReserveN(1).
+func (lim *Limiter) Reserve() (*Reservation, error) {
+  return lim.ReserveN(1)
+}
+
+// ReserveN returns a Reservation that indicates how long the caller must wait before n events happen.
+// The Limiter takes this Reservation into account when allowing future events.
+// The returned Reservation’s OK() method returns false if n exceeds the Limiter's burst size.
+// Usage example:
+//
+//  r := lim.ReserveN(1)
+//  if !r.OK() {
+//    // Not allowed to act! Did you remember to set lim.burst to be > 0 ?
+//    return
+//  }
+//  restate.Sleep(r.Delay())
+//  Act()
+//
+// Use this method if you wish to wait and slow down in accordance with the rate limit without dropping events.
+// If you need to respect a deadline or cancel the delay, use Wait instead.
+// To drop or skip events exceeding rate limit, use Allow instead.
+func (lim *Limiter) ReserveN(n int) (*Reservation, error) {
+  return lim.reserveN(n, types.InfDuration)
+}
+
+func (lim *Limiter) reserveN(n int, maxFutureReserve time.Duration) (*Reservation, error) {
+  r, err := restate.Object[types.Reservation](lim.ctx, "Limiter", lim.limiterID, "ReserveN").Request(types.ReserveRequest{
+    N:                n,
+    MaxFutureReserve: maxFutureReserve,
+  })
+  if err != nil {
+    return nil, err
+  }
+
+  return &Reservation{
+    lim: lim,
+    r:   r,
+  }, nil
+}
+
+// Wait is shorthand for WaitN(1, types.InfDuration).
+func (lim *Limiter) Wait() (err error) {
+  return lim.WaitN(1, types.InfDuration)
+}
+
+// SetLimit sets a new Limit for the limiter. The new Limit, and Burst, may be violated
+// or underutilized by those which reserved (using Reserve or Wait) but did not yet act
+// before SetLimit was called.
+func (lim *Limiter) SetLimit(limit types.Limit) error {
+  _, err := restate.Object[types.Reservation](lim.ctx, "Limiter", lim.limiterID, "SetRate").Request(types.SetRateRequest{
+    Limit: &limit,
+  })
+  return err
+}
+
+// SetBurst sets a new burst size for the limiter.
+func (lim *Limiter) SetBurst(burst int) error {
+  _, err := restate.Object[types.Reservation](lim.ctx, "Limiter", lim.limiterID, "SetRate").Request(types.SetRateRequest{
+    Burst: &burst,
+  })
+  return err
+}
+
+// SetRate is a convenience method to call both SetLimit and SetBurst atomically.
+func (lim *Limiter) SetRate(limit types.Limit, burst int) error {
+  _, err := restate.Object[types.Reservation](lim.ctx, "Limiter", lim.limiterID, "SetRate").Request(types.SetRateRequest{
+    Limit: &limit,
+    Burst: &burst,
+  })
+  return err
+}
+
+// WaitN blocks until lim permits n events to happen.
+// It returns an error if n exceeds the Limiter's burst size, the invocation is
+// canceled, or the expected wait time exceeds the maxFutureReserve
+// The burst limit is ignored if the rate limit is Inf.
+func (lim *Limiter) WaitN(n int, maxFutureReserve time.Duration) (err error) {
+  r, err := lim.reserveN(n, maxFutureReserve)
+  if err != nil {
+    return err
+  }
+
+  if !r.r.Ok {
+    if maxFutureReserve == types.InfDuration {
+      return restate.WithErrorCode(restate.TerminalErrorf("rate: Wait(n=%d) would exceed the limiters burst", n), 429)
+    } else {
+      return restate.WithErrorCode(restate.TerminalErrorf("rate: Wait(n=%d) would either exceed the limiters burst or the provided maxFutureReserve", n), 429)
+    }
+  }
+
+  // Wait if necessary
+  delay := r.DelayFrom(r.r.CreationTime)
+  if delay == 0 {
+    return
+  }
+
+  if err := restate.Sleep(lim.ctx, delay); err != nil {
+    // this only happens on invocation cancellation - cancel the reservation in the background
+    r.Cancel()
+    return err
+  }
+
+  return nil
+}
+
+// Delay is shorthand for DelayFrom(time.Now()) using a deterministic timestamp.
+func (r *Reservation) Delay() time.Duration {
+  t, _ := restate.Run(r.lim.ctx, func(ctx restate.RunContext) (time.Time, error) {
+    return time.Now(), nil
+  })
+  return r.DelayFrom(t)
+}
+
+// DelayFrom returns the duration for which the reservation holder must wait
+// before taking the reserved action.  Zero duration means act immediately.
+// InfDuration means the limiter cannot grant the tokens requested in this
+// Reservation within the maximum wait time.
+func (r *Reservation) DelayFrom(t time.Time) time.Duration {
+  if !r.r.Ok {
+    return types.InfDuration
+  }
+  delay := r.r.TimeToAct.Sub(t)
+  if delay < 0 {
+    return 0
+  }
+  return delay
+}
+```
+
 </CodeGroup>
 
 The **limiter implementation**, which manages the token bucket state and logic:
 
 <CodeGroup>
 
-    ```ts TypeScript expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/ratelimit/limiter.ts"}
-    // a faithful reimplementation of https://pkg.go.dev/golang.org/x/time/rate#Limiter
-    // using virtual object state
+```ts TypeScript expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/ratelimit/limiter.ts"} 
+// a faithful reimplementation of https://pkg.go.dev/golang.org/x/time/rate#Limiter
+// using virtual object state
 
-    import { object, ObjectContext } from "@restatedev/restate-sdk";
+import { object, ObjectContext } from "@restatedev/restate-sdk";
 
-    type LimiterState = {
-    state: LimiterStateInner;
+type LimiterState = {
+  state: LimiterStateInner;
 };
-    type LimiterStateInner = {
-    limit: number;
-    burst: number;
-    tokens: number;
-    // last is the last time the limiter's tokens field was updated, in unix millis
-    last: number;
-    // lastEvent is the latest time of a rate-limited event (past or future), in unix millis
-    lastEvent: number;
+type LimiterStateInner = {
+  limit: number;
+  burst: number;
+  tokens: number;
+  // last is the last time the limiter's tokens field was updated, in unix millis
+  last: number;
+  // lastEvent is the latest time of a rate-limited event (past or future), in unix millis
+  lastEvent: number;
 };
 
-    export interface Reservation {
-    ok: boolean;
-    tokens: number;
-    creationDate: number;
-    dateToAct: number;
-    // This is the Limit at reservation time, it can change later.
-    limit: number;
+export interface Reservation {
+  ok: boolean;
+  tokens: number;
+  creationDate: number;
+  dateToAct: number;
+  // This is the Limit at reservation time, it can change later.
+  limit: number;
 }
 
-    export const limiter = object({
-    name: "limiter",
-    handlers: {
+export const limiter = object({
+  name: "limiter",
+  handlers: {
     state: async (ctx: ObjectContext<LimiterState>): Promise<LimiterStateInner> => {
-    return getState(ctx);
-},
+      return getState(ctx);
+    },
     tokens: async (ctx: ObjectContext<LimiterState>): Promise<number> => {
-    // deterministic date not needed, as there is only an output entry
-    const tokens = advance(await getState(ctx), Date.now());
-    return tokens;
-},
+      // deterministic date not needed, as there is only an output entry
+      const tokens = advance(await getState(ctx), Date.now());
+      return tokens;
+    },
     reserve: async (
-    ctx: ObjectContext<LimiterState>,
-{ n = 1, waitLimitMillis = Infinity }: { n?: number; waitLimitMillis?: number },
+      ctx: ObjectContext<LimiterState>,
+      { n = 1, waitLimitMillis = Infinity }: { n?: number; waitLimitMillis?: number },
     ): Promise<Reservation> => {
-    let lim = await getState(ctx);
+      let lim = await getState(ctx);
 
-    if (lim.limit == Infinity) {
-    // deterministic date is not necessary, as this is part of a response body, which won't be replayed.
-    const now = Date.now();
-    return {
-    ok: true,
-    tokens: n,
-    creationDate: now,
-    dateToAct: now,
-    limit: 0,
-};
-}
+      if (lim.limit == Infinity) {
+        // deterministic date is not necessary, as this is part of a response body, which won't be replayed.
+        const now = Date.now();
+        return {
+          ok: true,
+          tokens: n,
+          creationDate: now,
+          dateToAct: now,
+          limit: 0,
+        };
+      }
 
-    let r: Reservation;
-    ({ lim, r } = await ctx.run(() => {
-    const now = Date.now();
-    let tokens = advance(lim, now);
+      let r: Reservation;
+      ({ lim, r } = await ctx.run(() => {
+        const now = Date.now();
+        let tokens = advance(lim, now);
 
-    // Calculate the remaining number of tokens resulting from the request.
-    tokens -= n;
+        // Calculate the remaining number of tokens resulting from the request.
+        tokens -= n;
 
-    // Calculate the wait duration
-    let waitDurationMillis = 0;
-    if (tokens < 0) {
-    waitDurationMillis = durationFromTokens(lim.limit, -tokens);
-}
+        // Calculate the wait duration
+        let waitDurationMillis = 0;
+        if (tokens < 0) {
+          waitDurationMillis = durationFromTokens(lim.limit, -tokens);
+        }
 
-    // Decide result
-    const ok = n <= lim.burst && waitDurationMillis <= waitLimitMillis;
+        // Decide result
+        const ok = n <= lim.burst && waitDurationMillis <= waitLimitMillis;
 
-    // Prepare reservation
-    const r = {
-    ok,
-    tokens: 0,
-    creationDate: now,
-    dateToAct: 0,
-    limit: lim.limit,
-} satisfies Reservation;
+        // Prepare reservation
+        const r = {
+          ok,
+          tokens: 0,
+          creationDate: now,
+          dateToAct: 0,
+          limit: lim.limit,
+        } satisfies Reservation;
 
-    if (ok) {
-    r.tokens = n;
-    r.dateToAct = now + waitDurationMillis;
+        if (ok) {
+          r.tokens = n;
+          r.dateToAct = now + waitDurationMillis;
 
-    // Update state
-    lim.last = now;
-    lim.tokens = tokens;
-    lim.lastEvent = r.dateToAct;
-}
+          // Update state
+          lim.last = now;
+          lim.tokens = tokens;
+          lim.lastEvent = r.dateToAct;
+        }
 
-    return { lim, r };
-}));
+        return { lim, r };
+      }));
 
-    setState(ctx, lim);
+      setState(ctx, lim);
 
-    return r;
-},
+      return r;
+    },
     setRate: async (
-    ctx: ObjectContext<LimiterState>,
-{ newLimit, newBurst }: { newLimit?: number; newBurst?: number },
+      ctx: ObjectContext<LimiterState>,
+      { newLimit, newBurst }: { newLimit?: number; newBurst?: number },
     ) => {
-    if (newLimit === undefined && newBurst === undefined) {
-    return;
-}
+      if (newLimit === undefined && newBurst === undefined) {
+        return;
+      }
 
-    let lim = await getState(ctx);
+      let lim = await getState(ctx);
 
-    lim = await ctx.run(() => {
-    const now = Date.now();
-    const tokens = advance(lim, now);
+      lim = await ctx.run(() => {
+        const now = Date.now();
+        const tokens = advance(lim, now);
 
-    lim.last = now;
-    lim.tokens = tokens;
-    if (newLimit !== undefined) lim.limit = newLimit;
-    if (newBurst !== undefined) lim.burst = newBurst;
+        lim.last = now;
+        lim.tokens = tokens;
+        if (newLimit !== undefined) lim.limit = newLimit;
+        if (newBurst !== undefined) lim.burst = newBurst;
 
-    return lim;
+        return lim;
+      });
+
+      setState(ctx, lim);
+    },
+    cancelReservation: async (ctx: ObjectContext<LimiterState>, r: Reservation) => {
+      let lim = await getState(ctx);
+
+      lim = await ctx.run(() => {
+        const now = Date.now();
+
+        if (lim.limit == Infinity || r.tokens == 0 || r.dateToAct < now) {
+          return lim;
+        }
+
+        // calculate tokens to restore
+        // The duration between lim.lastEvent and r.timeToAct tells us how many tokens were reserved
+        // after r was obtained. These tokens should not be restored.
+        const restoreTokens = r.tokens - tokensFromDuration(r.limit, lim.lastEvent - r.dateToAct);
+        if (restoreTokens <= 0) {
+          return lim;
+        }
+        // advance time to now
+        let tokens = advance(lim, now);
+        // calculate new number of tokens
+        tokens += restoreTokens;
+        if (tokens > lim.burst) {
+          tokens = lim.burst;
+        }
+        // update state
+        lim.last = now;
+        lim.tokens = tokens;
+        if (r.dateToAct == lim.lastEvent) {
+          const prevEvent = r.dateToAct + durationFromTokens(r.limit, -r.tokens);
+          if (prevEvent >= now) {
+            lim.lastEvent = prevEvent;
+          }
+        }
+
+        return lim;
+      });
+
+      setState(ctx, lim);
+    },
+  },
 });
 
-    setState(ctx, lim);
-},
-    cancelReservation: async (ctx: ObjectContext<LimiterState>, r: Reservation) => {
-    let lim = await getState(ctx);
+function advance(lim: LimiterStateInner, date: number): number {
+  let last = lim.last;
+  if (date <= last) {
+    last = date;
+  }
 
-    lim = await ctx.run(() => {
-    const now = Date.now();
+  // Calculate the new number of tokens, due to time that passed.
+  const elapsedMillis = date - last;
+  const delta = tokensFromDuration(lim.limit, elapsedMillis);
+  let tokens = lim.tokens + delta;
+  if (tokens > lim.burst) {
+    tokens = lim.burst;
+  }
 
-    if (lim.limit == Infinity || r.tokens == 0 || r.dateToAct < now) {
-    return lim;
+  return tokens;
 }
+
+async function getState(ctx: ObjectContext<LimiterState>): Promise<LimiterStateInner> {
+  return (
+    (await ctx.get("state")) ?? {
+      limit: 0,
+      burst: 0,
+      tokens: 0,
+      last: 0,
+      lastEvent: 0,
+    }
+  );
+}
+
+async function setState(ctx: ObjectContext<LimiterState>, lim: LimiterStateInner) {
+  ctx.set("state", lim);
+}
+
+function durationFromTokens(limit: number, tokens: number): number {
+  if (limit <= 0) {
+    return Infinity;
+  }
+
+  return (tokens / limit) * 1000;
+}
+
+function tokensFromDuration(limit: number, durationMillis: number): number {
+  if (limit <= 0) {
+    return 0;
+  }
+  return (durationMillis / 1000) * limit;
+}
+
+export type Limiter = typeof limiter;
+```
+
+```go Go expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/ratelimit/service/limiter.go"} 
+package service
+
+import (
+  "math"
+  "time"
+
+  "github.com/restatedev/examples/go/patterns-use-cases/src/ratelimit/types"
+  restate "github.com/restatedev/sdk-go"
+)
+
+type Limiter struct{}
+
+func (Limiter) State(ctx restate.ObjectContext) (types.LimiterState, error) {
+  return restate.Get[types.LimiterState](ctx, "state")
+}
+
+func (Limiter) Tokens(ctx restate.ObjectContext) (float64, error) {
+  lim, err := restate.Get[types.LimiterState](ctx, "state")
+  if err != nil {
+    return 0.0, err
+  }
+
+  // deterministic date not needed, as there is only an output entry
+  tokens := advance(&lim, time.Now())
+  return tokens, nil
+}
+
+func (Limiter) ReserveN(ctx restate.ObjectContext, req types.ReserveRequest) (types.Reservation, error) {
+  lim, err := restate.Get[types.LimiterState](ctx, "state")
+  if err != nil {
+    return types.Reservation{}, err
+  }
+
+  if lim.Limit == types.Inf {
+    // deterministic date is not necessary, as this is part of a response body, which won't be replayed.
+    t := time.Now()
+    return types.Reservation{
+      Ok:           true,
+      CreationTime: t,
+      Tokens:       req.N,
+      TimeToAct:    t,
+    }, nil
+  }
+
+  type runResult struct {
+    types.LimiterState `json:"limiterState"`
+    types.Reservation  `json:"reservation"`
+  }
+
+  result, err := restate.Run(ctx, func(ctx restate.RunContext) (runResult, error) {
+    t := time.Now()
+    tokens := advance(&lim, t)
+
+    // Calculate the remaining number of tokens resulting from the request.
+    tokens -= float64(req.N)
+
+    // Calculate the wait duration
+    var waitDuration time.Duration
+    if tokens < 0 {
+      waitDuration = durationFromTokens(lim.Limit, -tokens)
+    }
+
+    // Decide result
+    ok := req.N <= lim.Burst && waitDuration <= req.MaxFutureReserve
+
+    // Prepare reservation
+    r := types.Reservation{
+      Ok:           ok,
+      CreationTime: t,
+      Limit:        lim.Limit,
+    }
+    if ok {
+      r.Tokens = req.N
+      r.TimeToAct = t.Add(waitDuration)
+
+      // Update state
+      lim.Last = t
+      lim.Tokens = tokens
+      lim.LastEvent = r.TimeToAct
+    }
+
+    return runResult{lim, r}, nil
+  })
+  if err != nil {
+    return types.Reservation{}, err
+  }
+
+  restate.Set(ctx, "state", result.LimiterState)
+
+  return result.Reservation, nil
+}
+
+func (Limiter) SetRate(ctx restate.ObjectContext, req types.SetRateRequest) error {
+  if req.Limit == nil && req.Burst == nil {
+    return nil
+  }
+
+  lim, err := restate.Get[types.LimiterState](ctx, "state")
+  if err != nil {
+    return err
+  }
+
+  lim, err = restate.Run(ctx, func(ctx restate.RunContext) (types.LimiterState, error) {
+    t := time.Now()
+    tokens := advance(&lim, t)
+
+    lim.Last = t
+    lim.Tokens = tokens
+
+    if req.Limit != nil {
+      lim.Limit = *req.Limit
+    }
+    if req.Burst != nil {
+      lim.Burst = *req.Burst
+    }
+
+    return lim, nil
+  })
+  if err != nil {
+    return err
+  }
+
+  restate.Set(ctx, "state", lim)
+  return nil
+}
+
+func (Limiter) CancelReservation(ctx restate.ObjectContext, r types.Reservation) error {
+  lim, err := restate.Get[types.LimiterState](ctx, "state")
+  if err != nil {
+    return err
+  }
+
+  lim, err = restate.Run(ctx, func(ctx restate.RunContext) (types.LimiterState, error) {
+    t := time.Now()
+
+    if r.Limit == types.Inf || r.Tokens == 0 || r.TimeToAct.Before(t) {
+      return lim, nil
+    }
 
     // calculate tokens to restore
     // The duration between lim.lastEvent and r.timeToAct tells us how many tokens were reserved
     // after r was obtained. These tokens should not be restored.
-    const restoreTokens = r.tokens - tokensFromDuration(r.limit, lim.lastEvent - r.dateToAct);
-    if (restoreTokens <= 0) {
-    return lim;
-}
+    restoreTokens := float64(r.Tokens) - tokensFromDuration(r.Limit, lim.LastEvent.Sub(r.TimeToAct))
+    if restoreTokens <= 0 {
+      return lim, nil
+    }
     // advance time to now
-    let tokens = advance(lim, now);
+    tokens := advance(&lim, t)
     // calculate new number of tokens
-    tokens += restoreTokens;
-    if (tokens > lim.burst) {
-    tokens = lim.burst;
-}
+    tokens += restoreTokens
+    if burst := float64(lim.Burst); tokens > burst {
+      tokens = burst
+    }
     // update state
-    lim.last = now;
-    lim.tokens = tokens;
-    if (r.dateToAct == lim.lastEvent) {
-    const prevEvent = r.dateToAct + durationFromTokens(r.limit, -r.tokens);
-    if (prevEvent >= now) {
-    lim.lastEvent = prevEvent;
-}
-}
-
-    return lim;
-});
-
-    setState(ctx, lim);
-},
-},
-});
-
-    function advance(lim: LimiterStateInner, date: number): number {
-    let last = lim.last;
-    if (date <= last) {
-    last = date;
-}
-
-    // Calculate the new number of tokens, due to time that passed.
-    const elapsedMillis = date - last;
-    const delta = tokensFromDuration(lim.limit, elapsedMillis);
-    let tokens = lim.tokens + delta;
-    if (tokens > lim.burst) {
-    tokens = lim.burst;
-}
-
-    return tokens;
-}
-
-    async function getState(ctx: ObjectContext<LimiterState>): Promise<LimiterStateInner> {
-    return (
-    (await ctx.get("state")) ?? {
-    limit: 0,
-    burst: 0,
-    tokens: 0,
-    last: 0,
-    lastEvent: 0,
-}
-    );
-}
-
-    async function setState(ctx: ObjectContext<LimiterState>, lim: LimiterStateInner) {
-        ctx.set("state", lim);
+    lim.Last = t
+    lim.Tokens = tokens
+    if r.TimeToAct == lim.LastEvent {
+      prevEvent := r.TimeToAct.Add(durationFromTokens(r.Limit, float64(-r.Tokens)))
+      if !prevEvent.Before(t) {
+        lim.LastEvent = prevEvent
+      }
     }
 
-        function durationFromTokens(limit: number, tokens: number): number {
-            if (limit <= 0) {
-            return Infinity;
-        }
+    return lim, nil
+  })
 
-            return (tokens / limit) * 1000;
-        }
+  restate.Set(ctx, "state", lim)
 
-        function tokensFromDuration(limit: number, durationMillis: number): number {
-            if (limit <= 0) {
-            return 0;
-        }
-            return (durationMillis / 1000) * limit;
-        }
+  return nil
+}
 
-        export type Limiter = typeof limiter;
-        ```
+func advance(lim *types.LimiterState, t time.Time) float64 {
+  last := lim.Last
+  if t.Before(last) {
+    last = t
+  }
+
+  // Calculate the new number of tokens, due to time that passed.
+  elapsed := t.Sub(last)
+  delta := tokensFromDuration(lim.Limit, elapsed)
+  tokens := lim.Tokens + delta
+  if burst := float64(lim.Burst); tokens > burst {
+    tokens = burst
+  }
+  return tokens
+}
+
+// durationFromTokens is a unit conversion function from the number of tokens to the duration
+// of time it takes to accumulate them at a rate of limit tokens per second.
+func durationFromTokens(limit types.Limit, tokens float64) time.Duration {
+  if limit <= 0 {
+    return types.InfDuration
+  }
+
+  duration := (tokens / float64(limit)) * float64(time.Second)
+
+  // Cap the duration to the maximum representable int64 value, to avoid overflow.
+  if duration > float64(math.MaxInt64) {
+    return types.InfDuration
+  }
+
+  return time.Duration(duration)
+}
+
+// tokensFromDuration is a unit conversion function from a time duration to the number of tokens
+// which could be accumulated during that duration at a rate of limit tokens per second.
+func tokensFromDuration(limit types.Limit, d time.Duration) float64 {
+  if limit <= 0 {
+    return 0
+  }
+  return d.Seconds() * float64(limit)
+}
+```
 
 </CodeGroup>
 
@@ -440,15 +867,49 @@ export const myService = service({
 export type MyService = typeof myService;
 ```
 
+```go Go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/ratelimit/example/main.go?collapse_prequel"} 
+type LimitedTask struct{}
+
+func (LimitedTask) RunTask(ctx restate.Context) error {
+  limiter := client.NewLimiter(ctx, "LimitedTask-RunTask")
+  if err := limiter.Wait(); err != nil {
+    return err
+  }
+
+  // Implement doing the work...
+
+  return nil
+}
+
+func main() {
+  server := server.NewRestate().
+    Bind(restate.Reflect(service.Limiter{})).
+    Bind(restate.Reflect(LimitedTask{}))
+
+  if err := server.Start(context.Background(), ":9080"); err != nil {
+    slog.Error("application exited unexpectedly", "err", err.Error())
+    os.Exit(1)
+  }
+}
+```
+
 </CodeGroup>
 
 ## Running the example
 
 <Steps>
     <Step title="Download the example">
+        <CodeGroup>
+
         ```bash TypeScript
         restate example typescript-patterns-use-cases && cd typescript-patterns-use-cases
         ```
+
+        ```bash Go
+        restate example go-patterns-use-cases && cd go-patterns-use-cases
+        ```
+
+        </CodeGroup>
     </Step>
 
     <Step title="Start the Restate Server">
@@ -458,10 +919,18 @@ export type MyService = typeof myService;
     </Step>
 
     <Step title="Start the Service">
+        <CodeGroup>
+
         ```bash TypeScript
         npm install
         npx tsx watch ./src/ratelimit/app.ts
         ```
+
+        ```bash Go
+        go run ./src/ratelimit/example/main.go
+        ```
+
+        </CodeGroup>
     </Step>
 
     <Step title="Register the services">
@@ -473,10 +942,19 @@ export type MyService = typeof myService;
     <Step title="Set up rate limiting">
         Set up the limiter named `myService-expensiveMethod` with a rate limit of 1 per second:
 
-        ```bash
-        curl localhost:8080/limiter/myService-expensiveMethod/setRate \
-            --json '{"newLimit": 1, "newBurst": 1}'
-        ```
+        <CodeGroup>
+
+            ```bash TypeScript
+            curl localhost:8080/limiter/myService-expensiveMethod/setRate \
+                --json '{"newLimit": 1, "newBurst": 1}'
+            ```
+
+            ```bash Go
+            curl localhost:8080/Limiter/LimitedTask-RunTask/SetRate \
+                --json '{"limit": 1, "burst": 1}'
+            ```
+
+        </CodeGroup>
 
         Try sending multiple requests quickly to see the rate limiting in action.
     </Step>
@@ -484,13 +962,25 @@ export type MyService = typeof myService;
     <Step title="Send requests to the rate limited handler">
         You can send requests that are subject to the limiter like this:
 
-        ```bash
+        <CodeGroup>
+
+        ```bash TypeScript
         # send one request
         curl localhost:8080/myService/expensiveMethod
 
         # send lots
         for i in $(seq 1 30); do curl localhost:8080/myService/expensiveMethod && echo "request completed"; done
         ```
+
+        ```bash Go
+        # send one request
+        curl localhost:8080/LimitedTask/RunTask
+
+        # send lots
+        for i in $(seq 1 30); do curl localhost:8080/LimitedTask/RunTask && echo "request completed"; done
+        ```
+
+        </CodeGroup>
 
         You should observe that only one request is processed per second.
         You can then try changing the limit or the burst and sending more requests.
