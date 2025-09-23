@@ -126,18 +126,14 @@ Output: `The weather in Detroit is currently 17°C with misty conditions.`.
 
 <Step title="Congratulations, you just ran a Durable AI Agent!">
 
-The agent you just invoked uses Durable Execution to make AI tool calls resilient to failures.
-Each tool call (like fetching weather data) is durably executed and can be retried if needed.
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
 
-Have a look at the Invocations tab in the Restate UI to see the journal entries created for each step:
-<Frame>
-<img src={"/img/quickstart/agent-quickstart/vercel-trace.png"} alt="Restate UI Journal Entries"/>
-</Frame>
+We did this by using Restate's `durableCalls` middleware to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
 
-```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"} 
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"}
 async function weatherAgent(restate: restate.Context, prompt: string) {
-  // we wrap the model with the 'durableCalls' middleware, which
-  // stores each response in Restate's journal, to be restored on retries
+  // The durableCalls middleware persists each LLM response in Restate's journal,
+  // so they can be restored on retries without re-calling the LLM
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
     middleware: durableCalls(restate, { maxRetryAttempts: 3 }),
@@ -152,7 +148,8 @@ async function weatherAgent(restate: restate.Context, prompt: string) {
         description: "Get the current weather for a given city.",
         inputSchema: z.object({ city: z.string() }),
         execute: async ({ city }) => {
-          // call tool wrapped as Restate durable step
+          // restate.run() persists the tool execution step in the journal,
+          // allowing it to be recovered and replayed on failures
           return await restate.run("get weather", () => fetchWeather(city));
         },
       }),
@@ -182,6 +179,13 @@ restate.serve({
 ```
 
 <GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/template/src/app.ts"}/>
+
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/vercel-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
 
 
 <Accordion title="See how a failing tool call is retried">
@@ -327,23 +331,18 @@ Output: `The weather in Detroit is currently 17°C with misty conditions.`
 
 <Step title="Congratulations, you just ran a Durable AI Agent!">
 
-The agent you just invoked uses Durable Execution to make agents resilient to failures.
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
 
-Have a look at the Invocations tab in the Restate UI to see the steps Restate persisted:
-<Frame>
-    <img src={"/img/quickstart/agent-quickstart/openai-trace.png"} alt="Restate UI Journal Entries"/>
-</Frame>
+We did this by using the `DurableModelCalls` model provider to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
 
-    Each tool call (like fetching weather data) is durably executed and can be retried if needed.
-
-
-```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"} 
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"}
 @function_tool
 async def get_weather(
     wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
 ) -> WeatherResponse:
     """Get the current weather for a given city."""
-    # Do durable steps using the Restate context
+    # restate_context.run_typed() persists the tool execution step in the journal,
+    # allowing it to be recovered and replayed on failures
     restate_context = wrapper.context
     return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
 
@@ -366,7 +365,8 @@ async def run(restate_context: restate.Context, message: str) -> str:
         input=message,
         # Pass the Restate context to tools to make tool execution steps durable
         context=restate_context,
-        # Choose any model and let Restate persist your calls
+        # DurableModelCalls persists each LLM response in Restate's journal,
+        # so they can be restored on retries without re-calling the LLM
         run_config=RunConfig(
             model="gpt-4o", model_provider=DurableModelCalls(restate_context)
         ),
@@ -375,6 +375,11 @@ async def run(restate_context: restate.Context, message: str) -> str:
     return result.final_output
 ```
 <GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/openai-agents/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/openai-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
 
 <Accordion title="See how a failing tool call is retried">
 Ask about the weather in Denver:
