@@ -12,7 +12,7 @@ async def my_handler(ctx: Context, arg):
     # <start_here>
     id, promise = ctx.awakeable(type_hint=str)
 
-    await ctx.run("trigger task", request_human_review, args=(name, id))
+    await ctx.run_typed("trigger task", request_human_review, name=name, id=id)
 
     review = await promise
     # <end_here>
@@ -28,5 +28,5 @@ async def my_handler(ctx: Context, arg):
     return arg
 
 
-def request_human_review(name, awakeable_id):
+def request_human_review(name, id):
     return "123"
