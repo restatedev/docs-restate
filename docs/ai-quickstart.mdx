@@ -135,16 +135,17 @@ Have a look at the Invocations tab in the Restate UI to see the journal entries 
 </Frame>
 
 ```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"} 
-async function simpleAgent(restate: restate.Context, prompt: string) {
+async function weatherAgent(restate: restate.Context, prompt: string) {
   // we wrap the model with the 'durableCalls' middleware, which
   // stores each response in Restate's journal, to be restored on retries
   const model = wrapLanguageModel({
-    model: openai("gpt-4o-2024-08-06"),
+    model: openai("gpt-4o"),
     middleware: durableCalls(restate, { maxRetryAttempts: 3 }),
   });
 
   const { text } = await generateText({
     model,
+    system: "You are a helpful agent that provides weather updates.",
     prompt,
     tools: {
       getWeather: tool({
@@ -157,29 +158,24 @@ async function simpleAgent(restate: restate.Context, prompt: string) {
       }),
     },
     stopWhen: [stepCountIs(5)],
-    // these are local retries by the AI SDK
-    // Restate will retry the invocation once those local retries are exhaused to
-    // handle longer downtimes, faulty processes, or network communication issues
-    maxRetries: 3,
-    system: "You are a helpful agent.",
     providerOptions: { openai: { parallelToolCalls: false } },
   });
 
   return text;
 }
 
-// create a simple Restate service as the callable entrypoint
+// create a Restate Service as the callable entrypoint
 // for our durable agent function
 const agent = restate.service({
   name: "agent",
   handlers: {
     run: async (ctx: restate.Context, prompt: string) => {
-      return simpleAgent(ctx, prompt);
+      return weatherAgent(ctx, prompt);
     },
   },
 });
 
-// we serve the entry-point via an HTTP/2 server
+// Serve the entry-point via an HTTP/2 server
 restate.serve({
   services: [agent],
 });
@@ -191,7 +187,7 @@ restate.serve({
 <Accordion title="See how a failing tool call is retried">
 Ask about the weather in Denver:
 ```shell
-curl localhost:8080/Agent/run --json '"What is the weather in Denver?"'
+curl localhost:8080/agent/run --json '"What is the weather in Denver?"'
 ```
 
 You can see in the service logs and in the Restate UI how each LLM call and tool step gets durably executed.
@@ -203,11 +199,11 @@ We can see how the weather tool is currently stuck, because the weather API is d
 
 This was a mimicked failure. To fix the problem, remove the line `failOnDenver` from the `fetchWeather` function in the `utils.ts` file:
 
-```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/utils/weather.ts#weather"}
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/utils/weather.ts#weather"} 
 export async function fetchWeather(city: string) {
-failOnDenver(city);
-const output = await fetchWeatherFromAPI(city);
-return parseWeatherResponse(output);
+  failOnDenver(city);
+  const output = await fetchWeatherFromAPI(city);
+  return parseWeatherResponse(output);
 }
 ```
 
@@ -323,7 +319,7 @@ Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, c
 
 Or invoke via `curl`:
 ```shell
-curl localhost:8080/Agent/run --json '"What is the weather in Detroit?"'
+curl localhost:8080/agent/run --json '"What is the weather in Detroit?"'
 ```
 Output: `The weather in Detroit is currently 17°C with misty conditions.`
 
@@ -331,20 +327,17 @@ Output: `The weather in Detroit is currently 17°C with misty conditions.`
 
 <Step title="Congratulations, you just ran a Durable AI Agent!">
 
-The agent you just invoked uses Durable Execution to make AI tool calls resilient to failures.
-Each tool call (like fetching weather data) is durably executed and can be retried if needed.
+The agent you just invoked uses Durable Execution to make agents resilient to failures.
 
-Have a look at the Invocations tab in the Restate UI to see the journal entries created for each step:
+Have a look at the Invocations tab in the Restate UI to see the steps Restate persisted:
 <Frame>
     <img src={"/img/quickstart/agent-quickstart/openai-trace.png"} alt="Restate UI Journal Entries"/>
 </Frame>
 
+    Each tool call (like fetching weather data) is durably executed and can be retried if needed.
+
+
 ```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"} 
-class WeatherRequest(BaseModel):
-    """Request to get the weather for a city."""
-    city: str
-
-
 @function_tool
 async def get_weather(
     wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
@@ -352,35 +345,30 @@ async def get_weather(
     """Get the current weather for a given city."""
     # Do durable steps using the Restate context
     restate_context = wrapper.context
-    resp = await restate_context.run(
-        "Get weather", fetch_weather, args=(req.city,))
-    return await parse_weather_data(resp)
+    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
 
 
-my_agent = Agent[restate.Context](
-    name="Helpful Agent",
-    handoff_description="A helpful agent.",
-    instructions="You are a helpful agent.",
+weather_agent = Agent[restate.Context](
+    name="WeatherAgent",
+    instructions="You are a helpful agent that provides weather updates.",
     tools=[get_weather],
 )
 
 
-# Agent keyed by conversation id
-agent = restate.Service("Agent")
+agent_service = restate.Service("agent")
 
 
-@agent.handler()
+@agent_service.handler()
 async def run(restate_context: restate.Context, message: str) -> str:
 
     result = await Runner.run(
-        my_agent,
+        weather_agent,
         input=message,
         # Pass the Restate context to tools to make tool execution steps durable
         context=restate_context,
         # Choose any model and let Restate persist your calls
         run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context)
+            model="gpt-4o", model_provider=DurableModelCalls(restate_context)
         ),
     )
 
@@ -403,12 +391,11 @@ We can see how the weather tool is currently stuck, because the weather API is d
 
 This was a mimicked failure. To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `utils.py` file:
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/utils/utils.py#weather"}
-export async function fetchWeather(city: string) {
-failOnDenver(city);
-const output = await fetchWeatherFromAPI(city);
-return parseWeatherResponse(output);
-}
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/utils/utils.py#weather"} 
+async def fetch_weather(city: str) -> WeatherResponse:
+    fail_on_denver(city)
+    weather_data = await call_weather_api(city)
+    return parse_weather_data(weather_data)
 ```
 
 
