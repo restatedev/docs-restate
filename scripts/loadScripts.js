@@ -136,6 +136,8 @@ function collapsePrequelFn(lines, serviceSymbol, commentSymbol) {
 
 function collapseImportsFn(lines, filePath, commentSymbol) {
     let startIndex = -1;
+    let inMultilineImport = false;
+    let multilineImportDepth = 0;
 
     for (let i = 0; i < lines.length; i++) {
         const trimmedLine = lines[i].trim();
@@ -145,8 +147,38 @@ function collapseImportsFn(lines, filePath, commentSymbol) {
             continue;
         }
 
-        // Check if this line is an import/require statement based on language
-        const isImportLine = isImportStatement(trimmedLine, filePath);
+        let isImportLine = false;
+
+        // Handle Python imports (both single-line and multiline)
+        if (filePath.endsWith('.py')) {
+            // Check if we're continuing a multiline import
+            if (inMultilineImport) {
+                multilineImportDepth += (trimmedLine.match(/\(/g) || []).length - (trimmedLine.match(/\)/g) || []).length;
+
+                // End of multiline import
+                if (multilineImportDepth <= 0) {
+                    inMultilineImport = false;
+                    multilineImportDepth = 0;
+                }
+                isImportLine = true; // This line is part of import
+            } else {
+                // Check for regular import statements
+                isImportLine = isImportStatement(trimmedLine, filePath);
+
+                // Check for start of multiline import
+                if (isImportLine && trimmedLine.includes('(')) {
+                    const openParens = (trimmedLine.match(/\(/g) || []).length;
+                    const closeParens = (trimmedLine.match(/\)/g) || []).length;
+                    if (openParens > closeParens) {
+                        inMultilineImport = true;
+                        multilineImportDepth = openParens - closeParens;
+                    }
+                }
+            }
+        } else {
+            // For non-Python files, use the regular import detection
+            isImportLine = isImportStatement(trimmedLine, filePath);
+        }
 
         if (!isImportLine) {
             // Found the first non-import line
