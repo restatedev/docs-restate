@@ -2,6 +2,7 @@ import json
 import typing
 from datetime import datetime
 
+import restate
 from restate.serde import Serde, PydanticJsonSerde
 from restate import ObjectContext, VirtualObject
 from pydantic import BaseModel
@@ -81,7 +82,7 @@ async def deliver(ctx: ObjectContext, delivery: Delivery) -> CompletedDelivery:
     ctx.awakeable(type_hint=Delivery)
 
     # To serialize the results of actions
-    await ctx.run("some-task", do_something, type_hint=Delivery)
+    await ctx.run_typed("some-task", do_something, restate.RunOptions(type_hint=Delivery))
 
     return CompletedDelivery(status="delivered", timestamp=datetime.now())
 
