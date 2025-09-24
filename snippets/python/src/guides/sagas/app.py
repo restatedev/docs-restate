@@ -31,22 +31,22 @@ async def run(ctx: restate.Context, req: BookingRequest):
     compensations = []
 
     # <start_twostep>
-    booking_id = await ctx.run(
-        "reserve", flight_client.reserve, args=(customer_id, flight)
+    booking_id = await ctx.run_typed(
+        "reserve", flight_client.reserve, customer_id=customer_id, flight=flight
     )
     compensations.append(
-        lambda: ctx.run("cancel", flight_client.cancel, args=(booking_id,))
+        lambda: ctx.run_typed("cancel", flight_client.cancel, booking_id=booking_id)
     )
 
     #  ... do other work, like reserving a car, etc. ...
 
-    await ctx.run("confirm", flight_client.confirm, args=(booking_id,))
+    await ctx.run_typed("confirm", flight_client.confirm, booking_id=booking_id)
     # <end_twostep>
 
     # <start_idempotency>
-    payment_id = await ctx.run("payment id", lambda: str(uuid.uuid4()))
-    compensations.append(lambda: ctx.run("refund", payment.refund, args=(payment_id,)))
-    await ctx.run("charge", payment.charge, args=(payment_info, payment_id))
+    payment_id = ctx.uuid()
+    compensations.append(lambda: ctx.run_typed("refund", payment.refund, payment_id=payment_id))
+    await ctx.run_typed("charge", payment.charge, payment_info=payment_info, payment_id=payment_id)
     # <end_idempotency>
 
 
