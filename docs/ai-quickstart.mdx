@@ -12,405 +12,399 @@ This guide takes you through building your first AI agent with Restate and popul
 
 We will run a simple weather agent that can answer questions about the weather using durable execution to ensure reliability.
 
-<img src="/img/quickstart/overview.svg" alt="AI Agent Quickstart"/>
+<img src="/img/quickstart/agent-quickstart/weather-agent.png" alt="AI Agent Quickstart" noZoom/>
 
 Select your AI SDK:
 
 <Tabs>
-    <Tab title={"TypeScript + Vercel AI"} icon={"/img/languages/typescript.svg"}>
-        <Info>
-            **Prerequisites**:
-            - [Node.js](https://nodejs.org/en/) >= v20
-            - OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
-        </Info>
-        <Steps>
-            <Step title="Install Restate Server & CLI">
-                <InstallRestate/>
-            </Step>
-
-            <Step title="Get the AI Agent template">
-                ```shell
-                git clone https://github.com/restatedev/ai-examples.git &&
-                cd ai-examples/vercel-ai/template &&
-                npm install
-                ```
-                <GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/vercel-ai/template"}/>
-            </Step>
-
-            <Step title="Set your OpenAI API key">
-                ```shell
-                export OPENAI_API_KEY=your_openai_api_key_here
-                ```
-            </Step>
-
-            <Step title="Run the AI Agent service">
-                ```shell
-                npm run dev
-                ```
-            </Step>
-
-            <Step title="Register the service">
-                Tell Restate where the service is running, so Restate can discover and register the services and handlers behind this endpoint.
-                You can do this via the UI (`http://localhost:9070`) or via:
-
-                <CodeGroup>
-                    ```shell CLI
-                    restate deployments register http://localhost:9080
-                    ```
-                    ```shell curl
-                    curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
-                    ```
-                </CodeGroup>
-
-                <Expandable title={"Output"}>
-                    <CodeGroup>
-                        ```shell CLI
-                        ❯ SERVICES THAT WILL BE ADDED:
-                        - agent
-                        Type: Service
-                        HANDLER  INPUT                                     OUTPUT
-                        run      value of content-type 'application/json'  value of content-type 'application/json'
-
-
-                        ✔ Are you sure you want to apply those changes? · yes
-                        ✅ DEPLOYMENT:
-                        SERVICE  REV
-                        agent    1
-                        ```
-
-                        ```shell curl
-                        {
-                            "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
-                            "services": [
-                        {
-                            "name": "agent",
-                            "handlers": [
-                        {
-                            "name": "run",
-                            "ty": "Shared",
-                            "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
-                            "output_description": "value of content-type 'application/json'"
-                        }
-                            ],
-                            "ty": "Service",
-                            "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
-                            "revision": 1,
-                            "public": true,
-                            "idempotency_retention": "1day"
-                        }
-                            ]
-                        }
-                        ```
-                    </CodeGroup>
-                </Expandable>
-
-                If you run Restate with Docker, use `http://host.docker.internal:9080` instead of `http://localhost:9080`.
-
-                <Info title="Restate Cloud">
-                    When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
-                    If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
-                </Info>
-            </Step>
-
-            <Step title="Send a request to the AI Agent">
-                Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
-                <Frame>
-                <img src={"/img/quickstart/playground.png"} alt="Restate UI Playground"/>
-                </Frame>
-
-                Or invoke via `curl`:
-                ```shell
-                curl localhost:8080/agent/run --json '"What is the weather in Detroit?"'
-                ```
-                Output: `The weather in Detroit is currently 17°C with misty conditions.`.
-            </Step>
-
-            <Step title="Congratulations, you just ran a Durable AI Agent!">
-
-                The agent you just invoked uses Durable Execution to make AI tool calls resilient to failures.
-                Each tool call (like fetching weather data) is durably executed and can be retried if needed.
-
-                Have a look at the Invocations tab in the Restate UI to see the journal entries created for each step:
-                <Frame>
-                <img src={"/img/quickstart/vercel-trace.png"} alt="Restate UI Journal Entries"/>
-                </Frame>
-
-                ```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts"}
-                import * as restate from "@restatedev/restate-sdk";
-                import { durableCalls } from "@restatedev/vercel-ai-middleware";
-                import { openai } from "@ai-sdk/openai";
-                import { generateText, tool, wrapLanguageModel, stepCountIs } from "ai";
-                import { z } from "zod";
-                import { fetchWeather } from "./utils/weather";
-
-                // --------------------------------------------------------
-                //  A simple agent, following the template of the AI SDK
-                //  tool calling examples
-                // --------------------------------------------------------
-
-                async function simpleAgent(restate: restate.Context, prompt: string) {
-                // we wrap the model with the 'durableCalls' middleware, which
-                // stores each response in Restate's journal, to be restored on retries
-                const model = wrapLanguageModel({
-                model: openai("gpt-4o-2024-08-06"),
-                middleware: durableCalls(restate, { maxRetryAttempts: 3 }),
-            });
-
-                const { text } = await generateText({
-                model,
-                prompt,
-                tools: {
-                getWeather: tool({
-                description: "Get the current weather for a given city.",
-                inputSchema: z.object({ city: z.string() }),
-                execute: async ({ city }) => {
-                // call tool wrapped as Restate durable step
-                return await restate.run("get weather", () => fetchWeather(city));
-            },
-            }),
-            },
-                stopWhen: [stepCountIs(5)],
-                // these are local retries by the AI SDK
-                // Restate will retry the invocation once those local retries are exhaused to
-                // handle longer downtimes, faulty processes, or network communication issues
-                maxRetries: 3,
-                system: "You are a helpful agent.",
-                providerOptions: { openai: { parallelToolCalls: false } },
-            });
-
-                return text;
-            }
-
-                // create a simple Restate service as the callable entrypoint
-                // for our durable agent function
-                const agent = restate.service({
-                name: "agent",
-                handlers: {
-                run: async (ctx: restate.Context, prompt: string) => {
-                return simpleAgent(ctx, prompt);
-            },
-            },
-            });
-
-                // we serve the entry-point via an HTTP/2 server
-                restate.serve({
-                services: [agent],
-            });
-                ```
-
-                <Accordion title="See how a failing tool call is retried">
-
-                Try asking about weather in different cities to see how the agent handles multiple tool calls:
-                ```shell
-                curl localhost:8080/agent/run --json '"Compare the weather in New York and San Francisco"'
-                ```
-
-                You can see in the service logs and in the Restate UI how each AI interaction gets durably executed.
-                If a tool call fails, only that specific call gets retried - the LLM conversation state is preserved.
-
-                <Frame>
-                <img src={"/img/quickstart/vercel-agent-stuck.png"} alt="Restate UI Durable Execution"/>
-                </Frame>
-
-                Even multi-step AI reasoning is durable and tracked by Restate.
-                If you kill/restart the service during a complex agent workflow, it will resume from where it left off.
-
-                Restate persists the progress of your AI agent, including conversation state and tool call results.
-                This lets you build reliable AI applications that are resilient to failures out of the box.
-                Have a look at the [Durable Execution page](/foundations/key-concepts#durable-execution) to learn more.
-                </Accordion>
-            </Step>
-        </Steps>
-    </Tab>
-    <Tab title={"Python + OpenAI"} icon={"/img/languages/python.svg"}>
-        <Info>
-            **Prerequisites**:
-            - Python >= v3.12
-            - [uv](https://docs.astral.sh/uv/getting-started/installation/)
-            - OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
-        </Info>
-        <Steps>
-            <Step title="Install Restate Server & CLI">
-                <InstallRestate/>
-            </Step>
-
-            <Step title="Get the AI Agent template">
-                ```shell
-                git clone https://github.com/restatedev/ai-examples.git &&
-                cd ai-examples/openai-agents/template
-                ```
-                <GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/openai-agents/template"}/>
-            </Step>
-
-            <Step title="Set your OpenAI API key">
-                ```shell
-                export OPENAI_API_KEY=your_openai_api_key_here
-                ```
-            </Step>
-
-            <Step title="Run the AI Agent service">
-                ```shell
-                uv run .
-                ```
-            </Step>
-
-            <Step title="Register the service">
-                Tell Restate where the service is running, so Restate can discover and register the services and handlers behind this endpoint.
-                You can do this via the UI (`http://localhost:9070`) or via:
-
-                <CodeGroup>
-                    ```shell CLI
-                    restate deployments register http://localhost:9080
-                    ```
-                    ```shell curl
-                    curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
-                    ```
-                </CodeGroup>
-
-                <Expandable title={"Output"}>
-                    <CodeGroup>
-                        ```shell CLI
-                        ❯ SERVICES THAT WILL BE ADDED:
-                        - Agent
-                        Type: Service
-                        HANDLER  INPUT                                     OUTPUT
-                        run      value of content-type 'application/json'  value of content-type 'application/json'
-
-
-                        ✔ Are you sure you want to apply those changes? · yes
-                        ✅ DEPLOYMENT:
-                        SERVICE  REV
-                        Agent    1
-                        ```
-
-                        ```shell curl
-                        {
-                            "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
-                            "services": [
-                        {
-                            "name": "Agent",
-                            "handlers": [
-                        {
-                            "name": "run",
-                            "ty": "Shared",
-                            "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
-                            "output_description": "value of content-type 'application/json'"
-                        }
-                            ],
-                            "ty": "Service",
-                            "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
-                            "revision": 1,
-                            "public": true,
-                            "idempotency_retention": "1day"
-                        }
-                            ]
-                        }
-                        ```
-                    </CodeGroup>
-                </Expandable>
-
-                If you run Restate with Docker, use `http://host.docker.internal:9080` instead of `http://localhost:9080`.
-
-                <Info title="Restate Cloud">
-                    When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
-                    If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
-                </Info>
-            </Step>
-
-            <Step title="Send a request to the AI Agent">
-                Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
-                <Frame>
-                <img src={"/img/quickstart/playground.png"} alt="Restate UI Playground"/>
-                </Frame>
-
-                Or invoke via `curl`:
-                ```shell
-                curl localhost:8080/Agent/run --json '"What is the weather in Detroit?"'
-                ```
-                Output: `The weather in Detroit is currently 17°C with misty conditions.`
-
-            </Step>
-
-            <Step title="Congratulations, you just ran a Durable AI Agent!">
-
-                The agent you just invoked uses Durable Execution to make AI tool calls resilient to failures.
-                Each tool call (like fetching weather data) is durably executed and can be retried if needed.
-
-
-                ```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py"}
-                import restate
-
-                from agents import Agent, RunConfig, Runner, function_tool, RunContextWrapper
-                from pydantic import BaseModel
-
-                from utils.middleware import DurableModelCalls
-                from utils.utils import fetch_weather, parse_weather_data, WeatherResponse
-
-
-                class WeatherRequest(BaseModel):
-                """Request to get the weather for a city."""
-                city: str
-
-
-                @function_tool
-                async def get_weather(
-                wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
-                ) -> WeatherResponse:
-                """Get the current weather for a given city."""
-                # Do durable steps using the Restate context
-                restate_context = wrapper.context
-                resp = await restate_context.run(
-                "Get weather", fetch_weather, args=(req.city,))
-                return await parse_weather_data(resp)
-
-
-                my_agent = Agent[restate.Context](
-                name="Helpful Agent",
-                handoff_description="A helpful agent.",
-                instructions="You are a helpful agent.",
-                tools=[get_weather],
-                )
-
-
-                # Agent keyed by conversation id
-                agent = restate.Service("Agent")
-
-
-                @agent.handler()
-                async def run(restate_context: restate.Context, message: str) -> str:
-
-                result = await Runner.run(
-                my_agent,
-                input=message,
-                # Pass the Restate context to tools to make tool execution steps durable
-                context=restate_context,
-                # Choose any model and let Restate persist your calls
-                run_config=RunConfig(
-                model="gpt-4o",
-                model_provider=DurableModelCalls(restate_context)
-                ),
-                )
-
-                return result.final_output
-                ```
-
-                <Accordion title="See how a failing tool call is retried">
-                Try asking about the weather in other cities:
-                ```shell
-                curl localhost:8080/Agent/run --json '"What is the weather in San Francisco?"'
-                ```
-
-                You can see in the service logs and in the Restate UI how each AI interaction gets durably executed.
-                Each tool call is journaled by Restate, ensuring that failed calls are retried without re-executing successful steps.
-
-                <img src={"/img/quickstart/quickstart_retries.png"} alt="Restate UI Durable Execution"/>
-
-                Restate persists the progress of your AI agent, including conversation state and tool call results.
-                This lets you build reliable AI applications that are resilient to failures out of the box.
-                Have a look at the [Durable Execution page](/foundations/key-concepts#durable-execution) to learn more.
-
-                </Accordion>
-            </Step>
-        </Steps>
-    </Tab>
+<Tab title={"TypeScript + Vercel AI"} icon={"/img/languages/typescript.svg"}>
+<Info>
+**Prerequisites**:
+- [Node.js](https://nodejs.org/en/) >= v20
+- OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
+</Info>
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template for the [Vercel AI SDK](https://ai-sdk.dev/docs/foundations/overview) and Restate:
+```shell
+git clone https://github.com/restatedev/ai-examples.git &&
+cd ai-examples/vercel-ai/template &&
+npm install
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/vercel-ai/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your OpenAI key and run the agent:
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+npm run dev
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`) or via:
+
+<CodeGroup>
+```shell CLI
+restate deployments register http://localhost:9080
+```
+```shell curl
+curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
+```
+</CodeGroup>
+
+<Expandable title={"Output"}>
+<CodeGroup>
+```shell CLI
+❯ SERVICES THAT WILL BE ADDED:
+- agent
+Type: Service
+HANDLER  INPUT                                     OUTPUT
+run      value of content-type 'application/json'  value of content-type 'application/json'
+
+
+✔ Are you sure you want to apply those changes? · yes
+✅ DEPLOYMENT:
+SERVICE  REV
+agent    1
+```
+
+```shell curl
+{
+    "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+    "services": [
+        {
+            "name": "Agent",
+            "handlers": [
+                {
+                    "name": "run",
+                    "ty": "Shared",
+                    "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
+                    "output_description": "value of content-type 'application/json'"
+                }
+            ],
+            "ty": "Service",
+            "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+            "revision": 1,
+            "public": true,
+            "idempotency_retention": "1day"
+        }
+    ]
+}
+```
+</CodeGroup>
+</Expandable>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/playground.png"} alt="Restate UI Playground"/>
+</Frame>
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/agent/run --json '"What is the weather in Detroit?"'
+```
+Output: `The weather in Detroit is currently 17°C with misty conditions.`.
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by using Restate's `durableCalls` middleware to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
+
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"} 
+async function weatherAgent(restate: restate.Context, prompt: string) {
+  // The durableCalls middleware persists each LLM response in Restate,
+  // so they can be restored on retries without re-calling the LLM
+  const model = wrapLanguageModel({
+    model: openai("gpt-4o"),
+    middleware: durableCalls(restate, { maxRetryAttempts: 3 }),
+  });
+
+  const { text } = await generateText({
+    model,
+    system: "You are a helpful agent that provides weather updates.",
+    prompt,
+    tools: {
+      getWeather: tool({
+        description: "Get the current weather for a given city.",
+        inputSchema: z.object({ city: z.string() }),
+        execute: async ({ city }) => {
+          // call tool wrapped as Restate durable step
+          return await restate.run("get weather", () => fetchWeather(city));
+        },
+      }),
+    },
+    stopWhen: [stepCountIs(5)],
+    providerOptions: { openai: { parallelToolCalls: false } },
+  });
+
+  return text;
+}
+
+// create a Restate Service as the callable entrypoint
+// for our durable agent function
+const agent = restate.service({
+  name: "agent",
+  handlers: {
+    run: async (ctx: restate.Context, prompt: string) => {
+      return weatherAgent(ctx, prompt);
+    },
+  },
+});
+
+// Serve the entry-point via an HTTP/2 server
+restate.serve({
+  services: [agent],
+});
+```
+
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/template/src/app.ts"}/>
+
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/vercel-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+
+<Accordion title="See how a failing tool call is retried">
+Ask about the weather in Denver:
+```shell
+curl localhost:8080/agent/run --json '"What is the weather in Denver?"'
+```
+
+You can see in the service logs and in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/vercel-agent-stuck.png"} alt="Restate UI Durable Execution"/>
+</Frame>
+
+This was a mimicked failure. To fix the problem, remove the line `failOnDenver` from the `fetchWeather` function in the `utils.ts` file:
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/utils/weather.ts#weather"} 
+export async function fetchWeather(city: string) {
+  failOnDenver(city);
+  const output = await fetchWeatherFromAPI(city);
+  return parseWeatherResponse(output);
+}
+```
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+
+</Accordion>
+
+    **Next step:**
+Follow the [Tour of Agents](/tour/ai-agents) to learn how to build agents with Restate and Vercel AI SDK.
+
+</Step>
+</Steps>
+</Tab>
+<Tab title={"Python + OpenAI"} icon={"/img/languages/python.svg"}>
+<Info>
+**Prerequisites**:
+- Python >= v3.12
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
+</Info>
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template for the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/) and Restate:
+```shell
+git clone https://github.com/restatedev/ai-examples.git &&
+cd ai-examples/openai-agents/template
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/openai-agents/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your OpenAI key and run the agent:
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+uv run .
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the agent service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`) or via:
+
+<CodeGroup>
+```shell CLI
+restate deployments register http://localhost:9080
+```
+```shell curl
+curl localhost:9070/deployments --json '{"uri": "http://localhost:9080"}'
+```
+</CodeGroup>
+
+<Expandable title={"Output"}>
+<CodeGroup>
+```shell CLI
+❯ SERVICES THAT WILL BE ADDED:
+- Agent
+Type: Service
+HANDLER  INPUT                                     OUTPUT
+run      value of content-type 'application/json'  value of content-type 'application/json'
+
+
+✔ Are you sure you want to apply those changes? · yes
+✅ DEPLOYMENT:
+SERVICE  REV
+Agent    1
+```
+
+```shell curl
+{
+    "id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+    "services": [
+        {
+            "name": "Agent",
+            "handlers": [
+                {
+                    "name": "run",
+                    "ty": "Shared",
+                    "input_description": "one of [\"none\", \"value of content-type 'application/json'\"]",
+                    "output_description": "value of content-type 'application/json'"
+                }
+            ],
+            "ty": "Service",
+            "deployment_id": "dp_17sztQp4gnEC1L0OCFM9aEh",
+            "revision": 1,
+            "public": true,
+            "idempotency_retention": "1day"
+        }
+    ]
+}
+```
+</CodeGroup>
+</Expandable>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/playground.png"} alt="Restate UI Playground"/>
+</Frame>
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/agent/run --json '"What is the weather in Detroit?"'
+```
+Output: `The weather in Detroit is currently 17°C with misty conditions.`
+
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by using the `DurableModelCalls` model provider to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
+
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"} 
+@function_tool
+async def get_weather(
+    wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
+) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    # Do durable steps using the Restate context
+    restate_context = wrapper.context
+    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
+
+
+weather_agent = Agent[restate.Context](
+    name="WeatherAgent",
+    instructions="You are a helpful agent that provides weather updates.",
+    tools=[get_weather],
+)
+
+
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(restate_context: restate.Context, message: str) -> str:
+
+    result = await Runner.run(
+        weather_agent,
+        input=message,
+        # Pass the Restate context to tools to make tool execution steps durable
+        context=restate_context,
+        # Choose any model and let Restate persist your calls
+        run_config=RunConfig(
+            model="gpt-4o", model_provider=DurableModelCalls(restate_context)
+        ),
+    )
+
+    return result.final_output
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/openai-agents/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/openai-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+<Accordion title="See how a failing tool call is retried">
+Ask about the weather in Denver:
+```shell
+curl localhost:8080/agent/run --json '"What is the weather in Denver?"'
+```
+
+You can see in the service logs and in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/openai-agent-stuck.png"} alt="Restate UI Durable Execution"/>
+</Frame>
+
+This was a mimicked failure. To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `utils.py` file:
+
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/utils/utils.py#weather"} 
+async def fetch_weather(city: str) -> WeatherResponse:
+    fail_on_denver(city)
+    weather_data = await call_weather_api(city)
+    return parse_weather_data(weather_data)
+```
+
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+
+</Accordion>
+</Step>
+</Steps>
+</Tab>
 </Tabs>
