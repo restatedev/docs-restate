@@ -130,9 +130,9 @@ The agent you just invoked uses Durable Execution to make agents resilient to fa
 
 We did this by using Restate's `durableCalls` middleware to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
 
-```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"}
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/template/src/app.ts?collapse_imports"} 
 async function weatherAgent(restate: restate.Context, prompt: string) {
-  // The durableCalls middleware persists each LLM response in Restate's journal,
+  // The durableCalls middleware persists each LLM response in Restate,
   // so they can be restored on retries without re-calling the LLM
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
@@ -148,8 +148,7 @@ async function weatherAgent(restate: restate.Context, prompt: string) {
         description: "Get the current weather for a given city.",
         inputSchema: z.object({ city: z.string() }),
         execute: async ({ city }) => {
-          // restate.run() persists the tool execution step in the journal,
-          // allowing it to be recovered and replayed on failures
+          // call tool wrapped as Restate durable step
           return await restate.run("get weather", () => fetchWeather(city));
         },
       }),
@@ -335,14 +334,13 @@ The agent you just invoked uses Durable Execution to make agents resilient to fa
 
 We did this by using the `DurableModelCalls` model provider to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
 
-```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"}
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"} 
 @function_tool
 async def get_weather(
     wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
 ) -> WeatherResponse:
     """Get the current weather for a given city."""
-    # restate_context.run_typed() persists the tool execution step in the journal,
-    # allowing it to be recovered and replayed on failures
+    # Do durable steps using the Restate context
     restate_context = wrapper.context
     return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
 
@@ -365,8 +363,7 @@ async def run(restate_context: restate.Context, message: str) -> str:
         input=message,
         # Pass the Restate context to tools to make tool execution steps durable
         context=restate_context,
-        # DurableModelCalls persists each LLM response in Restate's journal,
-        # so they can be restored on retries without re-calling the LLM
+        # Choose any model and let Restate persist your calls
         run_config=RunConfig(
             model="gpt-4o", model_provider=DurableModelCalls(restate_context)
         ),
