@@ -5,21 +5,26 @@ description: "Run your TypeScript services on Vercel"
 
 import CustomVars from "/snippets/custom-variables.mdx";
 
-This page describes how to set up a Restate + Vercel service, starting from the [template](https://github.com/restatedev/vercel-template).
+You can use Vercel to deploy Restate services.
 
-<Card
-    title="Create your Restate + Vercel GitHub repository"
-    icon="github"
-    href="https://github.com/new?template_name=vercel-template&template_owner=restatedev"
-    arrow="true"
-    horizontal
-/>
+## Getting started
 
-## Serving the Restate SDK using Next.js
+<Tabs>
+    <Tab title="New project">
+        Start from the [vercel-template](https://github.com/restatedev/vercel-template).
 
-To serve the Restate SDK, create a `fetch` endpoint:
+        <Card
+            title="Create your Restate + Vercel repository"
+            icon="github"
+            href="https://github.com/new?template_name=vercel-template&template_owner=restatedev"
+            arrow="true"
+            horizontal
+        />
+    </Tab>
+    <Tab title="Existing Next.js project">
+        Create a `fetch` endpoint, providing the services:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/vercel/src/restate/serve.ts"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/vercel/src/restate/serve.ts"}
 import * as restate from "@restatedev/restate-sdk/fetch";
 import { greeter } from "@/restate/greeter";
 
@@ -36,9 +41,9 @@ export const serve = () => {
 };
 ```
 
-And expose it in a Next.js parametrized route, e.g. `/restate/[[...services]]`:
+        And expose the endpoint in a Next.js parameterized route, e.g. `/restate/[[...services]]`:
 
-```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/vercel/src/app/restate/%5B%5B...services%5D%5D/route.ts"} 
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/vercel/src/app/restate/%5B%5B...services%5D%5D/route.ts"}
 import { serve } from "@/restate/serve";
 
 // This is the route that exposes the Restate services.
@@ -46,6 +51,8 @@ import { serve } from "@/restate/serve";
 // To call it, open Restate > Overview > Greeter > Playground
 export const { GET, POST } = serve();
 ```
+    </Tab>
+</Tabs>
 
 ## Configure Vercel project
 
@@ -59,7 +66,8 @@ For Restate to access the Vercel project, you have two alternatives:
 
 ## Register the service to Restate
 
-To [register the service](/services/versioning), use the CLI or UI. Make sure to register the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) so that Restate can address specific Vercel deployments:
+To [register the service](/services/versioning), use the CLI or UI.
+Make sure to register the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) so that Restate can address specific Vercel deployments:
 
 ```shell
 npx @restatedev/restate deployments register \
@@ -80,11 +88,12 @@ npx @restatedev/restate deployments register \
     https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
 ```
 
-You're set up! Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
+You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
 
 ## Restate identity keys (for Restate Cloud)
 
-Follow the guide in your Restate Cloud Dashboard to set up Restate identity keys, to make sure only a specific Restate Cloud environment can call it.
+In order to make sure only a specific Restate Cloud environment can push requests to your Vercel deployment,
+head over to your Restate Cloud Dashboard to set up Restate identity keys.
 
 <Card
     title="Restate Cloud > Developers > Security"
@@ -98,18 +107,45 @@ Follow the guide in your Restate Cloud Dashboard to set up Restate identity keys
 
 ## CI/CD Automation
 
-The template includes a setup to automatically register a new [Restate Deployment version](/services/versioning) when a Vercel deployment gets promoted.
-This is done by the GitHub Action [deploy.yml](https://github.com/restatedev/examples/blob/main/typescript/templates/vercel/.github/workflows/deploy.yml), which reacts to Vercel's [repository dispatch](https://vercel.com/docs/git/vercel-for-github#repository-dispatch-events) events.
+You can set up automation to automatically register new [Restate service versions](/services/versioning) every time a Vercel deployment gets promoted:
 
-To enable automatic registration, add the following to [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
-- `RESTATE_ADMIN_URL`: The Admin URL. You can find this in Developers > Invoke. For example: `https://some-environment-private-id.env.us.restate.cloud:9070`
-- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+```yml
+name: Register to Restate
+
+# React to vercel.deployment.promoted event
+on:
+  repository_dispatch:
+    types:
+      - 'vercel.deployment.promoted'
+jobs:
+  deploy-to-restate:
+    if: github.event_name == 'repository_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Register Restate deployment
+        env:
+          # In your Restate Cloud dashboard, go to Developers > API Keys > Create API Key, and make sure to select **Admin** for the role
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          # You can find this out in Developers > Admin URL.
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+
+        # Run service registration
+        run: |
+          npx -y @restatedev/restate deployment register -y \
+            --use-http1.1 \
+            ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN && format('--extra-header x-vercel-protection-bypass={0}', secrets.VERCEL_PROTECTION_BYPASS_TOKEN) }} \
+            ${{ github.event.client_payload.url }}/restate
+```
+
+For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
 
 ![Token setup](/img/services/deploy/deployment-token.png)
 
 - If you set up the Protection Bypass for Automation as described above, add the secret `VERCEL_PROTECTION_BYPASS_TOKEN` with the token value
 
 <Accordion title={"Self-hosted Restate"}>
-    You can use the [deploy.yml](https://github.com/restatedev/examples/blob/main/typescript/templates/vercel/.github/workflows/deploy.yml) with Self-hosted Restate as well,
+    You can use this workflow with Self-hosted Restate as well,
     just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
 </Accordion>
