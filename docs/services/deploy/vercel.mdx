@@ -1,0 +1,73 @@
+---
+title: "Vercel"
+description: "Run your TypeScript services on Vercel"
+---
+
+import CustomVars from "/snippets/custom-variables.mdx";
+
+<Card
+    title="Vercel template"
+    icon="github"
+    href="https://github.com/new?template_name=vercel-template&template_owner=restatedev"
+    arrow="true"
+>
+    Setup your Vercel + Restate project repository
+</Card>
+
+Then [create the Vercel project](https://vercel.com/new) importing the newly created repository.
+
+## Configure Restate access to Vercel project
+
+For Restate to access the Vercel project, you have two alternatives:
+
+* Disable [Vercel Authentication](https://vercel.com/docs/security/deployment-protection/methods-to-protect-deployments/vercel-authentication) for the project, making their URLs publicly accessible.
+![Vercel Authentication](/img/services/deploy/vercel-disable-authentication.png)
+* Enable [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation). This makes the URL accessible only if the `x-vercel-protection-bypass` header is provided with the right value.
+
+In both cases, we suggest setting up the [Restate Identity keys](#restate-identity-keys) as well.
+
+## Versioning
+
+The template includes a setup to automatically register a new Restate Deployment version when a Vercel deployment gets promoted.
+This is done by the GitHub Action [deploy.yml](https://github.com/restatedev/examples/blob/main/typescript/templates/vercel/.github/workflows/deploy.yml), which reacts to Vercel's [repository dispatch](https://vercel.com/docs/git/vercel-for-github#repository-dispatch-events) events.
+
+To enable automatic versioning, add the following to **Github Actions repository secrets**:
+- `RESTATE_ADMIN_URL`: The Admin URL. You can find that out in Developers > Invoke. For example: `https://some-environment-private-id.env.us.restate.cloud:9070`
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for role
+
+![Token setup](/img/services/deploy/deployment-token.png)
+
+- If you set up the Protection Bypass for Automation as described above, add the secret `VERCEL_PROTECTION_BYPASS_TOKEN` with the token value
+
+<AccordionGroup>
+    <Accordion title={"Versioning on Self-hosted Restate"}>
+        You can use the [deploy.yml](https://github.com/restatedev/examples/blob/main/typescript/templates/vercel/.github/workflows/deploy.yml) with Self-hosted Restate as well,
+        just make sure to correctly setup `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
+    </Accordion>
+    <Accordion title={"Manual versioning"}>
+        You can always register deployments manually. When doing so, use the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) to make sure Restate can address specific Vercel deployments:
+
+        ```shell
+        restate deployments register --use-http1.1 https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
+        ```
+
+        If you set up Protection Bypass for Automation as described above, pass the additional header as argument:
+
+        ```shell
+        --extra-header x-vercel-protection-bypass=<token>
+        ```
+    </Accordion>
+</AccordionGroup>
+
+## Restate identity keys
+
+Follow the guide in your Restate Cloud Dashboard to setup Restate identity keys, to make sure only a specific Restate Cloud environment can call it.
+
+<Card
+    title="Restate Cloud > Developers > Security"
+    icon="lock"
+    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
+    arrow="true"
+>
+    Setup Restate identity keys
+</Card>
