@@ -1,36 +1,25 @@
 import * as restate from "@restatedev/restate-sdk";
-import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
-import { z } from "zod";
-import { fetchWeather } from "../utils";
-import { durableCalls } from "@restatedev/vercel-ai-middleware";
 
 export default restate.service({
   name: "WeatherAgent",
   handlers: {
     run: async (ctx: restate.Context, { prompt }: { prompt: string }) => {
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
+      // <start_here>
+      // Without ctx.run - error goes straight to agent
+      async function myTool() {
+        const result = await fetch('/api/data'); // Might fail due to network
+        // If this fails, agent gets the error immediately
+      }
 
-      const { text } = await generateText({
-        model,
-        system: "You are a helpful agent that provides weather updates.",
-        prompt,
-        tools: {
-          getWeather: tool({
-            description: "Get the current weather for a given city.",
-            inputSchema: z.object({ city: z.string() }),
-            execute: async ({ city }) =>
-              ctx.run("get weather", () => fetchWeather(city)),
-          }),
-        },
-        stopWhen: [stepCountIs(5)],
-        providerOptions: { openai: { parallelToolCalls: false } },
-      });
-
-      return text;
+      // With ctx.run - Restate handles retries
+      async function myToolWithRestate(ctx: restate.Context) {
+        const result = await ctx.run('fetch-data', () =>
+            fetch('/api/data')
+        );
+        // Network failures get retried automatically
+        // Only terminal errors (like 404) reach the AI
+      }
+      // <end_here>
     },
   },
 });
