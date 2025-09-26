@@ -648,7 +648,6 @@ Many AI SDKs also have their own retry behavior for LLM calls and tool execution
 
 ### Retries of LLM calls
 
-
 In the Vercel AI SDK, set `maxRetries` on `generateText` (default: 2) to retry failed calls due to rate limits or transient errors.
 After retries are exhausted, the agent throws an error.
 Restate then retries the invocation with exponential backoff to handle longer outages or network issues.
@@ -669,11 +668,38 @@ Once Restate’s retries are exhausted, the invocation fails with a `TerminalErr
 
 ### Tool execution errors
 
-The Vercel AI SDK will convert any error in tool execution into a message to the LLM, and the agent will decide how to proceed.
-By default, it also does this for terminal errors thrown in the tool execution.
-This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
+By default, the Vercel AI SDK will convert any errors in tool executions into a message to the LLM, and the agent will decide how to proceed.
+This is often desirable, as the LLM can decide to use a different tool or provide a fallback answer.
 
-However, if you want to treat terminal tool execution errors as permanent failures, you can use one of the following options.
+However, if you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
+So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
+
+Here is a small practical example:
+```typescript {"CODE_LOAD::ts/src/tour/agents/inline-tool-errors.ts#here"} 
+// Without ctx.run - error goes straight to agent
+async function myTool() {
+  const result = await fetch('/api/data'); // Might fail due to network
+  // If this fails, agent gets the error immediately
+}
+
+// With ctx.run - Restate handles retries
+async function myToolWithRestate(ctx: restate.Context) {
+  const result = await ctx.run('fetch-data', () =>
+      fetch('/api/data')
+  );
+  // Network failures get retried automatically
+  // Only terminal errors (like 404) reach the AI
+}
+```
+
+If your tool calls other Restate handlers or workflows (for example sub-workflow or sub-agent), then these are also Restate Context actions that get retried until they succeed.
+
+
+Terminal errors thrown from Restate Context actions are not retried by Restate, and get processed by the Vercel AI SDK.
+Also here, the Vercel AI SDK will convert the error into a message to the LLM, and the agent will decide how to proceed.
+
+In some cases, you might want to treat terminal tool execution errors as permanent failures and stop the agent instead of letting the LLM decide how to proceed.
+The Restate middleware provides two utilities to help with this:
 
 <AccordionGroup>
 <Accordion title="Fail the agent on terminal tool errors">
