@@ -1,46 +1,154 @@
 ---
 title: "Cloudflare Workers"
-description: "Run Restate services on Cloudflare Workers."
+description: "Run your TypeScript services on Cloudflare Workers"
 ---
 
-You can run your Restate services as serverless functions on [Cloudflare Workers](https://workers.cloudflare.com/).
-
+Deploy your Restate services on Cloudflare Workers.
+This guide covers project configuration, service registration, and security setup.
 
 <Tip>
-    Follow the [Restate Cloudflare Workers quickstart](/quickstart) to set up your project.
+    Follow the [quickstart](/quickstart#cloudflare-workers) to try Cloudflare Workers and Restate locally.
 </Tip>
 
-Get started using the [Workers+Restate template](https://github.com/restatedev/examples/tree/main/typescript/templates/cloudflare-worker):
-```shell CLI
-restate example typescript-cloudflare-worker-hello-world &&
-cd typescript-cloudflare-worker-hello-world
+## Set up your project
+
+<Tabs>
+    <Tab title="New project">
+        Start with the [cloudflare-workers-template](https://github.com/restatedev/cloudflare-workers-template) and follow its README.
+
+        <Card
+            title="Create your Restate + CloudFlare workers repository"
+            icon="github"
+            href="https://github.com/new?template_name=cloudflare-workers-template&template_owner=restatedev"
+            arrow="true"
+            horizontal
+        />
+    </Tab>
+    <Tab title="Existing Cloudflare Workers project">
+        Import the Restate SDK with the `fetch` component:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk/fetch";
+
+// Export the Restate handler
+export default {
+    fetch: restate.createEndpointHandler({ services: [greeter] })
+};
 ```
 
-You can also add Restate into the standard `wrangler init` template, as long
-as you have the `nodejs_compat` compatibility flag set in `wrangler.toml`.
+Make sure your `wrangler.toml` has the `nodejs_compat` flag, minification is disabled and and preview urls are enabled:
+```toml {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/cloudflare-worker/wrangler.toml"} 
+name = "restate-cloudflare-worker"
+main = "./src/index.ts"
+compatibility_date = "2024-05-13"
+compatibility_flags = [ "nodejs_compat" ]
 
-The SDK should be imported with the `fetch` component:
-```shell
-@restatedev/restate-sdk/fetch
-```
-and you would expose your endpoint to the Worker runtime with:
-```ts
-export default endpoint().bind(...).handler()
-```
+# DO NOT ENABLE MINIFICATION
+# The CF Worker minifier incorrectly removes parts of the Restate SDK
+minify = false
 
-You can deploy with `wrangler deploy`, and register your deployed service:
-```shell
-restate deployments register https://my-service.my-domain.workers.dev
+# Preview URLs are used to register to Restate
+preview_urls = true
 ```
+    </Tab>
+</Tabs>
 
 ## Local development
 
-A Workers dev server can be started on port 9080 using
+A Workers dev server can be started on port 9080 using:
+
 ```shell
 wrangler dev --port 9080
 ```
 
-`wrangler dev` only serves over HTTP1.1, so you'll need to register a local service with:
+To register to Restate:
+
 ```shell
-restate deployments register --use-http1.1 http://localhost:9080
+npx @restatedev/restate deployments register --use-http1.1 http://localhost:9080
 ```
+
+<Note>
+    `wrangler` only supports HTTP/1.1 when running locally, so the `--use-http1.1` flag is required. This flag is not needed when deploying to Cloudflare Workers.
+</Note>
+
+## Register the service to Restate
+
+After deploying to Cloudflare Workers, [register the service](/services/versioning) with Restate CLI or UI providing [Preview URLs](https://developers.cloudflare.com/workers/configuration/previews/) to target specific service versions:
+
+```shell
+npx @restatedev/restate deployments register \
+  https://<VERSION_PREFIX OR ALIAS>-<WORKER_NAME>.<SUBDOMAIN>.workers.dev
+```
+
+You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
+
+## Restate identity keys (for Restate Cloud)
+
+In order to make sure only a specific Restate Cloud environment can push requests to your Cloudflare Workers deployment,
+head over to your Restate Cloud Dashboard to set up Restate identity keys.
+
+<Card
+    title="Restate Cloud > Developers > Security"
+    icon="lock"
+    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
+    arrow="true"
+    horizontal
+>
+    Set up Restate identity keys
+</Card>
+
+## CI/CD Automation
+
+You can set up automation to deploy to Cloudflare Workers on each commit to `main` and automatically register new [Restate service versions](/services/versioning):
+
+```yml
+name: Deploy Worker
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+      - run: npm ci
+
+      - name: Build & Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        id: deploy
+        with:
+          # Check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Add a message to the deployment with the commit
+          command: versions upload --message "Deployed via GitHub Actions - commit ${{ github.sha }}"
+      - name: Get deployment URL
+        id: get-url
+        env:
+          WRANGLER_OUTPUT: ${{ steps.deploy.outputs.command-output }}
+        run: |
+          URL=$(echo "$WRANGLER_OUTPUT" | awk '/Version Preview URL:/ {gsub(/.*Version Preview URL: /, ""); print}')
+          echo "deployment-url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Register Restate deployment
+        env:
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        run: npx -y @restatedev/restate deployment register -y ${{ steps.get-url.outputs.deployment-url }}
+```
+
+For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token. To get a token, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+- `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for role
+
+![Token setup](/img/services/deploy/deployment-token.png)
+
+<AccordionGroup>
+    <Accordion title={"Self-hosted Restate"}>
+        You can use this workflow with Self-hosted Restate as well,
+        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
+    </Accordion>
+</AccordionGroup>
