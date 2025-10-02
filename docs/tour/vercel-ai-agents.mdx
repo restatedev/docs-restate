@@ -220,14 +220,20 @@ You can also use awakeables outside of tools, for example, to implement human ap
 </Info>
 
 <Accordion title={"Try out human approval"} icon={"laptop"}>
-    Start a request for a high-value claim that needs human approval.
-    Use `/send` to start the claim asynchronously, without waiting for the result.
+    Start a request for a high-value claim that needs human approval, by clicking on the `run` handler of the `HumanClaimApprovalAgent`, and sending the default request via the playground.
+
+    Or use `curl` with `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
     curl localhost:8080/HumanClaimApprovalAgent/run/send \
     --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
     ```
 
     You can restart the service to see how Restate continues waiting for the approval.
+
+    If you wait for more than a minute, the invocation will get suspended.
+    <Frame>
+        <img src="/img/tour/agents/suspensions.png" alt="Invocation overview" />
+    </Frame>
 
     Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
 
@@ -269,6 +275,8 @@ curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
 --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
 ```
 You restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
 </Accordion>
 
 ## Chat Agent with Memory
@@ -321,8 +329,8 @@ Virtual Objects are ideal for implementing any entity with mutable state:
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
 - **Built-in concurrency control**: Restate’s Virtual Objects have built-in queuing and consistency guarantees per object key. Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context).
-    - Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions.
-    - Handlers with read-only access can run concurrently to the write-access handlers.
+    - Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions (for example `message()`).
+    - Handlers with read-only access can run concurrently to the write-access handlers (for example `getHistory()`).
 <img src="/img/tour/agents/chat_queue.png" alt="Queue"/>
 
 <Accordion title={"Try out Virtual Objects"} icon={"laptop"}>
@@ -634,7 +642,7 @@ LLM calls are costly, so you can configure retry behavior in both Restate and yo
 
 Restate distinguishes between two types of errors:
 - **Transient errors**: Temporary issues like network failures or rate limits. Restate automatically retries these until they succeed or the retry policy is exhausted.
-- **Terminal errors**: Permanent failures like invalid input or business rule violations. These are not retried and cause the invocation to fail.
+- **Terminal errors**: Permanent failures like invalid input or business rule violations. Restate does not retry these. The invocation fails permanently. You can catch these errors and handle them gracefully.
 
 You can throw a terminal error via:
 
