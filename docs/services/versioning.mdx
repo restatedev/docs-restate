@@ -13,9 +13,10 @@ This requires understanding two fundamental approaches: **immutable versions** a
 
 **Immutable versions** create a completely new deployment for each code change. Once a deployment is registered with Restate, its code cannot change. Restate automatically proxies new requests to the latest version, while ongoing requests continue with their original version until completion.
 
-**In-place updates** modify the code at an existing endpoint without creating a new deployment. While sometimes necessary for critical bug fixes, this approach can break determinism if not handled carefully.
+**In-place updates** modify the code at an existing endpoint without creating a new deployment. While sometimes necessary for critical bug fixes, this approach breaks determinism if not handled carefully.
 
-**We strongly recommend using immutable versions for simplicity.** They guarantee that your durable executions remain deterministic without requiring you to think about the complexities of breaking existing in-flight invocations.
+**Restate requires the use of immutable versions.** They guarantee that your durable executions remain deterministic without requiring you to think about the complexities of breaking existing in-flight invocations.
+Only use in-place updates for emergency bug fixes.
 
 ## What is a deployment?
 
@@ -32,6 +33,11 @@ An invocation is bound to a specific deployment: it starts and completes within 
     Instead, break work into smaller chunks and chain them via service-to-service calls.
 
     For example, instead of a handler that sleeps for hours, have it schedule a new invocation via a delayed message.
+</Tip>
+
+<Tip>
+    It's possible to [resume an invocation on a different deployment](/services/invocation/managing-invocations#resume).
+    This is useful if there is a bug in the original deployment’s application code, and you want to move the invocation to a new deployment which contains a fix.
 </Tip>
 
 ## Registering a deployment
@@ -74,42 +80,12 @@ When registering deployments via the UI, you can select the HTTP/1.1 checkbox.
 
 Function-as-a-Service (FaaS) platforms automatically handle immutable versioning through version-specific URLs or ARNs. This makes them ideal for Restate deployments as they eliminate the complexity of manual version management.
 
-<AccordionGroup>
-<Accordion title="AWS Lambda">
-When you [publish a Lambda function](https://docs.aws.amazon.com/lambda/latest/dg/configuration-versions.html), it automatically creates an immutable version with a unique ARN that never changes:
+Have a look at the dedicated deployment docs to learn more:
+- [Vercel](/services/deploy/vercel#register-the-service-to-restate): Register the Commit URL so that Restate can address specific Vercel deployments.
+- [AWS Lambda](/services/deploy/lambda): When you [publish a Lambda function](https://docs.aws.amazon.com/lambda/latest/dg/configuration-versions.html), it automatically creates an immutable version with a unique ARN that never changes.
+- [Deno Deploy](/services/deploy/deno-deploy#register-the-service-to-restate): Register the Preview URLs so that Restate can target specific Deno deployments.
+- [Cloudflare Workers](/services/deploy/cloudflare-workers#register-the-service-to-restate): Register the Preview URLs so that Restate can target specific Cloudflare deployments.
 
-```bash
-# Register a specific Lambda version
-restate deployments register arn:aws:lambda:us-east-1:123456789012:function:my-service:42
-```
-
-Once created, versions remain accessible, so ongoing invocations can continue using them until they finish.
-Old versions automatically phase out once no invocations are using them.
-</Accordion>
-
-<Accordion title="Deno Deploy">
-Deno Deploy creates [immutable deployments](https://docs.deno.com/deploy/manual/deployments/) with unique URLs for each deployment:
-
-```bash
-# Each deployment gets a unique, immutable URL
-restate deployments register https://my-service-abc123.deno.dev
-```
-
-Once created, deployments remain accessible, so ongoing invocations can continue using them until they finish.
-Old deployments automatically phase out once no invocations are using them.
-</Accordion>
-
-<Accordion title="KNative">
-KNative supports immutable revisions through tags and traffic management.
-We will add a more detailed guide soon.
-</Accordion>
-
-<Accordion title="Google Cloud Run">
-Cloud Run creates immutable revisions that can be addressed individually.
-We will add a more detailed guide soon.
-
-</Accordion>
-</AccordionGroup>
 
 ## Automatic versioning with Kubernetes Operator
 
