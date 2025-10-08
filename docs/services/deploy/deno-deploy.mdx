@@ -1,38 +1,147 @@
 ---
 title: "Deno Deploy"
-description: "Run your TypeScript services on Deno Deploy."
+description: "Run your TypeScript services on Deno Deploy"
 ---
 
 import CustomVars from "/snippets/custom-variables.mdx";
 
-You can run your Restate services as serverless functions on [Deno Deploy](https://deno.com/deploy).
+Deploy your Restate services on Deno Deploy.
+This guide covers project configuration, service registration, and security setup.
 
 <Tip>
-    Follow the [Restate Deno Deploy quickstart](/quickstart) to set up your project.
+    Follow the [quickstart](/quickstart#deno) to try Deno and Restate locally.
 </Tip>
 
-Get started using the
-[Deno+Restate template](https://github.com/restatedev/examples/tree/main/typescript/templates/deno):
+## Set up your project
+
+<Tabs>
+    <Tab title="New project">
+        Start with the [deno-template](https://github.com/restatedev/examples/tree/main/typescript/templates/deno) and follow its README.
+
+        [![Deploy on Deno](https://deno.com/button)](https://console.deno.com/new?clone=https://github.com/restatedev/deno-template)
+    </Tab>
+    <Tab title="Existing Deno project">
+        Import the Restate SDK with the `fetch` component:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk/fetch";
+
+// Create the Restate endpoint
+// Here you need to register your services
+const handler = restate.createEndpointHandler({
+    services: [greeter],
+    bidirectional: true,
+});
+
+// Serve using Deno
+Deno.serve({ port: 9080 }, handler);
+```
+    </Tab>
+</Tabs>
+
+## Register the service to Restate
+
+Once deployed on Deno Deploy EA, [register the service](/services/versioning) with Restate using the CLI or UI. Use **Preview URLs** so that Restate can target specific Deno deployments:
+
 ```shell
-restate example typescript-deno-hello-world &&
-  cd typescript-deno-hello-world
+npx @restatedev/restate deployments register \
+  https://your-project-name-<deployment_id>.deno.dev
 ```
 
-You can also add Restate into an existing Deno project. The SDK should be imported with the `fetch` component, for example: <code>{<CustomVars name="DENO_FETCH"/>}</code>.
+You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
 
-and you would serve with
-```ts
-Deno.serve({ port: 9080 }, handler.fetch)
+## Restate identity keys (for Restate Cloud)
+
+In order to make sure only a specific Restate Cloud environment can push requests to your Deno Deploy deployment,
+head over to your Restate Cloud Dashboard to set up Restate identity keys.
+
+<Card
+    title="Restate Cloud > Developers > Security"
+    icon="lock"
+    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
+    arrow="true"
+    horizontal
+>
+    Set up Restate identity keys
+</Card>
+
+## CI/CD Automation
+
+You can set up automation to register new [Restate service versions](/services/versioning) every time you deploy to Deno Deploy:
+
+```yml
+name: Register to Restate
+
+on:
+  repository_dispatch:
+    types: [deno_deploy.build.routed] # Listen for successful builds
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Register Restate deployment
+        env:
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        run: npx -y @restatedev/restate deployment register -y ${{ github.event.client_payload.revision.preview_url }}
 ```
 
-You can deploy to Deno Run with `deployctl deploy`, and register your deployed
-service:
-```shell
-restate deployments register https://my-service.deno.dev
-```
+For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
 
-Local development is as simple as running your `main.ts` and discovering the local
-port:
-```shell
-restate deployments register http://localhost:9080
+![Token setup](/img/services/deploy/deployment-token.png)
+
+<AccordionGroup>
+    <Accordion title={"Deno Deploy Classic"}>
+        For [Deno Deploy Classic](https://docs.deno.com/deploy/classic/), we suggest the following CI/CD setup that deploys to Deno and then registers the deployment with Restate:
+
+```yml
+name: Deploy Deno
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  # Create the Deno project going to https://dash.deno.com/new_project linking this repository.
+  # When creating the project, check **Just link the repo, I’ll set up GitHub Actions myself**.
+  # Make sure this project name matches the deno project.
+  DENO_PROJECT_NAME: ${{ vars.DENO_PROJECT_NAME }}
+
+jobs:
+  deploy:
+    permissions:
+      id-token: write # required
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Deploy using deployctl
+      - name: Deploy to Deno Deploy
+        uses: denoland/deployctl@v1
+        id: deploy
+        with:
+          project: ${{ env.DENO_PROJECT_NAME }}
+          entrypoint: main.ts
+
+      - name: Register Restate deployment
+        env:
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        # Revision URL https://docs.deno.com/deploy/classic/deployments/#production-vs.-preview-deployments
+        run: npx -y @restatedev/restate deployment register -y https://${{ env.DENO_PROJECT_NAME }}-${{ steps.deploy.outputs.deployment-id }}.deno.dev
 ```
+    </Accordion>
+    <Accordion title={"Self-hosted Restate"}>
+        You can use this workflow with Self-hosted Restate as well,
+        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
+    </Accordion>
+</AccordionGroup>

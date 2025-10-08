@@ -10,7 +10,7 @@ class FlightRequest(BaseModel):
     passenger_name: str
 
 
-async def reserve(customer_id: str, request: FlightRequest):
+async def reserve(customer_id: str, flight: FlightRequest) -> str:
     # this should implement the communication with the flight
     # provider's APIs
     logging.info(f"Flight reservation cancelled for customer: {customer_id}")
