@@ -825,7 +825,56 @@ By default, the middleware retries three times. Once Restate's retries are exhau
 By default, the OpenAI Agent SDK will convert any error in tool execution into a message to the LLM, and the LLM will decide how to proceed.
 This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
 
-However, if you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
+#### Surfacing suspensions and terminal errors
+There are some Restate errors that should not be handled by the LLM, for example, if a tool execution is suspended waiting for human input.
+Restate lets tool executions suspend if they need to wait for a long time. This suspension is started by raising an artificial error.
+These errors should be re-raised by the agent, instead of ingested.
+
+Therefore, you should always set your tool's `failure_error_function` to raise Restate errors like suspensions.
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#here"}
+@function_tool(failure_error_function=raise_restate_errors)
+async def get_weather(
+    wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
+) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    restate_context = wrapper.context
+    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
+```
+
+This error function will also re-raise any terminal errors that happen during tool execution.
+
+You can then handle the terminal error in your agent logic if needed, or let it fail the invocation:
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#handle"}
+try:
+    result = await Runner.run(
+        weather_agent,
+        input=prompt.message,
+        context=restate_context,
+        run_config=RunConfig(
+            model="gpt-4o",
+            model_provider=DurableModelCalls(restate_context, max_retries=2),
+            model_settings=ModelSettings(parallel_tool_calls=False),
+        ),
+    )
+except restate.TerminalError as e:
+    # Handle terminal errors gracefully
+    return "The agent couldn't complete the request."
+```
+
+
+<Warning>
+    The OpenAI Agent SDK also allows setting `failure_error_function` to `None`, which will rethrow any error in the agent execution as-is.
+    Also for example invalid LLM responses (e.g. tool call with invalid arguments or to a tool that doesn't exist).
+    The error will then lead to Restate retries. Restate will recover the invocation by replaying the journal entries.
+    This can lead to infinite retries if the error is not transient.
+    Therefore, be careful when using this option and handle errors appropriately in your agent logic.
+    You also might want to set [a retry policy at the service or handler level](/services/configuration#how-to-configure) to avoid infinite retries.
+</Warning>
+
+#### Retry-ing transient errors
+
+If you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
 So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
 
 Here is a small practical example:
@@ -846,56 +895,11 @@ async function myToolWithRestate(ctx: restate.Context) {
 }
 ```
 
-If your tool calls other Restate handlers or workflows (for example sub-workflow or sub-agent), then these are also Restate Context actions that get retried until they succeed.
-
-Terminal errors thrown from Restate Context actions are not retried by Restate, and get processed by the OpenAI Agent SDK.
-Also here, the OpenAI Agent SDK will convert the error into a message to the LLM, and the agent will decide how to proceed.
-
-In some cases, you might want to treat terminal tool execution errors as permanent failures and stop the agent instead of letting the LLM decide how to proceed.
-You can do this by setting your tool's `failure_error_function` to raise Restate errors like suspensions.
-Now, any terminal error in the tool execution will be re-raised as a `TerminalError`, instead of swallowed by the agent.
-
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#here"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def get_weather(
-    wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
-) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    restate_context = wrapper.context
-    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
-```
-
-You can then handle the terminal error in your agent logic if needed, or let it fail the invocation:
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
-try:
-    result = await Runner.run(
-        weather_agent,
-        input=prompt.message,
-        context=restate_context,
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context, max_retries=2),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
-    )
-except restate.TerminalError as e:
-    # Handle terminal errors gracefully
-    return "The agent couldn't complete the request."
-```
-
 
 <Info>
 You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `ctx.run` steps in your tool executions.
 </Info>
 
-<Warning>
-    The OpenAI Agent SDK also allows setting `failure_error_function` to `None`, which will rethrow any error in the agent execution as-is.
-    Also for example invalid LLM responses (e.g. tool call with invalid arguments or to a tool that doesn't exist).
-    The error will then lead to Restate retries. Restate will recover the invocation by replaying the journal entries.
-    This can lead to infinite retries if the error is not transient.
-    Therefore, be careful when using this option and handle errors appropriately in your agent logic.
-    You also might want to set [a retry policy at the service or handler level](/services/configuration#how-to-configure) to avoid infinite retries.
-</Warning>
 
 ## Advanced patterns
 
@@ -904,7 +908,7 @@ You can set [custom retry policies](/guides/error-handling#at-the-run-block-leve
 If you need more control over the agent loop, you can implement it manually using Restate's durable primitives.
 
 This allows you to:
-- Parallelize tool calls with `restate.select`
+- Parallelize tool calls with [`restate.select`](/develop/python/concurrent-tasks#select) and [`restate.gather`](/develop/python/concurrent-tasks#waiting-for-all-tasks-to-complete)
 - Implement custom stopping conditions
 - Implement custom logic between steps (e.g. human approval)
 - Interact with external systems between steps
@@ -1091,18 +1095,13 @@ async def book(restate_context: restate.Context, prompt: BookingPrompt) -> str:
 Try it out by sending the following request:
 ```bash
 curl localhost:8080/BookingWithRollbackAgent/book \
---json '{"message": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."}'
+--json '{
+    "booking_id": "booking_123",
+    "message": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."
+}'
 ```
 
-This will succeed successfully. Have a look at the invocation trace in the UI.
-
-To see the compensation in action, ask for an SUV rental, which will cause the car booking step to fail and trigger the compensation logic:
-```bash
-curl localhost:8080/BookingWithRollbackAgent/book \
---json '{"message": "Planning a family vacation to Miami for 4 people from May 20-25. We need flights from Boston Logan BOS, a beachfront hotel for 4 guests, and an SUV rental with pick-up at BOS airport."}'
-```
-
-Have a look at the UI to see how the car booking fails, and the flight and hotel bookings are rolled back.
+Have a look at the UI to see how the flight booking fails, and the bookings are rolled back.
 
 Check out the [sagas guide](/guides/sagas) for more details.
 
@@ -1115,7 +1114,7 @@ Check out the [sagas guide](/guides/sagas) for more details.
 This allows you to build agents that run periodically, wait for specific times, or implement complex scheduling logic.
     Agents can either be long-running or reschedule themselves for later execution.
 
-    Have a look at the [scheduling docs](/develop/ts/durable-timers) to learn more.
+    Have a look at the [scheduling docs](/develop/python/durable-timers) to learn more.
 </Accordion>
 <Accordion title="Streaming back intermediate results">
 Have a look at the [pub-sub example](https://github.com/igalshilman/agent47/tree/main/packages/pubsub).
