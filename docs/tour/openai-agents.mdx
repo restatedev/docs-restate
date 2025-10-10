@@ -390,7 +390,7 @@ async def message(restate_context: ObjectContext, chat_message: ChatMessage) -> 
     )
 
     result = await Runner.run(
-        Agent("Assistant", "You are a helpful assistant."),
+        Agent(name="Assistant", instructions="You are a helpful assistant."),
         input=chat_message.message,
         run_config=RunConfig(
             model="gpt-4o",
@@ -832,7 +832,7 @@ These errors should be re-raised by the agent, instead of ingested.
 
 Therefore, you should always set your tool's `failure_error_function` to raise Restate errors like suspensions.
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#here"}
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#here"} 
 @function_tool(failure_error_function=raise_restate_errors)
 async def get_weather(
     wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
@@ -845,7 +845,7 @@ async def get_weather(
 This error function will also re-raise any terminal errors that happen during tool execution.
 
 You can then handle the terminal error in your agent logic if needed, or let it fail the invocation:
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#handle"}
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
 try:
     result = await Runner.run(
         weather_agent,
@@ -891,7 +891,7 @@ async function myToolWithRestate(ctx: restate.Context) {
       fetch('/api/data')
   );
   // Network failures get retried automatically
-  // Only terminal errors (like 404) reach the AI
+  // Only terminal errors reach the AI
 }
 ```
 
@@ -932,11 +932,6 @@ TOOLS = [
 ]
 
 
-async def get_weather(restate_context: Context, req: WeatherRequest) -> WeatherResponse:
-    """Get the current weather in a given location"""
-    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
-
-
 manual_loop_agent = restate.Service("ManualLoopAgent")
 
 
@@ -970,7 +965,8 @@ async def run(ctx: Context, prompt: MultiWeatherPrompt) -> str:
         # Check if we need to call tools
         for tool_call in assistant_message.tool_calls:
             if tool_call.function.name == "get_weather":
-                tool_output = await get_weather(ctx, WeatherRequest(**json.loads(tool_call.function.arguments)))
+                req = WeatherRequest.model_validate_json(tool_call.function.arguments)
+                tool_output = await ctx.run_typed("Get weather", fetch_weather, city=req.city)
 
                 # Add tool response to messages
                 messages.append({
