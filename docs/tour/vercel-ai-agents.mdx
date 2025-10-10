@@ -197,10 +197,7 @@ const { text } = await generateText({
       execute: async (claim: InsuranceClaim): Promise<boolean> => {
         const approval = ctx.awakeable<boolean>();
         await ctx.run("request-review", () =>
-          requestHumanReview(
-            `Please review: ${JSON.stringify(claim)}`,
-            approval.id,
-          ),
+          requestHumanReview(claim, approval.id),
         );
         return approval.promise;
       },
@@ -403,10 +400,7 @@ export const humanApprovalWorfklow = restate.service({
     requestApproval: async (ctx: restate.Context, claim: InsuranceClaim) => {
       const approval = ctx.awakeable<boolean>();
       await ctx.run("request-review", () =>
-        requestHumanReview(
-          `Please review: ${JSON.stringify(claim)}`,
-          approval.id,
-        ),
+        requestHumanReview(claim, approval.id),
       );
       return approval.promise;
     },
@@ -467,7 +461,7 @@ const { text } = await generateText({
     "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
   tools: {
     analyzeEligibility: tool({
-      description: "Analyze eligibility result.",
+      description: "Analyze claim eligibility.",
       inputSchema: InsuranceClaimSchema,
       execute: async (claim: InsuranceClaim) =>
         ctx.serviceClient(eligibilityAgent).run(claim),
@@ -538,6 +532,7 @@ const { text } = await generateText({
       description: "Calculate claim metrics.",
       inputSchema: InsuranceClaimSchema,
       execute: async (claim: InsuranceClaim) => {
+        // Execute each calculation as a parallel durable step
         return RestatePromise.all([
           ctx.run("eligibility", () => checkEligibility(claim)),
           ctx.run("cost", () => compareToStandardRates(claim)),
@@ -592,11 +587,12 @@ export default restate.service({
   name: "ParallelAgentClaimApproval",
   handlers: {
     run: async (ctx: restate.Context, claim: InsuranceClaim) => {
-      const [eligibility, rateComparison, fraudCheck] = await RestatePromise.all([
-        ctx.serviceClient(eligibilityAgent).run(claim),
-        ctx.serviceClient(rateComparisonAgent).run(claim),
-        ctx.serviceClient(fraudCheckAgent).run(claim),
-      ]);
+      const [eligibility, rateComparison, fraudCheck] =
+        await RestatePromise.all([
+          ctx.serviceClient(eligibilityAgent).run(claim),
+          ctx.serviceClient(rateComparisonAgent).run(claim),
+          ctx.serviceClient(fraudCheckAgent).run(claim),
+        ]);
 
       const model = wrapLanguageModel({
         model: openai("gpt-4o"),
@@ -790,13 +786,13 @@ Here is an example of a manual agent loop:
 export default restate.service({
   name: "ManualLoopAgent",
   handlers: {
-    run: async (ctx: restate.Context, {prompt}: { prompt: string }) => {
-      const messages = [{role: 'user', content: prompt} as ModelMessage];
+    run: async (ctx: restate.Context, { prompt }: { prompt: string }) => {
+      const messages = [{ role: "user", content: prompt } as ModelMessage];
 
       while (true) {
         const model = wrapLanguageModel({
           model: openai("gpt-4o"),
-          middleware: durableCalls(ctx, {maxRetryAttempts: 3}),
+          middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
         });
 
         const result = await generateText({
@@ -804,8 +800,8 @@ export default restate.service({
           messages,
           tools: {
             getWeather: tool({
-              name: 'getWeather',
-              description: 'Get the current weather in a given location',
+              name: "getWeather",
+              description: "Get the current weather in a given location",
               inputSchema: z.object({
                 city: z.string(),
               }),
@@ -816,19 +812,22 @@ export default restate.service({
 
         messages.push(...result.response.messages);
 
-        if (result.finishReason === 'tool-calls') {
+        if (result.finishReason === "tool-calls") {
           // Handle all tool call execution here
           for (const toolCall of result.toolCalls) {
-            if (toolCall.toolName === 'getWeather') {
-              const toolOutput = await getWeather(ctx, toolCall.input as { city: string });
+            if (toolCall.toolName === "getWeather") {
+              const toolOutput = await getWeather(
+                ctx,
+                toolCall.input as { city: string },
+              );
               messages.push({
-                role: 'tool',
+                role: "tool",
                 content: [
                   {
                     toolName: toolCall.toolName,
                     toolCallId: toolCall.toolCallId,
-                    type: 'tool-result',
-                    output: {type: 'json', value: toolOutput},
+                    type: "tool-result",
+                    output: { type: "json", value: toolOutput },
                   },
                 ],
               });
@@ -839,8 +838,8 @@ export default restate.service({
           return result.text;
         }
       }
-    }
-  }
+    },
+  },
 });
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/advanced/manual-loop-agent.ts" />
@@ -868,9 +867,8 @@ Just track the rollback actions as you go, let the agent rethrow terminal tool e
 
 Here is an example of a travel booking agent that first reserves a hotel, flight and car, and then either confirms them or rolls back if any step fails with a terminal error (e.g. car type not available):
 ```typescript advanced/rollback-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/advanced/rollback-agent.ts#here"} 
-const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
+const book = async (ctx: restate.Context, { bookingId, prompt }: { bookingId: string, prompt: string }) => {
   const on_rollback: { (): restate.RestatePromise<any> }[] = [];
-  const on_success: { (): restate.RestatePromise<any> }[] = [];
 
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
@@ -881,63 +879,35 @@ const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
     const { text } = await generateText({
       model,
       system: `Book a complete travel package with the requirements in the prompt.
-        Use the tools to request booking of hotel, flight, car.`,
+        Use tools to first book the hotel, then the flight.`,
       prompt,
       tools: {
         bookHotel: tool({
           description: "Book a hotel reservation",
           inputSchema: HotelBookingSchema,
           execute: async (req: HotelBooking) => {
-            const result = await ctx.run("book-hotel", () => reserveHotel(req));
-            on_success.push(() =>
-              ctx.run("confirm-hotel", () => confirmHotel(result.id)),
-            );
             on_rollback.push(() =>
-              ctx.run("cancel-hotel", () => cancelHotel(result.id)),
+              ctx.run("cancel-hotel", () => cancelHotel(bookingId)),
             );
-            return result;
+            return ctx.run("book-hotel", () => reserveHotel(bookingId, req));
           },
         }),
         bookFlight: tool({
           description: "Book a flight",
           inputSchema: FlightBookingSchema,
           execute: async (req: FlightBooking) => {
-            const result = await ctx.run("book-flight", () =>
-              reserveFlight(req),
-            );
-            on_success.push(() =>
-              ctx.run("confirm-flight", () => confirmFlight(result.id)),
-            );
             on_rollback.push(() =>
-              ctx.run("cancel-flight", () => cancelFlight(result.id)),
+              ctx.run("cancel-flight", () => cancelFlight(bookingId)),
             );
-            return result;
+            return ctx.run("book-flight", () => reserveFlight(bookingId, req));
           },
         }),
-        bookCar: tool({
-          description: "Book a car rental",
-          inputSchema: CarBookingSchema,
-          execute: async (req: CarBooking) => {
-            const result = await ctx.run("book-car", () => reserveCar(req));
-            on_success.push(() =>
-              ctx.run("confirm-car", () => confirmCar(result.id)),
-            );
-            on_rollback.push(() =>
-              ctx.run("cancel-car", () => cancelCar(result.id)),
-            );
-            return result;
-          },
-        }),
+        // ... similar for car rental ...
       },
       stopWhen: [stepCountIs(10)],
       onStepFinish: rethrowTerminalToolError,
       providerOptions: { openai: { parallelToolCalls: false } },
     });
-
-    for (const confirm of on_success) {
-      await confirm();
-    }
-
     return text;
   } catch (error) {
     console.log("Error occurred, rolling back all bookings...");
