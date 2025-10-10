@@ -38,6 +38,10 @@ const LANGUAGE_SYMBOLS = {
     toml: {
         commentSymbol: "#",
         serviceSymbol: [],
+    },
+    yaml: {
+        commentSymbol: "#",
+        serviceSymbol: [],
     }
 };
 
@@ -50,6 +54,7 @@ function extractLanguageSymbol(filePath) {
     if (filePath.endsWith(".rs")) return LANGUAGE_SYMBOLS.rust;
     if (filePath.endsWith(".proto")) return LANGUAGE_SYMBOLS.proto;
     if (filePath.endsWith(".toml")) return LANGUAGE_SYMBOLS.toml;
+    if (filePath.endsWith(".yaml") || filePath.endsWith(".yml")) return LANGUAGE_SYMBOLS.yaml;
     throw new Error(`language not detected for filepath ${filePath}`);
 }
 
