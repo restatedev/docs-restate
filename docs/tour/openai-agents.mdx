@@ -24,7 +24,7 @@ A Restate AI application has two main components:
 
 <img src="/img/tour/agents/ai-app-layout.png" alt="Application Structure"/>
 
-Restate works with how you already deploy your agents, whether that's in Docker, on Kubernetes, or via serverless platforms (Vercel, Modal, Cloudflare Workers,...). You don't need to run your agents in any special way.
+Restate works with how you already deploy your agents, whether that's in Docker, on Kubernetes, or via serverless platforms (Modal, AWS Lambda...). You don't need to run your agents in any special way.
 
 Let's run an example locally to get a better feel for how it works.
 
@@ -198,7 +198,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 
 **Benefits with Restate:**
 - If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
-- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://restate.dev/blog/we-replaced-400-lines-of-stepfunctions-asl-with-40-lines-of-typescript-by-making-lambdas-suspendable/)).
+- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
 
 Here's an insurance claim agent that asks for human approval for high-value claims:
 
@@ -464,10 +464,10 @@ Virtual Objects are ideal for implementing any entity with mutable state:
 </Accordion>
 
 <Accordion title={"Stateful Serverless Agents"}>
-    You can run Virtual Objects on serverless platforms like Vercel, Modal, Cloudflare Workers, or AWS Lambda.
+    You can run Virtual Objects on serverless platforms like Modal, Render, or AWS Lambda.
     When the request comes in, Restate attaches the correct state to the request, so your handler can access it locally.
 
-    This way, you can implement stateful, serverless agents without managing any external state store and without worrying about concurrency issues.
+    This way, you can implement [stateful, serverless agents without managing any external state store](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting) and without worrying about concurrency issues.
 </Accordion>
 
 
@@ -818,7 +818,7 @@ run_config=RunConfig(
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/tour_openai/openai-agents/tour-of-agents/app/errorhandling_fail_on_terminal_tool_agent.py" />
 
-Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+By default, the middleware retries three times. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
 
 ### Tool execution errors
 
@@ -852,7 +852,7 @@ Terminal errors thrown from Restate Context actions are not retried by Restate, 
 Also here, the OpenAI Agent SDK will convert the error into a message to the LLM, and the agent will decide how to proceed.
 
 In some cases, you might want to treat terminal tool execution errors as permanent failures and stop the agent instead of letting the LLM decide how to proceed.
-You can do this by setting your tool's `failure_error_function` to `raise_terminal_error` from the Restate middleware.
+You can do this by setting your tool's `failure_error_function` to raise Restate errors like suspensions.
 Now, any terminal error in the tool execution will be re-raised as a `TerminalError`, instead of swallowed by the agent.
 
 ```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/tour_openai/openai-agents/tour-of-agents/app/error_handling.py#here"} 

@@ -17,7 +17,7 @@ export default restate.service({
             fetch('/api/data')
         );
         // Network failures get retried automatically
-        // Only terminal errors (like 404) reach the AI
+        // Only terminal errors reach the AI
       }
       // <end_here>
     },

@@ -21,5 +21,5 @@ async def my_tool_with_restate(ctx):
 
     result = await ctx.run('fetch-data', fetch_data)
     # Network failures get retried automatically
-    # Only terminal errors (like 404) reach the AI
+    # Only terminal errors reach the AI
     return result
