@@ -1,7 +1,7 @@
 ---
-title: "AI Agents"
+title: "Tour of Restate for Agents with Vercel AI SDK"
+sidebarTitle: "Vercel AI SDK"
 description: "Build stateful, observable AI agents that recover from failures."
-icon: "robot"
 ---
 
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
@@ -10,7 +10,7 @@ AI agents are long-running processes that combine LLMs with tools and external A
 
 In this guide, you'll learn how to:
 - Build durable AI agents that recover automatically from crashes and API failures
-- Integrate with existing AI SDKs like Vercel AI SDK and OpenAI Agent SDK
+- Integrate Restate and the Vercel AI SDK
 - Observe and debug agent executions with detailed traces
 - Implement resilient human-in-the-loop workflows with approvals and timeouts
 - Manage conversation history and state across multi-turn interactions
@@ -178,7 +178,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 
 **Benefits with Restate:**
 - If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
-- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://restate.dev/blog/we-replaced-400-lines-of-stepfunctions-asl-with-40-lines-of-typescript-by-making-lambdas-suspendable/)).
+- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
 
 Here's an insurance claim agent that asks for human approval for high-value claims:
 
@@ -197,10 +197,7 @@ const { text } = await generateText({
       execute: async (claim: InsuranceClaim): Promise<boolean> => {
         const approval = ctx.awakeable<boolean>();
         await ctx.run("request-review", () =>
-          requestHumanReview(
-            `Please review: ${JSON.stringify(claim)}`,
-            approval.id,
-          ),
+          requestHumanReview(claim, approval.id),
         );
         return approval.promise;
       },
@@ -220,14 +217,20 @@ You can also use awakeables outside of tools, for example, to implement human ap
 </Info>
 
 <Accordion title={"Try out human approval"} icon={"laptop"}>
-    Start a request for a high-value claim that needs human approval.
-    Use `/send` to start the claim asynchronously, without waiting for the result.
+    Start a request for a high-value claim that needs human approval, by clicking on the `run` handler of the `HumanClaimApprovalAgent`, and sending the default request via the playground.
+
+    Or use `curl` with `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
     curl localhost:8080/HumanClaimApprovalAgent/run/send \
     --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
     ```
 
     You can restart the service to see how Restate continues waiting for the approval.
+
+    If you wait for more than a minute, the invocation will get suspended.
+    <Frame>
+        <img src="/img/tour/agents/suspensions.png" alt="Invocation overview" />
+    </Frame>
 
     Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
 
@@ -269,6 +272,8 @@ curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
 --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
 ```
 You restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
 </Accordion>
 
 ## Chat Agent with Memory
@@ -321,8 +326,8 @@ Virtual Objects are ideal for implementing any entity with mutable state:
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
 - **Built-in concurrency control**: Restate’s Virtual Objects have built-in queuing and consistency guarantees per object key. Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context).
-    - Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions.
-    - Handlers with read-only access can run concurrently to the write-access handlers.
+    - Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions (for example `message()`).
+    - Handlers with read-only access can run concurrently to the write-access handlers (for example `getHistory()`).
 <img src="/img/tour/agents/chat_queue.png" alt="Queue"/>
 
 <Accordion title={"Try out Virtual Objects"} icon={"laptop"}>
@@ -372,7 +377,7 @@ Virtual Objects are ideal for implementing any entity with mutable state:
     You can run Virtual Objects on serverless platforms like Vercel, Modal, Cloudflare Workers, or AWS Lambda.
     When the request comes in, Restate attaches the correct state to the request, so your handler can access it locally.
 
-    This way, you can implement stateful, serverless agents without managing any external state store and without worrying about concurrency issues.
+    This way, you can implement [stateful, serverless agents without managing any external state store](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting) and without worrying about concurrency issues.
 </Accordion>
 
 ## Agent Orchestration
@@ -395,10 +400,7 @@ export const humanApprovalWorfklow = restate.service({
     requestApproval: async (ctx: restate.Context, claim: InsuranceClaim) => {
       const approval = ctx.awakeable<boolean>();
       await ctx.run("request-review", () =>
-        requestHumanReview(
-          `Please review: ${JSON.stringify(claim)}`,
-          approval.id,
-        ),
+        requestHumanReview(claim, approval.id),
       );
       return approval.promise;
     },
@@ -459,7 +461,7 @@ const { text } = await generateText({
     "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
   tools: {
     analyzeEligibility: tool({
-      description: "Analyze eligibility result.",
+      description: "Analyze claim eligibility.",
       inputSchema: InsuranceClaimSchema,
       execute: async (claim: InsuranceClaim) =>
         ctx.serviceClient(eligibilityAgent).run(claim),
@@ -530,6 +532,7 @@ const { text } = await generateText({
       description: "Calculate claim metrics.",
       inputSchema: InsuranceClaimSchema,
       execute: async (claim: InsuranceClaim) => {
+        // Execute each calculation as a parallel durable step
         return RestatePromise.all([
           ctx.run("eligibility", () => checkEligibility(claim)),
           ctx.run("cost", () => compareToStandardRates(claim)),
@@ -584,11 +587,12 @@ export default restate.service({
   name: "ParallelAgentClaimApproval",
   handlers: {
     run: async (ctx: restate.Context, claim: InsuranceClaim) => {
-      const [eligibility, rateComparison, fraudCheck] = await RestatePromise.all([
-        ctx.serviceClient(eligibilityAgent).run(claim),
-        ctx.serviceClient(rateComparisonAgent).run(claim),
-        ctx.serviceClient(fraudCheckAgent).run(claim),
-      ]);
+      const [eligibility, rateComparison, fraudCheck] =
+        await RestatePromise.all([
+          ctx.serviceClient(eligibilityAgent).run(claim),
+          ctx.serviceClient(rateComparisonAgent).run(claim),
+          ctx.serviceClient(fraudCheckAgent).run(claim),
+        ]);
 
       const model = wrapLanguageModel({
         model: openai("gpt-4o"),
@@ -634,7 +638,7 @@ LLM calls are costly, so you can configure retry behavior in both Restate and yo
 
 Restate distinguishes between two types of errors:
 - **Transient errors**: Temporary issues like network failures or rate limits. Restate automatically retries these until they succeed or the retry policy is exhausted.
-- **Terminal errors**: Permanent failures like invalid input or business rule violations. These are not retried and cause the invocation to fail.
+- **Terminal errors**: Permanent failures like invalid input or business rule violations. Restate does not retry these. The invocation fails permanently. You can catch these errors and handle them gracefully.
 
 You can throw a terminal error via:
 
@@ -647,7 +651,6 @@ You can catch and handle terminal errors in your agent logic if needed.
 Many AI SDKs also have their own retry behavior for LLM calls and tool executions, so let's look at how these interact.
 
 ### Retries of LLM calls
-
 
 In the Vercel AI SDK, set `maxRetries` on `generateText` (default: 2) to retry failed calls due to rate limits or transient errors.
 After retries are exhausted, the agent throws an error.
@@ -669,11 +672,38 @@ Once Restate’s retries are exhausted, the invocation fails with a `TerminalErr
 
 ### Tool execution errors
 
-The Vercel AI SDK will convert any error in tool execution into a message to the LLM, and the agent will decide how to proceed.
-By default, it also does this for terminal errors thrown in the tool execution.
-This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
+By default, the Vercel AI SDK will convert any errors in tool executions into a message to the LLM, and the agent will decide how to proceed.
+This is often desirable, as the LLM can decide to use a different tool or provide a fallback answer.
 
-However, if you want to treat terminal tool execution errors as permanent failures, you can use one of the following options.
+However, if you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
+So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
+
+Here is a small practical example:
+```typescript {"CODE_LOAD::ts/src/tour/agents/inline-tool-errors.ts#here"} 
+// Without ctx.run - error goes straight to agent
+async function myTool() {
+  const result = await fetch('/api/data'); // Might fail due to network
+  // If this fails, agent gets the error immediately
+}
+
+// With ctx.run - Restate handles retries
+async function myToolWithRestate(ctx: restate.Context) {
+  const result = await ctx.run('fetch-data', () =>
+      fetch('/api/data')
+  );
+  // Network failures get retried automatically
+  // Only terminal errors reach the AI
+}
+```
+
+If your tool calls other Restate handlers or workflows (for example sub-workflow or sub-agent), then these are also Restate Context actions that get retried until they succeed.
+
+
+Terminal errors thrown from Restate Context actions are not retried by Restate, and get processed by the Vercel AI SDK.
+Also here, the Vercel AI SDK will convert the error into a message to the LLM, and the agent will decide how to proceed.
+
+In some cases, you might want to treat terminal tool execution errors as permanent failures and stop the agent instead of letting the LLM decide how to proceed.
+The Restate middleware provides two utilities to help with this:
 
 <AccordionGroup>
 <Accordion title="Fail the agent on terminal tool errors">
@@ -756,13 +786,13 @@ Here is an example of a manual agent loop:
 export default restate.service({
   name: "ManualLoopAgent",
   handlers: {
-    run: async (ctx: restate.Context, {prompt}: { prompt: string }) => {
-      const messages = [{role: 'user', content: prompt} as ModelMessage];
+    run: async (ctx: restate.Context, { prompt }: { prompt: string }) => {
+      const messages = [{ role: "user", content: prompt } as ModelMessage];
 
       while (true) {
         const model = wrapLanguageModel({
           model: openai("gpt-4o"),
-          middleware: durableCalls(ctx, {maxRetryAttempts: 3}),
+          middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
         });
 
         const result = await generateText({
@@ -770,8 +800,8 @@ export default restate.service({
           messages,
           tools: {
             getWeather: tool({
-              name: 'getWeather',
-              description: 'Get the current weather in a given location',
+              name: "getWeather",
+              description: "Get the current weather in a given location",
               inputSchema: z.object({
                 city: z.string(),
               }),
@@ -782,19 +812,22 @@ export default restate.service({
 
         messages.push(...result.response.messages);
 
-        if (result.finishReason === 'tool-calls') {
+        if (result.finishReason === "tool-calls") {
           // Handle all tool call execution here
           for (const toolCall of result.toolCalls) {
-            if (toolCall.toolName === 'getWeather') {
-              const toolOutput = await getWeather(ctx, toolCall.input as { city: string });
+            if (toolCall.toolName === "getWeather") {
+              const toolOutput = await getWeather(
+                ctx,
+                toolCall.input as { city: string },
+              );
               messages.push({
-                role: 'tool',
+                role: "tool",
                 content: [
                   {
                     toolName: toolCall.toolName,
                     toolCallId: toolCall.toolCallId,
-                    type: 'tool-result',
-                    output: {type: 'json', value: toolOutput},
+                    type: "tool-result",
+                    output: { type: "json", value: toolOutput },
                   },
                 ],
               });
@@ -805,8 +838,8 @@ export default restate.service({
           return result.text;
         }
       }
-    }
-  }
+    },
+  },
 });
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/advanced/manual-loop-agent.ts" />
@@ -834,9 +867,8 @@ Just track the rollback actions as you go, let the agent rethrow terminal tool e
 
 Here is an example of a travel booking agent that first reserves a hotel, flight and car, and then either confirms them or rolls back if any step fails with a terminal error (e.g. car type not available):
 ```typescript advanced/rollback-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/advanced/rollback-agent.ts#here"} 
-const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
+const book = async (ctx: restate.Context, { bookingId, prompt }: { bookingId: string, prompt: string }) => {
   const on_rollback: { (): restate.RestatePromise<any> }[] = [];
-  const on_success: { (): restate.RestatePromise<any> }[] = [];
 
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
@@ -847,63 +879,35 @@ const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
     const { text } = await generateText({
       model,
       system: `Book a complete travel package with the requirements in the prompt.
-        Use the tools to request booking of hotel, flight, car.`,
+        Use tools to first book the hotel, then the flight.`,
       prompt,
       tools: {
         bookHotel: tool({
           description: "Book a hotel reservation",
           inputSchema: HotelBookingSchema,
           execute: async (req: HotelBooking) => {
-            const result = await ctx.run("book-hotel", () => reserveHotel(req));
-            on_success.push(() =>
-              ctx.run("confirm-hotel", () => confirmHotel(result.id)),
-            );
             on_rollback.push(() =>
-              ctx.run("cancel-hotel", () => cancelHotel(result.id)),
+              ctx.run("cancel-hotel", () => cancelHotel(bookingId)),
             );
-            return result;
+            return ctx.run("book-hotel", () => reserveHotel(bookingId, req));
           },
         }),
         bookFlight: tool({
           description: "Book a flight",
           inputSchema: FlightBookingSchema,
           execute: async (req: FlightBooking) => {
-            const result = await ctx.run("book-flight", () =>
-              reserveFlight(req),
-            );
-            on_success.push(() =>
-              ctx.run("confirm-flight", () => confirmFlight(result.id)),
-            );
             on_rollback.push(() =>
-              ctx.run("cancel-flight", () => cancelFlight(result.id)),
+              ctx.run("cancel-flight", () => cancelFlight(bookingId)),
             );
-            return result;
+            return ctx.run("book-flight", () => reserveFlight(bookingId, req));
           },
         }),
-        bookCar: tool({
-          description: "Book a car rental",
-          inputSchema: CarBookingSchema,
-          execute: async (req: CarBooking) => {
-            const result = await ctx.run("book-car", () => reserveCar(req));
-            on_success.push(() =>
-              ctx.run("confirm-car", () => confirmCar(result.id)),
-            );
-            on_rollback.push(() =>
-              ctx.run("cancel-car", () => cancelCar(result.id)),
-            );
-            return result;
-          },
-        }),
+        // ... similar for car rental ...
       },
       stopWhen: [stepCountIs(10)],
       onStepFinish: rethrowTerminalToolError,
       providerOptions: { openai: { parallelToolCalls: false } },
     });
-
-    for (const confirm of on_success) {
-      await confirm();
-    }
-
     return text;
   } catch (error) {
     console.log("Error occurred, rolling back all bookings...");
@@ -919,18 +923,13 @@ const book = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
 Try it out by sending the following request:
 ```bash
 curl localhost:8080/BookingWithRollbackAgent/book \
---json '{"prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."}'
+--json '{
+    "bookingId": "booking_123",
+    "prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."
+}'
 ```
 
-This will succeed successfully. Have a look at the invocation trace in the UI.
-
-To see the compensation in action, ask for an SUV rental, which will cause the car booking step to fail and trigger the compensation logic:
-```bash
-curl localhost:8080/BookingWithRollbackAgent/book \
---json '{"prompt": "Planning a family vacation to Miami for 4 people from May 20-25. We need flights from Boston Logan BOS, a beachfront hotel for 4 guests, and an SUV rental with pick-up at BOS airport."}'
-```
-
-Have a look at the UI to see how the car booking fails, and the flight and hotel bookings are rolled back.
+Have a look at the UI to see how the flight booking fails, and the bookings are rolled back.
 
 Check out the [sagas guide](/guides/sagas) for more details.
 

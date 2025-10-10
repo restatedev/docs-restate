@@ -62,21 +62,22 @@ function extractLanguageSymbol(filePath) {
 const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{["']?CODE_LOAD::([^#?\}]+)(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
 
 function parseOptions(optionsStr) {
-    // optionsStr: collapse_prequel&remove_comments
-    const opts = { collapsePrequel: false, removeComments: false };
+    // optionsStr: collapse_prequel&remove_comments&collapse_imports
+    const opts = { collapsePrequel: false, removeComments: false, collapseImports: false };
     if (!optionsStr) return opts;
     const parts = optionsStr.split("&");
     for (const part of parts) {
         if (part.includes("collapse_prequel")) opts.collapsePrequel = true;
         if (part.includes("remove_comments")) opts.removeComments = true;
+        if (part.includes("collapse_imports")) opts.collapseImports = true;
     }
     return opts;
 }
 
-function extractAndClean(fileContent, customTag, filePath, collapsePrequel, removeComments) {
+function extractAndClean(fileContent, customTag, filePath, collapsePrequel, removeComments, collapseImports) {
     const { commentSymbol, serviceSymbol } = extractLanguageSymbol(filePath);
     let lines;
-    
+
     // If custom tag is provided, use start/end tags
     if (customTag) {
         const startTag = `<start_${customTag}>`;
@@ -91,11 +92,11 @@ function extractAndClean(fileContent, customTag, filePath, collapsePrequel, remo
         // No custom tag, use entire file content
         lines = fileContent.split('\n').filter(line => !line.includes(`${commentSymbol} break`));
     }
-    
+
     if (filePath.endsWith(".go")) {
         lines = lines.map(line => line.replace(/\t/g, '  '));
     }
-    
+
     const leadingWhitespace = lines[0] ? lines[0].match(/^\s*/)[0] : '';
     let inBlockComment = false;
     let finalLines = lines.filter(line => {
@@ -115,7 +116,11 @@ function extractAndClean(fileContent, customTag, filePath, collapsePrequel, remo
     if (collapsePrequel) {
         finalLines = collapsePrequelFn(finalLines, serviceSymbol, commentSymbol);
     }
-    
+
+    if (collapseImports) {
+        finalLines = collapseImportsFn(finalLines, filePath, commentSymbol);
+    }
+
     return finalLines.map(line => line.replace(new RegExp(`^${leadingWhitespace}`), '')).join('\n');
 }
 
@@ -132,6 +137,90 @@ function collapsePrequelFn(lines, serviceSymbol, commentSymbol) {
     } else {
         throw new Error('No service/object/workflow found in file, so cannot collapse prequel');
     }
+}
+
+function collapseImportsFn(lines, filePath, commentSymbol) {
+    let startIndex = -1;
+    let inMultilineImport = false;
+    let multilineImportDepth = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmedLine = lines[i].trim();
+
+        // Skip empty lines and comments at the start
+        if (trimmedLine === '' || trimmedLine.startsWith(commentSymbol)) {
+            continue;
+        }
+
+        let isImportLine = false;
+
+        // Handle Python imports (both single-line and multiline)
+        if (filePath.endsWith('.py')) {
+            // Check if we're continuing a multiline import
+            if (inMultilineImport) {
+                multilineImportDepth += (trimmedLine.match(/\(/g) || []).length - (trimmedLine.match(/\)/g) || []).length;
+
+                // End of multiline import
+                if (multilineImportDepth <= 0) {
+                    inMultilineImport = false;
+                    multilineImportDepth = 0;
+                }
+                isImportLine = true; // This line is part of import
+            } else {
+                // Check for regular import statements
+                isImportLine = isImportStatement(trimmedLine, filePath);
+
+                // Check for start of multiline import
+                if (isImportLine && trimmedLine.includes('(')) {
+                    const openParens = (trimmedLine.match(/\(/g) || []).length;
+                    const closeParens = (trimmedLine.match(/\)/g) || []).length;
+                    if (openParens > closeParens) {
+                        inMultilineImport = true;
+                        multilineImportDepth = openParens - closeParens;
+                    }
+                }
+            }
+        } else {
+            // For non-Python files, use the regular import detection
+            isImportLine = isImportStatement(trimmedLine, filePath);
+        }
+
+        if (!isImportLine) {
+            // Found the first non-import line
+            startIndex = i;
+            break;
+        }
+    }
+
+    if (startIndex !== -1) {
+        return lines.slice(startIndex);
+    } else {
+        // If no non-import lines found, return all lines
+        return lines;
+    }
+}
+
+function isImportStatement(trimmedLine, filePath) {
+    if (filePath.endsWith('.ts') || filePath.endsWith('.js')) {
+        return trimmedLine.startsWith('import ') ||
+               trimmedLine.startsWith('const ') && trimmedLine.includes('require(') ||
+               trimmedLine.startsWith('export ') && trimmedLine.includes('from ');
+    } else if (filePath.endsWith('.py')) {
+        return trimmedLine.startsWith('import ') ||
+               trimmedLine.startsWith('from ') && trimmedLine.includes('import');
+    } else if (filePath.endsWith('.java') || filePath.endsWith('.kt')) {
+        return trimmedLine.startsWith('import ') ||
+               trimmedLine.startsWith('package ');
+    } else if (filePath.endsWith('.go')) {
+        return trimmedLine.startsWith('import ') ||
+               trimmedLine === 'import (' ||
+               (trimmedLine.startsWith('"') && trimmedLine.endsWith('"')); // import inside import block
+    } else if (filePath.endsWith('.rs')) {
+        return trimmedLine.startsWith('use ') ||
+               trimmedLine.startsWith('extern crate');
+    }
+
+    return false;
 }
 
 async function updateCodeBlocksInFile(filePath) {
@@ -174,7 +263,8 @@ async function updateCodeBlocksInFile(filePath) {
                     customTag,
                     snippetFullPath,
                     opts.collapsePrequel,
-                    opts.removeComments
+                    opts.removeComments,
+                    opts.collapseImports
                 );
             } catch (e) {
                 console.warn(`❌ Error processing snippet: ${loadPath}: ${e.message}`);
@@ -239,7 +329,8 @@ async function updateCodeBlocksInFile(filePath) {
                 customTag,
                 snippetFullPath,
                 opts.collapsePrequel,
-                opts.removeComments
+                opts.removeComments,
+                opts.collapseImports
             );
         } catch (e) {
             console.warn(`❌ Error processing snippet: ${loadPath}: ${e.message}`);
