@@ -1,0 +1,405 @@
+---
+title: "AI-Assisted Development"
+description: "Developing Restate apps with AI coding agents."
+icon: "robot"
+---
+
+The Restate documentation site includes several features to help you leverage AI coding agents like Cursor and Claude Code in your development workflow.
+
+## Contextual menu
+
+Each page of the Restate documentation has a contextual menu in the top right corner that provides quick access to various AI resources:
+
+<img src="/img/develop/contextual-menu.png" alt="Contextual menu"/>
+
+You can use this to quickly hydrate your AI chat with the content of the current page, or to add the Restate docs MCP server to Cursor, or VSCode.
+
+
+## Restate Docs as MCP server
+
+The Restate documentation is available as an MCP server, which you can add to Cursor or other AI coding agents that support MCP.
+
+You can either use the shortcuts in the [contextual menu](/develop/ai-assistant#contextual-menu) or follow the following guidelines:
+<Tabs>
+    <Tab title={"Claude"}>
+        1. Navigate to the `Connectors` page in the Claude settings.
+        2. Select `Add custom connector`.
+        3. Add the MCP server name and URL: `restate-docs`, `https://docs.restate.dev/mcp`.
+        4. Select `Add`.
+        5. When using Claude, select the attachments button (the plus icon).
+        6. Select your MCP server.
+    </Tab>
+    <Tab title={"Claude Code"}>
+        To add the Restate documentation MCP server to Claude Code, run the following command in your terminal:
+        ```shell
+        claude mcp add --transport http restate-docs https://docs.restate.dev/mcp
+        ```
+    </Tab>
+    <Tab title={"Cursor"}>
+        1. Use `Command` + `Shift` + `P` (`Ctrl` + `Shift` + `P` on Windows) to open the command palette.
+        2. Search for `“Open MCP settings”`.
+        3. Select `Add custom MCP`. This will open the `mcp.json` file.
+        4. In `mcp.json`, configure your server:
+        ```json
+        {
+            "mcpServers": {
+                "restate-docs": {
+                    "url": "https://docs.restate.dev/mcp"
+                }
+            }
+        }
+        ```
+    </Tab>
+    <Tab title={"VS Code"}>
+        1. Create a `.vscode/mcp.json` file.
+        2. In `mcp.json`, configure your server:
+        ```json
+        {
+            "servers": {
+            "restate-docs": {
+                    "type": "http",
+                    "url": "https://docs.restate.dev/mcp"
+                }
+            }
+        }
+        ```
+    </Tab>
+</Tabs>
+
+More information in the [Mintlify documentation](https://www.mintlify.com/docs/ai/model-context-protocol#using-your-mcp-server).
+
+## Coding agent rules
+
+To improve the performance of coding agents when implementing Restate applications, add the following rules to your agent's context.
+
+<CodeGroup>
+````markdown expandable TypeScript SDK
+# Restate TypeScript SDK Rules
+
+## Core Concepts
+
+- Restate provides durable execution: code automatically stores completed steps and resumes from where it left off on failures
+- All handlers receive a `Context` object as the first argument
+- Handlers can take one optional JSON-serializable input and must return a JSON-serializable output
+- Services are stateless - Restate Server stores all state and execution history
+
+## Service Types
+
+### Basic Services
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, input: string) => {
+      return `${input}!`;
+    },
+  },
+});
+
+restate.serve({ services: [myService] });
+```
+
+### Virtual Objects (Stateful, Key-Addressable)
+```typescript
+const myObject = restate.object({
+  name: "MyObject",
+  handlers: {
+    // Exclusive handler (default) - single-writer guarantee
+    myHandler: async (ctx: restate.ObjectContext, input: string) => {
+      return `${input} ${ctx.key}!`;
+    },
+    // Shared handler - concurrent reads
+    myConcurrentHandler: restate.handlers.object.shared(
+      async (ctx: restate.ObjectSharedContext, input: string) => {
+        return `${input} ${ctx.key}!`;
+      }
+    ),
+  },
+});
+```
+
+### Workflows
+```typescript
+const myWorkflow = restate.workflow({
+  name: "MyWorkflow",
+  handlers: {
+    // Required: run handler (executes once per workflow ID)
+    run: async (ctx: restate.WorkflowContext, req: string) => {
+      // Workflow logic here
+      return "success";
+    },
+    // Shared handlers for interaction
+    interactWithWorkflow: async (ctx: restate.WorkflowSharedContext) => {
+      // Interaction logic
+    },
+  },
+});
+```
+
+## Context Operations
+
+### State Management (Virtual Objects & Workflows only)
+```typescript
+// Get state
+const count = (await ctx.get<number>("count")) ?? 0;
+
+// Set state
+ctx.set("count", count + 1);
+
+// Clear state
+ctx.clear("count");
+ctx.clearAll();
+
+// Get all state keys
+const keys = await ctx.stateKeys();
+```
+
+### Service Communication
+
+#### Request-Response
+```typescript
+// Call a Service
+const response = await ctx.serviceClient(myService).myHandler("Hi");
+
+// Call a Virtual Object
+const response = await ctx.objectClient(myObject, "key").myHandler("Hi");
+
+// Call a Workflow
+const response = await ctx.workflowClient(myWorkflow, "wf-id").run("Hi");
+```
+
+#### One-Way Messages
+```typescript
+ctx.serviceSendClient(myService).myHandler("Hi");
+ctx.objectSendClient(myObject, "key").myHandler("Hi");
+ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
+```
+
+#### Delayed Messages
+```typescript
+ctx.serviceSendClient(myService).myHandler(
+  "Hi",
+  restate.rpc.sendOpts({ delay: { hours: 5 } })
+);
+```
+
+#### With Idempotency Key
+```typescript
+const response = await ctx.serviceClient(myService).myHandler(
+  "Hi",
+  restate.rpc.opts({ idempotencyKey: "my-key" })
+);
+```
+
+### Side Effects (Non-Deterministic Operations)
+```typescript
+// Wrap non-deterministic code in ctx.run
+const result = await ctx.run("my-side-effect", async () => {
+  return await callExternalAPI();
+});
+```
+
+### Durable Timers
+```typescript
+// Sleep
+await ctx.sleep({ seconds: 30 });
+
+// Schedule delayed call (different from sleep + send)
+ctx.serviceSendClient(myService).myHandler(
+  "Hi",
+  restate.rpc.sendOpts({ delay: { hours: 5 } })
+);
+```
+
+### Awakeables (External Events)
+```typescript
+// Create awakeable
+const { id, promise } = ctx.awakeable<string>();
+
+// Send ID to external system
+await ctx.run(() => requestHumanReview(name, id));
+
+// Wait for result
+const review = await promise;
+
+// Resolve from another handler
+ctx.resolveAwakeable(id, "Looks good!");
+
+// Reject from another handler
+ctx.rejectAwakeable(id, "Cannot be reviewed");
+```
+
+### Durable Promises (Workflows only)
+```typescript
+// Wait for promise
+const review = await ctx.promise<string>("review");
+
+// Resolve promise
+await ctx.promise<string>("review").resolve(review);
+```
+
+### Invocation Management
+```typescript
+// Attach to invocation
+const handle = ctx.serviceSendClient(myService).myHandler(
+  "Hi",
+  restate.rpc.sendOpts({ idempotencyKey: "my-key" })
+);
+const invocationId = await handle.invocationId;
+const response = await ctx.attach(invocationId);
+
+// Cancel invocation
+ctx.cancel(invocationId);
+```
+
+## Logging
+
+Always use `ctx.console` instead of regular `console` to avoid duplicate logs during replays:
+
+```typescript
+ctx.console.info("This will not be printed again during replays");
+ctx.console.debug("Debug message");
+ctx.console.error("Error message");
+```
+
+## Serialization
+
+### Default (JSON)
+Built-in JSON serialization for all operations.
+
+### Zod Schemas
+```typescript
+import { z } from "zod";
+import { serde } from "@restatedev/restate-sdk-zod";
+
+const Greeting = z.object({ name: z.string() });
+const GreetingResponse = z.object({ result: z.string() });
+
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
+      async (ctx: restate.Context, { name }) => {
+        return { result: `You said hi to ${name}!` };
+      }
+    ),
+  },
+});
+```
+
+### Custom Serialization
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: restate.handlers.handler(
+      {
+        input: restate.serde.binary,
+        output: restate.serde.binary,
+      },
+      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
+        return data;
+      }
+    ),
+  },
+});
+```
+
+## Error Handling
+
+### Terminal Errors (No Retry)
+```typescript
+import { TerminalError } from "@restatedev/restate-sdk";
+
+throw new TerminalError("Invalid input - will not retry");
+```
+
+### Retryable Errors
+```typescript
+// Any other thrown error will be retried
+throw new Error("Temporary failure - will retry");
+```
+
+## Testing
+
+```typescript
+import { RestateTestEnvironment } from "@restatedev/restate-sdk-testcontainers";
+import * as clients from "@restatedev/restate-sdk-clients";
+
+describe("MyService", () => {
+  let restateTestEnvironment: RestateTestEnvironment;
+  let restateIngress: clients.Ingress;
+
+  beforeAll(async () => {
+    restateTestEnvironment = await RestateTestEnvironment.start(
+      (restateServer) => restateServer.bind(router)
+    );
+    restateIngress = clients.connect({ url: restateTestEnvironment.baseUrl() });
+  }, 20_000);
+
+  afterAll(async () => {
+    await restateTestEnvironment?.stop();
+  });
+
+  it("Can call methods", async () => {
+    const client = restateIngress.objectClient(router, "myKey");
+    await client.greet("Test!");
+  });
+
+  it("Can read/write state", async () => {
+    const state = restateTestEnvironment.stateOf(router, "myKey");
+    await state.set("count", 123);
+    expect(await state.get("count")).toBe(123);
+  });
+});
+```
+
+## SDK Clients (External Invocations)
+
+```typescript
+import * as clients from "@restatedev/restate-sdk-clients";
+
+const restateClient = clients.connect({ url: "http://localhost:8080" });
+
+// Request-response
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler({ input: "Hi" });
+
+// One-way
+await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .myHandler({ input: "Hi" });
+
+// Delayed
+await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .myHandler({ input: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
+```
+
+## Best Practices
+
+1. **Always use `ctx.console` for logging** - prevents duplicate logs during replays
+2. **Wrap non-deterministic operations in `ctx.run`** - ensures deterministic replay
+3. **Use awakeables for external events** - enables durable waiting for callbacks
+4. **Use durable promises in workflows** - simpler signaling between workflow handlers
+5. **Add idempotency keys for critical operations** - prevents duplicate execution
+6. **Use Virtual Objects for stateful entities** - provides single-writer guarantee
+7. **Use Workflows for long-running processes** - enables human-in-the-loop patterns
+8. **Avoid direct service-to-service calls** - always go through Restate context for durability
+
+````
+
+</CodeGroup>
+
+
+## llms.txt and llm-full.txt
+
+The Restate documentation is available in markdown, for easy ingestion by LLMs.
+
+Add `.md` to any page’s URL to view a Markdown version.
+
+The documentation also includes [`llms.txt`](/llms.txt) (navigation structure) and [`llm-full.txt`](/llms-full.txt) (full documentation) files.
