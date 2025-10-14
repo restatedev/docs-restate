@@ -73,17 +73,17 @@ Cancellation is non-blocking. The API call may return before cancellation comple
     3. **SDK surfaces cancellation** at the next await point in your handler code
 
     The cancellation exception (`TerminalError` in TypeScript/Python, `TerminalException` in Java/Kotlin) is thrown at the next **await point** - operations that wait for a result:
-    - `ctx.run()` / `ctx.runAsync().await()`
-    - Service calls (`ctx.serviceClient(...).call()`)
-    - `ctx.sleep()`
-    - `ctx.awakeable()` resolution
-    - Promise combinators (e.g., `Promise.all()`)
+    - Run actions: `ctx.run()`
+    - Request-response calls
+    - Sleep
+    - Awakeable resolution
+    - Promise combinators (e.g., `RestatePromise.all()`)
 
     Operations that are **not** await points will continue to execute and ignore cancellation:
-    - `ctx.set()` / `ctx.get()`
-    - `ctx.send()` (one-way calls)
-    - `ctx.sendDelayed()` (delayed calls)
-    - `ctx.uuid()`
+    - Setting and getting state
+    - Sending messages / one-way calls
+    - Delayed messages
+    - Deterministic UUID generation with the context (e.g., `ctx.uuid()`)
     - Other non-blocking context operations
 
     <Note>
@@ -93,14 +93,112 @@ Cancellation is non-blocking. The API call may return before cancellation comple
     ### Example
 
     <CodeGroup>
-    ```typescript {"CODE_LOAD::code/ts/src/cancellation-example.ts"}
-    ```
-    ```go {"CODE_LOAD::code/go/cancellation-example.go"}
-    ```
-    ```java {"CODE_LOAD::code/java/src/main/java/cancellation/CancellationExample.java"}
-    ```
-    ```python {"CODE_LOAD::code/python/cancellation_example.py"}
-    ```
+```typescript TypeScript {"CODE_LOAD::ts/src/services/cancellation-example.ts#here"} 
+async function processOrder(ctx: restate.ObjectContext, order: Order) {
+  // If cancellation happened before this line, this still executes
+  ctx.set("status", "processing");
+
+  // If cancellation happened before this line, this still executes
+  const paymentId = ctx.rand.uuidv4().toString();
+
+  try {
+    // If cancelled right before this line, ctx.run won't execute
+    // If cancelled during run block execution,
+    // then a terminal error gets thrown here once execution finishes
+    await ctx.run(() => processPayment(paymentId, order));
+
+    // If cancellation happened before this line, this still executes
+    ctx.serviceSendClient(notificationService).notify("Payment processed");
+
+  } catch (error) {
+    if (error instanceof restate.TerminalError) {
+      // Cancellation detected - run compensation
+      await ctx.run(() => refundPayment(paymentId, order));
+      throw error; // Re-throw to propagate cancellation
+    }
+  }
+}
+```
+```go Go {"CODE_LOAD::go/services/cancellation-example.go#here"}
+func (OrderService) processOrder(ctx restate.ObjectContext, order Order) error {
+  // If cancellation happened right before this line, this still executes
+  restate.Set(ctx, "status", "processing")
+
+  // If cancellation happened right before this line, this still executes
+  paymentId := restate.Rand(ctx).UUID().String()
+
+  // If cancelled right before this line, Run won't execute
+  // If cancelled during run block execution,
+  // then a terminal error gets returned here once execution finishes
+  _, err := restate.Run(ctx, func(ctx restate.RunContext) (Payment, error) {
+    return processPayment(paymentId, order)
+  })
+  if err != nil {
+    if restate.IsTerminalError(err) {
+      // Cancellation detected - run compensation
+      _, _ = restate.Run(ctx, func(ctx restate.RunContext) (any, error) {
+        return nil, refundPayment(paymentId)
+      })
+    }
+    return err
+  }
+
+  // If cancellation happened right before this line, this still executes
+  restate.ServiceSend(ctx, "NotificationService", "Notify").
+    Send("Payment processed")
+
+  return nil
+}
+```
+```java Java {"CODE_LOAD::java/src/main/java/services/CancellationExample.java#here"}
+@Handler
+public void processOrder(Context ctx, Order order) {
+  // If cancellation happened before this line, this still executes
+  ctx.set("status", "processing");
+
+  // If cancellation happened before this line, this still executes
+  String paymentId = ctx.random().nextUUID().toString();
+  try {
+
+    // If cancelled right before this line, ctx.run won't execute
+    // If cancelled during run block execution,
+    // then a terminal exception gets thrown here once execution finishes
+    ctx.run(() -> processPayment(paymentId, order));
+
+    // If cancellation happened right before this line, this still executes
+    NotificationServiceClient.fromContext(ctx)
+        .send()
+        .notify(order.getUserId(), "Payment processed");
+
+  } catch (TerminalException e) {
+    // Cancellation detected - run compensation
+    ctx.run(() -> refundPayment(paymentId, order));
+    throw e; // Re-throw to propagate cancellation
+  }
+}
+```
+```python Python {"CODE_LOAD::python/src/services/cancellation_example.py#here"}
+@order_service.handler()
+async def process_order(ctx: restate.ObjectContext, order: Order):
+    # If cancellation happened before this line, this still executes
+    ctx.set("status", "processing")
+
+    # If cancellation happened before this line, this still executes
+    payment_id = str(ctx.uuid())
+    try:
+        # If cancelled before this await, ctx.run won't execute
+        # If cancelled during run block execution,
+        # then a terminal error gets raised here once execution finishes
+        await ctx.run_typed("process-payment", process_payment, id=payment_id, order=order)
+
+        # If cancellation happened before this line, this still executes
+        ctx.send(notify, "Payment processed")
+
+    except TerminalError as e:
+        # Cancellation detected - run compensation
+        await ctx.run_typed("refund-payment", refund_payment, id=payment_id)
+        raise e # Re-throw to propagate cancellation
+```
     </CodeGroup>
 
     ### Call Graph Propagation
