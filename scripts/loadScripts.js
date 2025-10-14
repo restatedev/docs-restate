@@ -226,7 +226,7 @@ function isImportStatement(trimmedLine, filePath) {
 async function updateCodeBlocksInFile(filePath) {
     if (!fs.existsSync(filePath)) return;
     const ext = path.extname(filePath);
-    if (ext !== ".mdx") return;
+    if (ext !== ".mdx" && ext !== ".md") return;
     const fileContent = fs.readFileSync(filePath, "utf8");
     const updatedContent = await fileContent.replace(
         CODE_LOAD_REGEX,
@@ -283,7 +283,7 @@ async function updateCodeBlocksInFile(filePath) {
 async function updateCodeBlocksInFile(filePath) {
     if (!fs.existsSync(filePath)) return;
     const ext = path.extname(filePath);
-    if (ext !== ".mdx") return;
+    if (ext !== ".mdx" && ext !== ".md") return;
     const fileContent = fs.readFileSync(filePath, "utf8");
     
     // Find all matches first
@@ -350,7 +350,7 @@ function updateAllMdxFiles(directory = MDX_DIR) {
         const fullPath = path.join(directory, entry.name);
         if (entry.isDirectory()) {
             updateAllMdxFiles(fullPath); // Recursively process subdirectories
-        } else if (entry.isFile() && fullPath.endsWith(".mdx")) {
+        } else if (entry.isFile() && (fullPath.endsWith(".mdx") || fullPath.endsWith(".md"))) {
             updateCodeBlocksInFile(fullPath);
         }
     });
@@ -367,7 +367,7 @@ function startWatcher() {
         .on("change", (filePath) => {
             console.log(`✏️ File changed: ${filePath}`);
 
-            if (filePath.endsWith(".mdx")) {
+            if (filePath.endsWith(".mdx") || filePath.endsWith(".md")) {
                 // Check if it's a guide file (but not the overview itself)
                 if (filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
                     console.log("🔄 Guide file changed, regenerating overview...");
@@ -380,14 +380,14 @@ function startWatcher() {
             }
         })
         .on("add", (filePath) => {
-            if (filePath.endsWith(".mdx") && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
+            if ((filePath.endsWith(".mdx") || filePath.endsWith(".md")) && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
                 console.log(`📄 New guide file added: ${filePath}`);
                 console.log("🔄 Regenerating overview...");
                 generateGuidesOverview();
             }
         })
         .on("unlink", (filePath) => {
-            if (filePath.endsWith(".mdx") && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
+            if ((filePath.endsWith(".mdx") || filePath.endsWith(".md")) && filePath.includes("/guides/") && !filePath.endsWith("/overview.mdx")) {
                 console.log(`🗑️ Guide file removed: ${filePath}`);
                 console.log("🔄 Regenerating overview...");
                 generateGuidesOverview();
