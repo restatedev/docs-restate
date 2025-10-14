@@ -1,0 +1,176 @@
+---
+sidebar_position: 11
+description: "Test your handler logic."
+---
+
+# Testing
+
+The Go SDK provides a mocking framework to test your Restate handlers in isolation. The `mocks` package allows you to create mock contexts and set expectations for SDK operations.
+
+## Setup
+
+Import the mocking package in your test file:
+
+```go
+import (
+    "testing"
+    
+    restate "github.com/restatedev/sdk-go"
+    "github.com/restatedev/sdk-go/mocks"
+    "github.com/stretchr/testify/assert"
+)
+```
+
+## Creating a mock context
+
+Use `mocks.NewMockContext(t)` to create a mock context for your tests:
+
+```go
+func TestMyHandler(t *testing.T) {
+    mockCtx := mocks.NewMockContext(t)
+    
+    // Set up expectations...
+    
+    // Call your handler
+    result, err := myHandler(restate.WithMockContext(mockCtx), input)
+    
+    // Assert results
+    assert.NoError(t, err)
+    assert.Equal(t, expected, result)
+}
+```
+
+## Setting expectations
+
+### State operations
+
+Mock state get and set operations:
+
+```go
+// Mock getting state
+mockCtx.EXPECT().GetAndReturn("status", TicketAvailable)
+
+// Mock setting state
+mockCtx.EXPECT().Set("status", TicketReserved)
+
+// Mock clearing state
+mockCtx.EXPECT().Clear("status")
+
+// Mock clearing all state
+mockCtx.EXPECT().ClearAll()
+```
+
+### Service calls
+
+Mock calls to other services:
+
+```go
+// Mock a service call
+mockCtx.EXPECT().MockObjectClient(TicketServiceName, "ticket-123", "Reserve").
+    RequestAndReturn("userID", true, nil)
+
+// Mock a one-way call (send)
+mockCtx.EXPECT().MockObjectClient(TicketServiceName, "ticket-123", "Unreserve").
+    MockSend(restate.Void{})
+
+// Mock a delayed call
+mockCtx.EXPECT().MockObjectClient(UserSessionServiceName, "userID", "ExpireTicket").
+    MockSend("ticket-123", restate.WithDelay(15*time.Minute))
+```
+
+### Side effects (Run)
+
+Mock side effects using `RunAndExpect`:
+
+```go
+mockCtx.EXPECT().RunAndExpect(mockCtx, true, nil)
+```
+
+### Random values
+
+Mock random value generation:
+
+```go
+mockCtx.EXPECT().MockRand().UUID().Return(uuid.Max)
+```
+
+### Logging
+
+Mock the logger:
+
+```go
+mockCtx.EXPECT().Log().Return(slog.Default())
+```
+
+### Context key
+
+Mock the context key for Virtual Objects and Workflows:
+
+```go
+mockCtx.EXPECT().Key().Return("my-key")
+```
+
+## Testing workflows
+
+For workflows, you can mock promises and timers:
+
+```go
+func TestCheckout(t *testing.T) {
+    mockCtx := mocks.NewMockContext(t)
+    
+    mockCtx.EXPECT().Key().Return("userID")
+    mockCtx.EXPECT().GetAndReturn("tickets", []string{"ticket1"})
+    mockCtx.EXPECT().Log().Return(slog.Default())
+    
+    // Mock a timer
+    mockAfter := mockCtx.EXPECT().MockAfter(time.Minute)
+    
+    // Mock a service call that returns a future
+    mockResponseFuture := mockCtx.EXPECT().MockObjectClient(CheckoutServiceName, "", "Payment").
+        MockResponseFuture(PaymentRequest{UserID: "userID", Tickets: []string{"ticket1"}})
+    
+    // Mock selecting between futures
+    mockCtx.EXPECT().MockSelector(mockAfter, mockResponseFuture).
+        Select().Return(mockResponseFuture)
+    
+    // Mock the response
+    mockResponseFuture.EXPECT().ResponseAndReturn(PaymentResponse{ID: "paymentID", Price: 30}, nil)
+    
+    // Continue with other expectations...
+    mockCtx.EXPECT().MockObjectClient(TicketServiceName, "ticket1", "MarkAsSold").MockSend(restate.Void{})
+    mockCtx.EXPECT().Clear("tickets")
+    
+    ok, err := (&userSession{}).Checkout(restate.WithMockContext(mockCtx), restate.Void{})
+    assert.NoError(t, err)
+    assert.True(t, ok)
+}
+```
+
+## Complete example
+
+Here's a complete test for a Virtual Object handler:
+
+```go
+func TestReserve(t *testing.T) {
+    mockCtx := mocks.NewMockContext(t)
+    
+    // Set up expectations
+    mockCtx.EXPECT().GetAndReturn("status", TicketAvailable)
+    mockCtx.EXPECT().Set("status", TicketReserved)
+    
+    // Call the handler
+    ok, err := (&ticketService{}).Reserve(restate.WithMockContext(mockCtx), restate.Void{})
+    
+    // Assert results
+    assert.NoError(t, err)
+    assert.True(t, ok)
+}
+```
+
+## Best practices
+
+- **Set expectations in order**: Mock expectations should match the order of operations in your handler
+- **Use `WithMockContext`**: Always wrap your mock context with `restate.WithMockContext()` when calling handlers
+- **Test error cases**: Mock error returns to test error handling logic
+- **Keep tests focused**: Test one handler at a time with clear expectations
+- **Use assertion libraries**: Libraries like `testify/assert` make test assertions clearer
