@@ -1,6 +1,8 @@
 package main
 
 import (
+	"slices"
+
 	restate "github.com/restatedev/sdk-go"
 )
 
@@ -41,9 +43,9 @@ func (BookingService) Reserve(ctx restate.Context, request BookingRequest) (res 
 	// Register defer that executes compensations
 	defer func() {
 		if err != nil {
-			for i := len(compensations) - 1; i >= 0; i-- {
+			for _, compensation := range slices.Backward(compensations) {
 				_, compErr := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
-					return restate.Void{}, compensations[i]()
+					return restate.Void{}, compensation()
 				})
 				if compErr != nil {
 					err = compErr
