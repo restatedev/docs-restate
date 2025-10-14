@@ -58,12 +58,76 @@ Cancellation is non-blocking. The API call may return before cancellation comple
 
 <Accordion title="How Cancellation Works">
 
-    When an invocation is canceled, Restate propagates the cancellation recursively through the call graph:
+    ### Requirements
 
-    1. **Propagate to leaves**: Cancellation first reaches the leaves of the call graph. Restate interrupts any ongoing sleeps, awakeables, or other context actions at those points.
-    2. **Throw terminal error**: At the cancellation point, Restate throws a terminal error, signaling that normal execution cannot continue.
-    3. **Run compensation**: The handler runs its defined compensation logic to undo or mitigate side effects.
-    4. **Propagate upward**: The cancellation response then flows back up the call graph, ensuring that each parent invocation also executes its compensation logic if defined.
+    For cancellation to work, the invocation must:
+    - Be scheduled by Restate
+    - Reach the deployment (the service endpoint must be reachable)
+
+    If the deployment is not reachable, cancellation will not work. In this case, use [kill](#kill) instead.
+
+    ### Cancellation Flow
+
+    When an invocation is canceled:
+
+    1. **User sends cancellation request** to the Restate runtime
+    2. **Runtime forwards cancellation** to the SDK eagerly
+    3. **SDK surfaces cancellation** at the next await point in your handler code
+
+    The cancellation exception (`TerminalError` in TypeScript/Python, `TerminalException` in Java/Kotlin) is thrown at the next **await point** - operations that wait for a result:
+    - `ctx.run()` / `ctx.runAsync().await()`
+    - Service calls (`ctx.serviceClient(...).call()`)
+    - `ctx.sleep()`
+    - `ctx.awakeable()` resolution
+    - Promise combinators (e.g., `Promise.all()`)
+
+    Operations that are **not** await points will continue to execute and ignore cancellation:
+    - `ctx.set()` / `ctx.get()`
+    - `ctx.send()` (one-way calls)
+    - `ctx.sendDelayed()` (delayed calls)
+    - `ctx.uuid()`
+    - Other non-blocking context operations
+
+    <Note>
+        One-way calls (`ctx.send()`) and delayed calls (`ctx.sendDelayed()`) are detached from the call tree. They will be scheduled and execute fully even if the originating invocation is cancelled.
+    </Note>
+
+    ### Example
+
+    ```typescript
+    async function processOrder(ctx: Context, order: Order) {
+      // This executes - not an await point
+      ctx.set("status", "processing");
+      
+      try {
+        // If cancelled before this await, ctx.run won't execute
+        // If cancelled during execution, exception thrown here
+        const payment = await ctx.run(() => processPayment(order));
+        
+        // These one-way calls execute even if cancellation happens after
+        ctx.send(notificationService).notify(order.userId, "Payment processed");
+        
+        // If cancelled, exception thrown at this await point
+        await ctx.run(() => shipOrder(order));
+        
+      } catch (error) {
+        if (error instanceof TerminalError) {
+          // Cancellation detected - run compensation
+          await ctx.run(() => refundPayment(order));
+          throw error; // Re-throw to propagate cancellation
+        }
+      }
+    }
+    ```
+
+    ### Call Graph Propagation
+
+    Cancellation propagates recursively through the call graph:
+
+    1. **Propagate to leaves**: Cancellation first reaches the leaves of the call graph
+    2. **Throw at await points**: Each handler receives the cancellation exception at its next await point
+    3. **Run compensation**: Handlers execute their compensation logic (if defined)
+    4. **Propagate upward**: Cancellation flows back up the call graph, allowing each parent to compensate
 
 </Accordion>
 
