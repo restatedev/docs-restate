@@ -79,9 +79,8 @@ To improve the performance of coding agents when implementing Restate applicatio
 ## Core Concepts
 
 - Restate provides durable execution: code automatically stores completed steps and resumes from where it left off on failures
-- All handlers receive a `Context` object as the first argument
-- Handlers can take one optional JSON-serializable input and must return a JSON-serializable output
-- Services are stateless - Restate Server stores all state and execution history
+- All handlers receive a `Context`/`ObjectContext`/`WorkflowContext`/`ObjectSharedContext`/`WorkflowSharedContext` object as the first argument
+- Handlers can take one optional JSON-serializable input and must return a JSON-serializable output. Or specify the serializers.
 
 ## Service Types
 
@@ -141,6 +140,9 @@ const myWorkflow = restate.workflow({
 ## Context Operations
 
 ### State Management (Virtual Objects & Workflows only)
+❌ Never use global variables - not durable, lost across replicas.
+✅ Use `ctx.get()` and `ctx.set()` - durable and scoped to the object's key.
+
 ```typescript
 // Get state
 const count = (await ctx.get<number>("count")) ?? 0;
@@ -193,7 +195,10 @@ const response = await ctx.serviceClient(myService).myHandler(
 );
 ```
 
-### Side Effects (Non-Deterministic Operations)
+### Run Actions or Side Effects (Non-Deterministic Operations)
+❌ Never call external APIs/DBs directly - will re-execute during replay, causing duplicates.
+✅ Wrap in `ctx.run()` - Restate journals the result; runs only once.
+
 ```typescript
 // Wrap non-deterministic code in ctx.run
 const result = await ctx.run("my-side-effect", async () => {
@@ -201,7 +206,19 @@ const result = await ctx.run("my-side-effect", async () => {
 });
 ```
 
-### Durable Timers
+### Deterministic randoms and time
+
+❌ Never use `Math.random()` - non-deterministic and breaks replay logic.
+✅ Use `ctx.rand.random()` or `ctx.rand.uuidv4()` - Restate journals the result for deterministic replay.
+
+❌ Never use Date.now(), new Date() - returns different values during replay.
+✅ Use `await ctx.date.now();` - Restate records and replays the same timestamp.
+
+
+### Durable Timers and Sleep
+❌ Never use setTimeout() or sleep from other libraries - not durable, lost on restarts.
+✅ Use ctx.sleep() - durable timer that survives failures.
+
 ```typescript
 // Sleep
 await ctx.sleep({ seconds: 30 });
@@ -240,6 +257,70 @@ const review = await ctx.promise<string>("review");
 await ctx.promise<string>("review").resolve(review);
 ```
 
+## Concurrency
+Always use Restate combinators (`RestatePromise.all`, `RestatePromise.race`, `RestatePromise.any`, `RestatePromise.allSettled`) instead of JavaScript's native `Promise` methods - they journal execution order for deterministic replay.
+
+### `RestatePromise.all()` - Wait for All
+Returns when all futures complete. Use to wait for multiple operations to finish.
+```typescript
+// ❌ BAD
+const results = await Promise.all([call1(), call2()]);
+
+// ✅ GOOD
+const claude = ctx.serviceClient(ClaudeSonnet).ask("What is the weather?");
+const openai = ctx.serviceClient(OpenAI).ask("What is the weather?");
+const results = await RestatePromise.all([claude, openai]);
+```
+
+### `RestatePromise.race()` - Race Multiple Operations
+
+Returns immediately when the first future completes. Use for timeouts and racing operations.
+```typescript
+// ❌ BAD
+const result = await Promise.race([call1(), call2()]);
+
+// ✅ GOOD
+const confirmation = ctx.awakeable<string>();
+const result = await RestatePromise.race([
+    confirmation.promise,
+    ctx.sleep({ days: 1 }).then(() => { throw new restate.TerminalError("Timeout!"); })
+]);
+```
+
+### RestatePromise.any() - First Successful Result
+Returns the first successful result, ignoring rejections until all fail.
+```typescript
+// ❌ BAD - using Promise.any (not journaled)
+const result = await Promise.any([call1(), call2()]);
+
+// ✅ GOOD
+const result = await RestatePromise.any([
+    ctx.run(() => callLLM("gpt-4", prompt)),
+    ctx.run(() => callLLM("claude", prompt))
+]);
+```
+
+### `RestatePromise.allSettled()` - Wait for All (Success or Failure)
+Returns results of all promises, whether they succeeded or failed.
+```typescript
+// ❌ BAD
+const results = await Promise.allSettled([call1(), call2()]);
+
+// ✅ GOOD
+const results = await RestatePromise.allSettled([
+    ctx.serviceClient(Service1).call(),
+    ctx.serviceClient(Service2).call()
+]);
+
+results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+        console.log(`Call ${i} succeeded:`, result.value);
+    } else {
+        console.log(`Call ${i} failed:`, result.reason);
+    }
+});
+```
+
 ### Invocation Management
 ```typescript
 // Attach to invocation
@@ -254,22 +335,13 @@ const response = await ctx.attach(invocationId);
 ctx.cancel(invocationId);
 ```
 
-## Logging
-
-Always use `ctx.console` instead of regular `console` to avoid duplicate logs during replays:
-
-```typescript
-ctx.console.info("This will not be printed again during replays");
-ctx.console.debug("Debug message");
-ctx.console.error("Error message");
-```
-
 ## Serialization
 
 ### Default (JSON)
-Built-in JSON serialization for all operations.
+By default, TypeScript SDK uses built-in JSON support.
 
 ### Zod Schemas
+For type safety and validation with Zod, install: `npm install @restatedev/restate-sdk-zod`
 ```typescript
 import { z } from "zod";
 import { serde } from "@restatedev/restate-sdk-zod";
@@ -309,6 +381,8 @@ const myService = restate.service({
 ```
 
 ## Error Handling
+
+Restate retries failures indefinitely by default. For permanent business-logic failures (invalid input, declined payment), use TerminalError to stop retries immediately.
 
 ### Terminal Errors (No Retry)
 ```typescript
@@ -380,26 +454,15 @@ await restateClient
   .myHandler({ input: "Hi" }, clients.rpc.sendOpts({ delay: { seconds: 1 } }));
 ```
 
-## Best Practices
-
-1. **Always use `ctx.console` for logging** - prevents duplicate logs during replays
-2. **Wrap non-deterministic operations in `ctx.run`** - ensures deterministic replay
-3. **Use awakeables for external events** - enables durable waiting for callbacks
-4. **Use durable promises in workflows** - simpler signaling between workflow handlers
-5. **Add idempotency keys for critical operations** - prevents duplicate execution
-6. **Use Virtual Objects for stateful entities** - provides single-writer guarantee
-7. **Use Workflows for long-running processes** - enables human-in-the-loop patterns
-8. **Avoid direct service-to-service calls** - always go through Restate context for durability
-
 ````
 
 </CodeGroup>
 
 
-## llms.txt and llm-full.txt
+## llms.txt and llms-full.txt
 
 The Restate documentation is available in markdown, for easy ingestion by LLMs.
 
 Add `.md` to any page’s URL to view a Markdown version.
 
-The documentation also includes [`llms.txt`](/llms.txt) (navigation structure) and [`llm-full.txt`](/llms-full.txt) (full documentation) files.
+The documentation also includes [`llms.txt`](/llms.txt) (navigation structure) and [`llms-full.txt`](/llms-full.txt) (full documentation) files.
