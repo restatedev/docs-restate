@@ -1,4 +1,6 @@
-# Restate TypeScript SDK Rules
+---
+title: "Restate TypeScript SDK Rules"
+---
 
 ## Core Concepts
 
