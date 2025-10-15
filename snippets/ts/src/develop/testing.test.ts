@@ -11,9 +11,7 @@ describe("ExampleObject", () => {
   let restateIngress: clients.Ingress;
 
   beforeAll(async () => {
-    restateTestEnvironment = await RestateTestEnvironment.start(
-      (restateServer) => restateServer.bind(router)
-    );
+    restateTestEnvironment = await RestateTestEnvironment.start({services: [router]});
     restateIngress = clients.connect({ url: restateTestEnvironment.baseUrl() });
   }, 20_000);
 
