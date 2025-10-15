@@ -126,6 +126,17 @@ const ActionsExampleService = restate.service({
     },
 
     sendingMessagesExample: async (ctx: restate.Context, userId: string) => {
+      // <start_generic_call>
+      const response = await ctx.genericCall({
+        service: "MyObject",
+        method: "myHandler",
+        parameter: "Hi",
+        key: "Mary", // drop this for Service calls
+        inputSerde: restate.serde.json,
+        outputSerde: restate.serde.json,
+      });
+      // <end_generic_call>
+
       // <start_sending_messages>
       ctx.serviceSendClient(myService).myHandler("Hi");
       ctx.objectSendClient(myObject, "key").myHandler("Hi");

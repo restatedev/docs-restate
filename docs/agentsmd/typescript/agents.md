@@ -11,7 +11,7 @@ title: "Restate TypeScript SDK Rules"
 ## Service Types
 
 ### Basic Services
-```ts {"CODE_LOAD::ts/src/develop/service.ts#here"} 
+```ts {"CODE_LOAD::ts/src/develop/service.ts"} 
 import * as restate from "@restatedev/restate-sdk";
 
 export const myService = restate.service({
@@ -27,7 +27,7 @@ restate.serve({ services: [myService] });
 ```
 
 ### Virtual Objects (Stateful, Key-Addressable)
-```ts {"CODE_LOAD::ts/src/develop/virtual_object.ts#here"} 
+```ts {"CODE_LOAD::ts/src/develop/virtual_object.ts"} 
 import * as restate from "@restatedev/restate-sdk";
 
 export const myObject = restate.object({
@@ -48,7 +48,7 @@ restate.serve({ services: [myObject] });
 ```
 
 ### Workflows
-```ts {"CODE_LOAD::ts/src/develop/workflow.ts#here"} 
+```ts {"CODE_LOAD::ts/src/develop/workflow.ts"} 
 import * as restate from "@restatedev/restate-sdk";
 
 export const myWorkflow = restate.workflow({
@@ -118,6 +118,21 @@ ctx.serviceSendClient(myService).myHandler(
     "Hi",
     restate.rpc.sendOpts({ delay: { hours: 5 } })
 );
+```
+
+#### Generic Calls
+
+Call a service without using the generated client, but just String names.
+
+```ts {"CODE_LOAD::ts/src/develop/agentsmd/agentsmd-actions.ts#generic_call"} 
+const response = await ctx.genericCall({
+  service: "MyObject",
+  method: "myHandler",
+  parameter: "Hi",
+  key: "Mary", // drop this for Service calls
+  inputSerde: restate.serde.json,
+  outputSerde: restate.serde.json,
+});
 ```
 
 ### Run Actions or Side Effects (Non-Deterministic Operations)

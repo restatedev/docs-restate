@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import restate
 from datetime import timedelta
@@ -77,6 +78,12 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     ctx.object_send(my_object_handler, key="object-key", arg="Hi")
     ctx.workflow_send(run, "wf-id", arg="Hi")
     # <end_sending_messages>
+
+    # <start_request_response_generic>
+    response = await ctx.generic_call(
+        "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
+    )
+    # <end_request_response_generic>
 
     # <start_delayed_messages>
     ctx.service_send(

@@ -118,6 +118,16 @@ ctx.service_send(
 )
 ```
 
+#### Generic Calls
+
+Call a service without using the generated client, but just String names.
+
+```python {"CODE_LOAD::python/src/develop/agentsmd/actions.py#request_response_generic"} 
+response = await ctx.generic_call(
+    "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
+)
+```
+
 #### With Idempotency Key
 ```python
 response = await ctx.service_call(
