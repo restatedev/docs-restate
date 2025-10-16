@@ -1,0 +1,100 @@
+---
+title: "Single-Node Deployment"
+---
+
+
+
+- data ends in restate-data
+- needs to be on persisted disk
+- you can create backups
+
+
+On Kubernetes
+
+With CDK
+
+
+Talk about deploying to azure, google cloud
+
+We have been reading up on the documentation have noticed that restate is heavily flavoured towards AWS (lambda & s3). Are there any plans to support other cloud providers? We are especially asking for Azure, as thats what we are using.
+
+We do want to run restate in a clustered manner (not k8s), but afaik that seems to require us to have access to a s3 compatible object storage in order to be fault tolerant. Is this a right assumption?
+
+We have read about s3 proxies to azure blob, but its 3rd party and probably not something we want to rely on for an orchestrator in our system.
+
+We are aware of minio and that it could be ran in the same cluster, but how fault tolerant would that be? Can it use azure blob as its storage layer and act as a proxy?
+
+Are there any plans to support azure customers as well?
+
+Please add dedicated page for deployment of restate cluster on gke too and using Google cloud storage.
+
+
+
+Landeholt — 9/18/25, 10:27 AM
+Hello,
+
+We have been reading up on the documentation have noticed that restate is heavily flavoured towards AWS (lambda & s3). Are there any plans to support other cloud providers? We are especially asking for Azure, as thats what we are using.
+
+We do want to run restate in a clustered manner (not k8s), but afaik that seems to require us to have access to a s3 compatible object storage in order to be fault tolerant. Is this a right assumption?
+
+We have read about s3 proxies to azure blob, but its 3rd party and probably not something we want to rely on for an orchestrator in our system.
+
+We are aware of minio and that it could be ran in the same cluster, but how fault tolerant would that be? Can it use azure blob as its storage layer and act as a proxy?
+
+Are there any plans to support azure customers as well?
+Jack @ Restate — 9/18/25, 10:33 AM
+Hey! I think we can work around this. It's a shame that Azure doesn't have an S3 compatible api, but if we are just talking about restate's snapshots (not s3-based metadata), this is not on the hot path at all and doesn't need to have particularly good availability even. Minio would be totally fine
+Direct support for Azure blob store for snapshots is a reasonable feature request and if you filed an issue I think we could get to that at some point. It might also be a good starter issue for a new contributor as I suspect it is fairly simple
+as for running your services, any http-based faas can work, as can long lived http services
+Landeholt — 9/18/25, 11:04 AM
+Could you elaborate what you mean by not s3-based metadata? I thought snapshots were sent to an external service of some sort.
+
+Besides that, having to rely on minio for storage just shifts the problem onto that service. Our current cluster solution might support nfs, but wouldn't that put limits on the iops and throughput?
+Jack @ Restate — 9/18/25, 11:06 AM
+there is several stateful things in restate
+the metadata store.  by default its raft, but some folks use s3 for this, in which case s3 becomes a fairly critical component
+the partition stores, which are stored on disk, potentially replicated to speed up failover, but durability from that disk is not especially important and they snapshot to an object store, but that store is not on the hot path and is rarely read from
+the log stores, which are stored on disk and replicated, and must be durable
+the snapshots you refer to are point 2. they can also go to the filesystem (and if that filesystem is an nfs mount, then great)
+the snapshot might only be done a few times an hour and read even more rarely. the performance of the snapshot destination has no effect on the performance of the cluster - nfs would be fine!
+you can think of it more like backup than production database
+Landeholt — 9/19/25, 10:07 AM
+Hey, I'm back again with a followup question. Its more of a check for my sanity, and that is:
+
+consider this scenario, we have 3 restate services on their seperate nodes in a cluster (non k8s). They all have their own attached disk as well as a shared nfs volume. What would happend if service A on node A gets cycled onto node B, and Service B onto node A. Will restate handle this gracefully, or will it create a problem?
+
+Essentially, im asking if each service (A/B/C) keeps a unique state that is required to be used with the same service or if its possible to switch state between the services without it caring about it.
+Jack @ Restate — 9/19/25, 10:08 AM
+are you referring to restate services like 'greeter' or the restate-server processes on these node?
+Landeholt — 9/19/25, 10:09 AM
+server. A service/container/pod on the cluster.
+
+I'm not worrying about the actual services that will do the business logic currently
+Jack @ Restate — 9/19/25, 10:12 AM
+so each process is configured with a node name, which defaults to the hostname. when restate starts, it will look for its node name in the restate-data directory and use that data. if when these services 'cycle' the node names also 'cycle' then youre all good. but if service A tried to start on a new node with node_name 'servicea' and it finds a restate-data directory containing data for 'serviceb' then this situation is basically equivalent to data loss
+i suppose you could derive the node name from the disk id if you wanted to protect against this
+in principle the nodes can all have identical config except for the node name
+Jack @ Restate — 9/19/25, 10:19 AM
+oh, i guess you could just put the config file for restate, which includes the node name, into the volume
+Landeholt — 9/19/25, 10:21 AM
+that might be one way. I will look into what possible ways I have to make replica specific config on the cluster. Thank you jack!
+Jack @ Restate — 9/19/25, 10:23 AM
+no problem!
+what is the compute scheduler here btw? something homegrown?
+Landeholt — 9/19/25, 10:24 AM
+yeah, unfortunately. Old tech built inhouse.
+
+I wish that we atleast could have used something more modern like docker swarm, but my hands are tied up haha
+"but hey, it works"
+Landeholt — 9/19/25, 10:33 AM
+can't all restate-server services use the same name, if that doesn't conflict on the local drives. Or are they also using their node name at snapshot (shared storage)?
+Jack @ Restate — 9/19/25, 10:34 AM
+the node name is looked up in the metadata store to get your node id, it does need to be unique by node for sure
+is a scheduler even useful when you have a fixed set of persistent disks? honestly you can just put restate in a systemd unit on each machine where the disk is
+
+
+
+
+Single node  Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
+
+

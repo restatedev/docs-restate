@@ -19,3 +19,45 @@ helm install restate oci://ghcr.io/restatedev/restate-helm --namespace restate -
 If you want to run multiple Restate clusters in Kubernetes, or want advanced functionality like managing versions of Restate SDK services, you can also use the [Restate Operator](https://github.com/restatedev/restate-operator). Details
 of how to install it and deploy a cluster can be found in the [README](https://github.com/restatedev/restate-operator/blob/main/README.md).
 
+
+
+## Helm chart
+
+- Just a configuration file on how you can deploy Restate to Kubernetes.
+- You install helm in your kubernetes. Then you install the helm chart. It helps you deploy other peoples manifests to your kubernetes cluster
+- you install the CRD which is the schema of the resources that are needed
+- our standard helm chart does not require anything extra outside of what is standardly provided by Kubernetes: containers and the ability to attach volumes to those containers
+- to make changes you need to do that manually
+
+## Restate Operator
+
+- Completely separate to the helm chart
+- Makes available a new resource type called resource cluster and restate deployment
+- cluster: more dynamic way of deploying a restate server with volumes etc.
+- more abstracted version of deploying a restate server.
+- you have less to think about doing things. The operator does some things a bit smarter for you. There is a rust reconciler that looks at the crd that the user deploys and turns that into the resources.
+- you need to be an administrator to install it. you must be able to create namespaces and crds etc.
+- each restate cluster is deployed in its own namespace
+- the operator gets notified whenever the user deploys a crd which includes restate resources.
+- the better choice if you have an operations team that deploys the operator. And then the separate teams that want to use Restate can deploy clusters in a slightly higher level way.
+
+### Restate operator service deployment versioning
+
+Restate operator manages multiple deployed versions of services:
+
+- it creates a restatedeployment operator type
+- a kubernetes deployment is a scalable deployment that sits behind a service
+- a kubernetes service is a named ingress point in front of some computing service that accepts inbound requests. It’s an abstraction over a load balancer that routes traffic to one or more pods.
+- a restate deployment is pretty similar to that. It has a named entry point and a container reference. A compute specification template that says how much cpu, memory etc. And since it’s a stateless service it can scale without worrying about persistent volumes
+- You can manage multiple versions of the deployment running over time.
+- You can give it a specific version and it will deploy that and register it with a restate cluster by specifying a name and a namespace.
+- The restate operator will repeatedly check for older versions whether they are drained and will then scales to zero when it sees there are no more ongoing invocations
+
+example restate cluster: https://github.com/restatedev/restate-operator/blob/main/crd/examples/restatecluster.yaml
+
+full spec: https://github.com/restatedev/restate-operator/blob/main/crd/restateclusters.yaml or https://github.com/restatedev/restate-operator/blob/main/crd/RestateCluster.pkl
+
+example deployment: https://github.com/restatedev/restate-operator/blob/main/crd/examples/restatedeployment.yaml
+
+full spec: https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml or https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl
+
