@@ -10,9 +10,7 @@ Restate runs as a single binary
 
 [DIAGRAM]
 
-## Deployment Decision Matrix
-
-### Single-Node vs Cluster
+## Single-Node vs Cluster
 
 | Requirement | Single-Node | Cluster |
 |-------------|-------------|---------|
@@ -22,12 +20,12 @@ Restate runs as a single binary
 | **Horizontal Scaling** | ❌ | ✅ |
 | **Vertical Scaling** | ✅ | ✅ |
 
-#### When to Choose Single-Node
+### When to Choose Single-Node
 The current single node version provides you already with the highest level of durability (aggressively fsyncing changes to disk). So if you run it with a persistent volume, then you won't see any loss of data. In case of a crash, you will only see a short time of unavailability as the process gets restarted.
 
 Single-node Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
 
-#### When to use Cluster Deployments
+### When to use Cluster Deployments
 Distributed deployments with Restate serve multiple purposes:
 - Higher availability, by having another process ready to take over, rather than waiting on the failed process (or container/pod) to be rescheduled. As a special case, this involves deployments across multiple availability zones or even regions that tolerate outages of full zones and regions.
 - Better durability, by persisting copies of the data across multiple zones / regions.
@@ -38,7 +36,7 @@ Restate stores data using two mechanisms: New events (invocations, journal entri
 This is a form of storage tiering, though not the classical tiering like in modern logs. It is more similar to a database management system, where the write-ahead-log (WAL) would be replicated across nodes, while the table data files and indexes would be persisted on S3 (and cached on the nodes).
 
 
-### Compute
+## Compute
 
 The easiest way to manage the Restate cluster and services is via the Kubernetes operator.
 
@@ -48,19 +46,30 @@ Then, install the Restate operator on top of this, for easy management of Restat
 
 This approach is also if you do a single node Restate deployment because it will manage the volume for you
 
-### Storage Options
+## Storage Options
+
+there is several stateful things in restate
+- the metadata store.  by default its raft, but some folks use s3 for this, in which case s3 becomes a fairly critical component
+- the partition stores, which are stored on disk, potentially replicated to speed up failover, but durability from that disk is not especially important and they snapshot to an object store, but that store is not on the hot path and is rarely read from
+- the log stores, which are stored on disk and replicated, and must be durable
+
+the snapshots can go to the filesystem (and if that filesystem is an nfs mount, then great)
+the snapshot might only be done a few times an hour and read even more rarely. the performance of the snapshot destination has no effect on the performance of the cluster - nfs would be fine!
+you can think of it more like backup than production database
 
 | Storage Type | Use Case | Durability | Performance |
 |--------------|----------|------------|-------------|
 | **Persistent Volumes** | Single-node, simple setup | Depends on underlying storage | High |
 | **S3-Compatible Object Storage** | Multi-node clusters, backups | Very high | Good for snapshots |
 
-#### When to Choose Persistent Volumes?
+### Using Persistent Volumes
 When you don't have access to an S3-compatible object store.
 
-Single-node  Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
+Single-node Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
 
-#### When to Choose Object Storage?
+
+
+### Using Object Storage
 https://www.restate.dev/blog/building-a-modern-durable-execution-engine-from-first-principles
 -->
 
@@ -73,6 +82,11 @@ The reason why Restate has additionally a replication layer that persists new ev
 
 Restate’s replication bridges the latency gap between the requirements of fast durable functions and the capabilities of object storage.
 
+#### Supported Object Stores
+Currently we support the following object stores:
+- AWS S3
+- MinIO (only for snapshots, not metadata)
+- Coming soon: Google Cloud Storage and Azure Blob Storage (Contact us for more info: [Discord](https://discord.com/invite/skW3AZ6uGd)/[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA))
 
 ## Platform-Specific Guides
 
