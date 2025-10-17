@@ -199,13 +199,20 @@ if err != nil {
 }
 ```
 
-### Deterministic randoms and time
+### Deterministic randoms
 
 ❌ Never use `rand.Float64()` - non-deterministic and breaks replay logic.
-✅ Use `restate.Rand()` or `restate.UUID()` - Restate journals the result for deterministic replay.
+✅ Use Restate's deterministically replayable random generators.
 
-❌ Never use `time.Now()` - returns different values during replay.
-✅ Use `restate.Now()` - Restate records and replays the same timestamp.
+```go {"CODE_LOAD::go/develop/journalingresults.go#uuid"} 
+uuid := restate.Rand(ctx).UUID()
+```
+
+```go {"CODE_LOAD::go/develop/journalingresults.go#random_nb"} 
+randomInt := restate.Rand(ctx).Uint64()
+randomFloat := restate.Rand(ctx).Float64()
+randomSource := rand.New(restate.Rand(ctx).Source())
+```
 
 ### Durable Timers and Sleep
 ❌ Never use `time.Sleep()` or timers - not durable, lost on restarts.
