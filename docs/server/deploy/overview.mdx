@@ -1,9 +1,14 @@
 ---
 title: "Deployment Overview"
+sidebarTitle: "Overview"
 description: "Choose the right deployment strategy for your Restate setup"
 ---
 
-Restate is designed to be flexible in how you deploy it. This guide helps you choose the right deployment strategy based on your requirements.
+Restate is designed to be flexible in how you deploy it. We list the options on this page.
+
+Restate runs as a single binary
+
+[DIAGRAM]
 
 ## Deployment Decision Matrix
 
@@ -28,6 +33,21 @@ Distributed deployments with Restate serve multiple purposes:
 - Better durability, by persisting copies of the data across multiple zones / regions.
 - Scalability, by spreading load over multiple nodes.
 
+Restate stores data using two mechanisms: New events (invocations, journal entries, state updates, ...) are persisted in an embedded replicated log (called Bifrost). From there, events move to state indexes in RocksDB, which are periodically snapshotted to an object store. So at any point in time, the majority of the data is durable in the object store (the nodes maintain a copy as cache) while a smaller part of the data is durable in the log replicated across the nodes.
+
+This is a form of storage tiering, though not the classical tiering like in modern logs. It is more similar to a database management system, where the write-ahead-log (WAL) would be replicated across nodes, while the table data files and indexes would be persisted on S3 (and cached on the nodes).
+
+
+### Compute
+
+The easiest way to manage the Restate cluster and services is via the Kubernetes operator.
+
+We recommend using a managed Kubernetes provider such as EKS, AKS, or GKE for your Restate deployments.
+
+Then, install the Restate operator on top of this, for easy management of Restate clusters and services.
+
+This approach is also if you do a single node Restate deployment because it will manage the volume for you
+
 ### Storage Options
 
 | Storage Type | Use Case | Durability | Performance |
@@ -40,7 +60,7 @@ When you don't have access to an S3-compatible object store.
 
 Single-node  Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
 
-#### Why Object Storage?
+#### When to Choose Object Storage?
 https://www.restate.dev/blog/building-a-modern-durable-execution-engine-from-first-principles
 -->
 
@@ -53,49 +73,36 @@ The reason why Restate has additionally a replication layer that persists new ev
 
 Restate’s replication bridges the latency gap between the requirements of fast durable functions and the capabilities of object storage.
 
-- on AWS: use S3
-- on Azure: use MinIO
-- on GCP: use MinIO (GCS's S3-compatible API does not support the S3 conditional put semantics we require for both snapshots and metadata store usage. This requires native support, will have an update for you soon.)
 
-## Choose Your Deployment Path
+## Platform-Specific Guides
 
-### I want simple, cost-effective deployment
-**→ [Single-Node Deployment](/server/deploy/single-node)**
-- Perfect for development, testing, or small production workloads
-- Full durability with persistent volumes
-- Vertical scaling capabilities
-
-### I need high availability and scale
-**→ [Cluster Deployment](/server/deploy/cluster)**
-- Distributed across multiple nodes
-- Fault tolerance and horizontal scaling
-- Requires more complex configuration
-
-### I'm using Kubernetes
+### Kubernetes
 **→ [Kubernetes Deployment](/server/deploy/kubernetes)**
 - Helm charts for easy installation
 - Restate Operator for advanced functionality
 - Works with both single-node and cluster setups
 
-## Platform-Specific Guides
-
 ### AWS
 **→ [AWS Deployment](/server/deploy/aws)**
-- EC2, ECS, EKS options
-- Native S3 integration
+- Recommended: EKS on Fargate with Restate Operator
+- Snapshot storage on S3
 - CDK templates available
 
 ### Azure
 **→ [Azure Deployment](/server/deploy/azure)**
-- Virtual Machines with managed disks
-- MinIO for S3-compatible storage
-- AKS integration
+- Recommended: AKS with Restate Operator
+- MinIO for S3-compatible snapshot storage (until native Azure Blob support is available)
 
 ### Google Cloud
 **→ [GCP Deployment](/server/deploy/gcp)**
-- Compute Engine with persistent disks
-- Cloud Storage via MinIO
-- GKE support
-
+- Recommended: GKE with Restate Operator
+- MinIO for S3-compatible snapshot storage (until native GCS support is available)
 
 ## Load balancing
+
+If you run a multi-node Restate cluster, we recommend using a cloud-native load balancer to distribute incoming requests across the nodes.
+
+
+## Creating backups
+
+visit the [snapshots/backups docs](/server/operations/snapshots) for details on how to create backups of your data.
