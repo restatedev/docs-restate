@@ -113,7 +113,7 @@ func (ActionsExample) DurableStepsExample(ctx restate.Context, userId string) er
 	}
 
 	// Idempotency key generation
-	id := restate.Rand(ctx).UUID().String()
+	id := restate.UUID(ctx).String()
 	// <end_durable_steps>
 
 	// Use results to avoid compiler warnings
@@ -211,8 +211,11 @@ func (ActionsExample) DurableTimersExample(ctx restate.Context, req map[string]i
 	sleepFuture := restate.After(ctx, 5*time.Minute)
 	callFuture := restate.Workflow[restate.Void](ctx, "OrderWorkflow", orderId, "Run").RequestFuture(order)
 
-	selector := restate.Select(ctx, sleepFuture, callFuture)
-	switch selector.Select() {
+	fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
+	if err != nil {
+		return err
+	}
+	switch fut {
 	case sleepFuture:
 		if err := sleepFuture.Done(); err != nil {
 			return err
