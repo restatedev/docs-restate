@@ -9,36 +9,56 @@ Restate can run as a single binary, making it easy to run it on a variety of pla
 
 This page gives an overview of the different deployment strategies and requirements.
 
-## Infrastructure and Storage
+## Pre-requisites
 
-Restate has a layered architecture:
+You can deploy Restate on any platform that meets the following requirements:
+1. A **runtime environment** where you can run the Restate Docker container or binary.
+2. A **persistent volume** attached to store Restate's state.
+3. (For clustered setups) An **object store** to store snapshots.
 
-<Frame>
-    <img
-        alt={"Restate Node internal architecture"}
-        src={"/img/architecture/restate_layered_arch.png"}
-        className="bg-white p-4 rounded-lg"
-    />
-</Frame>
+Restate can run as a single node or as a cluster. See [the trade-offs below](/server/overview#single-node-vs-cluster-deployments).
+
+## Compute
+
+The easiest way to deploy and manage the Restate cluster and services is via the [Kubernetes operator](/server/deploy/kubernetes), since it gives you a lot of built-in functionality and tooling for deploying services, versioning, and more.
+Therefore, **we recommend using the Restate Kubernetes Operator in combination with a managed Kubernetes provider such as AWS EKS, Azure's AKS, or Google's GKE.**
+
+This approach is also recommended for single-node Restate deployments because it will make managing the persistent volume of your Restate instance easier.
+If your instance goes down, the Kubernetes provider automatically restarts it and reattaches the persistent volume.
+
+## Persistent volumes
+
+Restate is a stateful system that persists data in its embedded state store.
+
+If you run Restate as a single node, then the durability of the disk defines how durable Restate is.
+In this case, you might want to take periodic backups of the persistent volume (see [data backups](/server/snapshots#data-backups-2)).
+
+In clustered deployments, Restate nodes can failover to other nodes and restore from snapshots stored in an object store.
+But each Restate node still benefits from having a persistent volume to store its local state during normal operation.
+Mainly because this makes failover much faster, without the need to recompose all state from object store and other nodes.
+
+<Accordion title="What does Restate store?">
+    Restate has a layered architecture with the following stateful components:
+
+    <Frame>
+        <img
+            alt={"Restate Node internal architecture"}
+            src={"/img/architecture/restate_layered_arch.png"}
+            className="bg-white p-4 rounded-lg"
+        />
+    </Frame>
+
+    - [The metadata store](/references/architecture#metadata-store): Restate's control plane includes a built-in Raft-based metadata store. This store keeps track of the cluster configuration, partition assignments, and other critical metadata. It is essential to the correctness of the overall system.
+    - [The durable log](/references/architecture#durability-and-storage-model): The log is the primary durability layer. New events (invocations, journal entries, state updates, ...) are first persisted in the log, and then move to the partition processors. The log is stored on disk and replicated. Durability is critical here.
+    - [The partition processor stores](/references/architecture#materializing-state-for-fast-access): The partition processor leader maintains a full cache of the partition’s materialized state in RocksDB for fast reads and updates during execution. This cache can always be rebuilt from the log, so durability is not critical here. In cluster deployments, the content of RocksDB should be periodically snapshotted to an object store, for faster failover.
+
+    For more information, check out the [architecture reference](/references/architecture).
+</Accordion>
 
 
-The architecture has the following stateful components:
+## Object storage for snapshots
 
-- [The metadata store](/references/architecture#metadata-store): Restate's control plane includes a built-in Raft-based metadata store. This store keeps track of the cluster configuration, partition assignments, and other critical metadata. It is essential to the correctness of the overall system.
-- [The durable log](/references/architecture#durability-and-storage-model): The log is the primary durability layer. New events (invocations, journal entries, state updates, ...) are first persisted in the log, and then move to the partition processors. The log is stored on disk and replicated. Durability is critical here.
-- [The partition processor stores](/references/architecture#materializing-state-for-fast-access): The partition processor leader maintains a full cache of the partition’s materialized state in RocksDB for fast reads and updates during execution. This cache can always be rebuilt from the log, so durability is not critical here. In cluster deployments, the content of RocksDB should be periodically snapshotted to an object store, for faster failover.
-
-### Persistent Volumes
-
-Single-node Restate runs as a single binary which persists its data to disk. Therefore, the durability of the disk defines how durable Restate is.
-
-When running a single-node Restate Server, you might want to take periodic backups of the persistent volume (see [data backups](/server/snapshots#data-backups-2)).
-
-### Object Storage for snapshots
-
-As we mentioned, the content of the partition processor's RocksDB should be periodically snapshotted for faster failover.
-
-**Snapshotting is mandatory for Restate clusters**, because it enables handing over partitions between nodes.
+Snapshotting the content of Restate's state store, is recommended to enable faster failover. It is mandatory for cluster deployments, because it enables handing over partitions between nodes.
 
 Restate supports snapshotting to object stores because they offer great scalability, durability, and cost and are available in all cloud providers and most on-prem setups.
 Plus, the storage exists disaggregated from compute nodes, making the nodes stateless (or owning little state), which is highly desirable for efficient operations.
@@ -52,26 +72,11 @@ See the [snapshot documentation](/server/snapshots#snapshots-2) for more informa
     This is currently only offered by AWS S3.
 </Note>
 
-#### Supported Object Stores
+### Supported Object Stores
 Currently we support the following object stores:
 - [AWS S3](/server/deploy/aws#using-s3)
 - [MinIO](/server/deploy/kubernetes#minio-object-store) (only for snapshots, not metadata)
 - Coming soon: Google Cloud Storage and Azure Blob Storage (Contact us for more info: [Discord](https://discord.com/invite/skW3AZ6uGd)/[Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA))
-
-## Platform-Specific Deployment Guides
-
-The easiest way to manage the Restate cluster and services is via the Kubernetes operator, since it gives you a lot of built-in functionality and tooling.
-Therefore, **we recommend using the Restate Kubernetes Operator in combination with a managed Kubernetes provider such as AWS EKS, Azure's AKS, or Google's GKE.**
-
-This approach is also recommended for single-node Restate deployments because it will make managing the persistent volume of your Restate instance easier.
-If your instance goes down, the Kubernetes provider automatically restarts it and reattaches the persistent volume.
-
-Follow the links below for platform-specific deployment instructions:
-
-- [Kubernetes Deployment](/server/deploy/kubernetes)
-- [AWS Deployment](/server/deploy/aws)
-- [Azure Deployment](/server/deploy/azure)
-- [GCP Deployment](/server/deploy/gcp)
 
 ## Single-Node vs. Cluster Deployments
 Restate can be deployed as a single-node setup or as a distributed cluster, depending on your requirements for availability and scalability.
@@ -102,3 +107,11 @@ Restate cluster deployments serve multiple purposes:
 - Even **better durability**, by persisting copies of the data across multiple zones / regions.
 
 **Use this for**: use cases requiring high availability, very high throughput, or geo-replication.
+
+## Platform-Specific Deployment Guides
+Follow the links below for platform-specific deployment instructions:
+
+- [Kubernetes Deployment](/server/deploy/kubernetes)
+- [AWS Deployment](/server/deploy/aws)
+- [Azure Deployment](/server/deploy/azure)
+- [GCP Deployment](/server/deploy/gcp)
