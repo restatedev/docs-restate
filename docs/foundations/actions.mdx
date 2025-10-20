@@ -73,7 +73,7 @@ if err != nil {
 }
 
 // Idempotency key generation
-id := restate.Rand(ctx).UUID().String()
+id := restate.UUID(ctx).String()
 ```
 
 </CodeGroup>
@@ -453,8 +453,11 @@ if err := restate.Sleep(ctx, 5*time.Minute); err != nil {
 sleepFuture := restate.After(ctx, 5*time.Minute)
 callFuture := restate.Workflow[restate.Void](ctx, "OrderWorkflow", orderId, "Run").RequestFuture(order)
 
-selector := restate.Select(ctx, sleepFuture, callFuture)
-switch selector.Select() {
+fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
+if err != nil {
+  return err
+}
+switch fut {
 case sleepFuture:
   if err := sleepFuture.Done(); err != nil {
     return err

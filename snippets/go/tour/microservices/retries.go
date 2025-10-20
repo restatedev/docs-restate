@@ -17,7 +17,7 @@ type SubscriptionRequest struct {
 }
 
 func (JournalingResults) Greet(ctx restate.Context, req SubscriptionRequest) error {
-	paymentId := restate.Rand(ctx).UUID().String()
+	paymentId := restate.UUID(ctx).String()
 	// <start_here>
 	result, err := restate.Run(ctx,
 		func(ctx restate.RunContext) (string, error) {

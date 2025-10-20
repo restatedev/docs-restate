@@ -80,8 +80,11 @@ func (JournalingResults) PromiseCombinators(ctx restate.Context, name string) (s
 	sleepFuture := restate.After(ctx, 30*time.Second)
 	callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 
-	selector := restate.Select(ctx, sleepFuture, callFuture)
-	switch selector.Select() {
+	fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
+	if err != nil {
+		return "", err
+	}
+	switch fut {
 	case sleepFuture:
 		if err := sleepFuture.Done(); err != nil {
 			return "", err
@@ -97,7 +100,7 @@ func (JournalingResults) PromiseCombinators(ctx restate.Context, name string) (s
 	// <end_race>
 
 	// <start_uuid>
-	uuid := restate.Rand(ctx).UUID()
+	uuid := restate.UUID(ctx)
 	// <end_uuid>
 
 	_ = uuid
@@ -105,12 +108,12 @@ func (JournalingResults) PromiseCombinators(ctx restate.Context, name string) (s
 	// <start_random_nb>
 	randomInt := restate.Rand(ctx).Uint64()
 	randomFloat := restate.Rand(ctx).Float64()
-	randomSource := rand.New(restate.Rand(ctx).Source())
+	mathRandV2 := rand.New(restate.RandSource(ctx))
 	// <end_random_nb>
 
 	_ = randomInt
 	_ = randomFloat
-	_ = randomSource
+	_ = mathRandV2
 
 	return "", nil
 }
@@ -128,12 +131,13 @@ func (JournalingResults) SelectCombinators(ctx restate.Context, name string) (st
 	callFuture1 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 	callFuture2 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi again")
 
-	selector := restate.Select(ctx, callFuture1, callFuture2)
-
 	// Collect all results
 	var subResults []string
-	for selector.Remaining() {
-		response, err := selector.Select().(restate.ResponseFuture[string]).Response()
+	for fut, err := range restate.Wait(ctx, callFuture1, callFuture2) {
+		if err != nil {
+			return "", err
+		}
+		response, err := fut.(restate.ResponseFuture[string]).Response()
 		if err != nil {
 			return "", err
 		}

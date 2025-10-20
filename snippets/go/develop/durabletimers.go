@@ -20,8 +20,11 @@ func (DurableTimers) Greet(ctx restate.Context, name string) (string, error) {
 	sleepFuture := restate.After(ctx, 30*time.Second)
 	callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 
-	selector := restate.Select(ctx, sleepFuture, callFuture)
-	switch selector.Select() {
+	fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
+	if err != nil {
+		return "", err
+	}
+	switch fut {
 	case sleepFuture:
 		if err := sleepFuture.Done(); err != nil {
 			return "", err

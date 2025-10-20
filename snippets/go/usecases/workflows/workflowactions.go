@@ -42,8 +42,11 @@ func (ApprovalWorkflow) Run(ctx restate.WorkflowContext, user User) (string, err
 	userResponse := restate.Promise[string](ctx, "user-response")
 	timeout := restate.After(ctx, 24*time.Hour)
 
-	selector := restate.Select(ctx, userResponse, timeout)
-	switch selector.Select() {
+	fut, err := restate.WaitFirst(ctx, userResponse, timeout)
+	if err != nil {
+		return "", err
+	}
+	switch fut {
 	case userResponse:
 		return userResponse.Result()
 	case timeout:

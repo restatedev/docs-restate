@@ -31,7 +31,7 @@ func (SignupWorkflow) Run(ctx restate.WorkflowContext, user User) (bool, error) 
 		return false, err
 	}
 
-	secret := restate.Rand(ctx).UUID().String()
+	secret := restate.UUID(ctx).String()
 	_, err = restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
 		return sendVerificationEmail(user, secret)
 	})

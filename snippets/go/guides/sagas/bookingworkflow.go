@@ -84,7 +84,7 @@ func (BookingWorkflow) Run(ctx restate.Context, req BookingRequest) (err error) 
 	// <end_twostep>
 
 	// <start_idempotency>
-	paymentID := restate.Rand(ctx).UUID().String()
+	paymentID := restate.UUID(ctx).String()
 
 	// Register the refund as a compensation, using the idempotency key
 	compensations = append(compensations, func() (restate.Void, error) {
