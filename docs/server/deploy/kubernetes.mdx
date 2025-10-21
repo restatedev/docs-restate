@@ -4,69 +4,157 @@ sidebarTitle: "Kubernetes"
 description: "Deploy the Restate Server on Kubernetes."
 ---
 
-This page describes how to deploy the Restate Server on [Kubernetes](https://kubernetes.io/).
+There are two main ways to deploy the Restate Server on [Kubernetes](https://kubernetes.io/):
+1. Using the [Restate Operator](#restate-kubernetes-operator) (recommended): a Kubernetes operator that simplifies deploying and managing Restate clusters and services, with advanced features like automatic service versioning and cloud environment integration.
+2. Using the [Helm Chart](#helm-chart): a more bare-bone deployment method that requires more manual operational tasks.
 
 ## Restate Kubernetes Operator
 
-We recommend running Restate with the [Restate Operator](https://github.com/restatedev/restate-operator).
+We recommend running Restate with the Restate Operator.
 The operator simplifies deploying and managing Restate clusters and services on Kubernetes.
 
-We recommend using the Restate Operator in combination with a managed Kubernetes provider, such as AWS EKS, Azure's AKS, or Google's GKE.
+**We recommend using the Restate Operator in combination with a managed Kubernetes provider, such as AWS EKS, Azure's AKS, or Google's GKE.**
 This eases the management of compute instances and persistent volumes. See the deployment guides for [AWS](/server/deploy/aws), [GCP](/server/deploy/gcp), and [Azure](/server/deploy/azure).
 
+<Card title="Restate Operator GitHub" href="https://github.com/restatedev/restate-operator" icon="github" horizontal={true} />
+
 ### Features
-- Resource types to deploy and manage Restate clusters and services
-- Automatic service versioning and scaling down old versions
+- Resource types to deploy, manage, and configure Restate clusters and services
 - Connect Restate deployments running on Kubernetes to Restate Cloud Environments
+- Automatic service versioning and scaling down old versions
+- Set up network security via `NetworkPolicy`
+- Sign requests using private keys from Secrets or [CSI Secret Store](https://secrets-store-csi-driver.sigs.k8s.io/)
+- Online volume expansion: dynamically increase the size of persistent volumes used by Restate clusters
+- For AWS EKS: Manage credentials using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) and security groups using [Security Groups for Pods](https://docs.aws.amazon.com/eks/latest/userguide/security-groups-for-pods.html)
 
 ### Custom Resource Definitions
 
 The Restate Operator introduces Custom Resource Definitions (CRDs) to Kubernetes to deploy Restate clusters and services.
 
+It includes the following CRDs:
+- `RestateCluster`: defines a Restate cluster deployment, including storage, networking, and configuration options.
+- `RestateDeployment`: defines a Restate service deployment, including container image, resource requirements, and registration options ([learn more](/services/deploy/kubernetes)).
+- `RestateCloudEnvironment`: defines a connection between a Kubernetes service deployment and a Restate Cloud Environment ([learn more](/cloud/connecting-services)).
+
+### Deploying the operator
+
+Install the Restate Operator via Helm:
+
+```bash
+helm install restate-operator \
+  oci://ghcr.io/restatedev/restate-operator-helm \
+  --namespace restate-operator \
+  --create-namespace
+```
+
+To install the operator, you need to be able to create namespaces and CRDs.
 
 
-#### `RestateCluster`
+To view the charts for local inspection, you can dump them to a file via:
 
+```
+helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
+--namespace restate-operator \
+--create-namespace \
+--include-crds \
+  > manifests.yaml
+```
 
-#### `RestateDeployment`
+### Deploying single-node Restate
 
-#### `RestateCloudEnvironment`
+The `RestateCluster` CRD defines a Restate cluster. The operator watches for these objects and creates the necessary Kubernetes resources, such as `StatefulSet`, `Service`, and `NetworkPolicy` objects in a new namespace that matches the `RestateCluster` name.
 
+An example RestateCluster with one node:
 
+```yaml restate-cluster.yaml
+apiVersion: restate.dev/v1
+kind: RestateCluster
+metadata:
+  name: restate-test
+spec:
+  compute:
+    image: restatedev/restate:1.5
+  storage:
+    storageRequestBytes: 2147483648 # 2 GiB
+```
 
-- Makes available a new resource type called resource cluster and restate deployment
-- cluster: more dynamic way of deploying a restate server with volumes etc.
-- more abstracted version of deploying a restate server.
-- you have less to think about doing things. The operator does some things a bit smarter for you. There is a rust reconciler that looks at the crd that the user deploys and turns that into the resources.
-- you need to be an administrator to install it. you must be able to create namespaces and crds etc.
-- each restate cluster is deployed in its own namespace
-- the operator gets notified whenever the user deploys a crd which includes restate resources.
-- the better choice if you have an operations team that deploys the operator. And then the separate teams that want to use Restate can deploy clusters in a slightly higher level way.
+Apply the manifest via `kubectl`:
 
-### Automatic service versioning
+```bash
+kubectl apply -f restate-cluster.yaml
+```
 
-Restate operator manages multiple deployed versions of services:
+This will deploy the Restate cluster in its own namespace, called `restate-test`.
 
-- it creates a restatedeployment operator type
-- a kubernetes deployment is a scalable deployment that sits behind a service
-- a kubernetes service is a named ingress point in front of some computing service that accepts inbound requests. It’s an abstraction over a load balancer that routes traffic to one or more pods.
-- a restate deployment is pretty similar to that. It has a named entry point and a container reference. A compute specification template that says how much cpu, memory etc. And since it’s a stateless service it can scale without worrying about persistent volumes
-- You can manage multiple versions of the deployment running over time.
-- You can give it a specific version and it will deploy that and register it with a restate cluster by specifying a name and a namespace.
-- The restate operator will repeatedly check for older versions whether they are drained and will then scales to zero when it sees there are no more ongoing invocations
+To learn more about the `RestateCluster` spec options, see the [`RestateCluster` pkl definition](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCluster.pkl) (or the less-readable [yaml version](https://github.com/restatedev/restate-operator/blob/main/crd/restateclusters.yaml)).
 
-example restate cluster: https://github.com/restatedev/restate-operator/blob/main/crd/examples/restatecluster.yaml
+<Info>
+    Follow [the guide](/guides/restate-operator-on-kind) to experiment with deploying a Restate cluster and services on a local kind cluster.
+</Info>
 
-full spec: https://github.com/restatedev/restate-operator/blob/main/crd/restateclusters.yaml or https://github.com/restatedev/restate-operator/blob/main/crd/RestateCluster.pkl
+### Deploying a Restate cluster
 
-example deployment: https://github.com/restatedev/restate-operator/blob/main/crd/examples/restatedeployment.yaml
+You can deploy a multi-node Restate cluster with the `RestateCluster` CRD, by:
+1. increasing the `replicas` field in the `compute` section of the `RestateCluster` spec.
+2. providing a [Restate configuration](/references/server-config) via the `config` field in the `RestateCluster` spec
 
-full spec: https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml or https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl
+```yaml restate-cluster.yaml
+apiVersion: restate.dev/v1
+kind: RestateCluster
+metadata:
+  name: restate-test
+spec:
+  compute:
+    replicas: 3
+    image: restatedev/restate:1.5
+  storage:
+    storageRequestBytes: 2147483648 # 2 GiB
+  security:
+    # this kind of annotation can be used to give your cluster an IAM role in EKS
+    serviceAccountAnnotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/my-role-that-can-read-write-to-the-bucket
+  config: |
+    roles = [
+        "worker",
+        "admin",
+        "log-server",
+        "http-ingress",
+    ]
+    auto-provision = true
+    default-num-partitions = 128
+    default-replication = 2
+
+    [metadata-client]
+    type = "object-store"
+    path = "s3://some-bucket/metadata"
+    # the same aws-* parameters as below are supported here
+
+    [bifrost]
+    default-provider = "replicated"
+
+    [worker.snapshots]
+    destination = "s3://some-bucket/snapshots"
+    snapshot-interval-num-records = 10000
+    # you can also provide parameters here for non-S3 stores eg:
+    # aws-region = "local"
+    # aws-access-key-id = "minioadmin"
+    # aws-secret-access-key = "minioadmin"
+    # aws-endpoint-url = "http://localhost:9000"
+    # aws-allow-http = true
+```
+
+This example includes [MinIO object store](https://www.min.io/) as the snapshot destination.
+Note that running a distributed cluster without snapshots is not recommended.
+
+You can find more information about configuring MinIO with your Restate cluster [here](https://github.com/restatedev/restate-operator/blob/main/docs/minio.md).
 
 ## Helm Chart
 
-For a more bare-bone deployment of a Restate cluster, you can use the [Helm chart](https://github.com/restatedev/restate/tree/main/charts/restate-helm).
+For a more bare-bone deployment of a Restate cluster, you can use the Helm chart.
 This will require you to do more manual operational tasks, such as registration and versioning of services.
+
+<Card title="Restate Helm Chart GitHub" href="https://github.com/restatedev/restate/tree/main/charts/restate-helm" icon="github" horizontal={true} />
+
 
 The Helm chart does not require anything besides standard Kubernetes functionality: the ability to deploy containers and attach volumes to them.
 Any changes to the deployment need to be done manually by updating the Helm chart values and redeploying.
@@ -79,15 +167,12 @@ helm install restate oci://ghcr.io/restatedev/restate-helm --namespace restate -
 
 Single node or cluster
 
-## Minio Object Store
-
-https://github.com/restatedev/restate-operator/blob/main/docs/minio.md
-
 ## Load balancing
 
+If Restate is deployed as a multi-node cluster, you can send a request to any node in the cluster which runs the [`http-ingress` role](/references/architecture#ingress-2). Restate will internally forward the request to the appropriate node that owns the partition for that request.
+It is, therefore, not strictly necessary to put a load balancer in front of the Restate nodes.
 
+If you want to distribute requests across multiple Restate nodes or cover the case where an ingress is down, then you can put a load balancer in front of the Restate nodes.
 
-Envoy/Nginx
-
-## Backups & Snapshots
+When using a managed Kubernetes provider, we recommend using the cloud-native load balancer. For example, ELB for AWS.
 
