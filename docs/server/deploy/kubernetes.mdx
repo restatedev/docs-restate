@@ -148,13 +148,13 @@ Note that running a distributed cluster without snapshots is not recommended.
 
 You can find more information about configuring MinIO with your Restate cluster [here](https://github.com/restatedev/restate-operator/blob/main/docs/minio.md).
 
+
 ## Helm Chart
 
 For a more bare-bone deployment of a Restate cluster, you can use the Helm chart.
 This will require you to do more manual operational tasks, such as registration and versioning of services.
 
 <Card title="Restate Helm Chart GitHub" href="https://github.com/restatedev/restate/tree/main/charts/restate-helm" icon="github" horizontal={true} />
-
 
 The Helm chart does not require anything besides standard Kubernetes functionality: the ability to deploy containers and attach volumes to them.
 Any changes to the deployment need to be done manually by updating the Helm chart values and redeploying.
@@ -164,7 +164,6 @@ The Helm chart deploys Restate as a one-replica StatefulSet in its own namespace
 ```shell
 helm install restate oci://ghcr.io/restatedev/restate-helm --namespace restate --create-namespace
 ```
-
 Single node or cluster
 
 ## Load balancing
@@ -172,7 +171,9 @@ Single node or cluster
 If Restate is deployed as a multi-node cluster, you can send a request to any node in the cluster which runs the [`http-ingress` role](/references/architecture#ingress-2). Restate will internally forward the request to the appropriate node that owns the partition for that request.
 It is, therefore, not strictly necessary to put a load balancer in front of the Restate nodes.
 
-If you want to distribute requests across multiple Restate nodes or cover the case where an ingress is down, then you can put a load balancer in front of the Restate nodes.
+However, in practice, you'll want some kind of entry point into your cluster. The simplest approach would be a DNS entry with multiple A records that round-robin resolves to all the http-ingress nodes. Kubernetes makes this easier though - you create a Service object and Kubernetes translates that into a logical entry point. The Restate operator automatically creates these services for you.
 
-When using a managed Kubernetes provider, we recommend using the cloud-native load balancer. For example, ELB for AWS.
+Having something intelligent in front of your ingresses is desirable because it can perform health checks and skip over nodes that aren't reporting as ready to serve, providing better reliability than simple DNS round-robin.
+
+The specific Kubernets provider to which you deploy will likely support binding to specific native load-balancer services, for example ELB in AWS EKS.
 

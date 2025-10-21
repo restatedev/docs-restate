@@ -1,45 +1,55 @@
 ---
-title: "Local Restate Cluster on Kubernetes with Restate Operator"
+title: "Local Restate Cluster with Restate Kubernetes Operator"
 description: "Learn how to deploy a Restate cluster with Restate operator on a kind Kubernetes cluster."
 tags: ["deployment"]
 ---
 
+This guide walks you through deploying a Restate cluster on Kubernetes using the Restate Operator.
 
+We will use [kind](https://kind.sigs.k8s.io/) to create a local Kubernetes cluster for testing purposes.
 
-1. Install kind, helm, kubectl, and Restate on your local machine.
-2. Create a kind cluster:
+<Steps>
+<Step title={"Prerequisites"}>
+    Install the following on your local machine:
+    - [Docker](https://docs.docker.com/)
+    - [kind](https://kind.sigs.k8s.io/docs/user/quick-start)
+    - [Helm](https://helm.sh/docs/intro/install/)
+    - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+    - [Restate](/installation)
+</Step>
+<Step title={"Create a kind cluster"}>
+    ```bash
+    kind create cluster
+    ```
 
-```bash
-kind create cluster
-```
+    Set kubectl context to "kind-kind":
 
-Set kubectl context to "kind-kind":
+    ```bash
+    kubectl cluster-info --context kind-kind
+    ```
+</Step>
+<Step title={"Install the Restate Operator via Helm"}>
+    ```bash
+    helm install restate-operator \
+    oci://ghcr.io/restatedev/restate-operator-helm \
+    --namespace restate-operator \
+    --create-namespace
+    ```
 
-```
-kubectl cluster-info --context kind-kind
-```
-3. Install the Restate Operator via Helm:
+    To view the charts for local inspection, you can dump them to a file via:
 
-```bash
-helm install restate-operator \
-  oci://ghcr.io/restatedev/restate-operator-helm \
-  --namespace restate-operator \
-  --create-namespace
-```
+    ```bash
+    helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
+    --namespace restate-operator \
+    --create-namespace \
+    --include-crds \
+    > manifests.yaml
+    ```
+</Step>
+<Step title={"Create a Restate cluster"}>
 
-To view the charts for local inspection, you can dump them to a file via:
-
-```
-helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
---namespace restate-operator \
---create-namespace \
---include-crds \
-  > manifests.yaml
-```
-
-4. Create a Restate cluster by applying the following manifest:
-
-```yaml
+Create a `RestateCluster` manifest in a file called `restate-cluster.yaml`:
+```yaml restate-cluster.yaml
 apiVersion: restate.dev/v1
 kind: RestateCluster
 metadata:
@@ -65,19 +75,25 @@ kubectl apply -n restate-test -f restate-cluster.yaml
 
 A single-node Restate deployment will be created in the `restate-test` namespace.
 
-5. Verify that the Restate cluster is running:
+Verify that the Restate cluster is running:
 
 ```bash
 kubectl get pods -n restate-test
 ```
 
-6. Forward the ports of the Restate ingress and the UI to your local machine:
+</Step>
+
+<Step title={"Forward the ports of the Restate ingress and the UI to your local machine"}>
 ```bash
 kubectl port-forward svc/restate -n restate-test 8080:8080 9070:9070
 ```
 
-6. Download a service template (for example a TypeScript Hello World service):
+Now you can access the Restate UI at `http://localhost:9070`.
+</Step>
 
+<Step title={"Build and upload a Restate service Docker image to the kind cluster"}>
+
+For example, download the TypeScript Hello World service:
 ```bash
 restate example typescript-hello-world &&
 cd typescript-hello-world &&
@@ -90,9 +106,18 @@ Build a Docker image for the service:
 docker build -t my-restate-service:0.0.1 .
 ```
 
-7. Create a RestateDeployment manifest for the service in a file called `service-deployment.yaml`:
+Upload the image to the kind cluster:
 
-```yaml
+```bash
+kind load docker-image my-restate-service:0.0.1
+```
+</Step>
+
+<Step title={"Deploy the Restate service"}>
+
+Create a `RestateDeployment` manifest for the service in a file called `service-deployment.yaml`:
+
+```yaml service-deployment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -123,15 +148,15 @@ spec:
 Apply the manifest to deploy the service:
 
 ```bash
-kind load docker-image my-restate-service:0.0.1
 kubectl apply -f service-deployment.yaml -n restate-test
 ```
 
 You now see the deployed service listed:
-```
+```bash
 kubectl get pods -n restate-test
 ```
 
-
+</Step>
+</Steps>
 
 
