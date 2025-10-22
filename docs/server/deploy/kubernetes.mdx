@@ -52,7 +52,7 @@ To install the operator, you need to be able to create namespaces and CRDs.
 
 To view the charts for local inspection, you can dump them to a file via:
 
-```
+```bash
 helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
 --namespace restate-operator \
 --create-namespace \
@@ -96,7 +96,7 @@ To learn more about the `RestateCluster` spec options, see the [`RestateCluster`
 
 You can deploy a multi-node Restate cluster with the `RestateCluster` CRD, by:
 1. increasing the `replicas` field in the `compute` section of the `RestateCluster` spec.
-2. providing a [Restate configuration](/references/server-config) via the `config` field in the `RestateCluster` spec
+2. providing a [Restate cluster configuration](/server/clusters) via the `config` field in the `RestateCluster` spec
 
 ```yaml restate-cluster.yaml
 apiVersion: restate.dev/v1
@@ -159,21 +159,91 @@ This will require you to do more manual operational tasks, such as registration 
 The Helm chart does not require anything besides standard Kubernetes functionality: the ability to deploy containers and attach volumes to them.
 Any changes to the deployment need to be done manually by updating the Helm chart values and redeploying.
 
-The Helm chart deploys Restate as a one-replica StatefulSet in its own namespace. To install the helm chart:
+### Single-node deployment
+
+By default, the Helm chart deploys Restate as a single-replica StatefulSet:
 
 ```shell
 helm install restate oci://ghcr.io/restatedev/restate-helm --namespace restate --create-namespace
 ```
-Single node or cluster
+
+[View the default values.yaml](https://github.com/restatedev/restate/blob/main/charts/restate-helm/values.yaml)
+
+### Replicated cluster deployment
+
+For a multi-node cluster, use the provided replicated configuration:
+
+```shell
+helm install restate oci://ghcr.io/restatedev/restate-helm \
+  --namespace restate \
+  --create-namespace \
+  -f https://raw.githubusercontent.com/restatedev/restate/main/charts/restate-helm/replicated-values.yaml
+```
+
+[View the replicated-values.yaml](https://github.com/restatedev/restate/blob/main/charts/restate-helm/replicated-values.yaml)
+
+After deployment, you must manually provision the cluster:
+
+```shell
+kubectl exec -n restate -it restate-0 -- restatectl provision --replication 2 --yes
+```
+
+<Warning>
+Make sure to use the `replicated-values.yaml` file that matches your Helm chart version.
+</Warning>
+
+### Configuration options
+
+Key values you can customize in your own `values.yaml`:
+
+- **Resources**: Configure CPU/memory limits and requests
+  ```yaml values.yaml
+  resources:
+    limits:
+      cpu: 1
+      memory: 3Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  ```
+
+- **Storage**: Set persistent volume size and storage class
+  ```yaml values.yaml
+  storage:
+    size: 64Gi
+    storageClassName: fast-ssd
+  ```
+
+- **Replica count**: Number of nodes in the cluster
+  ```yaml replicated-values.yaml
+  replicaCount: 3
+  ```
+
+
+## MinIO object storage
+
+To configure a RestateCluster to send snapshots to self-hosted S3-compatible object store like MinIO, you can point the server to your MinIO instance. For security, it's best to create a dedicated service account with credentials scoped only to the buckets Restate needs.
+
+To deploy MinIO on your Kubernetes cluster, follow the instructions in the [MinIO documentation](https://docs.min.io/enterprise/aistor-object-store/installation/kubernetes/).
+
+<Warning>
+You should only use MinIO for snapshots, not for metadata storage, as MinIO's consistency model may lead to corrupt metadata, breaking your Restate cluster.
+Use the default Raft metadata store instead.
+</Warning>
+
+Run your MinIO instance with at least 4 replicas to avoid data loss, as [recommended by MinIO](https://docs.min.io/enterprise/aistor-object-store/operations/core-concepts/#minio-architecture).
+
+For more information on configuring MinIO with your Restate cluster, see [here](https://github.com/restatedev/restate-operator/blob/main/docs/minio.md).
 
 ## Load balancing
 
-If Restate is deployed as a multi-node cluster, you can send a request to any node in the cluster which runs the [`http-ingress` role](/references/architecture#ingress-2). Restate will internally forward the request to the appropriate node that owns the partition for that request.
-It is, therefore, not strictly necessary to put a load balancer in front of the Restate nodes.
+When Restate is deployed as a multi-node cluster, requests can be sent to any node running the [`http-ingress` role](/references/architecture#ingress-2). Restate automatically forwards each request to the node responsible for the target partition.
 
-However, in practice, you'll want some kind of entry point into your cluster. The simplest approach would be a DNS entry with multiple A records that round-robin resolves to all the http-ingress nodes. Kubernetes makes this easier though - you create a Service object and Kubernetes translates that into a logical entry point. The Restate operator automatically creates these services for you.
+Although a load balancer is not strictly required, having a single entry point is recommended. The simplest option is a DNS record with multiple A entries for round-robin resolution across all `http-ingress` nodes.
 
-Having something intelligent in front of your ingresses is desirable because it can perform health checks and skip over nodes that aren't reporting as ready to serve, providing better reliability than simple DNS round-robin.
+On Kubernetes, you can create a `Service` object for this purpose. The Restate operator creates these services automatically for you.
 
-The specific Kubernets provider to which you deploy will likely support binding to specific native load-balancer services, for example ELB in AWS EKS.
+Adding a load balancer can further improve your setup by performing health checks and routing traffic only to ready nodes.
+
+The specific Kubernetes provider to which you deploy will likely support binding to specific native load-balancer services, for example, AWS ELB in AWS EKS.
 
