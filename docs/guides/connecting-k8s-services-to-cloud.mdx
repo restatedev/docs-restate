@@ -4,41 +4,99 @@ description: "Learn how to connect services on Kubernetes to Restate Cloud."
 tags: ["deployment"]
 ---
 
+This guide walks you through connecting a Kubernetes services to Restate Cloud with Restate Operator.
+
+We will use [kind](https://kind.sigs.k8s.io/) to create a local Kubernetes cluster for testing purposes.
+
+<Steps>
+<Step title={"Prerequisites"}>
+    Install the following on your local machine:
+    - [Docker](https://docs.docker.com/)
+    - [Helm](https://helm.sh/docs/intro/install/)
+    - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+    - [Restate](/installation)
+    - [Restate Cloud account](https://cloud.restate.dev/)
+    - [kind](https://kind.sigs.k8s.io/docs/user/quick-start)
+
+    This guide was written with kind v0.30.0, [Restate Operator](https://github.com/restatedev/restate-operator/tree/main) v1.8.1, and Restate v1.5.0.
+    Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) if something does not work as expected.
+</Step>
+<Step title={"Create a kind cluster"}>
+    ```bash
+    kind create cluster
+    ```
+
+    Set `kubectl` context to `kind-kind`:
+
+    ```bash
+    kubectl cluster-info --context kind-kind
+    ```
+</Step>
+<Step title={"Install the Restate Operator"}>
+
+    ```bash
+    helm install restate-operator \
+    oci://ghcr.io/restatedev/restate-operator-helm \
+    --namespace restate-operator \
+    --create-namespace
+    ```
+</Step>
+<Step title={"Create a Restate Cloud environment secret"}>
+
+    Create an API key via `Developers` tab of the Restate Cloud UI and give it `Full` permissions.
+
+    The API key starts with `api_`. Put it in a file named `token` and add the secret:
+    ```bash
+    kubectl create secret generic my-cloud-environment-secret \
+    --from-file=token=./token -n restate-operator
+    ```
+</Step>
+<Step title={"Set up a secure tunnel between the kind cluster and Restate Cloud"}>
+
+Create a `RestateCloudEnvironment` manifest in a file called `restate-cloud-env.yaml`:
+```yaml restate-cloud-env.yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateCloudEnvironment
+metadata:
+  name: my-cloud-environment
+spec:
+  environmentId: env_201j05r9g0f12ygtphdszbb4scp
+  signingPublicKey: publickeyv1_BBuEJnx28hdGb5Ky6qpvuXQG4aVoWBnubJtHXpznzgQk
+  region: eu
+  authentication:
+    secret:
+      name: my-cloud-environment-secret
+      key: token
+```
+
+- The `environmentId` can be found in the Restate Cloud UI at the top left corner when you select your environment.
+This ID starts with `env_`.
+
+- The `signingPublicKey` can be found in the Restate Cloud UI under `Developers`. Scroll down to the `Security` section to find the public key under `HTTP endpoints`.
+The public key starts with `publickeyv1_`.
+
+- Set the `region` field to the region your Restate Cloud environment is hosted in. Possible values are `us` and `eu`.
+You can find the region next to your environment ID in the Restate Cloud UI.
 
 
-1. Install kind, helm, kubectl, and Restate on your local machine.
-2. Create a kind cluster:
+Finally, apply the manifest:
 
 ```bash
-kind create cluster
+kubectl apply -f restate-cloud-env.yaml
 ```
 
-Set kubectl context to "kind-kind":
+This deploys a tunnel service in the `restate-operator` namespace that connects the kind cluster to your Restate Cloud environment.
 
-```
-kubectl cluster-info --context kind-kind
-```
-3. Install the Restate Operator via Helm:
-
+And wait until the tunnel is ready:
 ```bash
-helm install restate-operator \
-  oci://ghcr.io/restatedev/restate-operator-helm \
-  --namespace restate-operator \
-  --create-namespace
+kubectl get pods -w -n restate-operator
 ```
 
-To view the charts for local inspection, you can dump them to a file via:
+</Step>
 
-```
-helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
---namespace restate-operator \
---create-namespace \
---include-crds \
-  > manifests.yaml
-```
+<Step title={"Build and upload a Restate service Docker image to the kind cluster"}>
 
-6. Download a service template (for example a TypeScript Hello World service):
-
+For example, download the TypeScript Hello World service:
 ```bash
 restate example typescript-hello-world &&
 cd typescript-hello-world &&
@@ -51,9 +109,18 @@ Build a Docker image for the service:
 docker build -t my-restate-service:0.0.1 .
 ```
 
-7. Create a RestateDeployment manifest for the service in a file called `service-deployment.yaml`:
+Upload the image to the kind cluster:
 
-```yaml
+```bash
+kind load docker-image my-restate-service:0.0.1
+```
+</Step>
+
+<Step title={"Deploy the Restate service"}>
+
+Create a `RestateDeployment` manifest for the service in a file called `service-deployment.yaml`:
+
+```yaml service-deployment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -62,9 +129,7 @@ spec:
   replicas: 1
   restate:
     register:
-      service:
-        name: restate
-        namespace: restate-test
+      cloud: my-cloud-environment
   selector:
     matchLabels:
       app: my-app
@@ -84,15 +149,42 @@ spec:
 Apply the manifest to deploy the service:
 
 ```bash
-kind load docker-image my-restate-service:0.0.1
 kubectl apply -f service-deployment.yaml -n restate-test
 ```
 
-You now see the deployed service listed:
-```
-kubectl get pods -n restate-test
-```
+You should now see the deployed service listed in the Restate Cloud UI:
 
 
+<Frame>
+<img src={"/img/guides/connecting-k8s-services-to-cloud/registration.png"}/>
+</Frame>
+
+The Restate Operator automatically [registered](/services/versioning#registering-a-deployment) the service with the Restate cluster.
+
+</Step>
+
+<Step title={"Invoke the service"}>
+In the Restate Cloud UI playground, you can now invoke the service. In the overview page, click on the `greet` handler of your service to open the playground.
+Then send a request:
+
+<Frame>
+    <img src={"/img/guides/restate-on-kind-with-operator/invoke.png"}/>
+</Frame>
+
+</Step>
+
+<Step title={"🎉 You did it!"}>
+    You have successfully deployed a Restate cluster and a Restate service on a local kind Kubernetes cluster using the Restate Operator!
+
+    Check out the [Restate Operator docs](/server/deploy/kubernetes#restate-kubernetes-operator) for further information.
+</Step>
+</Steps>
+
+
+After you are done experimenting, you can delete the kind cluster:
+
+```bash
+kind delete cluster
+```
 
 
