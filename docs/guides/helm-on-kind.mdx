@@ -1,571 +1,167 @@
 ---
-title: "Local Restate Cluster on Kubernetes with Helm"
+title: "Kubernetes deployments with Helm"
 description: "Learn how to deploy a Restate cluster using Helm on a kind Kubernetes cluster."
 tags: ["deployment"]
 ---
 
 
-This tutorial will guide you through deploying a single-node Restate cluster on a local Kubernetes cluster using kind (Kubernetes in Docker) and Helm.
+This tutorial will guide you through deploying a single-node Restate cluster on a local Kubernetes cluster using Helm.
 
+We will use [kind](https://kind.sigs.k8s.io/) to create a local Kubernetes cluster for testing purposes.
 
-### What You'll Learn
-- How to deploy Restate using Helm charts on a a local Kubernetes cluster (with kind)
-- How to configure Restate for single-node operation
-- How to deploy and register services with Restate
-- How to verify and test your deployment
+<Steps>
+<Step title={"Prerequisites"}>
+    Install the following on your local machine:
+    - [Docker](https://docs.docker.com/)
+    - [Helm](https://helm.sh/docs/intro/install/)
+    - [kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl)
+    - [Restate](/installation)
+    - [kind](https://kind.sigs.k8s.io/docs/user/quick-start)
 
-## Pre-requisites:
-- [Docker](https://docs.docker.com/get-docker/)
-- [kind](https://kind.sigs.k8s.io/docs/user/quick-start)
-- [Helm](https://helm.sh/docs/intro/install/)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [Restate CLI](https://docs.restate.dev/installation#install-restate-server-%26-cli) and [`restatectl`](https://docs.restate.dev/installation#advanced%3A-installing-restatectl)
+    This guide was written with kind v0.30.0, and Restate v1.5.0.
+    Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) if something does not work as expected.
+</Step>
+<Step title={"Create a kind cluster"}>
+    ```bash
+    kind create cluster
+    ```
 
+    Set `kubectl` context to `kind-kind`:
 
-## Setting up a Kind Cluster
+    ```bash
+    kubectl cluster-info --context kind-kind
+    ```
+</Step>
+<Step title={"Install the single-node Restate Helm chart"}>
 
-### Step 1: Create a Kind Configuration File
+    ```bash
+    helm install restate oci://ghcr.io/restatedev/restate-helm \
+      --namespace restate
+      --create-namespace
+    ```
 
-Create a file named `kind-config.yaml` with the following configuration:
+    This will deploy a single-node Restate cluster in the `restate` namespace.
 
-```yaml
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-name: restate-cluster
-nodes:
-  - role: control-plane
-    # Port mappings to expose services
-    extraPortMappings:
-      # Restate ingress port
-      - containerPort: 30080
-        hostPort: 8080
-        protocol: TCP
-      # Restate admin port
-      - containerPort: 30070
-        hostPort: 9070
-        protocol: TCP
-      # Restate NodeCtl port (metrics)
-      - containerPort: 30122
-        hostPort: 5122
-        protocol: TCP
-    # Extra mounts for persistence (optional)
-    extraMounts:
-      - hostPath: ./restate-data
-        containerPath: /var/restate-data
+    Wait until the `restate-0` pod is in the `Ready` state:
+
+    ```bash
+    kubectl get pods -n restate -w
+    ```
+
+</Step>
+
+<Step title={"Forward the ports of the Restate ingress and the UI to your local machine"}>
+```bash
+kubectl port-forward svc/restate -n restate 8080:8080 9070:9070
 ```
 
-### Step 2: Create the Kind Cluster
+Now you can access the Restate UI at `http://localhost:9070`.
+</Step>
+
+<Step title={"Build and upload a Restate service Docker image to the kind cluster"}>
+
+For example, download the TypeScript Hello World service:
+```bash
+restate example typescript-hello-world &&
+cd typescript-hello-world &&
+npm install
+```
+
+Build a Docker image for the service:
 
 ```bash
-# Create the cluster with the configuration
-kind create cluster --config kind-config.yaml
-
-# Verify cluster is running
-kubectl cluster-info --context kind-restate-cluster
-
-# Check nodes are ready
-kubectl get nodes
+docker build -t my-restate-service:0.0.1 .
 ```
 
-## Installing Restate with Helm
-
-### Step 1: Create a Custom Values File
-
-Create a file named `restate-values.yaml` to configure Restate for single-node operation:
-
-```yaml
-# Restate Helm Chart Values for Single-Node Deployment
-
-# StatefulSet configuration
-replicaCount: 1
-
-# Service configuration
-service:
-  type: NodePort
-  ingress:
-    port: 8080
-    nodePort: 30080
-  admin:
-    port: 9070
-    nodePort: 30070
-  metrics:
-    port: 5122
-    nodePort: 30122
-
-# Persistence configuration
-persistence:
-  enabled: true
-  size: 10Gi
-  storageClassName: standard
-  # For kind, we use the default storage class
-
-# Resource limits and requests
-resources:
-  requests:
-    memory: "512Mi"
-    cpu: "500m"
-  limits:
-    memory: "2Gi"
-    cpu: "2000m"
-
-# Restate server configuration
-config:
-  # Single-node configuration
-  cluster-name: "restate-single-node"
-  node-name: "restate-0"
-
-  # Replication factor for single node
-  default-replication: 1
-
-  # Auto-provision the cluster
-  auto-provision: true
-
-  # Number of partitions (can be adjusted based on workload)
-  bootstrap-num-partitions: 4
-
-  # Bifrost configuration for single node
-  bifrost:
-    default-provider: "replicated"
-
-  # Metadata server configuration
-  metadata-server:
-    type: "replicated"
-
-  # Admin server configuration
-  admin:
-    bind-address: "0.0.0.0:9070"
-
-  # Ingress configuration
-  ingress:
-    bind-address: "0.0.0.0:8080"
-
-# Service Account
-serviceAccount:
-  create: true
-  name: restate
-
-# Security Context
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-
-# Liveness and Readiness Probes
-livenessProbe:
-  enabled: true
-  httpGet:
-    path: /health
-    port: admin
-  initialDelaySeconds: 30
-  periodSeconds: 10
-
-readinessProbe:
-  enabled: true
-  httpGet:
-    path: /health
-    port: admin
-  initialDelaySeconds: 10
-  periodSeconds: 5
-
-# Optional: Enable ingress if you have an ingress controller
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: restate.local
-      paths:
-        - path: /
-          pathType: Prefix
-```
-
-### Step 2: Install Restate Using Helm
+Upload the image to the kind cluster:
 
 ```bash
-# Create a namespace for Restate
-kubectl create namespace restate
-
-# Add the Restate Helm repository (if using OCI registry)
-# Note: Restate uses OCI registry for Helm charts
-
-# Install Restate with custom values
-helm install restate \
-  oci://ghcr.io/restatedev/restate-helm \
-  --namespace restate \
-  --values restate-values.yaml \
-  --wait \
-  --timeout 5m
-
-# Alternatively, if you've cloned the repository:
-# git clone https://github.com/restatedev/restate.git
-# cd restate/charts/restate-helm
-# helm install restate . --namespace restate --values ../../restate-values.yaml
+kind load docker-image my-restate-service:0.0.1
 ```
+</Step>
 
-### Step 3: Verify the Installation
+<Step title={"Deploy the Restate service"}>
 
-```bash
-# Check if the StatefulSet is running
-kubectl get statefulset -n restate
+Create a `RestateDeployment` manifest for the service in a file called `service-deployment.yaml`:
 
-# Check if the pod is running
-kubectl get pods -n restate
-
-# Check services
-kubectl get svc -n restate
-
-# View logs
-kubectl logs -n restate restate-0
-
-# Check PVC (Persistent Volume Claim)
-kubectl get pvc -n restate
-```
-
-## Verifying the Installation
-
-### Step 1: Port Forward to Access Restate UI
-
-If NodePort is not working, you can use port-forward:
-
-```bash
-# Forward admin port
-kubectl port-forward -n restate svc/restate 9070:9070 &
-
-# Forward ingress port
-kubectl port-forward -n restate svc/restate 8080:8080 &
-```
-
-### Step 2: Check Restate Status
-
-Using the Restate CLI:
-
-```bash
-# Check cluster status
-restate status
-
-# Or using restatectl from inside the pod
-kubectl exec -n restate restate-0 -- restatectl status
-
-# Check nodes
-kubectl exec -n restate restate-0 -- restatectl nodes list
-
-# Check logs configuration
-kubectl exec -n restate restate-0 -- restatectl logs list
-```
-
-### Step 3: Access Restate UI
-
-Open your browser and navigate to:
-- Admin UI: http://localhost:9070
-- Ingress endpoint: http://localhost:8080
-
-## Deploying a Sample Service
-
-### Step 1: Create a Simple Greeter Service
-
-Create a file named `greeter-deployment.yaml`:
-
-```yaml
+```yaml service-deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: greeter-service
-  namespace: restate
+  name: my-app
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: greeter
+      app: my-app
   template:
     metadata:
       labels:
-        app: greeter
+        app: my-app
     spec:
       containers:
-        - name: greeter
-          # Use your own service image or a sample from Restate examples
-          image: ghcr.io/restatedev/examples-typescript-greeter:latest
-          env:
-            - name: PORT
-              value: "9080"
-          ports:
-            - containerPort: 9080
-              name: restate
+      - name: app
+        image: my-restate-service:0.0.1
+        ports:
+        - name: http
+          containerPort: 9080
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: greeter-service
-  namespace: restate
+  name: my-app
 spec:
   selector:
-    app: greeter
+    app: my-app
   ports:
-    - port: 9080
-      name: restate
-  type: ClusterIP
+  - name: http
+    port: 9080
+    targetPort: 9080
 ```
 
-Deploy the service:
+Apply the manifest to deploy the service:
 
 ```bash
-kubectl apply -f greeter-deployment.yaml
-
-# Verify the service is running
-kubectl get pods -n restate | grep greeter
-kubectl get svc -n restate | grep greeter
+kubectl apply -f service-deployment.yaml -n restate
 ```
 
-### Step 2: Register the Service with Restate
+</Step>
+
+<Step title={"Register the service"}>
+In the Restate UI, you can now register the deployment `http://my-app.restate.svc.cluster.local:9080/` via the UI at `http://localhost:9070`.
+
+Once it is registered, you should see the deployed service listed in the Restate UI:
+
+<Frame>
+    <img src={"/img/guides/helm-on-kind/registration.png"}/>
+</Frame>
+
+</Step>
+
+<Step title={"Invoke the service"}>
+In the Restate UI playground, you can now invoke the service. In the overview page, click on the `greet` handler of your service to open the playground.
+Then send a request:
+
+<Frame>
+    <img src={"/img/guides/helm-on-kind/invoke.png"}/>
+</Frame>
+
+</Step>
+
+<Step title={"🎉 You did it!"}>
+    You have successfully deployed a Restate cluster and a Restate service on a local kind Kubernetes cluster using the Helm chart!
+
+    Check out the [Restate Helm deployment docs](/server/deploy/kubernetes#helm-chart) for more information.
+</Step>
+</Steps>
+
+
+
+
+After you are done experimenting, you can delete the kind cluster:
 
 ```bash
-# Register the service endpoint
-restate deployments register http://greeter-service.restate.svc.cluster.local:9080 \
-  --yes
-
-# Or using curl
-curl -X POST http://localhost:9070/deployments \
-  -H "Content-Type: application/json" \
-  -d '{"uri": "http://greeter-service.restate.svc.cluster.local:9080"}'
-
-# List registered deployments
-restate deployments list
+kind delete cluster
 ```
 
-## Testing Your Setup
 
-### Step 1: Invoke the Service
-
-```bash
-# Call the greeter service
-curl http://localhost:8080/Greeter/greet \
-  -H "Content-Type: application/json" \
-  -d '"World"'
-
-# Expected response: "Hello, World!"
-```
-
-### Step 2: Check Service Invocations
-
-```bash
-# List invocations
-restate invocations list
-
-# Get invocation details (replace with actual invocation ID)
-restate invocations describe <invocation-id>
-```
-
-## Monitoring and Operations
-
-### Metrics with Prometheus
-
-Restate exposes metrics in Prometheus format at the NodeCtl endpoint:
-
-```bash
-# Get metrics
-curl http://localhost:5122/metrics
-```
-
-### Setting up Prometheus (Optional)
-
-Create `prometheus-config.yaml`:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-  namespace: restate
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-    scrape_configs:
-      - job_name: 'restate'
-        static_configs:
-          - targets: ['restate:5122']
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prometheus
-  namespace: restate
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: prometheus
-  template:
-    metadata:
-      labels:
-        app: prometheus
-    spec:
-      containers:
-        - name: prometheus
-          image: prom/prometheus:latest
-          ports:
-            - containerPort: 9090
-          volumeMounts:
-            - name: config
-              mountPath: /etc/prometheus
-      volumes:
-        - name: config
-          configMap:
-            name: prometheus-config
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-  namespace: restate
-spec:
-  selector:
-    app: prometheus
-  ports:
-    - port: 9090
-  type: NodePort
-```
-
-Deploy Prometheus:
-
-```bash
-kubectl apply -f prometheus-config.yaml
-
-# Port forward to access Prometheus
-kubectl port-forward -n restate svc/prometheus 9090:9090
-```
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-#### 1. Pod Not Starting
-
-```bash
-# Check pod status
-kubectl describe pod -n restate restate-0
-
-# Check logs
-kubectl logs -n restate restate-0
-
-# Check events
-kubectl get events -n restate --sort-by='.lastTimestamp'
-```
-
-#### 2. Service Registration Fails
-
-```bash
-# Check if service is reachable from Restate pod
-kubectl exec -n restate restate-0 -- curl http://greeter-service:9080
-
-# Check service endpoints
-kubectl get endpoints -n restate greeter-service
-```
-
-#### 3. Storage Issues
-
-```bash
-# Check PVC status
-kubectl get pvc -n restate
-
-# Check available storage
-kubectl get storageclass
-kubectl describe storageclass standard
-```
-
-#### 4. Connection Issues
-
-```bash
-# Test connectivity
-kubectl exec -n restate restate-0 -- nc -zv greeter-service 9080
-
-# Check network policies
-kubectl get networkpolicies -n restate
-```
-
-### Viewing Logs
-
-```bash
-# Stream logs
-kubectl logs -n restate restate-0 -f
-
-# Get logs with timestamps
-kubectl logs -n restate restate-0 --timestamps=true
-
-# Get previous container logs (if crashed)
-kubectl logs -n restate restate-0 --previous
-```
-
-## Next Steps
-
-### 1. Scaling to Multi-Node (Future)
-
-While this tutorial focuses on single-node deployment, Restate supports multi-node clusters. To scale:
-
-1. Update the `replicaCount` in your Helm values
-2. Configure proper replication factors
-3. Set up a shared storage solution
-4. Configure snapshot repository for state replication
-
-### 2. Production Considerations
-
-For production deployments, consider:
-
-- **Persistence**: Use production-grade storage classes
-- **Snapshots**: Configure external object storage (S3, MinIO)
-- **Security**: Enable TLS, configure RBAC
-- **Monitoring**: Set up comprehensive monitoring with Prometheus/Grafana
-- **Backup**: Implement backup strategies for state data
-
-### 3. Advanced Configuration
-
-Explore additional Restate features:
-
-- **Workflows**: Build complex orchestration workflows
-- **Virtual Objects**: Manage stateful entities
-- **Kafka Integration**: Connect with event streams
-- **Service Versioning**: Implement zero-downtime deployments
-
-### 4. Useful Resources
-
-- [Restate Documentation](https://docs.restate.dev)
-- [Restate GitHub Repository](https://github.com/restatedev/restate)
-- [Restate Examples](https://github.com/restatedev/examples)
-- [Restate Discord Community](https://discord.gg/restate)
-
-## Cleanup
-
-To remove the entire setup:
-
-```bash
-# Delete Restate deployment
-helm uninstall restate -n restate
-
-# Delete the namespace
-kubectl delete namespace restate
-
-# Delete the kind cluster
-kind delete cluster --name restate-cluster
-
-# Clean up local data (if created)
-rm -rf ./restate-data
-```
-
-## Conclusion
-
-You've successfully deployed a single-node Restate cluster on a kind Kubernetes cluster using Helm! This setup provides a solid foundation for:
-
-- Local development and testing
-- Learning Restate concepts
-- Prototyping distributed applications
-- Preparing for production deployments
-
-The single-node configuration is perfect for development but can be easily scaled to multi-node deployments when needed. Restate's architecture ensures that even a single-node deployment provides durable execution and reliable state management for your services.
-
-Remember that Restate handles:
-- **Durable execution**: Automatic retries and recovery from failures
-- **State management**: Built-in K/V store for your services
-- **Service orchestration**: Workflows and virtual objects
-- **Version management**: Safe deployments with the Kubernetes operator
-
-Happy building with Restate! 🚀
