@@ -1,0 +1,48 @@
+---
+Title: "Docker"
+sidebarTitle: "Docker"
+description: "Run Restate Server in Docker and Docker Compose."
+---
+
+import DockerComposeCluster from '/snippets/common/docker-compose-cluster.mdx';
+
+We recommend using Docker primarily for local development and testing.
+
+While you can deploy Restate with Docker in production, ensure that the data directory is stored on durable storage. In Kubernetes, this is typically handled by deploying Restate as a StatefulSet with persistent volumes (for example, EBS volumes), allowing pods to restart with the same data. Kubernetes also makes it easier to run distributed Restate clusters.
+
+If your Docker setup can provide equivalent durability, such as guaranteeing the same volume is reused across restarts, then running Restate via Docker is perfectly fine.
+
+## Single-node Restate Server
+
+To run a single-node Restate server using Docker, you can use the following command.
+
+```shell
+docker run -d \
+  --name restate \
+  --rm \  # Remove the named container on stop
+  -p 8080:8080 \
+  -p 9070:9070 \
+  -p 5122:5122 \
+  -v ./restate_data:/restate-data \  # Persist data in the current directory on the host machine
+  --add-host host.docker.internal:host-gateway \  # Only when running locally
+  docker.restate.dev/restatedev/restate:latest \
+  --node-name="restate-1" # Makes sure to restore from restate_data/restate-1 on restart
+```
+
+This command starts a Restate server container named `restate` in detached mode.
+
+It maps the necessary ports for ingress, admin, and node-to-node communication.
+
+It also mounts a host volume to persist Restate data across restarts.
+To run Restate durably, use a persistent volume for the `restate-data` directory as described in the [server overview](/server/overview#persistent-volumes).
+
+
+The `--node-name` flag ensures that the server uses a consistent node name, which is essential for data restoration.
+When Restate starts, it looks in the `restate-data` directory for a folder matching its node name and uses that data.
+If a node starts with a different name (for example, `node-a` finds data for `node-b`), this mismatch leads to data loss.
+
+## Multi-node Restate Cluster with Docker Compose
+
+<DockerComposeCluster/>
+
+<Info> See the [guide on running Restate with Docker Compose](/guides/cluster) for a step-by-step tutorial. </Info>

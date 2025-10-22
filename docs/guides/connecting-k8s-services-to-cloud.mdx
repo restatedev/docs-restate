@@ -1,0 +1,98 @@
+---
+title: "Connecting Kubernetes Services to Restate Cloud"
+description: "Learn how to connect services on Kubernetes to Restate Cloud."
+tags: ["deployment"]
+---
+
+
+
+1. Install kind, helm, kubectl, and Restate on your local machine.
+2. Create a kind cluster:
+
+```bash
+kind create cluster
+```
+
+Set kubectl context to "kind-kind":
+
+```
+kubectl cluster-info --context kind-kind
+```
+3. Install the Restate Operator via Helm:
+
+```bash
+helm install restate-operator \
+  oci://ghcr.io/restatedev/restate-operator-helm \
+  --namespace restate-operator \
+  --create-namespace
+```
+
+To view the charts for local inspection, you can dump them to a file via:
+
+```
+helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
+--namespace restate-operator \
+--create-namespace \
+--include-crds \
+  > manifests.yaml
+```
+
+6. Download a service template (for example a TypeScript Hello World service):
+
+```bash
+restate example typescript-hello-world &&
+cd typescript-hello-world &&
+npm install
+```
+
+Build a Docker image for the service:
+
+```bash
+docker build -t my-restate-service:0.0.1 .
+```
+
+7. Create a RestateDeployment manifest for the service in a file called `service-deployment.yaml`:
+
+```yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateDeployment
+metadata:
+  name: my-app
+spec:
+  replicas: 1
+  restate:
+    register:
+      service:
+        name: restate
+        namespace: restate-test
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: app
+        image: my-restate-service:0.0.1
+        ports:
+        - name: restate
+          containerPort: 9080
+```
+
+Apply the manifest to deploy the service:
+
+```bash
+kind load docker-image my-restate-service:0.0.1
+kubectl apply -f service-deployment.yaml -n restate-test
+```
+
+You now see the deployed service listed:
+```
+kubectl get pods -n restate-test
+```
+
+
+
+
