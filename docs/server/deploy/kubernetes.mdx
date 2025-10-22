@@ -36,7 +36,7 @@ It includes the following CRDs:
 - `RestateDeployment`: defines a Restate service deployment, including container image, resource requirements, and registration options ([learn more](/services/deploy/kubernetes)).
 - `RestateCloudEnvironment`: defines a connection between a Kubernetes service deployment and a Restate Cloud Environment ([learn more](/cloud/connecting-services)).
 
-### Deploying the operator
+### Operator deployment
 
 Install the Restate Operator via Helm:
 
@@ -60,13 +60,11 @@ helm template restate-operator oci://ghcr.io/restatedev/restate-operator-helm \
   > manifests.yaml
 ```
 
-### Deploying single-node Restate
+### Single-node deployment
 
 The `RestateCluster` CRD defines a Restate cluster. The operator watches for these objects and creates the necessary Kubernetes resources, such as `StatefulSet`, `Service`, and `NetworkPolicy` objects in a new namespace that matches the `RestateCluster` name.
 
-An example RestateCluster with one node:
-
-```yaml restate-cluster.yaml
+```yaml restate-server.yaml
 apiVersion: restate.dev/v1
 kind: RestateCluster
 metadata:
@@ -81,7 +79,7 @@ spec:
 Apply the manifest via `kubectl`:
 
 ```bash
-kubectl apply -f restate-cluster.yaml
+kubectl apply -f restate-server.yaml
 ```
 
 This will deploy the Restate cluster in its own namespace, called `restate-test`.
@@ -92,11 +90,11 @@ To learn more about the `RestateCluster` spec options, see the [`RestateCluster`
     Follow [the guide](/guides/restate-operator-on-kind) to experiment with deploying a Restate cluster and services on a local kind cluster.
 </Info>
 
-### Deploying a Restate cluster
+### Replicated cluster deployment
 
-You can deploy a multi-node Restate cluster with the `RestateCluster` CRD, by:
-1. increasing the `replicas` field in the `compute` section of the `RestateCluster` spec.
-2. providing a [Restate cluster configuration](/server/clusters) via the `config` field in the `RestateCluster` spec
+Deploy a multi-node Restate cluster by:
+1. Setting the `replicas` field in the `compute` section
+2. Providing [Restate cluster configuration](/server/clusters) via the `config` field
 
 ```yaml restate-cluster.yaml
 apiVersion: restate.dev/v1
@@ -143,8 +141,19 @@ spec:
     # aws-allow-http = true
 ```
 
-This example includes [MinIO object store](https://www.min.io/) as the snapshot destination.
-Note that running a distributed cluster without snapshots is not recommended.
+This example deploys a 3-node Restate cluster with snapshots and metadata stored in S3.
+
+S3 is the only supported object store for metadata storage. Other S3-compatible stores (such as MinIO) can be used for snapshots, but not for metadata storage.
+
+<Warning>
+Running a distributed cluster without snapshots is not recommended for production use.
+</Warning>
+
+Apply the manifest:
+
+```bash
+kubectl apply -f restate-cluster.yaml
+```
 
 You can find more information about configuring MinIO with your Restate cluster [here](https://github.com/restatedev/restate-operator/blob/main/docs/minio.md).
 
@@ -227,8 +236,7 @@ To configure a RestateCluster to send snapshots to self-hosted S3-compatible obj
 To deploy MinIO on your Kubernetes cluster, follow the instructions in the [MinIO documentation](https://docs.min.io/enterprise/aistor-object-store/installation/kubernetes/).
 
 <Warning>
-You should only use MinIO for snapshots, not for metadata storage, as MinIO's consistency model may lead to corrupt metadata, breaking your Restate cluster.
-Use the default Raft metadata store instead.
+MinIO should **only** be used for snapshots, not for metadata storage. MinIO's consistency model may corrupt metadata when read quorum is lost, breaking your Restate cluster. Always use the default Raft metadata store for cluster metadata.
 </Warning>
 
 Run your MinIO instance with at least 4 replicas to avoid data loss, as [recommended by MinIO](https://docs.min.io/enterprise/aistor-object-store/operations/core-concepts/#minio-architecture).
