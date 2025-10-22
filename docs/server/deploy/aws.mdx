@@ -1,87 +1,52 @@
 ---
-title: "AWS"
+title: "Deploying Restate on AWS"
+sidebarTitle: "AWS"
+description: "Deploy the Restate Server on Amazon Web Services using EKS, Fargate, and S3."
 ---
 
-## Compute
+We recommend deploying Restate on AWS using **Amazon EKS (Elastic Kubernetes Service)** with the [Restate Operator](/server/deploy/kubernetes). This approach provides the best balance of operational simplicity, scalability, and reliability.
 
-The easiest way to manage Restate is via the [Kubernetes operator](https://github.com/restatedev/restate-operator).
-That is why we recommend using EKS for your Restate deployments.
+## Recommended Architecture
 
-You can use EKS on top of AWS Fargate containers to avoid managing EC2 instances.
+For AWS deployments, we recommend:
 
-This approach is recommended both for a single-node deployment as well as for a cluster deployment.
+- **Compute**: EKS with Fargate for serverless container management
+- **Storage**: EBS for persistent volumes, S3 for snapshots (and optionally metadata)
+- **Networking**: Application Load Balancer (ALB) for ingress
+- **Security**: EKS Pod Identity for AWS service access
 
-ECS not recommended because it requires a Fargate deployment controller
-AWS might recycle the node at any time which is an issue for stateful Restate server
+## EKS with Restate Operator
 
-This supports EKS pod identity
+Create an EKS cluster with Fargate support.
+The easiest way to do this is via the Restate CDK constructs library (see [CDK Deployment](#cdk-deployment) below).
 
-Recommend EKS on Fargate: with Restate Operator
+Install the Restate Operator on your EKS cluster.
+And create a Restate cluster with EBS storage and snapshots to S3 ([see instructions](/server/deploy/kubernetes)).
 
-- can use fargate compute provider as the node target
-- EKS then manages state/etc to make sure the disk doesnt disappear when your node gets restarted
+## EC2 and ECS
 
-if you deploy single node EKS and sngle node restate
-Kubernetes will be good at attaching the volume to a new node if your node restarts.
-Kubernetes will be better at guarding your data
+While it is possible to deploy Restate on EC2 instances or ECS, keep in mind the increased operational overhead compared to EKS with Fargate.
+There is more manual work involved in managing the instances and persistent volumes.
 
-Quickstart guide that shows how to do this (use fargate, not EC2 so you don’t need to manage this:
+## EBS Persistent Volumes
 
-1. Deploy Fargate with EKS  (core CDK library)
-2. Then use Restate CDK library to deploy single node on top
-3. Then deploy small greeter AWS Lambda (core CDK library) that gets registered via the servicedeployer
+For persistent storage, we generally recommend a [General Purpose SSD (gp3) EBS volume](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html#gp3-ebs-volume-type).
 
+For single-node deployments, EBS volume snapshots can be used as [backups for point-in-time recovery](/server/snapshots#data-backups-2).
 
-## Storage
+We do not recommend using [EBS volume snapshots](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-snapshots.html) for restoring multi-node Restate clusters, since coordinating simultaneous backups across multiple nodes presents significant timing precision requirements, as described in the [backups documentation](/server/snapshots#multi-node-backup-challenges).
 
-### Using EBS as persistent volume
+### S3 Snapshots
 
-- You run a single Restate container
-- All data gets stored in `restate-data`
-- Attach a persistent volume (EBS, EFS). Your durability is equal to the durability of the underlying storage.
-- Restate persists every journal entry if it's in single node mode? Does this increase latency?
+We recommend using Amazon S3 for storing Restate snapshots, and optionally also as metadata store.
 
-Example of the configuration file
+Consult [snapshot configuration documentation](/server/snapshots#configuring-automatic-snapshotting) for more information on how to configure this.
 
-### Using S3 for snapshots
-Using Ephemeral Disk + async S3 snapshots
+If you are using EKS with the Restate Operator, then also check the [Restate Operator documentation](/server/deploy/kubernetes#replicated-cluster-deployment).
 
-- E.g. MinIO, AWS S3, anything else?
-- On AWS use S3. Everywhere else minio?
-- GCS's S3-compatible API does not support the S3 conditional put semantics we require for both snapshots and metadata store usage. This requires native support, will have an update for you soon.
-- Azure: use Minio
-- You run a single Restate container
-- All data gets stored in S3
-- You still need persistent volume? otherwise too slow to wait on S3 writes?
+## CDK Deployment
 
-
-Example of the configuration file
-
-## Deploying Restate with CDK
-Restate has a CDK constructs library.
+The Restate CDK constructs library provides infrastructure-as-code deployment options.
 
 <Card title="Restate CDK GitHub" href="https://github.com/restatedev/cdk" icon="github" horizontal={true} />
 
-- ServiceDeployer construct: teaches cloudformation how to register your lambda fucntion with a specific restate environment
-- Single-node EC2 construct is really only good for demos. Do not use this for production. You are not taking backups as you should be. You will lose data.
-
-The CDK stack sets up a load balancer in front of the admin port.
-
-### Deploying a single-node Restate Server with CDK
-
-
-https://github.com/restatedev/cdk/blob/main/test/e2e/stacks/ec2-r53-alb-stack.ts
-
-
-Old docs:
-https://github.com/restatedev/documentation/blob/main/docs/deploy/server/self-hosted.md
-
-### Deploying a Cluster with CDK
-
-### Services with CDK to AWS Lambda
-https://github.com/restatedev/documentation/blob/main/docs/deploy/services/faas/lambda/cdk.mdx
-
-
-## Load balancing
-
-Use the cloud-native load balancer: for example ELB like we do in the CDK examples.
