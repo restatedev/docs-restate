@@ -1,9 +1,9 @@
 package cancellation;
 
 import dev.restate.sdk.Context;
-import dev.restate.sdk.common.TerminalException;
-import dev.restate.sdk.annotation.Service;
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Service;
+import dev.restate.sdk.common.TerminalException;
 
 @Service
 public class CancellationExample {
@@ -34,11 +34,10 @@ public class CancellationExample {
       throw e; // Re-throw to propagate cancellation
     }
   }
+
   // <end_here>
 
-  private void processPayment(String paymentId, Order order) {
-  }
+  private void processPayment(String paymentId, Order order) {}
 
-  private void refundPayment(String paymentId, Order order) {
-  }
+  private void refundPayment(String paymentId, Order order) {}
 }
