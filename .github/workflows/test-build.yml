@@ -1,0 +1,113 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  ts-build:
+    name: TS snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Compile TypeScript code snippets
+        run: npm install --prefix snippets/ts && npm run build --prefix snippets/ts
+
+      - name: Check if TypeScript code snippets build is successful
+        run: |
+          if [ -d "snippets/ts/dist" ]; then
+          echo "TypeScript compilation successful"
+          else
+          echo "TypeScript compilation failed"
+          exit 1
+          fi
+
+  python-build:
+    name: Python snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install dependencies and check Python code snippets
+        run: |
+          cd snippets/python
+          uv sync --locked --all-extras --dev
+          uv add --dev mypy
+          uv run mypy .
+
+  java-build:
+    name: Java snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # Setup Java
+      - uses: actions/setup-java@v3
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      # Check Java code snippets
+      - name: Test Java code snippets
+        uses: gradle/gradle-build-action@v2
+        with:
+          arguments: check
+          build-root-directory: snippets/java
+
+  kotlin-build:
+    name: Kotlin snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # Setup Java
+      - uses: actions/setup-java@v3
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      # Check Kotlin code snippets
+      - name: Test Kotlin code snippets
+        uses: gradle/gradle-build-action@v2
+        with:
+          arguments: check
+          build-root-directory: snippets/kotlin
+
+  go-build:
+    name: Golang snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Setup Go
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      # Check Go code snippets
+      - name: Test Go code snippets
+        working-directory: snippets/go
+        run: go test ./...
+
+  rust-build:
+    name: Rust snippets build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Setup Rust
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          rustflags: ""
+
+      # Run Rust tests
+      - name: Run Rust tests
+        run: cargo clippy --manifest-path ./snippets/rust/Cargo.toml
