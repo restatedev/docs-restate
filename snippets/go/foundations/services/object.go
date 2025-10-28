@@ -1,10 +1,7 @@
 package main
 
 import (
-	"context"
 	restate "github.com/restatedev/sdk-go"
-	"github.com/restatedev/sdk-go/server"
-	"log"
 )
 
 type Item struct {
@@ -39,10 +36,3 @@ func (ShoppingCartObject) GetTotal(ctx restate.ObjectSharedContext) (float64, er
 }
 
 // <end_here>
-func main() {
-	if err := server.NewRestate().
-		Bind(restate.Reflect(ShoppingCartObject{})).
-		Start(context.Background(), ":9080"); err != nil {
-		log.Fatal(err)
-	}
-}

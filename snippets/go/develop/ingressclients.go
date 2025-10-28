@@ -106,7 +106,7 @@ func (c *IngressClient) idempotentInvoke() {
 	// <end_service_idempotent>
 }
 
-func (c *IngressClient) attach() {
+func (c *IngressClient) attach() error {
 	var input MyInput
 	input.Name = "Hi"
 
@@ -114,22 +114,25 @@ func (c *IngressClient) attach() {
 	restateClient := restateingress.NewClient("http://localhost:8080")
 
 	// The call to which we want to attach later
-	handle := restateingress.ServiceSend[*MyInput](
+	handle, err := restateingress.ServiceSend[*MyInput](
 		restateClient, "MyService", "MyHandler").
 		Send(context.Background(), &input, restate.WithIdempotencyKey("my-idempotency-key"))
+	if err != nil {
+		return err
+	}
 
 	// ... do something else ...
 
 	// ---------------------------------
 	// OPTION 1: With the invocation Id
-	invocationId := handle.Id
-	result1, err := restateingress.AttachInvocation[*MyOutput](
+	invocationId := handle.Id()
+	result1, err := restateingress.InvocationById[*MyOutput](
 		restateClient, invocationId).
 		Attach(context.Background())
 
 	// ---------------------------------
 	// OPTION 2: With the idempotency key
-	result2, err := restateingress.AttachService[*MyOutput](
+	result2, err := restateingress.ServiceInvocationByIdempotencyKey[*MyOutput](
 		restateClient, "MyService", "MyHandler", "my-idempotency-key").
 		Attach(context.Background())
 	// <end_service_attach>
@@ -137,9 +140,10 @@ func (c *IngressClient) attach() {
 	_ = result1
 	_ = result2
 	_ = err
+	return nil
 }
 
-func (c *IngressClient) workflowAttach() {
+func (c *IngressClient) workflowAttach() error {
 	var input MyInput
 	input.Name = "Hi"
 
@@ -147,21 +151,24 @@ func (c *IngressClient) workflowAttach() {
 	restateClient := restateingress.NewClient("http://localhost:8080")
 
 	// The workflow to which we want to attach later
-	wfHandle := restateingress.WorkflowSend[*MyInput](
+	wfHandle, err := restateingress.WorkflowSend[*MyInput](
 		restateClient, "MyWorkflow", "Mary", "Run").
 		Send(context.Background(), &input)
+	if err != nil {
+		return err
+	}
 
 	// ... do something else ...
 
 	// ---------------------------------
 	// OPTION 1: With the handle returned by the workflow submission
-	result, err := restateingress.AttachInvocation[*MyOutput](
-		restateClient, wfHandle.Id).
+	result, err := restateingress.InvocationById[*MyOutput](
+		restateClient, wfHandle.Id()).
 		Attach(context.Background())
 
 	// ---------------------------------
 	// OPTION 2: With the workflow ID
-	wfHandle2, err := restateingress.AttachWorkflow[*MyOutput](
+	wfHandle2, err := restateingress.WorkflowHandle[*MyOutput](
 		restateClient, "MyWorkflow", "wf-id").
 		Attach(context.Background())
 	// <end_workflow_attach>
@@ -169,6 +176,7 @@ func (c *IngressClient) workflowAttach() {
 	_ = result
 	_ = wfHandle2
 	_ = err
+	return nil
 }
 
 // Mock data structures
