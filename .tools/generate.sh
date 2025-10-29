@@ -32,6 +32,7 @@ $SCRIPT_DIR/generate_sql_introspection_page.sh $RESTATE_PATH
 popd
 
 pushd $DOCS_DIR
+npm i
 node scripts/generate-restate-config-viewer.js
 node scripts/loadScripts.js
 popd
