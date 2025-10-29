@@ -141,23 +141,21 @@ func (OrderService) processOrder(ctx restate.ObjectContext, order Order) error {
 ```
 ```java Java {"CODE_LOAD::java/src/main/java/services/CancellationExample.java#here"} 
 @Handler
-public void processOrder(Context ctx, Order order) {
+public void processOrder(ObjectContext ctx, Order order) {
   // If cancellation happened before this line, this still executes
-  ctx.set("status", "processing");
+  ctx.set(STATUS, "processing");
 
   // If cancellation happened before this line, this still executes
   String paymentId = ctx.random().nextUUID().toString();
   try {
 
-    // If cancelled right before this line, ctx.run won't execute
-    // If cancelled during run block execution,
+    // If canceled right before this line, ctx.run won't execute
+    // If canceled during run block execution,
     // then a terminal exception gets thrown here once execution finishes
     ctx.run(() -> processPayment(paymentId, order));
 
     // If cancellation happened right before this line, this still executes
-    NotificationServiceClient.fromContext(ctx)
-        .send()
-        .notify(order.getUserId(), "Payment processed");
+    NotificationServiceClient.fromContext(ctx).send().sendNotification("Your order is processed");
 
   } catch (TerminalException e) {
     // Cancellation detected - run compensation
@@ -181,7 +179,7 @@ async def process_order(ctx: restate.ObjectContext, order: Order):
         await ctx.run_typed("process-payment", process_payment, id=payment_id, order=order)
 
         # If cancellation happened before this line, this still executes
-        ctx.send(notify, "Payment processed")
+        ctx.service_send(notify, "Payment processed")
 
     except TerminalError as e:
         # Cancellation detected - run compensation
