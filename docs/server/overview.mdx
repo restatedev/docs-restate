@@ -6,13 +6,14 @@ icon: "book-open"
 ---
 
 
-Restate can run as a single binary, making it easy to run it on a variety of platforms, from your local machine, to a VM, to Kubernetes.
+Restate is distributed as a single binary that implements all features required to run a single- or multi-node cluster, making it easy to run it on a variety of platforms, from your local machine, to a VM, to Kubernetes.
 
 This page gives an overview of the different deployment strategies and requirements.
 
 <Card icon={"cloud"} href={"/cloud/getting-started"} title={"The easiest way to run Restate is with Restate Cloud."}>
     Keep deploying your code the same way you do now.
-    Restate Cloud handles resilience, observability, and scalability for your code, with no additional infra.
+    Restate Cloud handles resilience, observability, and scalability for your code, with no additional infrastructure to manage beyond your services.
+    Pair Restate Cloud with a serverless compute provider for the simplest operational experience.
 </Card>
 
 ## Pre-requisites
@@ -26,11 +27,10 @@ Restate can run as a single node or as a cluster. See [the trade-offs below](/se
 
 ## Compute
 
-The easiest way to deploy and manage the Restate cluster and services is via the [Kubernetes operator](/server/deploy/kubernetes), since it gives you a lot of built-in functionality and tooling for deploying services, versioning, and more.
+The easiest way to deploy and manage a Restate cluster and containerized Restate services is via the [Kubernetes operator](/server/deploy/kubernetes), as it provides the simplest experience for deploying Restate clusters, deploying services while managing versioning, and more.
 Therefore, **we recommend using the Restate Kubernetes Operator in combination with a managed Kubernetes provider such as AWS EKS, Azure's AKS, or Google's GKE.**
 
-This approach is also recommended for single-node Restate deployments because it will make managing the persistent volume of your Restate instance easier.
-If your instance goes down, the Kubernetes provider automatically restarts it and reattaches the persistent volume.
+This approach is great even for single-node Restate deployments because it makes managing the Restate node much simpler, handling node restarts or Restate version updates with ease. Kubernetes is responsible for keeping the Restate container running and, crucially, makes sure that the persistent volume attachment follows it around if it moves between nodes.
 
 ## Persistent volumes
 
@@ -67,10 +67,9 @@ Mainly because this makes failover much faster, without the need to recompose al
 
 ## Object storage for snapshots
 
-Snapshotting the content of Restate's state store, is recommended to enable faster failover. It is mandatory for cluster deployments, because it enables handing over partitions between nodes.
+Snapshotting Restate partition processors is necessary when running multi-node clusters. Partition snapshots are required to enable log trimming and avoid long catch-up delays when handing over partitions between nodes.
 
 Restate supports snapshotting to object stores because they offer great scalability, durability, and cost and are available in all cloud providers and most on-prem setups.
-Plus, the storage exists disaggregated from compute nodes, making the nodes stateless (or owning little state), which is highly desirable for efficient operations.
 
 Performance requirements for snapshot storage are minimal. Snapshots typically occur only a few times per hour and are read rarely, so the snapshot destination's performance doesn't affect cluster performance.
 
@@ -92,7 +91,7 @@ Restate can be deployed as a single-node setup or as a distributed cluster, depe
 
 | Requirement | Single-Node | Cluster |
 |-------------|-------------|---------|
-| **Durability** | ✅ | ✅ |
+| **Durability** | OK (when using durable disk) | Better |
 | **High Availability** | ❌ | ✅ |
 | **Geo-replication** | ❌ | ✅ |
 | **Horizontal Scaling** | ❌ | ✅ |
@@ -111,7 +110,7 @@ In case of a node or Restate process crash, you won't lose data, but you will ex
 ### When to use Cluster Deployments
 Restate cluster deployments serve multiple purposes:
 - **High-availability**: In case of a crash, other nodes of the cluster can take over immediately, rather than waiting on the failed node to get rescheduled.
-- **Geo-replication**: To reduce the risk of downtime even further, Restate clusters can run in a geo-replicated setup, with nodes deployed across multiple availability zones or even regions. Letting you tolerate outages of full zones and regions.
+- **Geo-replication**: To reduce the risk of downtime even further, Restate clusters can run in a geo-replicated setup, with nodes deployed across multiple availability zones or even regions. Depending on your architecture, such a deployment allows you to remain available through outages affecting entire zones and even regions.
 - **Scalability** by spreading load over multiple nodes.
 - Even **better durability**, by persisting copies of the data across multiple zones / regions.
 
