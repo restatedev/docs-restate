@@ -21,17 +21,14 @@ cargo xtask generate-rest-api-doc > $DOCS_DIR/docs/docs/schemas/openapi-admin.js
 
 echo "Generate config schema"
 cargo xtask generate-config-schema > $DOCS_DIR/docs/docs/schemas/restate-server-configuration-schema.json
+node scripts/generate-restate-config-viewer.js
 
 echo "Generate default config"
 cargo xtask generate-default-config > $DOCS_DIR/docs/docs/schemas/restate.toml
+node scripts/loadScripts.js
 
 echo "Generate sql introspection page"
 $SCRIPT_DIR/generate_sql_introspection_page.sh $RESTATE_PATH
 
 
-popd
-
-# Regenerate OpenAPI docs
-pushd $DOCS_DIR
-node scripts/generate-restate-config-viewer.js
 popd

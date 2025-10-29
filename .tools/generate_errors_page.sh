@@ -26,9 +26,5 @@ for md_file in $(find $IN_PATH -type f -name "*.md" | sort); do
     printf "$(cat $md_file)\n\n" >> $OUT_TMP_FILE;
 done
 
-#chmod +x $SCRIPT_DIR/convert_headers.sh
-#$SCRIPT_DIR/convert_headers.sh $OUT_TMP_FILE > $OUT_FILE
-#rm $OUT_TMP_FILE
-
 mv $OUT_TMP_FILE $OUT_FILE
 echo "Generated $OUT_FILE"
