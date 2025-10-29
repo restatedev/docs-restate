@@ -17,14 +17,14 @@ $SCRIPT_DIR/generate_errors_page.sh $RESTATE_PATH/crates/errors/src/error_codes
 pushd $RESTATE_PATH
 
 echo "Generate OpenAPI"
-cargo xtask generate-rest-api-doc > $DOCS_DIR/docs/docs/schemas/openapi-admin.json
+cargo xtask generate-rest-api-doc > $DOCS_DIR/docs/schemas/openapi-admin.json
 
 echo "Generate config schema"
-cargo xtask generate-config-schema > $DOCS_DIR/docs/docs/schemas/restate-server-configuration-schema.json
+cargo xtask generate-config-schema > $DOCS_DIR/docs/schemas/restate-server-configuration-schema.json
 node scripts/generate-restate-config-viewer.js
 
 echo "Generate default config"
-cargo xtask generate-default-config > $DOCS_DIR/docs/docs/schemas/restate.toml
+cargo xtask generate-default-config > $DOCS_DIR/docs/schemas/restate.toml
 node scripts/loadScripts.js
 
 echo "Generate sql introspection page"

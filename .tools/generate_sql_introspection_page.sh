@@ -8,7 +8,7 @@ fi
 
 RESTATE_PATH=$1
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-OUT_FILE=$SCRIPT_DIR/../docs/docs/references/sql-introspection.mdx
+OUT_FILE=$SCRIPT_DIR/../docs/references/sql-introspection.mdx
 
 cat > $OUT_FILE << EOF
 ---

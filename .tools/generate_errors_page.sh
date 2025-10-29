@@ -8,8 +8,8 @@ fi
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 IN_PATH=$1
-OUT_TMP_FILE=$SCRIPT_DIR/../docs/docs/references/errors-tmp.mdx
-OUT_FILE=$SCRIPT_DIR/../docs/docs/references/errors.mdx
+OUT_TMP_FILE=$SCRIPT_DIR/../docs/references/errors-tmp.mdx
+OUT_FILE=$SCRIPT_DIR/../docs/references/errors.mdx
 
 cat > $OUT_TMP_FILE << EOF
 ---
