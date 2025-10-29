@@ -15,7 +15,7 @@ pushd $RESTATE_PATH
 cargo xtask generate-rest-api-doc > $OUT_FILE
 
 # Post-process the OpenAPI file to fix validation issues
-sed -i 's/"style": "simple",//g' $OUT_FILE
+sed -i 's/"style":"simple",//g' $OUT_FILE
 sed -i 's/"404 Not Found"/"404"/g' $OUT_FILE
 sed -i 's/"503 Service Unavailable"/"503"/g' $OUT_FILE
 sed -i 's/"400 Bad Request"/"400"/g' $OUT_FILE
