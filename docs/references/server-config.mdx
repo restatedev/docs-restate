@@ -197,86 +197,74 @@ Default: 64KiB
             Invoker options
             
             <Expandable title="Properties">
-                <ResponseField name="retry-policy" type="anyOf">
-                    This is **deprecated** and will be removed in the next Restate releases.
-
-Please refer to `default-retry-policy` for the new configuration options.
+                <ResponseField name="retry-policy" type="oneOf">
+                    Definition of a retry policy
                     
                     <Expandable title="Options">
-                        <ResponseField name="Retry policy" type="oneOf">
-                            Definition of a retry policy
+                        <ResponseField name="None" type="object">
+                            No retry strategy.
                             
-                            <Expandable title="Options">
-                                <ResponseField name="None" type="object">
-                                    No retry strategy.
-                                    
-                                    <Expandable title="Properties">
-                                        <ResponseField name="type" type="string" required>
-                                        </ResponseField>
-
-                                    </Expandable>
+                            <Expandable title="Properties">
+                                <ResponseField name="type" type="string" required>
                                 </ResponseField>
 
-                                <ResponseField name="Fixed delay" type="object">
-                                    Retry with a fixed delay strategy.
-                                    
-                                    <Expandable title="Properties">
-                                        <ResponseField name="type" type="string" required>
-                                        </ResponseField>
+                            </Expandable>
+                        </ResponseField>
 
-                                        <ResponseField name="interval" type="string" required>
-                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
-                                        </ResponseField>
-
-                                        <ResponseField name="max_attempts" type="integer">
-                                            Number of maximum attempts before giving up. Infinite retries if unset.
-                                        </ResponseField>
-
-                                    </Expandable>
+                        <ResponseField name="Fixed delay" type="object">
+                            Retry with a fixed delay strategy.
+                            
+                            <Expandable title="Properties">
+                                <ResponseField name="type" type="string" required>
                                 </ResponseField>
 
-                                <ResponseField name="Exponential" type="object">
-                                    Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
-                                    
-                                    <Expandable title="Properties">
-                                        <ResponseField name="type" type="string" required>
-                                        </ResponseField>
+                                <ResponseField name="interval" type="string" required>
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                </ResponseField>
 
-                                        <ResponseField name="initial_interval" type="string" required>
-                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
-                                        </ResponseField>
+                                <ResponseField name="max_attempts" type="integer">
+                                    Number of maximum attempts before giving up. Infinite retries if unset.
+                                </ResponseField>
 
-                                        <ResponseField name="factor" type="number" required>
-                                            The factor to use to compute the next retry attempt.
-                                        </ResponseField>
+                            </Expandable>
+                        </ResponseField>
 
-                                        <ResponseField name="max_attempts" type="integer">
-                                            Number of maximum attempts before giving up. Infinite retries if unset.
-                                        </ResponseField>
+                        <ResponseField name="Exponential" type="object">
+                            Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
+                            
+                            <Expandable title="Properties">
+                                <ResponseField name="type" type="string" required>
+                                </ResponseField>
 
-                                        <ResponseField name="max_interval" type="anyOf">
-                                            Maximum interval between retries.
+                                <ResponseField name="initial_interval" type="string" required>
+                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                </ResponseField>
+
+                                <ResponseField name="factor" type="number" required>
+                                    The factor to use to compute the next retry attempt.
+                                </ResponseField>
+
+                                <ResponseField name="max_attempts" type="integer">
+                                    Number of maximum attempts before giving up. Infinite retries if unset.
+                                </ResponseField>
+
+                                <ResponseField name="max_interval" type="anyOf">
+                                    Maximum interval between retries.
 
 Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
-                                            
-                                            <Expandable title="Options">
-                                                <ResponseField name="Human-readable duration" type="string">
-                                                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
-                                                </ResponseField>
+                                    
+                                    <Expandable title="Options">
+                                        <ResponseField name="Human-readable duration" type="string">
+                                            Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+                                        </ResponseField>
 
-                                                <ResponseField name="option-2" type="null">
-                                                </ResponseField>
-
-                                            </Expandable>
+                                        <ResponseField name="option-2" type="null">
                                         </ResponseField>
 
                                     </Expandable>
                                 </ResponseField>
 
                             </Expandable>
-                        </ResponseField>
-
-                        <ResponseField name="option-2" type="null">
                         </ResponseField>
 
                     </Expandable>
@@ -522,6 +510,18 @@ Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/
 
         <ResponseField name="advertised-admin-endpoint" type="string">
             Optional advertised Admin API endpoint.
+        </ResponseField>
+
+        <ResponseField name="deployment-routing-headers" type="array">
+            List of header names considered routing headers.
+
+These will be used during deployment creation to distinguish between an already existing deployment and a new deployment.
+            
+            <Expandable title="Array Items">
+                <ResponseField name="item" type="string">
+                </ResponseField>
+
+            </Expandable>
         </ResponseField>
 
         <ResponseField name="concurrent-api-requests-limit" type="integer">
@@ -2231,7 +2231,7 @@ Default: 64KiB
 </ResponseField>
 
 <ResponseField name="gossip-num-peers" type="integer" default={2}>
-    On every gossip interval, how many peers each node attempts to gossip with. The default is optimized for small clusters (less than 5). On larger clusters, if gossip overhead is noticeable, consider reducing this value to 1.
+    On every gossip interval, how many peers each node attempts to gossip with. The default is optimized for small clusters (less than 5 nodes). On larger clusters, if gossip overhead is noticeable, consider reducing this value to 1.
 </ResponseField>
 
 <ResponseField name="gossip-fd-stability-threshold" type="integer" default={3}>
