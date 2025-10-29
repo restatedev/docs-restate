@@ -503,13 +503,12 @@ if err != nil {
 <GlobalTab title="Python">
 
 ```python {"CODE_LOAD::python/src/tour/microservices/retries.py#here"} 
-retry_opts = restate.RunOptions(
-    max_attempts=10, max_retry_duration=timedelta(seconds=30)
-)
 pay_ref = await ctx.run_typed(
     "pay",
     lambda: create_recurring_payment(req["creditCard"], payment_id),
-    retry_opts,
+    restate.RunOptions(
+        max_attempts=10, max_retry_duration=timedelta(seconds=30)
+    ),
 )
 ```
 </GlobalTab>
@@ -712,7 +711,7 @@ async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
         for subscription in req.subscriptions:
             # Add compensation for this subscription
             compensations.append(
-                lambda s=subscription: ctx.run_typed(
+                lambda s=subscription: ctx.run_typed( # type: ignore
                     f"undo-{s}",
                     remove_subscription,
                     user_id=req.user_id,
@@ -939,7 +938,7 @@ user_subscriptions = restate.VirtualObject("UserSubscriptions")
 @user_subscriptions.handler()
 async def add(ctx: restate.ObjectContext, subscription: str) -> None:
     # Get current subscriptions
-    subscriptions = await ctx.get("subscriptions") or []
+    subscriptions = await ctx.get("subscriptions", type_hint=List[str]) or []
 
     # Add new subscription
     if subscription not in subscriptions:
@@ -953,7 +952,7 @@ async def add(ctx: restate.ObjectContext, subscription: str) -> None:
 
 @user_subscriptions.handler("getSubscriptions")
 async def get_subscriptions(ctx: restate.ObjectSharedContext) -> List[str]:
-    return await ctx.get("subscriptions") or []
+    return await ctx.get("subscriptions", type_hint=List[str]) or []
 ```
 <GitHubLink url="https://github.com/restatedev/examples/blob/main/python/tutorials/tour-of-orchestration-python/app/objects/service.py" />
     Virtual Objects are ideal for implementing any entity with mutable state:
@@ -1136,7 +1135,7 @@ async def buy(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
     ctx.service_send(email_ticket, req)
 
     # Delayed message - schedule reminder for day before concert
-    ctx.service_send(send_reminder, req, send_delay=day_before(req.concert_date))
+    ctx.service_send(send_reminder_email, req, send_delay=day_before(req.concert_date))
 
     return f"Ticket purchased successfully with payment reference: {pay_ref}"
 ```

@@ -1,9 +1,7 @@
 from datetime import timedelta
 
 import restate
-from requests import options
-from restate import Context, Service
-from restate.exceptions import TerminalError
+from restate import Context, Service, RunOptions
 import uuid
 from typing import TypedDict, List, Optional
 
@@ -25,13 +23,12 @@ def create_recurring_payment(credit_card: str, payment_id: str) -> str:
 async def my_service_handler(ctx: Context, req: SubscriptionRequest):
     payment_id = f"payment-{uuid.uuid4()}"
     # <start_here>
-    retry_opts = restate.RunOptions(
-        max_attempts=10, max_retry_duration=timedelta(seconds=30)
-    )
     pay_ref = await ctx.run_typed(
         "pay",
         lambda: create_recurring_payment(req["creditCard"], payment_id),
-        retry_opts,
+        restate.RunOptions(
+            max_attempts=10, max_retry_duration=timedelta(seconds=30)
+        ),
     )
     # <end_here>
 

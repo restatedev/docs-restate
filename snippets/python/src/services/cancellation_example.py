@@ -31,7 +31,7 @@ async def process_order(ctx: restate.ObjectContext, order: Order):
         await ctx.run_typed("process-payment", process_payment, id=payment_id, order=order)
 
         # If cancellation happened before this line, this still executes
-        ctx.send(notify, "Payment processed")
+        ctx.service_send(notify, "Payment processed")
 
     except TerminalError as e:
         # Cancellation detected - run compensation

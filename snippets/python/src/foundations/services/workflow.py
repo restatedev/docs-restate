@@ -32,13 +32,13 @@ async def run(ctx: WorkflowContext, user: User) -> bool:
     secret = str(ctx.uuid())
     await ctx.run_typed("mail", send_verification_email, user=user, secret=secret)
 
-    click_secret = await ctx.promise("email-link-clicked").value()
+    click_secret = await ctx.promise("email-link-clicked", type_hint=str).value()
     return click_secret == secret
 
 
 @signup_workflow.handler()
 async def click(ctx: WorkflowSharedContext, secret: str) -> None:
-    await ctx.promise("email-link-clicked").resolve(secret)
+    await ctx.promise("email-link-clicked", type_hint=str).resolve(secret)
 
 
 # <end_here>

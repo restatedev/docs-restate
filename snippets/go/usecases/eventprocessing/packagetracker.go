@@ -1,11 +1,8 @@
-package main
+package eventprocessing
 
 import (
-	"context"
 	"errors"
 	restate "github.com/restatedev/sdk-go"
-	"github.com/restatedev/sdk-go/server"
-	"log"
 )
 
 type Location struct {
@@ -45,11 +42,3 @@ func (DeliveryTracker) GetDelivery(ctx restate.ObjectSharedContext) (*Delivery, 
 }
 
 // <end_here>
-
-func main() {
-	if err := server.NewRestate().
-		Bind(restate.Reflect(DeliveryTracker{})).
-		Start(context.Background(), ":9080"); err != nil {
-		log.Fatal(err)
-	}
-}
