@@ -25,6 +25,9 @@ cargo xtask generate-config-schema > $DOCS_DIR/docs/schemas/restate-server-confi
 
 echo "Generate default config"
 cargo xtask generate-default-config > $DOCS_DIR/docs/schemas/restate.toml
+# temporary fixes
+sed -i 's/(<5)/(less than 5 nodes)/g' $DOCS_DIR/docs/schemas/restate.toml
+sed -i 's/<region>/region/g' $DOCS_DIR/docs/schemas/restate.toml
 
 echo "Generate sql introspection page"
 $SCRIPT_DIR/generate_sql_introspection_page.sh $RESTATE_PATH
