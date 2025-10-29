@@ -7,17 +7,18 @@ if [ -z "$1" ]
 fi
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-RESTATE_PATH=$1
 DOCS_DIR=$SCRIPT_DIR/../
+RESTATE_PATH=$DOCS_DIR/$1
 
 # Generate docs
 echo "Generate errors.md"
 $SCRIPT_DIR/generate_errors_page.sh $RESTATE_PATH/crates/errors/src/error_codes
 
-pushd $RESTATE_PATH
 
 echo "Generate OpenAPI"
 $SCRIPT_DIR/generate_openapi_admin_spec.sh $RESTATE_PATH
+
+pushd $RESTATE_PATH
 
 echo "Generate config schema"
 cargo xtask generate-config-schema > $DOCS_DIR/docs/schemas/restate-server-configuration-schema.json
