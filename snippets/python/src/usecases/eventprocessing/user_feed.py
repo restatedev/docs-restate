@@ -2,7 +2,7 @@ from datetime import timedelta
 
 import restate
 
-from utils import (
+from .utils import (
     create_post,
     get_post_status,
     update_user_feed,

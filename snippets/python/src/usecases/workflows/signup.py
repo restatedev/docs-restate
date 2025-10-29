@@ -28,16 +28,6 @@ def send_welcome_email(user: User):
     pass
 
 
-user_service = restate.Service("user-service")
-
-
-@user_service.handler()
-async def create_user(ctx: restate.Context, req: CreateUserRequest) -> bool:
-    # Simulate DB call
-    print(f"Creating user {req.user_id}")
-    return True
-
-
 # <start_here>
 user_signup = restate.Workflow("user-signup")
 

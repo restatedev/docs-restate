@@ -30,8 +30,8 @@ Check out the guide on [parallelizing work](guides/parallelizing-work).
 
 ## Retrieving results
 
-Operations such as calls, awakeables, and `restate.After` return futures which can
-be safely selected over using `restate.Select`. Restate will log the order in which they complete, to make this deterministic on replay.
+Operations such as calls, awakeables, and [`restate.After`](https://pkg.go.dev/github.com/restatedev/sdk-go#After) return futures which can
+be safely waited concurrently using [`restate.Wait`](https://pkg.go.dev/github.com/restatedev/sdk-go#Wait). Restate will log the order in which they complete, to make this deterministic on replay.
 
 <Warning>
     **Don't use Go routines**:
@@ -45,8 +45,11 @@ be safely selected over using `restate.Select`. Restate will log the order in wh
 sleepFuture := restate.After(ctx, 30*time.Second)
 callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 
-selector := restate.Select(ctx, sleepFuture, callFuture)
-switch selector.Select() {
+fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
+if err != nil {
+  return "", err
+}
+switch fut {
 case sleepFuture:
   if err := sleepFuture.Done(); err != nil {
     return "", err
@@ -61,20 +64,19 @@ case callFuture:
 }
 ```
 
-Select blocks on the next completed operation or returns `nil` if there are none left.
-
 ### Wait for all tasks to complete
 
 ```go {"CODE_LOAD::go/develop/journalingresults.go#all"} 
 callFuture1 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
 callFuture2 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi again")
 
-selector := restate.Select(ctx, callFuture1, callFuture2)
-
 // Collect all results
 var subResults []string
-for selector.Remaining() {
-  response, err := selector.Select().(restate.ResponseFuture[string]).Response()
+for fut, err := range restate.Wait(ctx, callFuture1, callFuture2) {
+  if err != nil {
+    return "", err
+  }
+  response, err := fut.(restate.ResponseFuture[string]).Response()
   if err != nil {
     return "", err
   }

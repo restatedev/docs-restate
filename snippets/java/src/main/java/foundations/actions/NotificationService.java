@@ -11,5 +11,10 @@ public class NotificationService {
     // Implementation
   }
 
+  @Handler
+  public void sendNotification(Context ctx, String msg) {
+    // Implementation
+  }
+
   public record EmailRequest(String userId, String message) {}
 }

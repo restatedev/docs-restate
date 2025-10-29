@@ -1,42 +1,360 @@
 ---
 title: "AWS Lambda"
-description: "Run Restate services on AWS Lambda."
+description: "Run your Restate services on AWS Lambda"
 ---
 
+Deploy your Restate services as serverless functions on AWS Lambda.
+This guide covers project setup, packaging, and service registration.
 
-You can run your Restate services as serverless functions on [AWS Lambda](https://aws.amazon.com/lambda/).
+<Tip>
+    For infrastructure as code, check out the [Restate CDK construct library](https://github.com/restatedev/cdk).
+</Tip>
 
+## Set up your project
 
-<Info>
-    The easiest way to run Restate handlers on AWS Lambda is to use the [Restate CDK construct library](https://github.com/restatedev/cdk).
-</Info>
+<Tabs>
+    <Tab title="TypeScript">
+        <Card
+            title="Create your Restate + Typescript + Lambda repository"
+            icon="github"
+            href="https://github.com/new?template_name=lambda-typescript-template&template_owner=restatedev"
+            arrow="true"
+            horizontal
+        />
 
-To deploy a Restate service as a Lambda function, you can follow the [guidelines of AWS](https://docs.aws.amazon.com/lambda/latest/dg/typescript-package.html)
-for deploying plain TypeScript NodeJS functions. Restate does not add any complexity to this.
+        You can check out the template here: https://github.com/restatedev/lambda-typescript-template
 
-<Steps>
-    <Step title={"Create a Lambda endpoint"}>
-        Follow [the serving docs](/develop/ts/serving#creating-a-lambda-handler) to create a Lambda endpoint in your Restate service.
-    </Step>
-    <Step title={"Build the zip file"}>
-        Build a zip file containing the application code and dependencies and upload this to AWS Lambda.
+        See the [TypeScript serving docs](/develop/ts/serving#creating-a-lambda-handler) for more details.
+    </Tab>
+    <Tab title="Python">
+        <Card
+            title="Create your Restate + Python + Lambda repository"
+            icon="github"
+            href="https://github.com/new?template_name=lambda-python-template&template_owner=restatedev"
+            arrow="true"
+            horizontal
+        />
 
-        If you are using the Restate node template, then you can create a zip file with:
+        You can check out the template here: https://github.com/restatedev/lambda-python-template
+    </Tab>
+    <Tab title="Java">
+        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to setup a lambda handler.
+    </Tab>
+    <Tab title="Kotlin">
+        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to setup a lambda handler.
+    </Tab>
+    <Tab title="Go">
+        See the [Go serving docs](/develop/go/serving#creating-a-lambda-handler) to setup a lambda handler.
+    </Tab>
+</Tabs>
+
+## Package and deploy
+
+Build a deployment package containing your application code and dependencies.
+
+<Tabs>
+    <Tab title="TypeScript">
+        Package your application as a zip file for Lambda:
 
         ```shell
         npm run bundle
         ```
 
-        AWS Lambda assumes that the handler can be found under `index.handler` in the uploaded code.
-        By default, this is also the case for the Lambda functions developed with the Restate SDK.
-    </Step>
-    <Step title={"Register the Lambda handler"}>
-        [Register](/services/versioning#registering-deployments) the Lambda function ARN with Restate.
-        Make sure you first publish a new version of the Lambda function before registering it with Restate.
+        The Lambda handler to setup is `app.handler`.
+    </Tab>
+    <Tab title="Python">
+        Using `uv`, prepare a directory containing all the source and the dependencies, then zip it:
 
         ```shell
-        restate deployments register arn:aws:lambda:region:account-id:function:function-name:version
+        mkdir -p dist
+        # Install project and dependencies directly into dist using uv pip
+        uv pip install --python 3.13 --target dist .
+        # Copy source code
+        cp *.py dist/
+        # Zip the dist content
+        cd dist && zip ../dist.zip -r * && cd ..
         ```
-    </Step>
-</Steps>
 
+        The lambda handler to setup is `handler.app`.
+
+        <Warning>
+            When installing the dependencies, make sure the python version and your machine architecture match the one configured in the Lambda runtime.
+            If you get an error like `cannot import restate._internal`, most likely you have a python version and/or architecture mismatch between the Lambda runtime and the machine where the packaging happens.
+        </Warning>
+    </Tab>
+    <Tab title="Java">
+        Build an uber jar with all dependencies, using gradle:
+
+        ```shell
+        ./gradlew shadowJar
+        ```
+
+        Or using Maven:
+        ```shell
+        mvn package
+        ```
+
+        Upload the jar file from `build/libs/` or `target/` to Lambda.
+        Set the handler to your class name, e.g., `com.example.MyLambdaHandler`.
+    </Tab>
+    <Tab title="Kotlin">
+        Build an uber jar with all dependencies:
+
+        ```shell
+        ./gradlew shadowJar
+        ```
+
+        Upload the jar file from `build/libs/` to Lambda.
+        Set the handler to your class name, e.g., `com.example.MyLambdaHandler`.
+    </Tab>
+    <Tab title="Go">
+        Build the Go binary for Lambda:
+
+        ```shell
+        GOOS=linux GOARCH=amd64 go build -o bootstrap main.go
+        zip function.zip bootstrap
+        ```
+
+        Upload the zip file to Lambda.
+        The handler is automatically set to the binary name `bootstrap`.
+    </Tab>
+</Tabs>
+
+Head over to your AWS dashboard to create the Lambda and upload the zip. For more details, follow the [AWS Lambda documentation](https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-zip.html).
+
+## Role to invoke the Lambda
+
+When using Cloud, you'll need to create an IAM Role for Restate Cloud to invoke your Lambda.
+
+To set up the role, visit your Restate Cloud Dashboard at [Developers > Security > AWS Lambda](https://cloud.restate.dev/to/developers/integration#lambda).
+
+## Register the service to Restate
+
+In order for Restate to push requests to your Lambda function, you need to [register the service to Restate](/services/versioning) using the CLI or UI:
+
+```shell
+restate deployments register \
+  arn:aws:lambda:region:account-id:function:function-name:version \
+  --assume-role-arn <INVOKE_ROLE>
+```
+
+<Info>
+    Always register a specific Lambda version (not `$LATEST`) to ensure Restate routes requests to a stable deployment.
+    Check the [versioning documentation](/services/versioning) for more info.
+</Info>
+
+Once your service is registered, you can start sending requests to it.  
+
+## CI/CD Automation
+
+You can set up automation to upload a new Lambda version and register new [Restate service versions](/services/versioning).
+
+<Tabs>
+    <Tab title="TypeScript">
+```yml {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/templates/lambda/.github/workflows/deploy.yml"} 
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write   # This is required for OIDC authentication
+  contents: read    # This is required to checkout the repository
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+
+      - name: Deploy Lambda Function
+        uses: aws-actions/aws-lambda-deploy@v1.1.0
+        id: deploy
+        with:
+          function-name: my-greeter
+          code-artifacts-dir: dist
+          handler: app.handler
+          runtime: nodejs22.x
+          publish: true
+
+      - name: Register Restate deployment
+        env:
+          # Admin URL of your Cloud environment. You can find it in Developers > Admin URL: https://cloud.restate.dev/to/developers/integration#admin
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          # Auth token with Admin Role. To get one, go to Developers > API Keys > Create API Key: https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        run: npx -y @restatedev/restate deployment register -y ${{ steps.deploy.outputs.function-arn }} --assume-role-arn ${{ secrets.AWS_INVOKE_ROLE_TO_ASSUME }}
+```
+    </Tab>
+    <Tab title="Python">
+```yml {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/python/templates/lambda/.github/workflows/deploy.yml"} 
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write   # This is required for OIDC authentication
+  contents: read    # This is required to checkout the repository
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      PYTHON_VERSION: 3.13
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      
+      - name: Set up Python
+        # Keep this python version in sync with the Lambda runtime
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Build Lambda package
+        run: |
+          mkdir -p dist
+          # Install project and dependencies directly into dist using uv pip
+          uv pip install --python ${{ env.PYTHON_VERSION }} --target dist .
+          # Copy source code
+          cp *.py dist/
+
+      - name: Deploy Lambda Function
+        uses: aws-actions/aws-lambda-deploy@v1.1.0
+        id: deploy
+        with:
+          function-name: my-greeter
+          code-artifacts-dir: dist
+          handler: handler.app
+          runtime: python${{ env.PYTHON_VERSION }}
+          publish: true
+
+      - name: Register Restate deployment
+        env:
+          # Admin URL of your Cloud environment. You can find it in Developers > Admin URL: https://cloud.restate.dev/to/developers/integration#admin
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          # Auth token with Admin Role. To get one, go to Developers > API Keys > Create API Key: https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        run: npx -y @restatedev/restate deployment register -y ${{ steps.deploy.outputs.function-arn }} --assume-role-arn ${{ secrets.AWS_INVOKE_ROLE_TO_ASSUME }}
+```
+    </Tab>
+</Tabs>
+
+For this workflow to execute, you need to configure your [AWS account for the Github OIDC provider](https://github.com/aws-actions/configure-aws-credentials/tree/main?tab=readme-ov-file#configuring-iam-to-trust-github).
+
+Then, add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+- `AWS_INVOKE_ROLE_TO_ASSUME`: The role created in the [above paragraph](#role-to-invoke-the-lambda) to invoke the function
+- `AWS_DEPLOY_ROLE_TO_ASSUME`: The role to deploy the function, see below
+
+<AccordionGroup>
+    <Accordion title="Github OIDC setup">
+        To configure your account for the Github OIDC provider, run:
+
+```shell
+aws iam create-open-id-connect-provider \
+    --url https://token.actions.githubusercontent.com \
+    --client-id-list sts.amazonaws.com
+```
+    </Accordion>
+    <Accordion title="Deploy role set up">
+        To create the deploy role, head over to the AWS IAM console, and create a new role.
+
+        The role should have the following Trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:<GITHUB_ORG>/<GITHUB_REPO>:*"
+        }
+      }
+    }
+  ]
+}
+```
+
+And the following permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LambdaDeployPermissions",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:GetFunctionConfiguration",
+        "lambda:CreateFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:PublishVersion"
+      ],
+      "Resource": "arn:aws:lambda:<REGION>:<ACCOUNT_ID>:function:<FUNCTION_NAME>"
+    },
+    {
+      "Sid":"PassRolesDefinition",
+      "Effect":"Allow",
+      "Action":[
+        "iam:PassRole"
+      ],
+      "Resource":[
+        "<AWS_INVOKE_ROLE_TO_ASSUME>"
+      ]
+    }
+  ]
+}
+```
+    </Accordion>
+    <Accordion title={"Self-hosted Restate"}>
+        You can use this workflow with Self-hosted Restate as well,
+        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
+    </Accordion>
+</AccordionGroup>

@@ -1,9 +1,10 @@
 package guides
 
 import (
-	restate "github.com/restatedev/sdk-go"
 	"log/slog"
 	"time"
+
+	restate "github.com/restatedev/sdk-go"
 )
 
 type MyService struct{}
@@ -71,8 +72,11 @@ func (MyService) myTimeoutHandler(ctx restate.Context) error {
 	// <start_timeout>
 	awakeable := restate.Awakeable[string](ctx)
 	timeout := restate.After(ctx, 5*time.Second)
-	selector := restate.Select(ctx, awakeable, timeout)
-	switch selector.Select() {
+	fut, err := restate.WaitFirst(ctx, awakeable, timeout)
+	if err != nil {
+		return err
+	}
+	switch fut {
 	case awakeable:
 		result, err := awakeable.Result()
 		if err != nil {

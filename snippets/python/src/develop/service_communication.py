@@ -1,10 +1,10 @@
 import json
 from datetime import timedelta
 
-from restate import Service, Context, RestateDurableFuture
-import src.develop.my_service as my_service
-import src.develop.my_virtual_object as my_object
-import src.develop.my_workflow as my_workflow
+from restate import Service, Context
+from src.develop.my_service import my_handler as my_service_handler
+from src.develop.my_virtual_object import my_handler as my_object_handler
+from src.develop.my_workflow import run, interact_with_workflow
 
 caller = Service("Caller")
 
@@ -15,17 +15,17 @@ async def calling_handler(ctx: Context, arg):
     # import my_service # Import the service module to get to the handler, not the service itself
 
     # To call a Service:
-    response = await ctx.service_call(my_service.my_handler, arg="Hi")
+    response = await ctx.service_call(my_service_handler, arg="Hi")
 
     # To call a Virtual Object:
-    response = await ctx.object_call(my_object.my_handler, key="Mary", arg="Hi")
+    response = await ctx.object_call(my_object_handler, key="Mary", arg="Hi")
 
     # To call a Workflow:
     # `run` handler — can only be called once per workflow ID
-    response = await ctx.workflow_call(my_workflow.run, key="my_workflow_id", arg="Hi")
+    response = await ctx.workflow_call(run, key="my_workflow_id", arg="Hi")
     # Other handlers can be called anytime within workflow retention
     response = await ctx.workflow_call(
-        my_workflow.interact_with_workflow, key="my_workflow_id", arg="Hi"
+        interact_with_workflow, key="my_workflow_id", arg="Hi"
     )
     # <end_request_response>
 
@@ -37,16 +37,16 @@ async def calling_handler(ctx: Context, arg):
 
     # <start_one_way>
     # To message a Service:
-    ctx.service_send(my_service.my_handler, arg="Hi")
+    ctx.service_send(my_service_handler.my_handler, arg="Hi")
 
     # To message a Virtual Object:
-    ctx.object_send(my_object.my_handler, key="Mary", arg="Hi")
+    ctx.object_send(my_object_handler, key="Mary", arg="Hi")
 
     # To message a Workflow:
     # `run` handler — can only be called once per workflow ID
-    ctx.workflow_send(my_workflow.run, key="my_wf_id", arg="Hi")
+    ctx.workflow_send(run, key="my_wf_id", arg="Hi")
     # Other handlers can be called anytime within workflow retention
-    ctx.workflow_send(my_workflow.interact_with_workflow, key="my_wf_id", arg="Hi")
+    ctx.workflow_send(interact_with_workflow, key="my_wf_id", arg="Hi")
     # <end_one_way>
 
     # <start_one_way_generic>
@@ -55,16 +55,16 @@ async def calling_handler(ctx: Context, arg):
 
     # <start_delayed>
     # To message a Service with a delay:
-    ctx.service_send(my_service.my_handler, arg="Hi", send_delay=timedelta(hours=5))
+    ctx.service_send(my_service_handler, arg="Hi", send_delay=timedelta(hours=5))
 
     # To message a Virtual Object with a delay:
     ctx.object_send(
-        my_object.my_handler, key="Mary", arg="Hi", send_delay=timedelta(hours=5)
+        my_object_handler, key="Mary", arg="Hi", send_delay=timedelta(hours=5)
     )
 
     # To message a Workflow with a delay:
     ctx.workflow_send(
-        my_workflow.run, key="my_workflow_id", arg="Hi", send_delay=timedelta(hours=5)
+        run, key="my_workflow_id", arg="Hi", send_delay=timedelta(hours=5)
     )
     # <end_delayed>
 
@@ -78,13 +78,13 @@ async def calling_handler(ctx: Context, arg):
     # <end_delayed_generic>
 
     # <start_ordering>
-    ctx.object_send(my_object.my_handler, key="Mary", arg="I'm call A")
-    ctx.object_send(my_object.my_handler, key="Mary", arg="I'm call B")
+    ctx.object_send(my_object_handler, key="Mary", arg="I'm call A")
+    ctx.object_send(my_object_handler, key="Mary", arg="I'm call B")
     # <end_ordering>
 
     # <start_idempotency_key>
     await ctx.service_call(
-        my_service.my_handler,
+        my_service_handler,
         arg="Hi",
         idempotency_key="my-idempotency-key",
     )
@@ -93,12 +93,12 @@ async def calling_handler(ctx: Context, arg):
     # <start_attach>
     # Send a request, get the invocation id
     handle = ctx.service_send(
-        my_service.my_handler, arg="Hi", idempotency_key="my-idempotency-key"
+        my_service_handler, arg="Hi", idempotency_key="my-idempotency-key"
     )
     invocation_id = await handle.invocation_id()
 
     # Now re-attach
-    result = await ctx.attach_invocation(invocation_id)
+    result = await ctx.attach_invocation(invocation_id, type_hint=str)
     # <end_attach>
 
     # <start_cancel>

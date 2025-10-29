@@ -76,7 +76,7 @@ type OrderService struct{}
 
 func (OrderService) Process(ctx restate.Context, order Order) (OrderResult, error) {
   // Each step is automatically durable and resumable
-  paymentID := restate.Rand(ctx).UUID().String()
+  paymentID := restate.UUID(ctx).String()
 
   _, err := restate.Run(ctx, func(ctx restate.RunContext) (restate.Void, error) {
     return ChargePayment(order.CreditCard, paymentID)
@@ -115,8 +115,8 @@ Flexible communication patterns with strong delivery guarantees:
 - **Request deduplication**: Idempotency keys prevent duplicate processing
 
 <Accordion title="Code example">
-    <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#communication"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/service-actions.ts#communication"} 
 // Request-response: Wait for result
 const payRef = await ctx.serviceClient(paymentService).charge(req);
 
@@ -129,7 +129,7 @@ ctx
   .sendReminder(order, sendOpts({ delay: dayBefore(req.concertDate) }));
 ```
 
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
+```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
 // Request-response: Wait for result
 var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
 
@@ -140,7 +140,7 @@ EmailServiceClient.fromContext(ctx).send().emailTicket(order);
 EmailServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(21));
 ```
 
-        ```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
+```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
 # Request-response: Wait for result
 result = await ctx.service_call(charge_payment, req)
 
@@ -151,7 +151,7 @@ ctx.service_send(send_ticket_email, ticket)
 ctx.service_send(send_reminder, ticket, send_delay=timedelta(days=7))
 ```
 
-        ```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"} 
+```go Go {"CODE_LOAD::go/usecases/microservices/serviceactions.go#communication"} 
 // Request-response: Wait for result
 result, err := restate.Service[StockResult](ctx, "PaymentService", "Charge").Request(req)
 if err != nil {
@@ -165,7 +165,7 @@ restate.ServiceSend(ctx, "EmailService", "EmailTicket").Send(ticket)
 // Delayed execution: Schedule for later
 restate.ServiceSend(ctx, "EmailService", "SendReminder").Send(ticket, restate.WithDelay(7*24*time.Hour))
 ```
-    </CodeGroup>
+</CodeGroup>
 
 </Accordion>
 
@@ -180,8 +180,8 @@ Manage stateful entities without external databases or complex consistency mecha
 - **Built-in querying**: Access state via UI and APIs
 
 <Accordion title="Code example">
-    <CodeGroup>
-        ```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/user-account.ts#here"} 
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/usecases/microservices/user-account.ts#here"} 
 export default restate.object({
   name: "UserAccount",
   handlers: {
@@ -204,7 +204,7 @@ export default restate.object({
 });
 ```
 
-        ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/UserAccount.java#here"} 
+```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/UserAccount.java#here"} 
 @VirtualObject
 public class UserAccount {
   private static final StateKey<Double> BALANCE = StateKey.of("balance", Double.class);
@@ -229,13 +229,13 @@ public class UserAccount {
 }
 ```
 
-        ```python Python {"CODE_LOAD::python/src/usecases/microservices/user_account.py#here"} 
+```python Python {"CODE_LOAD::python/src/usecases/microservices/user_account.py#here"} 
 user_account = restate.VirtualObject("UserAccount")
 
 
 @user_account.handler()
 async def update_balance(ctx: restate.ObjectContext, amount: float):
-    balance = await ctx.get("balance") or 0.0
+    balance = await ctx.get("balance", type_hint=float) or 0.0
     new_balance = balance + amount
 
     if new_balance < 0.0:
@@ -247,10 +247,10 @@ async def update_balance(ctx: restate.ObjectContext, amount: float):
 
 @user_account.handler(kind="shared")
 async def get_balance(ctx: restate.ObjectSharedContext):
-    return await ctx.get("balance") or 0.0
+    return await ctx.get("balance", type_hint=float) or 0.0
 ```
 
-        ```go Go {"CODE_LOAD::go/usecases/microservices/useraccount.go#here"} 
+```go Go {"CODE_LOAD::go/usecases/microservices/useraccount.go#here"} 
 type UserAccount struct{}
 
 func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (float64, error) {
@@ -272,7 +272,7 @@ func (UserAccount) GetBalance(ctx restate.ObjectSharedContext) (float64, error) 
   return restate.Get[float64](ctx, "balance")
 }
 ```
-    </CodeGroup>
+</CodeGroup>
 
 </Accordion>
 

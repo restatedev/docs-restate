@@ -44,7 +44,7 @@ cd ai-examples/openai-agents/tour-of-agents
 Export your [OpenAI API key](https://platform.openai.com/api-keys) and run the agent:
 ```bash
 export OPENAI_API_KEY=sk-...
-uv run . 
+uv run .
 ```
 
 Then, tell Restate where your agent is running via the UI (`http://localhost:9070`) or CLI:
@@ -198,7 +198,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 
 **Benefits with Restate:**
 - If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
-- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while its waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
+- If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while it's waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
 
 Here's an insurance claim agent that asks for human approval for high-value claims:
 
@@ -917,18 +917,24 @@ This allows you to:
 Here is an example of a manual agent loop:
 
 ```python advanced/manual_loop_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/advanced/manual_loop_agent.py?collapse_imports"} 
+    ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
+from pydantic import BaseModel
+from restate import Context
+from openai import OpenAI, pydantic_function_tool
+
+from app.utils.models import WeatherRequest
+from app.utils.utils import fetch_weather, as_chat_completion_param
+
+# Initialize OpenAI client
 client = OpenAI()
 
 # Tool definitions
 TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "parameters": WeatherRequest.model_json_schema(),
-            "description": "Get the current weather in a given location"
-        }
-    }
+    pydantic_function_tool(
+        WeatherRequest,
+        name="get_weather",
+        description="Get the current weather in a given location",
+    )
 ]
 
 
@@ -938,42 +944,54 @@ manual_loop_agent = restate.Service("ManualLoopAgent")
 class MultiWeatherPrompt(BaseModel):
     message: str = "What is the weather like in New York and San Francisco?"
 
+
 @manual_loop_agent.handler()
-async def run(ctx: Context, prompt: MultiWeatherPrompt) -> str:
+async def run(ctx: Context, prompt: MultiWeatherPrompt) -> str | None:
     """Main agent loop with tool calling"""
-    messages = [{"role": "user", "content": prompt.message}]
+    messages: list[ChatCompletionMessageParam] = [
+        ChatCompletionUserMessageParam(role="user", content=prompt.message)
+    ]
 
     while True:
         # Call OpenAI with durable execution
+        def llm_call() -> ChatCompletion:
+            return client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                tools=TOOLS,
+            )
+
         response = await ctx.run_typed(
             "llm-call",
-            client.chat.completions.create,
-            restate.RunOptions(max_attempts=3,
-                           type_hint=ChatCompletion),  # To avoid using too many credits on infinite retries during development
-            model="gpt-4o",
-            tools=TOOLS,
-            messages=messages,
+            llm_call,
+            restate.RunOptions(
+                max_attempts=3
+            ),  # To avoid using too many credits on infinite retries during development
         )
 
         # Save function call outputs for subsequent requests
         assistant_message = response.choices[0].message
-        messages.append(assistant_message)
+        messages.append(as_chat_completion_param(assistant_message))
 
         if not assistant_message.tool_calls:
             return assistant_message.content
 
         # Check if we need to call tools
         for tool_call in assistant_message.tool_calls:
-            if tool_call.function.name == "get_weather":
+            if isinstance(tool_call, ChatCompletionMessageFunctionToolCall) and tool_call.function.name == "get_weather":
                 req = WeatherRequest.model_validate_json(tool_call.function.arguments)
-                tool_output = await ctx.run_typed("Get weather", fetch_weather, city=req.city)
+                tool_output = await ctx.run_typed(
+                    "Get weather", fetch_weather, city=req.city
+                )
 
                 # Add tool response to messages
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_output.model_dump_json()
-                })
+                messages.append(
+                    ChatCompletionToolMessageParam(
+                        role="tool",
+                        tool_call_id=tool_call.id,
+                        content=tool_output.model_dump_json(),
+                    )
+                )
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/advanced/manual_loop_agent.py" />
 
@@ -1135,4 +1153,3 @@ Durable Execution, paired with your existing SDKs, gives your agents a powerful 
 - Learn more about how to implement resilient tools with Restate in the [Tour of Workflows](/tour/workflows)
 - Check out the [other Restate AI examples on GitHub](https://github.com/restatedev/ai-examples)
 - Sign up for [Restate Cloud](https://restate.dev/cloud/) and start building agents without managing infrastructure
-

@@ -1,10 +1,7 @@
-package main
+package eventprocessing
 
 import (
-	"context"
 	restate "github.com/restatedev/sdk-go"
-	"github.com/restatedev/sdk-go/server"
-	"log"
 	"time"
 )
 
@@ -52,12 +49,3 @@ func (UserFeed) ProcessPost(ctx restate.ObjectContext, post SocialMediaPost) err
 }
 
 // <end_here>
-
-func main() {
-	if err := server.NewRestate().
-		Bind(restate.Reflect(UserFeed{})).
-		Bidirectional(false).
-		Start(context.Background(), ":9080"); err != nil {
-		log.Fatal(err)
-	}
-}

@@ -58,12 +58,144 @@ Cancellation is non-blocking. The API call may return before cancellation comple
 
 <Accordion title="How Cancellation Works">
 
-    When an invocation is canceled, Restate propagates the cancellation recursively through the call graph:
+    ### Requirements
 
-    1. **Propagate to leaves**: Cancellation first reaches the leaves of the call graph. Restate interrupts any ongoing sleeps, awakeables, or other context actions at those points.
-    2. **Throw terminal error**: At the cancellation point, Restate throws a terminal error, signaling that normal execution cannot continue.
-    3. **Run compensation**: The handler runs its defined compensation logic to undo or mitigate side effects.
-    4. **Propagate upward**: The cancellation response then flows back up the call graph, ensuring that each parent invocation also executes its compensation logic if defined.
+    For cancellation to work, the invocation must reach the deployment (the service endpoint must be reachable).
+
+    If the deployment is not reachable, use [kill](#kill) instead.
+
+    ### Cancellation Flow
+
+    When an invocation is canceled:
+
+    1. **User sends cancellation request** to the Restate runtime
+    2. **Runtime forwards cancellation** to the SDK eagerly
+    3. **SDK surfaces cancellation** at the next await point in your handler code
+
+    The cancellation exception (`TerminalError` in TypeScript/Python, `TerminalException` in Java/Kotlin) is thrown at the next **await point** - operations that wait for a result, such as `ctx.run()`, call responses, sleeps, awakeable results, etc.
+
+
+    <Note>
+        One-way calls (`ctx.send()`) and delayed calls (`ctx.sendDelayed()`) are detached from the call tree. They will be scheduled and execute fully even if the originating invocation is cancelled.
+    </Note>
+
+    ### Example
+
+    <CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/services/cancellation-example.ts#here"} 
+async function processOrder(ctx: restate.ObjectContext, order: Order) {
+  // If cancellation happened before this line, this still executes
+  ctx.set("status", "processing");
+
+  // If cancellation happened before this line, this still executes
+  const paymentId = ctx.rand.uuidv4().toString();
+
+  try {
+    // If cancelled right before this line, ctx.run won't execute
+    // If cancelled during run block execution,
+    // then a terminal error gets thrown here once execution finishes
+    await ctx.run(() => processPayment(paymentId, order));
+
+    // If cancellation happened before this line, this still executes
+    ctx.serviceSendClient(notificationService).notify("Payment processed");
+
+  } catch (error) {
+    if (error instanceof restate.TerminalError) {
+      // Cancellation detected - run compensation
+      await ctx.run(() => refundPayment(paymentId, order));
+      throw error; // Re-throw to propagate cancellation
+    }
+  }
+}
+```
+```go Go {"CODE_LOAD::go/services/cancellation-example.go#here"} 
+func (OrderService) processOrder(ctx restate.ObjectContext, order Order) error {
+  // If cancellation happened right before this line, this still executes
+  restate.Set(ctx, "status", "processing")
+
+  // If cancellation happened right before this line, this still executes
+  paymentId := restate.Rand(ctx).UUID().String()
+
+  // If cancelled right before this line, Run won't execute
+  // If cancelled during run block execution,
+  // then a terminal error gets returned here once execution finishes
+  _, err := restate.Run(ctx, func(ctx restate.RunContext) (Payment, error) {
+    return processPayment(paymentId, order)
+  })
+  if err != nil {
+    if restate.IsTerminalError(err) {
+      // Cancellation detected - run compensation
+      _, _ = restate.Run(ctx, func(ctx restate.RunContext) (any, error) {
+        return nil, refundPayment(paymentId)
+      })
+    }
+    return err
+  }
+
+  // If cancellation happened right before this line, this still executes
+  restate.ServiceSend(ctx, "NotificationService", "Notify").
+    Send("Payment processed")
+
+  return nil
+}
+```
+```java Java {"CODE_LOAD::java/src/main/java/services/CancellationExample.java#here"} 
+@Handler
+public void processOrder(ObjectContext ctx, Order order) {
+  // If cancellation happened before this line, this still executes
+  ctx.set(STATUS, "processing");
+
+  // If cancellation happened before this line, this still executes
+  String paymentId = ctx.random().nextUUID().toString();
+  try {
+
+    // If canceled right before this line, ctx.run won't execute
+    // If canceled during run block execution,
+    // then a terminal exception gets thrown here once execution finishes
+    ctx.run(() -> processPayment(paymentId, order));
+
+    // If cancellation happened right before this line, this still executes
+    NotificationServiceClient.fromContext(ctx).send().sendNotification("Your order is processed");
+
+  } catch (TerminalException e) {
+    // Cancellation detected - run compensation
+    ctx.run(() -> refundPayment(paymentId, order));
+    throw e; // Re-throw to propagate cancellation
+  }
+}
+```
+```python Python {"CODE_LOAD::python/src/services/cancellation_example.py#here"} 
+@order_service.handler()
+async def process_order(ctx: restate.ObjectContext, order: Order):
+    # If cancellation happened before this line, this still executes
+    ctx.set("status", "processing")
+
+    # If cancellation happened before this line, this still executes
+    payment_id = str(ctx.uuid())
+    try:
+        # If cancelled before this await, ctx.run won't execute
+        # If cancelled during run block execution,
+        # then a terminal error gets raised here once execution finishes
+        await ctx.run_typed("process-payment", process_payment, id=payment_id, order=order)
+
+        # If cancellation happened before this line, this still executes
+        ctx.service_send(notify, "Payment processed")
+
+    except TerminalError as e:
+        # Cancellation detected - run compensation
+        await ctx.run_typed("refund-payment", refund_payment, id=payment_id)
+        raise e # Re-throw to propagate cancellation
+```
+    </CodeGroup>
+
+    ### Call Graph Propagation
+
+    Cancellation propagates recursively through the call graph:
+
+    1. **Propagate to leaves**: Cancellation first reaches the leaves of the call graph
+    2. **Throw at await points**: Each handler receives the cancellation exception at its next await point
+    3. **Run compensation**: Handlers execute their compensation logic (if defined)
+    4. **Propagate upward**: Cancellation flows back up the call graph (unless handled differently), allowing each parent to compensate
 
 </Accordion>
 

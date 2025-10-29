@@ -86,7 +86,7 @@ public class SubscriptionService {
 type SubscriptionService struct{}
 
 func (SubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) error {
-  paymentId := restate.Rand(ctx).UUID().String()
+  paymentId := restate.UUID(ctx).String()
 
   payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
     return CreateRecurringPayment(req.CreditCard, paymentId)
@@ -503,13 +503,12 @@ if err != nil {
 <GlobalTab title="Python">
 
 ```python {"CODE_LOAD::python/src/tour/microservices/retries.py#here"} 
-retry_opts = restate.RunOptions(
-    max_attempts=10, max_retry_duration=timedelta(seconds=30)
-)
 pay_ref = await ctx.run_typed(
     "pay",
     lambda: create_recurring_payment(req["creditCard"], payment_id),
-    retry_opts,
+    restate.RunOptions(
+        max_attempts=10, max_retry_duration=timedelta(seconds=30)
+    ),
 )
 ```
 </GlobalTab>
@@ -637,7 +636,7 @@ func (SubscriptionSaga) Add(ctx restate.Context, req SubscriptionRequest) (err e
     }
   }()
 
-  paymentId := restate.Rand(ctx).UUID().String()
+  paymentId := restate.UUID(ctx).String()
 
   // Add compensation for payment
   compensations = append(compensations, func() error {
@@ -712,7 +711,7 @@ async def add(ctx: restate.Context, req: SubscriptionRequest) -> None:
         for subscription in req.subscriptions:
             # Add compensation for this subscription
             compensations.append(
-                lambda s=subscription: ctx.run_typed(
+                lambda s=subscription: ctx.run_typed( # type: ignore
                     f"undo-{s}",
                     remove_subscription,
                     user_id=req.user_id,
@@ -939,7 +938,7 @@ user_subscriptions = restate.VirtualObject("UserSubscriptions")
 @user_subscriptions.handler()
 async def add(ctx: restate.ObjectContext, subscription: str) -> None:
     # Get current subscriptions
-    subscriptions = await ctx.get("subscriptions") or []
+    subscriptions = await ctx.get("subscriptions", type_hint=List[str]) or []
 
     # Add new subscription
     if subscription not in subscriptions:
@@ -953,7 +952,7 @@ async def add(ctx: restate.ObjectContext, subscription: str) -> None:
 
 @user_subscriptions.handler("getSubscriptions")
 async def get_subscriptions(ctx: restate.ObjectSharedContext) -> List[str]:
-    return await ctx.get("subscriptions") or []
+    return await ctx.get("subscriptions", type_hint=List[str]) or []
 ```
 <GitHubLink url="https://github.com/restatedev/examples/blob/main/python/tutorials/tour-of-orchestration-python/app/objects/service.py" />
     Virtual Objects are ideal for implementing any entity with mutable state:
@@ -1136,7 +1135,7 @@ async def buy(ctx: restate.Context, req: PurchaseTicketRequest) -> str:
     ctx.service_send(email_ticket, req)
 
     # Delayed message - schedule reminder for day before concert
-    ctx.service_send(send_reminder, req, send_delay=day_before(req.concert_date))
+    ctx.service_send(send_reminder_email, req, send_delay=day_before(req.concert_date))
 
     return f"Ticket purchased successfully with payment reference: {pay_ref}"
 ```
@@ -1329,7 +1328,7 @@ func (Payments) Process(ctx restate.Context, req PaymentRequest) (PaymentResult,
   confirmation := restate.Awakeable[PaymentResult](ctx)
 
   // Initiate payment with external provider (Stripe, PayPal, etc.)
-  paymentId := restate.Rand(ctx).UUID().String()
+  paymentId := restate.UUID(ctx).String()
   _, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
     return InitPayment(req, paymentId, confirmation.Id())
   }, restate.WithName("pay"))
@@ -1550,7 +1549,7 @@ type PaymentsWithTimeout struct{}
 func (PaymentsWithTimeout) Process(ctx restate.Context, req PaymentRequest) (PaymentResult, error) {
   confirmation := restate.Awakeable[PaymentResult](ctx)
 
-  paymentId := restate.Rand(ctx).UUID().String()
+  paymentId := restate.UUID(ctx).String()
   payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
     return InitPayment(req, paymentId, confirmation.Id())
   }, restate.WithName("pay"))
@@ -1560,9 +1559,12 @@ func (PaymentsWithTimeout) Process(ctx restate.Context, req PaymentRequest) (Pay
 
   // Race between payment confirmation and timeout
   timeout := restate.After(ctx, 30*time.Second)
-  selector := restate.Select(ctx, confirmation, timeout)
+  resFut, err := restate.WaitFirst(ctx, confirmation, timeout)
+  if err != nil {
+    return PaymentResult{}, err
+  }
 
-  switch selector.Select() {
+  switch resFut {
   case confirmation:
     return confirmation.Result()
   default:
@@ -1752,7 +1754,7 @@ public class ParallelSubscriptionService {
 type ParallelSubscriptionService struct{}
 
 func (ParallelSubscriptionService) Add(ctx restate.Context, req SubscriptionRequest) (SubscriptionResult, error) {
-  paymentId := restate.Rand(ctx).UUID().String()
+  paymentId := restate.UUID(ctx).String()
 
   payRef, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
     return CreateRecurringPayment(req.CreditCard, paymentId)
@@ -1762,7 +1764,7 @@ func (ParallelSubscriptionService) Add(ctx restate.Context, req SubscriptionRequ
   }
 
   // Process all subscriptions sequentially
-  var subscriptionFutures []restate.Selectable
+  var subscriptionFutures []restate.Future
   for _, subscription := range req.Subscriptions {
     future := restate.RunAsync(ctx, func(ctx restate.RunContext) (string, error) {
       return CreateSubscription(req.UserId, subscription, payRef)
@@ -1770,10 +1772,11 @@ func (ParallelSubscriptionService) Add(ctx restate.Context, req SubscriptionRequ
     subscriptionFutures = append(subscriptionFutures, future)
   }
 
-  selector := restate.Select(ctx, subscriptionFutures...)
-
-  for selector.Remaining() {
-    _, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
+  for fut, err := range restate.Wait(ctx, subscriptionFutures...) {
+    if err != nil {
+      return SubscriptionResult{}, err
+    }
+    _, err := fut.(restate.RunAsyncFuture[string]).Result()
     if err != nil {
       return SubscriptionResult{}, err
     }

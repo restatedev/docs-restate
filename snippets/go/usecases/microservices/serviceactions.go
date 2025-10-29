@@ -63,7 +63,7 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 
 	// <start_parallel>
 	// Process all items in parallel
-	var itemFutures []restate.Selectable
+	var itemFutures []restate.Future
 	for _, item := range order.Items {
 		itemFutures = append(itemFutures,
 			restate.RunAsync(ctx, func(ctx restate.RunContext) (restate.Void, error) {
@@ -71,10 +71,11 @@ func (MyService) Process(ctx restate.Context, order Order) error {
 			}))
 	}
 
-	selector := restate.Select(ctx, itemFutures...)
-
-	for selector.Remaining() {
-		_, err := selector.Select().(restate.RunAsyncFuture[string]).Result()
+	for fut, err := range restate.Wait(ctx, itemFutures...) {
+		if err != nil {
+			return err
+		}
+		_, err := fut.(restate.RunAsyncFuture[string]).Result()
 		if err != nil {
 			return err
 		}

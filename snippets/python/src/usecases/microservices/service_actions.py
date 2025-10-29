@@ -44,26 +44,6 @@ async def process(ctx: restate.Context, ticket: Order):
     ctx.service_send(send_reminder, ticket, send_delay=timedelta(days=7))
     # <end_communication>
 
-    order = ticket
-    # <start_awakeables>
-    # Wait for external payment confirmation
-    confirmation_id, confirmation_promise = ctx.awakeable()
-    await ctx.run_typed(
-        "start_payment", start_payment, order=order, confirmation_id=confirmation_id
-    )
-    await confirmation_promise
-    # <end_awakeables>
-
-    # <start_parallel>
-    # Process all items in parallel
-    item_promises = [
-        ctx.run_typed(f"process_item_{item['id']}", process_item, item=item)
-        for item in order.items
-    ]
-
-    await restate.gather(*item_promises)
-    # <end_parallel>
-
 
 inventory_service = restate.Service("InventoryService")
 
