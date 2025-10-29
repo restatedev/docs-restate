@@ -1,9 +1,9 @@
 import restate
 import hypercorn
 import asyncio
-from basic_service import subscription_service
-from workflow import signup_workflow
-from object import cart_object
+from .basic_service import subscription_service
+from .workflow import signup_workflow
+from .object import cart_object
 
 # <start_here>
 app = restate.app([subscription_service, cart_object, signup_workflow])

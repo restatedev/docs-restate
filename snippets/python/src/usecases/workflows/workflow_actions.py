@@ -29,7 +29,7 @@ async def run(ctx: restate.WorkflowContext, user: User) -> Dict[str, bool]:
 
     # <start_approval>
     # Wait for external approval
-    approval = await ctx.promise("manager-approval")
+    approval = await ctx.promise("manager-approval", type_hint=bool)
     # <end_approval>
 
     # <start_timers>
@@ -51,7 +51,7 @@ async def run(ctx: restate.WorkflowContext, user: User) -> Dict[str, bool]:
 # External system resolves the promise
 @approval_workflow.handler()
 async def approve(ctx: restate.WorkflowSharedContext, decision: bool):
-    await ctx.promise("manager-approval").resolve(decision)
+    await ctx.promise("manager-approval", type_hint=bool).resolve(decision)
 
 
 # <end_approve>
@@ -63,7 +63,10 @@ order_workflow = restate.Workflow("order-workflow")
 # Query from external handler
 @order_workflow.handler()
 async def get_order_details(ctx: restate.WorkflowSharedContext) -> OrderDetails:
-    return await ctx.get("order-details")
+    order_details = await ctx.get("order-details", type_hint=OrderDetails)
+    if order_details is None:
+        raise restate.TerminalError("Order details not found.")
+    return order_details
 
 
 # <end_state_get>

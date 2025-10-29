@@ -11,7 +11,7 @@ async def run(ctx: restate.WorkflowContext, document_id: str):
 
     # Wait for external review submission
     # <start_promise>
-    review = await ctx.promise("review").value()
+    review = await ctx.promise("review", type_hint=str).value()
     # <end_promise>
 
     # Process the review result
@@ -22,7 +22,7 @@ async def run(ctx: restate.WorkflowContext, document_id: str):
 async def submit_review(ctx: restate.WorkflowSharedContext, review: str):
     # Signal the waiting run handler
     # <start_resolve_promise>
-    await ctx.promise("review").resolve(review)
+    await ctx.promise("review", type_hint=str).resolve(review)
     # <end_resolve_promise>
 
 
