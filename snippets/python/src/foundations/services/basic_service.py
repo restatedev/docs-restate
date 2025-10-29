@@ -11,8 +11,8 @@ class SubscriptionRequest(BaseModel):
     subscriptions: List[str]
 
 
-def create_recurring_payment(credit_card: str, payment_id: str) -> None:
-    return None
+def create_recurring_payment(credit_card: str, payment_id: str) -> str:
+    return "payment-ref-123"
 
 
 def create_subscription(user_id: str, subscription: str, pay_ref: Any) -> None:

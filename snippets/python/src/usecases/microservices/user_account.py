@@ -7,7 +7,7 @@ user_account = restate.VirtualObject("UserAccount")
 
 @user_account.handler()
 async def update_balance(ctx: restate.ObjectContext, amount: float):
-    balance = await ctx.get("balance") or 0.0
+    balance = await ctx.get("balance", type_hint=float) or 0.0
     new_balance = balance + amount
 
     if new_balance < 0.0:
@@ -19,7 +19,7 @@ async def update_balance(ctx: restate.ObjectContext, amount: float):
 
 @user_account.handler(kind="shared")
 async def get_balance(ctx: restate.ObjectSharedContext):
-    return await ctx.get("balance") or 0.0
+    return await ctx.get("balance", type_hint=float) or 0.0
 
 
 # <end_here>

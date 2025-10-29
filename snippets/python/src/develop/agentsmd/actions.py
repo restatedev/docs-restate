@@ -95,10 +95,10 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
 
     # <start_durable_steps>
     # Wrap non-deterministic code in ctx.run
-    result = await ctx.run_typed("my-side-effect", call_external_api, query="weather", some_id="123")
+    result = await ctx.run_typed("my-side-effect", lambda: call_external_api("weather", "123"))
 
     # Or with typed version for better type safety
-    result = await ctx.run_typed("my-side-effect", call_external_api)
+    result = await ctx.run_typed("my-side-effect", call_external_api, query="weather", some_id="123")
     # <end_durable_steps>
 
     # <start_durable_timers>
@@ -133,10 +133,10 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
 
     # <start_workflow_promises>
     # Wait for promise
-    review = await ctx.promise("review").value()
+    review = await ctx.promise("review", type_hint=str).value()
 
     # Resolve promise
-    await ctx.promise("review").resolve("approval")
+    await ctx.promise("review", type_hint=str).resolve("approval")
     # <end_workflow_promises>
 
     # <start_gather>
@@ -178,3 +178,4 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     # Cancel invocation
     ctx.cancel_invocation(invocation_id)
     # <end_cancel>
+    return "done"

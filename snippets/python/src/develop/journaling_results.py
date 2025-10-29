@@ -1,8 +1,7 @@
 import random
-import time
-import uuid
+import typing
 
-from restate import Service, Context
+from restate import Service, Context, RestateDurableCallFuture
 from datetime import timedelta
 from restate.exceptions import TerminalError
 import restate
@@ -125,15 +124,17 @@ async def my_other_handler(ctx: Context, arg):
 
     # cancel the pending calls
     for f in pending:
-        await f.cancel_invocation()
+        call_future = typing.cast(RestateDurableCallFuture, f)
+        ctx.cancel_invocation(await call_future.invocation_id())
     # <end_wait_completed>
 
 
 @my_service.handler()
 async def claude_sonnet(ctx: Context, req: str) -> str:
-    return f"Bonjour {req.content[13:]}!"
+    return f"Bonjour!"
 
 
 @my_service.handler()
 async def open_ai(ctx: Context, req: str) -> str:
-    return f"Hello {req.content[13:]}!"
+    await ctx.sleep(timedelta(minutes=1))
+    return f"Hello!"

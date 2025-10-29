@@ -1,5 +1,5 @@
 import logging
-import uuid
+from .clients.payment import charge, refund
 
 import restate
 from pydantic import BaseModel
@@ -44,9 +44,9 @@ async def run(ctx: restate.Context, req: BookingRequest):
     # <end_twostep>
 
     # <start_idempotency>
-    payment_id = ctx.uuid()
-    compensations.append(lambda: ctx.run_typed("refund", payment.refund, payment_id=payment_id))
-    await ctx.run_typed("charge", payment.charge, payment_info=payment_info, payment_id=payment_id)
+    payment_id = str(ctx.uuid())
+    compensations.append(lambda: ctx.run_typed("refund", refund, payment_id=payment_id))
+    await ctx.run_typed("charge", charge, payment_info=payment_info, payment_id=payment_id)
     # <end_idempotency>
 
 

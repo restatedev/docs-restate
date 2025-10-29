@@ -2,7 +2,6 @@ from datetime import timedelta
 
 from restate import Service, Context
 import restate
-import src.develop.my_service as my_service
 
 my_service = Service("MyService")
 
@@ -19,7 +18,7 @@ async def timer_handler(ctx: Context, arg):
 
     # <start_timer>
     match await restate.select(
-        greeting=ctx.service_call(my_service.my_handler, "Hi"),
+        greeting=ctx.service_call(my_handler, "Hi"),
         timeout=ctx.sleep(timedelta(seconds=5)),
     ):
         case ["greeting", greeting]:
