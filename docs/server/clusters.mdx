@@ -72,9 +72,16 @@ If this happens, you will need to abandon the redundantly provisioned cluster(s)
 If no node is allowed to auto provision, then you have to manually provision the cluster.
 Refer to the [Cluster provisioning](#cluster-provisioning) section for more information.
 
-The log provider needs to be configured with `default-provider = "replicated"`.
-The `default-replication` should be set to the number of nodes that the data should be replicated to.
+<Tip>
+    When running multiple nodes that run on the same host, make sure that ports do not conflict.
+</Tip>
+
+### Sizing Clusters
+
+The replicated log provider must be used with `default-provider = "replicated"` (this is the default).
+The `default-replication` determines the minimum number of nodes the data must be replicated to.
 If you run at least `2 * default-replication-property - 1` nodes, then the cluster can tolerate `default-replication-property - 1` node failures.
+Nodes running the `log-server` role store segments of replicated logs.
 
 Metadata availability is crucial for cluster availability, and the default metadata server type `replicated` can tolerate node failures.
 Every node that runs the `metadata-server` role will join the metadata store cluster.
@@ -82,9 +89,13 @@ To tolerate `n` metadata node failures, you need to run at least `2 * n + 1` Res
 
 The `metadata-client` should be configured with the advertised addresses of all nodes that run the `metadata-server` role.
 
-Every Restate node that runs the `worker` role will also run the ingress server and accept incoming invocations.
+Restate nodes running the `worker` role host partitions and handle service invocations, journaling execution, and data storage and queries. The `default-replication` property sets the total number of replicas that the cluster will schedule for any given partition. Only one of these partitions is designated as a leader and actively processes invocations; additional partition replicas are followers and serve as hot standby in case they need to take over processing. Running additional partition replicas does not increase durability, which is determined by log replication and object store snapshots, however it can increase system availability by ensuring a new partition leader can be quickly promoted.
 
-For those nodes that run on the same machine, make sure that the ports do not conflict.
+<Info>
+    Advanced users can configure different log and partition replication requirements via `restatectl config set --log-replication` / `--partition-replication`.
+</Info>
+
+Finally, nodes that run the `http-ingress` role will accept external invocation requests and route them to the appropriate partitions.
 
 <Info>
     [Snapshots](/server/snapshots) are essential to support safe log trimming and also allow you to set partition replication to a subset of all cluster nodes, while still allowing for fast partition fail-over to any live node. Snapshots are also necessary to add more nodes in the future.
@@ -136,7 +147,7 @@ Check out the [cluster deployment documentation](/server/clusters)
 </Accordion>
 
 <Accordion title="List all nodes and their assigned roles">
-```shell  
+```shell
 restatectl nodes list
 ```
 
@@ -185,13 +196,13 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
 
 <Accordion title="Lists all partition, their current state, and any dead nodes">
 
-    ```shell  
+    ```shell
     restatectl partitions list
     ```
 
     Output:
 
-    ```shell  
+    ```shell
     Alive partition processors (nodes config v21, partition table v21)
     ID   NODE  MODE      STATUS  EPOCH  APPLIED  DURABLE  ARCHIVED  LSN-LAG  UPDATED
     0    N1:6  Leader    Active  N1:6   61       -        -         0        1 second and 170 ms ago
@@ -228,34 +239,34 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
 
     Output:
 
-    ```shell  
+    ```shell
     ⚙️ Cluster Configuration
-    ├ Number of partitions: 8
-    ├ Partition replication: *
+    ├ Number of partitions: 24
+    ├ Partition replication: {node: 1}
     └ Logs Provider: replicated
-    ├ Log replication: {node: 1}
-    └ Nodeset size: 0
+     ├ Log replication: {node: 1}
+     └ Nodeset size: 0
     ```
 
 </Accordion>
 <Accordion title={"Update the cluster settings"}>
 
-    ```shell  
+    ```shell
     restatectl config set --help # check options
-    restatectl config set --log-replication 2 # increase log replication
+    restatectl config set --replication 2 # increases replication
     ```
 
     Output:
 
-    ```shell  
+    ```shell
     ⚙️ Cluster Configuration
-    ├ Number of partitions: 8
-    ├ Partition replication: *
+    ├ Number of partitions: 24
+   -├ Partition replication: {node: 1}
+   +├ Partition replication: {node: 2}
     └ Logs Provider: replicated
-    - ├ Log replication: {node: 1}
-    + ├ Log replication: {node: 2}
-    └ Nodeset size: 0
-
+   - ├ Log replication: {node: 1}
+   + ├ Log replication: {node: 2}
+     └ Nodeset size: 0
 
     ? Apply changes? (y/n) › yes
     ```
@@ -263,7 +274,7 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
 </Accordion>
 </AccordionGroup>
 
-## Growing the cluster
+## Growing clusters
 
 You can expand an existing cluster by adding new nodes after it has been started.
 
@@ -293,22 +304,21 @@ You can expand an existing cluster by adding new nodes after it has been started
     Increase log replication to your desired number. For example, to replicate to two nodes:
 
     ```shell
-    restatectl config set --log-replication 2 --partition-replication 2
+    restatectl config set --replication 2
     ```
 
     <Accordion title={"Output"}>
     ```shell
     ⚙️ Cluster Configuration
-    ├ Number of partitions: 4
-    -├ Partition replication: {node: 1}
-    +├ Partition replication: {node: 2}
+    ├ Number of partitions: 24
+   -├ Partition replication: {node: 1}
+   +├ Partition replication: {node: 2}
     └ Logs Provider: replicated
-    - ├ Log replication: {node: 1}
-    + ├ Log replication: {node: 2}
-    └ Nodeset size: 0
+   - ├ Log replication: {node: 1}
+   + ├ Log replication: {node: 2}
+     └ Nodeset size: 0
 
-
-    ? Apply changes? (y/n) › no
+    ? Apply changes? (y/n) › yes
     ```
     </Accordion>
 
@@ -342,15 +352,17 @@ You can expand an existing cluster by adding new nodes after it has been started
 </Step>
 </Steps>
 
-## Managing the Replicated Loglet
+## Managing Replicated Logs
 
-You can manage the [replicated loglet](/references/architecture#durable-log-“bifrost”) via:
+Restate relies on a [distributed write-ahead log](/references/architecture#durable-log-“bifrost”) to durably record data flowing through the cluster. The replicated loglet provider is the default backend for both single- and multi-node cluster logs however, in a distributed deployment, understanding how it works becomes more important for safe operation.
+
+You can manage the replicated loglet provider via:
+
 ```shell
 restatectl replicated-loglet
 ```
 
-When you use the replicated loglet, which is required for distributed operation, the Restate [control plane](/references/architecture#control-plane) selects nodes on which to replicate the log according to the specified log replication.
-
+The Restate [control plane](/references/architecture#control-plane) selects nodes on which to replicate the log according to the specified log replication.
 Each [`log-server` node](/references/architecture#log-servers) in the cluster has a storage state which determines how the control plane may use this node. The `set-storage-state` tool allows you to manually override this state as operational needs dictate.
 New log servers come up in the `provisioning` state and will automatically transition to `read-write`. The `read-write` state means that the node is considered both healthy to read from and accept writes, that is it may be selected as a nodeset member for new loglet segments.
 
@@ -358,7 +370,7 @@ New log servers come up in the `provisioning` state and will automatically trans
 
 You can view the current storage state of log servers in your cluster using the `list-servers` sub-command.
 
-```shell  
+```shell
 restatectl replicated-loglet list-servers
 ```
 
@@ -387,19 +399,120 @@ The `read-only` and `disabled` states are of particular interest to operators. L
 
 Use the `set-storage-state` sub-command to manually update the log server state, for example to prevent log servers from being included in new nodesets. Consider the following example:
 
-```shell  
-restatectl replicated-loglet set-storage-state --node 1 --storage-state read-only
+```shell
+restatectl replicated-loglet set-storage-state --node N.. --storage-state read-only
 ```
 
-Output:
-
-```shell  
-Node N1 storage-state updated from read-write to read-only
+<Accordion title={"Output"}>
+```shell
+Node N.. storage-state updated from read-write to read-only
 ```
+</Accordion>
 
-The cluster controller reconfigures the log nodeset to exclude `N1`. Depending on the configured log replication level, you may see a warning about compromised availability or, if insufficient log servers are available to achieve the minimum required replication, the log will stop accepting writes altogether.
-The `restatectl` checks whether it is possible to create new node sets after marking a given node or set of nodes as read-only.
+The cluster controller reconfigures the log nodeset to exclude the specified node `N..`. Depending on the configured log replication level, you may see a warning about compromised availability or, if insufficient log servers are available to achieve the minimum required replication, the log will stop accepting writes altogether.
+The `restatectl` tool checks whether it is possible to create new nodesets after marking a given node or set of nodes as read-only.
 Examine the logs using `restatectl logs describe`.
+
+## Removing Nodes & Shrinking Clusters
+
+You may need to permanently remove nodes from a cluster, whether to replace failing hardware or downsize capacity. This procedure ensures safe node removal without data loss or service interruption. If you are only replacing failing or failed hardware, and intend to keep the cluster at the original size, add replacement nodes first and do not adjust the replication settings. Use these steps only to permanently remove nodes from a cluster; nodes that are only temporarily down should not be removed from the cluster.
+
+<Warning>
+    Before removing nodes, ensure that the reduced cluster will meet your capacity, availability and durability requirements. See the section on [Cluster Sizing](#sizing-clusters) for more.
+</Warning>
+
+<Steps>
+<Step title="Review cluster nodes and settings">
+    Review the cluster replication settings and nodes in use (as well as their current state). If Restate has detected that log data has become corrupted, you might notice that the storage state has already been automatically set to `data-loss`.
+
+    ```shell
+    restatectl config get
+    restatectl nodes list --extra
+    ```
+</Step>
+
+<Step title="Adjust replication settings (if downsizing)">
+    Reduce the replication factor to match your target cluster size. The new replication value should be appropriate for the number of nodes that will remain.
+
+    For example, to shrink a 5-node cluster with `{node: 3}` replication) to a 3-node cluster:
+
+    ```shell
+    restatectl config set --replication 2
+    ```
+</Step>
+
+<Step title="Prepare nodes for removal">
+    For nodes running the `log-server` or `worker` roles, set the storage state to `read-only` and worker state to `draining` on each node you plan to remove. This tells the cluster to reconfigure and move log nodesets and partition replicas to other nodes.
+
+    ```shell
+    restatectl nodes set-storage-state --nodes N..,[N..] --storage-state read-only
+    restatectl nodes set-worker-state --nodes N..,[N..] --worker-state draining
+    ```
+
+    Replace `N..,[N..]` with the comma-separated list of nodes you wish to remove.
+</Step>
+
+<Step title="Remove nodes from metadata server">
+    If the nodes you are removing run the `metadata-server` role, remove them from the metadata Raft group:
+
+    ```shell
+    restatectl metadata-server remove-node N..,[N..]
+    ```
+</Step>
+
+<Step title="Verify nodes are not in use">
+    Confirm that the nodes to be removed are in the correct state:
+
+    ```shell
+    restatectl nodes list --extra
+    restatectl metadata-server list-servers
+    ```
+
+    Verify that:
+    - Nodes show `read-only` storage state
+    - Nodes show `draining` worker state
+    - Nodes are no longer metadata service members
+</Step>
+
+<Step title="Create partition snapshots">
+    Create partition snapshots which will enable the cluster to trim older log segments. This will ensure that no historic nodesets reference nodes about to be removed.
+
+    ```shell
+    restatectl snapshots create
+    ```
+
+    This step requires that you have configured an S3-compatible snapshot destination in your nodes' configurations (see [Configuring Snapshots](/server/snapshots) for more).
+</Step>
+
+<Step title="Confirm migration">
+    Ensure the nodes are no longer running any partitions, nor participating in log nodesets:
+
+    ```shell
+    restatectl partitions list
+    restatectl logs describe
+    ```
+
+    Check that the nodes to be removed do not appear in the output. Wait for the cluster to fully migrate partitions and reconfigure logs before proceeding. In particular, ensure that historic nodesets do not reference nodes you intend to remove.
+</Step>
+
+<Step title="Stop the node processes">
+    Stop the Restate processes on the nodes you are removing, e.g. by scaling down the Restate cluster via the Kubernetes Operator. Confirm that the cluster and any applications that depend on it remain operational:
+
+    ```shell
+    restatectl status
+    ```
+</Step>
+
+<Step title="Remove node entries from cluster">
+    Once you have confirmed the cluster is healthy and the removed nodes are no longer needed, remove their entries from the cluster configuration:
+
+    ```shell
+    restatectl nodes remove --nodes N..
+    ```
+
+    Removed nodes will not rejoin the cluster if restarted.
+</Step>
+</Steps>
 
 ## Troubleshooting Clusters
 
@@ -456,12 +569,12 @@ Examine the logs using `restatectl logs describe`.
     </Warning>
 
     ```shell
-    restatectl replicated-loglet set-storage-state --node 3 --storage-state 'read-write' --force
+    restatectl replicated-loglet set-storage-state --node N.. --storage-state 'read-write' --force
     ```
 
     <Accordion title={"Output"}>
     ```text
-    Node N3 storage-state updated from data-loss to read-write
+    Node N.. storage-state updated from data-loss to read-write
     ```
     </Accordion>
 
