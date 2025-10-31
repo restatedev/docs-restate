@@ -1,14 +1,115 @@
 ---
-title: "Clusters"
+title: "Highly-Available Clusters"
 sidebar_position: 4
-description: "Operating Restate clusters"
+description: "Deploying and operating Restate clusters"
+icon: "circle-nodes"
 ---
 
-This page helps with operating [Restate clusters](/deploy/server/cluster).
+This page helps with deploying and operating [Restate clusters](/deploy/server/cluster).
 
 <Info>
     To understand the terminology used on this page, it might be helpful to read through the [architecture reference](/references/architecture).
 </Info>
+
+<Tip>
+    To migrate an existing single-node deployment into a multi-node deployment without losing data, check out [this guide](/guides/local-to-replicated).
+</Tip>
+
+
+## Deploying Restate clusters
+
+To deploy a distributed Restate cluster without external dependencies, you need to configure the following settings in your [server configuration](/server/configuration):
+
+```toml restate.toml
+# Every node needs to have a unique node name; by default this is the hostname (or podname in Kubernetes)
+node-name = "UNIQUE_NODE_NAME"
+# All nodes need to have the same cluster name
+cluster-name = "CLUSTER_NAME"
+# It is crucial that all peer nodes are able to resolve and connect to every other node's advertised address
+advertised-address = "ADVERTISED_ADDRESS"
+# At most one node can be configured with auto-provision = true
+auto-provision = false
+# Default replication factor for both the logs and the partitions.
+#
+# Replicate the data to a minimum of 2 nodes. This requires that the cluster has at least 2 nodes to
+# become operational. If the cluster has at least 3 nodes, then it can tolerate 1 node failure.
+#
+# This also controls the default partition replication. A value of 2 means each partition
+# will be running on up to 2 nodes whenever possible, ensuring fast fail-over without needing to
+# reconstruct partition state if the partition leader becomes unavailable.
+default-replication = 2
+
+[bifrost]
+# Only the replicated Bifrost provider can be used in a distributed deployment
+default-provider = "replicated"
+
+[metadata-server]
+# To tolerate node failures, use the replicated metadata server
+type = "replicated"
+
+[metadata-client]
+# List all the advertised addresses of the nodes that run the metadata-server role
+addresses = ["ADVERTISED_ADDRESS_1", "ADVERTISED_ADDRESS_2", ...]
+
+[admin]
+# Make sure it does not conflict with the other nodes
+bind-address = "ADMIN_BIND_ADDRESS"
+
+[ingress]
+# Make sure it does not conflict with other nodes
+bind-address = "INGRESS_BIND_ADDRESS"
+```
+
+It is important that every Restate node you start has a **unique `node-name`** specified.
+The node name defaults to the hostname. Restate uses a subdirectory inside `restate-data` named after the node name to store local data. You will not be able to change the node name once it is in use without removing the node from the cluster, or else risk data loss.
+Nodes can have identical configurations aside from node name.
+
+All nodes that are part of the cluster need to have the same `cluster-name` specified.
+
+At most one node can be configured with `auto-provision = true`.
+It is important to avoid having more than one node enabled to auto-provision a cluster as this can lead to provisioning multiple clusters if not all nodes can see each other during startup.
+If this happens, you will need to abandon the redundantly provisioned cluster(s), as it is not possible to merge clusters.
+If no node is allowed to auto provision, then you have to manually provision the cluster.
+Refer to the [Cluster provisioning](#cluster-provisioning) section for more information.
+
+The log provider needs to be configured with `default-provider = "replicated"`.
+The `default-replication` should be set to the number of nodes that the data should be replicated to.
+If you run at least `2 * default-replication-property - 1` nodes, then the cluster can tolerate `default-replication-property - 1` node failures.
+
+Metadata availability is crucial for cluster availability, and the default metadata server type `replicated` can tolerate node failures.
+Every node that runs the `metadata-server` role will join the metadata store cluster.
+To tolerate `n` metadata node failures, you need to run at least `2 * n + 1` Restate nodes with the `metadata-server` role configured.
+
+The `metadata-client` should be configured with the advertised addresses of all nodes that run the `metadata-server` role.
+
+Every Restate node that runs the `worker` role will also run the ingress server and accept incoming invocations.
+
+For those nodes that run on the same machine, make sure that the ports do not conflict.
+
+<Info>
+    [Snapshots](/server/snapshots) are essential to support safe log trimming and also allow you to set partition replication to a subset of all cluster nodes, while still allowing for fast partition fail-over to any live node. Snapshots are also necessary to add more nodes in the future.
+</Info>
+
+<Info title="Growing the cluster in the future">
+    If you plan to scale your cluster over time, we strongly recommend enabling [snapshotting](/server/snapshots#configuring-automatic-snapshotting).
+    Without it, newly added nodes may not be fully utilized by the system.
+</Info>
+
+
+## Cluster provisioning
+
+Once you start the node that is configured with `auto-provision = true`, it will provision the cluster so that other nodes can join.
+The provision step initializes the metadata store and writes the initial `NodesConfiguration` with the initial cluster configuration to the metadata store.
+In case none of the nodes is allowed to auto-provision, then you need to provision the cluster manually via `restatectl`.
+
+```shell
+restatectl provision --address <SERVER_TO_PROVISION> --yes
+```
+
+This provisions the cluster with default settings specified in the server configuration. Replication settings can be updated after initial provisioning using the `restatectl config set` command, e.g. if you add more nodes to the cluster in the future.
+
+
+
 
 ## Controlling clusters with `restatectl`
 
@@ -31,7 +132,7 @@ The `restatectl` tool communicates with Restate at the advertised address specif
 
 </Accordion>
 <Accordion title="Provisioning clusters">
-Check out the [cluster deployment documentation](/server/deploy/cluster)
+Check out the [cluster deployment documentation](/server/clusters)
 </Accordion>
 
 <Accordion title="List all nodes and their assigned roles">
@@ -169,7 +270,7 @@ You can expand an existing cluster by adding new nodes after it has been started
 <Steps>
 <Step title="Starting point: single node">
     A Restate cluster can initially be started with a single node.
-    Follow the [cluster deployment instructions](/server/deploy/cluster) and ensure that:
+    Follow the [cluster deployment instructions](/server/clusters) and ensure that:
     - It uses the replicated loglet. If you use local loglet, check [this migration guide](/guides/local-to-replicated).
     - `default-replication` is set to 1
     - [Snapshotting is enabled](/server/snapshots), to ensure that newly added nodes are fully utilized by the system.

@@ -5,45 +5,304 @@ icon: "link"
 description: "Learn how to connect your services to Restate Cloud."
 ---
 
+import InstallRestateOperator from '/snippets/common/install-restate-operator.mdx';
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+When using Restate Cloud, you can run your services anywhere: on Kubernetes, as serverless functions, on AWS Lambda, or in private environments.
+The only requirement is that your services need to be reachable from Restate Cloud's infrastructure.
+
 You can connect your services to Restate Cloud in several ways, depending on where they run:
-- If your [services run in private environments](#connecting-services-in-private-environments), by setting up a tunnel.
-- If your [services run on AWS Lambda](#connecting-aws-lambda-services), by giving Restate Cloud permission to invoke them.
-- By making your [services accessible over the public internet](#public-endpoint-with-request-signing), and using request signing.
+- Connect [Kubernetes services](/cloud/connecting-services#connecting-kubernetes-services) via a secure tunnel with Restate Operator.
+- Connect [serverless functions (Vercel, Cloudflare Workers, Deno Deploy, etc.) or other public endpoints](/cloud/connecting-services#serverless-functions-and-other-public-endpoints), by signing requests with your cloud environment's public key.
+- Connect [AWS Lambda functions](#connecting-aws-lambda-services), by granting Restate Cloud permission to assume a role in your AWS account.
+- Connect [services in private environments](#connecting-services-in-private-environments), by setting up a tunnel.
 
-## Connecting services in private environments
+If you prefer a video walkthrough, check out this webinar on getting started with cloud:
 
-You can connect services that run in a locked-down private environment to Restate Cloud using a secure tunnel.
-This allows you to expose your services to Restate Cloud without opening up ports to the public internet.
+<iframe
+    className="w-full aspect-video rounded-xl"
+    src="https://www.youtube.com/embed/W2iDBqSIbqU?si=2RlVO-4C25mLeVbv&amp;start=242"
+    title="YouTube video player"
+    frameBorder="0"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+    allowFullScreen
+></iframe>
 
-The tunnel will also act as an authenticating proxy to Restate Cloud and make it appear as if your Restate Cloud environment is inside your private network.
-This allows you to use native access control mechanisms, like VPC Security Groups and Kubernetes network policies, to manage access to your environment.
+## Kubernetes services
 
-### 1. Create a Restate Cloud environment
-Open the [Restate Cloud UI](https://cloud.restate.dev) and create a new environment.
+You can connect your Kubernetes services to Restate Cloud using a secure tunnel provided by the Restate Operator.
 
-Note the environment id (`env_...`) and request signing key (under security -> HTTP services: `publickeyv1_...`), as you will need them later.
+This allows you to run your services inside a private Kubernetes cluster without exposing them to the public internet.
 
-Create a `"Full"` scope API key with a descriptive name for the tunnel client and copy the key for later.
+The operator will:
+- Establish a tunnel to Restate Cloud
+- Register your services automatically
+- Manage multiple deployment revisions
+- Scale down old revisions when no longer needed
 
-### 2. Setup the CLI
-Next, we need to set up a CLI profile to connect to our Restate Cloud environment.
+<Info>
+    Try connecting a greeter service on a local kind Kubernetes cluster to Restate Cloud by following this [guide](/guides/connecting-k8s-services-to-cloud).
+</Info>
 
-Log in to Restate Cloud using the CLI:
+### Operator deployment
+
+<InstallRestateOperator/>
+
+### Create a Restate Cloud secret
+
+Create an API key via `Developers` tab of the Restate Cloud UI and give it `Full` permissions.
+The API key starts with `key_`. Save it in a file named `token` and create the secret in Kubernetes:
 ```bash
-restate cloud login
+kubectl create secret generic my-cloud-environment-secret \
+  --from-file=token=./token -n restate-operator
 ```
 
-Set up a new CLI profile for your environment:
-```bash
-restate cloud env configure
+### Set up a secure tunnel
+Set up a secure tunnel between the Kubernetes cluster and Restate Cloud with the `RestateCloudEnvironment` CRD:
+
+```yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateCloudEnvironment
+metadata:
+  name: my-cloud-environment
+spec:
+  environmentId: env_...
+  signingPublicKey: publickeyv1_...
+  region: eu
+  authentication:
+    secret:
+      name: my-cloud-environment-secret
+      key: token
 ```
 
-Tell the CLI to use the new environment:
-```bash
-restate config use-env <name>
+- The `environmentId` can be found in the Restate Cloud UI in the top left corner when you select your environment.
+This ID starts with `env_`.
+
+- The `signingPublicKey` can be found in the Restate Cloud UI under `Developers`. Scroll down to the `Security` section to find the public key under `HTTP endpoints`.
+The public key starts with `publickeyv1_`.
+
+- Set the `region` field to the region your Restate Cloud environment is hosted in. Possible values are `us` and `eu`.
+You can find the region next to your environment ID in the Restate Cloud UI.
+
+
+To see all the available configuration options for the `RestateCloudEnvironment` resource, refer to the Custom Resource Definition (CRD): [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCloudEnvironment.pkl) (recommended) or [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restatecloudenvironments.yaml).
+
+<Info>
+    [Learn more about how the tunnel works below.](/cloud/connecting-services#how-does-the-tunnel-work)
+</Info>
+
+### Create your RestateDeployment
+
+Create a `RestateDeployment` manifest for your service, as described in the [deployment documentation](/services/deploy/kubernetes#deployment-with-restate-operator), and specify the cloud environment to register with in the `spec`:
+```yaml
+spec:
+  restate:
+    register:
+      cloud: my-cloud-environment
 ```
 
-### 3. Run the tunnel
+Once you apply the manifest, the Restate Operator will set up the secure tunnel and automatically register your service with Restate Cloud.
+
+
+## Serverless Functions and other public endpoints
+
+Restate can invoke your services over the public internet.
+This is useful if you are deploying your services as serverless functions, e.g. on Vercel, Cloudflare Workers, or Deno Deploy.
+You can also securely deploy Restate services you operate as directly reachable endpoints.
+
+<Info>
+    For AWS Lambda, please see the [AWS Lambda functions](#aws-lambda-functions) section below.
+</Info>
+
+It is important to secure access to your publicly routable services so that only the designated Restate environment can call them.
+The easiest way to do this is with Restate's native request identity feature.
+All requests to your service will be signed with a unique environment-specific private key.
+The Restate SDK will reject any requests that do not have a valid signature.
+
+You can find your cloud environment's public key in the Cloud UI's Developers tab under Security -> HTTP Services.
+Since it is not secret, it is safe to include the public key directly in your service source code or configuration files:
+
+<CodeGroup>
+```typescript TypeScript {"CODE_LOAD::ts/src/develop/serving.ts#identity"} 
+restate.serve({
+  services: [myService],
+  identityKeys: ["publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"],
+});
+```
+
+```java Java {"CODE_LOAD::java/src/main/java/develop/ServingIdentity.java#here"} 
+import dev.restate.sdk.auth.signing.RestateRequestIdentityVerifier;
+import dev.restate.sdk.endpoint.Endpoint;
+import dev.restate.sdk.http.vertx.RestateHttpServer;
+
+class MySecureApp {
+  public static void main(String[] args) {
+    var endpoint =
+        Endpoint.bind(new MyService())
+            .withRequestIdentityVerifier(
+                RestateRequestIdentityVerifier.fromKeys(
+                    "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"));
+    RestateHttpServer.listen(endpoint);
+  }
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServingIdentity.kt#here"} 
+import dev.restate.sdk.auth.signing.RestateRequestIdentityVerifier
+import dev.restate.sdk.http.vertx.RestateHttpServer
+import dev.restate.sdk.kotlin.endpoint.endpoint
+
+fun main() {
+  RestateHttpServer.listen(
+      endpoint {
+        bind(MyService())
+        requestIdentityVerifier =
+            RestateRequestIdentityVerifier.fromKeys(
+                "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f",
+            )
+      })
+}
+```
+
+
+```python Python {"CODE_LOAD::python/src/develop/serving.py#identity"} 
+app = restate.app(
+    services=[my_service],
+    identity_keys=["publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"],
+)
+```
+
+
+```go Go {"CODE_LOAD::go/develop/serving.go#identity"} 
+if err := server.NewRestate().
+  Bind(restate.Reflect(MyService{})).
+  WithIdentityV1("publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f").
+  Start(context.Background(), ":9080"); err != nil {
+  log.Fatal(err)
+}
+```
+
+
+</CodeGroup>
+
+
+You can find more information on how to deploy Restate to various serverless platforms in the following guides:
+- [Vercel](https://docs.restate.dev/services/deploy/vercel)
+- [Cloudflare Workers](https://docs.restate.dev/services/deploy/cloudflare-workers)
+- [Deno Deploy](/services/deploy/deno-deploy)
+
+Note that, if you are using public endpoints, HTTPS must be used between Restate and your services. Consider using a load balancer like AWS Network Load Balancer which handles TLS termination. For optimum performance, the load balancer in front of your services must support HTTP/2.
+
+## AWS Lambda functions
+
+Restate Cloud can securely invoke your AWS Lambda functions by assuming an AWS role which you manage, and has appropriate permissions to invoke the relevant functions.
+
+### Setting up the invoker role
+
+Restate Cloud must be able to assume an AWS role with permission to perform `lambda:InvokeFunction`, within the same AWS account where the Lambda function is deployed. As Restate Cloud is a multi-tenant system, the role must be set up to only allow specifically enumerated Restate Cloud environment(s) you trust to assume it.
+
+Note that the Restate Cloud role is separate from your Lambda function’s execution role.
+The execution role is used by your function to perform its tasks, while the invoker role grants Restate Cloud permission to invoke your service handler functions — and nothing else.
+
+You can set up the role directly in IAM or use an infrastructure-as-code tool such as AWS CDK to define it.
+
+<Info>
+    If your Lambda has an appropriate trust policy, you do not
+    need to secure incoming requests any further. If you choose to however, the
+    identity verification checks will work on Lambda endpoints as well.
+</Info>
+
+#### IAM trust policy for Restate Cloud
+To create a new IAM role, you can copy the trust policy directly from the Restate Cloud UI, by visiting [Developers > Security > AWS Lambda](https://cloud.restate.dev/to/developers/integration#lambda).
+The trust policy allows the Restate Cloud IAM identity to assume the invoker role, only on behalf of the specified environment ID.
+
+Once you have created the invoker role, you can register your Lambda-backed service(s) with your Restate environment by specifying the role to be assumed:
+
+```shell
+restate deployments register <LAMBDA_FUNCTION_ARN> --assume-role-arn <ROLE_ARN>
+```
+
+
+#### Using AWS CDK
+
+You can use AWS CDK together with the [Restate CDK construct library](https://www.npmjs.com/package/@restatedev/restate-cdk) to deploy
+Lambda handlers, manage the invoker role, and automatically register Lambda-backed services with a Restate (Cloud) environment.
+
+Here is an example CDK stack that deploys a Lambda function and registers it with Restate Cloud:
+
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/integrations/deployment-lambda-cdk/lib/lambda-ts-cdk-stack.ts?remove_comments"} 
+
+import * as restate from "@restatedev/restate-cdk";
+import * as cdk from "aws-cdk-lib";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+import * as secrets from "aws-cdk-lib/aws-secretsmanager";
+import { Construct } from "constructs";
+
+export class LambdaTsCdkStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: cdk.StackProps) {
+    super(scope, id, props);
+
+    const handler = new lambda_nodejs.NodejsFunction(this, "GreeterService", {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: "lib/lambda/handler.ts",
+      architecture: lambda.Architecture.ARM_64,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+      },
+    });
+
+    if (!process.env.RESTATE_ENV_ID || !process.env.RESTATE_API_KEY) {
+      throw new Error(
+        "Required environment variables RESTATE_ENV_ID and RESTATE_API_KEY are not set, please see README.",
+      );
+    }
+
+    const restateEnvironment = new restate.RestateCloudEnvironment(this, "RestateCloud", {
+      environmentId: process.env.RESTATE_ENV_ID! as restate.EnvironmentId,
+      apiKey: new secrets.Secret(this, "RestateCloudApiKey", {
+        secretStringValue: cdk.SecretValue.unsafePlainText(process.env.RESTATE_API_KEY!),
+      }),
+    });
+    const deployer = new restate.ServiceDeployer(this, "ServiceDeployer");
+
+
+    deployer.deployService("Greeter", handler.currentVersion, restateEnvironment);
+    new cdk.CfnOutput(this, "restateIngressUrl", { value: restateEnvironment.ingressUrl });
+  }
+}
+```
+
+View an example of deploying to AWS Lambda with SDK for your SDK here: [TS](https://github.com/restatedev/examples/tree/main/typescript/integrations/deployment-lambda-cdk), [Go](https://github.com/restatedev/examples/tree/main/go/integrations/go-lambda-cdk), [Java](https://github.com/restatedev/examples/tree/main/java/integrations/java-gradle-lambda-cdk), [Kotlin](https://github.com/restatedev/examples/tree/main/kotlin/integrations/kotlin-gradle-lambda-cdk)
+
+
+- The `RESTATE_ENV_ID` can be found in the Restate Cloud UI in the top left corner when you select your environment.
+This ID starts with `env_`.
+
+- For the `RESTATE_API_KEY`, create an API key via `Developers` tab of the Restate Cloud UI and give it `Full` permissions.
+
+The `RestateCloudEnvironment` automatically creates an IAM role with an appropriate trust policy for the matching Restate Cloud environment. The `ServiceDeployer` construct automatically grants this role permission to invoke any AWS Lambda functions registered with the environment. For more details, consult the relevant [Restate CDK](https://www.npmjs.com/package/@restatedev/restate-cdk) constructs' API documentation.
+
+The CDK also registers your service with Restate Cloud, so no need to do this manually.
+
+If something isn't working, the environment logs in the Cloud UI may help you find the issue.
+
+## Services in private environments
+
+You can connect services running in a locked-down private environment to Restate Cloud using a secure tunnel.
+
+This tunnel allows you to expose your services to Restate Cloud without opening up ports to the public internet.
+It also acts as an authenticating proxy, making it appear as if your Restate Cloud environment is inside your private network.
+
+The tunnel lets you use native access control mechanisms, like VPC Security Groups and Kubernetes network policies, to manage access to your Cloud environment. It also lets you control connections from the Cloud environment to the rest of your network by restricting which internal services the tunnel client can connect to.
+
+<Info>
+    If you are running on Kubernetes, then you can [use the Restate Operator to create a `RestateCloudEnvironment`](/cloud/connecting-services#kubernetes-services).
+    This tunnel automatically sets up the tunnel for you.
+    You only need to run the tunnel client manually if you’re not running on Kubernetes.
+</Info>
+
+### Set up a secure tunnel
 The tunnel can be hosted as a cloud VM in your VPC, a sidecar to your service, or a dedicated pod in your container orchestrator.
 
 You can deploy multiple copies for redundancy.
@@ -65,7 +324,7 @@ docker run \
   -e RESTATE_CLOUD_REGION \
   -p 8080:8080 \
   -p 9090:9090 \
-  -p 9070:9070
+  -p 9070:9070 \
   -it ghcr.io/restatedev/restate-cloud-tunnel-client:latest
 ```
 
@@ -87,45 +346,13 @@ The tunnel client exposes the following ports
 </Accordion>
 </AccordionGroup>
 
-### 4. Run a Restate service
+In addition to exposing local services to Restate Cloud, by default the tunnel client will also serve unauthenticated ingress and admin endpoints from Restate Cloud on its local 8080 and 9080 ports. This behaviour can be disabled with `RESTATE_REMOTE_PROXY=false`. If left enabled, be careful to restrict access to these ports; access to them is equivalent to having the configured `RESTATE_BEARER_TOKEN`.
 
-Follow the quickstart to [run a Restate service locally](/quickstart).
+<Info>
+    [Learn more about how the tunnel works below.](/cloud/connecting-services#how-does-the-tunnel-work)
+</Info>
 
-<CodeGroup>
-```bash TypeScript
-restate example typescript-hello-world
-cd typescript-hello-world
-npm install
-npm run dev
-```
-```bash Java
-restate example java-hello-world-maven
-cd java-hello-world-maven
-mvn compile exec:java
-```
-```bash Kotlin
-restate example kotlin-hello-world
-cd kotlin-hello-world
-./gradlew run
-```
-```bash Python
-restate example python-hello-world
-cd python-hello-world
-uv run .
-```
-```Bash Go
-restate example go-hello-world &&
-cd go-hello-world
-go run .
-```
-```bash Rust
-restate example rust-hello-world
-cd rust-hello-world
-cargo run
-```
-</CodeGroup>
-
-### 5. Register your service
+### Register your service
 
 If your setup is correct, you can now register your service with the Restate Cloud environment:
 ```bash
@@ -141,141 +368,38 @@ For example, if your service is running on `localhost:9080` and your environment
 restate deployments register https://tunnel.eu.restate.cloud:9080/20d1231jyphzkm8/test-tunnel/http/localhost/9080
 ```
 
-### 6. Test your service
+You can now invoke your service as usual.
 
-You can now test your service by invoking it via Restate Cloud:
-
-<CodeGroup>
-    ```bash TypeScript
-    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
-    ```
-    ```bash Java
-    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
-    ```
-    ```bash Kotlin
-    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
-    ```
-    ```bash Python
-    curl localhost:8080/Greeter/greet --json '{"name": "Sarah"}'
-    ```
-    ```Bash Go
-    curl localhost:8080/Greeter/Greet --json '"Sarah"'
-    ```
-    ```bash Rust
-    curl localhost:8080/Greeter/greet --json '"Sarah"'
-    ```
-</CodeGroup>
-
-### How does it work?
+### How does the tunnel work
 - Restate CLI is communicating with your Restate environment at `https://*.eu.restate.cloud:9070` using your user ID token and asks the admin API to perform a discovery at the special tunnel URL.
 - The Restate Cloud end of the tunnel receives the request from your environment and forwards the traffic to the tunnel container.
 - The tunnel container is forwarding the traffic to the Restate service endpoint.
 
 <img src="/img/cloud/tunnel_deployment.png" alt="Invocation overview" />
 
-## Connecting AWS Lambda services
 
-To invoke services running on AWS Lambda, Restate Cloud needs to assume an AWS
-identity in the same account that the Lambda is deployed to. Create a new role
-that has permission to invoke your Lambda handlers, and give it the following
-trust policy.
+## Advanced topics
 
-<Info>
-    The Restate Cloud role is distinct from the Lambda function's execution role.
-    The execution role is assumed by your function to perform its work. A dedicated
-    invoker role is needed to grant Restate Cloud permission to invoke service handlers
-    functions in your account, and nothing more.
-</Info>
+### Client-side encryption
 
-<CodeGroup>
-```json IAM JSON Policy expandable
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::654654156625:root"
-            },
-            "Action": "sts:AssumeRole",
-            "Condition": {
-                "StringEquals": {
-                    "aws:PrincipalArn": "arn:aws:iam::654654156625:role/RestateCloud",
-                    "sts:ExternalId": "${ENVIRONMENT_ID}"
-                }
-            }
-        },
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::654654156625:root"
-            },
-            "Action": "sts:TagSession"
-        }
-    ]
-}
-```
+You can optionally configure client-side encryption, which makes your data opaque to Restate Cloud.
+In this case, the SDK encrypts journal entries after serializing them but before sending them to Restate Cloud.
 
-Replace the `${ENVIRONMENT_ID}` placeholder with the environment ID can be found in the UI and in the output of `restate whoami`.
-This trust policy allows the Restate Cloud `us.restate.cloud` region principal to assume the role, but only on behalf of the specified environment ID.
+**What is encrypted?** Only the following journal entries are encrypted:
+- The input and output parameters to the handler
+- `ctx.run` success results
+- RPC calls parameters and return values (for service-to-service invocations)
+- State values
+- Awakeables and Durable Promise results
 
-```ts AWS CDK
-const restateCloudRole = new iam.Role(this, "RestateCloudRole", {
-    assumedBy: new iam.AccountPrincipal("654654156625")
-        .withConditions({
-            "StringEquals": {
-                "sts:ExternalId": environmentId,
-                "aws:PrincipalArn": "arn:aws:iam::654654156625:role/RestateCloud",
-            },
-        }),
-});
-restateCloudRole.assumeRolePolicy!.addStatements(
-    new iam.PolicyStatement({
-        principals: [new iam.AccountPrincipal("654654156625")],
-        actions: ["sts:TagSession"],
-    }),
-);
-```
+It is not possible to encrypt any other journal entries.
 
-        When you use the [Restate CDK construct library](https://github.com/restatedev/cdk) to deploy
-        Lambda handlers, the provided invoker role will automatically be granted access
-        to invoke the corresponding functions. If you manage Restate service deployments
-        some other way, you should ensure that the Restate Cloud invoker role is permitted
-        to call the appropriate Lambda handler functions by allowing it to perform `lambda:InvokeFunction`.
+**How to enable encryption?** You need to implement a [`JournalValueCodec`](https://github.com/restatedev/sdk-typescript/blob/main/packages/restate-sdk-core/src/entry_codec.ts#L26) and provide it to the SDK when creating the endpoint.
+Currently, this feature is only available in the TypeScript SDK.
 
-        Use the `environmentId` variable to pass the environment ID can be found in the UI and in the output of `restate whoami`.
-        This trust policy allows the Restate Cloud `us.restate.cloud` region principal to assume the role, but only on behalf of the specified environment.
-</CodeGroup>
-
-You can now register your Lambda through the new role:
-
-```shell
-restate deployments register <LAMBDA_FUNCTION_ARN> --assume-role-arn <ROLE_ARN>
-```
-
-If something isn't working, the environment logs in the cloud UI may help
-you find the issue.
-
-<Info>
-    **Securing your services:**
-
-    If your Lambda has an appropriate trust policy as described above, you do not
-need to secure incoming requests any further. If you choose to however, the
-identity verification checks will work on Lambda endpoints as well.
-</Info>
+<Card href={"https://github.com/restatedev/journal-encryption"}>
+Have a look at a reference implementation that uses Amazon's KMS to manage encryption keys.
+</Card>
 
 
-## Public endpoint with request signing
 
-Restate can invoke your services over the public internet. For production use cases
-HTTPS must be used between Restate and your services. You can terminate TLS at
-the service endpoint directly, but it's likely easier to use a fronting
-load balancer like an AWS NLB.
-
-You must secure access to your service so that only Restate can call it.
-The easiest way to do this is with our native request identity feature.
-All requests to your service will be signed with a unique environment-specific private
-key. You can find the corresponding public key in the environment settings UI, under HTTP Services.
-It is safe to include this public key directly in your service code.
-
-Have a look at the SDK serving documentation to learn how for [TS](/develop/ts/serving#validating-request-identity), [Java, Kotlin](/develop/java/serving#validating-request-identity), [Python](/develop/python/serving#validating-request-identity), [Go](/develop/go/serving#validating-request-identity), and [Rust](https://docs.rs/restate-sdk/latest/restate_sdk/http_server/index.html#validating-request-identity).

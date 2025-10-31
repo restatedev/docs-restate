@@ -1,0 +1,52 @@
+---
+title: "Deploying Restate on AWS"
+sidebarTitle: "AWS"
+description: "Deploy the Restate Server on Amazon Web Services using EKS, Fargate, and S3."
+---
+
+We recommend deploying Restate on AWS using **Amazon EKS (Elastic Kubernetes Service)** with the [Restate Operator](/server/deploy/kubernetes). This approach provides the best balance of operational simplicity, scalability, and reliability.
+
+## Recommended Architecture
+
+For AWS deployments, we recommend:
+
+- **Compute**: EKS with Fargate for serverless container management
+- **Storage**: EBS for persistent volumes, S3 for snapshots (and optionally metadata)
+
+## EKS with Restate Operator
+
+We recommend an EKS cluster using a Fargate profile for compute nodes for the simplest operational experience.
+
+Install the Restate Operator on your EKS cluster.
+And create a Restate cluster with EBS storage and snapshots to S3 ([see instructions](/server/deploy/kubernetes)).
+
+The Restate operator has support for [EKS Pod Identities](https://github.com/restatedev/restate-operator/tree/main?tab=readme-ov-file#eks-pod-identity) and [EKS security groups](https://github.com/restatedev/restate-operator/tree/main?tab=readme-ov-file#eks-security-groups-for-pods).
+
+## EC2 and ECS
+
+Running Restate on EKS with managed EC2 nodegroups is another good alternative, though in that case you will need to manage node patching yourself. ECS is not a suitable platform for deploying Restate Clusters as ECS lacks support for persistent volume attachments. ECS is a great target for hosting Restate services, however.
+
+For the highest performance on AWS, expert operators can also consider long-lived EC2 instances with local SSD storage, however this is also going to be the most difficult configuration to manage. You will need to carefully plan your cluster size, node placement, and replication settings to ensure that you can tolerate the loss of a number of nodes without leading to permanent data loss at the Restate cluster level.
+
+## EBS Persistent Volumes
+
+For persistent storage, we generally recommend a [General Purpose SSD (gp3) EBS volume](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html#gp3-ebs-volume-type).
+
+For single-node deployments, EBS volume snapshots can be used as [backups for point-in-time recovery](/server/snapshots#data-backups-2).
+
+We do not recommend using [EBS volume snapshots](https://docs.aws.amazon.com/ebs/latest/userguide/ebs-snapshots.html) for restoring multi-node Restate clusters, since coordinating simultaneous backups across multiple nodes presents significant timing precision requirements, as described in the [backups documentation](/server/snapshots#multi-node-backup-challenges).
+
+## S3 Snapshots
+
+We recommend using Amazon S3 for storing Restate snapshots, and optionally also as metadata store.
+
+Consult [snapshot configuration documentation](/server/snapshots#configuring-automatic-snapshotting) for more information on how to configure this.
+
+If you are using EKS with the Restate Operator, then also check the [Restate Operator documentation](/server/deploy/kubernetes#replicated-cluster-deployment).
+
+## CDK Deployment
+
+AWS CDK users can take advantage of the Restate CDK library provided service deployer construct for managing AWS Lambda-backed services.
+
+<Card title="Restate CDK GitHub" href="https://github.com/restatedev/cdk" icon="github" horizontal={true} />
+
