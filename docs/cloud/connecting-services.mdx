@@ -204,9 +204,22 @@ The execution role is used by your function to perform its tasks, while the invo
 
 You can set up the role directly in IAM or use an infrastructure-as-code tool such as AWS CDK to define it.
 
+<Info>
+    If your Lambda has an appropriate trust policy, you do not
+    need to secure incoming requests any further. If you choose to however, the
+    identity verification checks will work on Lambda endpoints as well.
+</Info>
+
 #### IAM trust policy for Restate Cloud
 To create a new IAM role, you can copy the trust policy directly from the Restate Cloud UI, by visiting [Developers > Security > AWS Lambda](https://cloud.restate.dev/to/developers/integration#lambda).
 The trust policy allows the Restate Cloud IAM identity to assume the invoker role, only on behalf of the specified environment ID.
+
+Once you have created the invoker role, you can register your Lambda-backed service(s) with your Restate environment by specifying the role to be assumed:
+
+```shell
+restate deployments register <LAMBDA_FUNCTION_ARN> --assume-role-arn <ROLE_ARN>
+```
+
 
 #### Using AWS CDK
 
@@ -215,53 +228,51 @@ Lambda handlers, manage the invoker role, and automatically register Lambda-back
 
 Here is an example CDK stack that deploys a Lambda function and registers it with Restate Cloud:
 
-```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/cdk/refs/heads/main/test/e2e/stacks/restate-cloud-lambda-stack.ts?remove_comments"}
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/integrations/deployment-lambda-cdk/lib/lambda-ts-cdk-stack.ts?remove_comments"} 
 
+import * as restate from "@restatedev/restate-cdk";
 import * as cdk from "aws-cdk-lib";
 import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as secrets from "aws-cdk-lib/aws-secretsmanager";
-import path from "path";
+import { Construct } from "constructs";
 
-import { EnvironmentId, RestateCloudEnvironment, ServiceDeployer } from "../../../lib/restate-constructs";
+export class LambdaTsCdkStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: cdk.StackProps) {
+    super(scope, id, props);
 
-const app = new cdk.App();
-const stackName = app.node.tryGetContext("stack_name") ?? "e2e-RestateCloud";
-const stack = new cdk.Stack(app, stackName, {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
-  },
-});
+    const handler = new lambda_nodejs.NodejsFunction(this, "GreeterService", {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: "lib/lambda/handler.ts",
+      architecture: lambda.Architecture.ARM_64,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+      },
+    });
 
-if (!process.env.RESTATE_ENV_ID || !process.env.RESTATE_API_KEY) {
-  throw new Error("Please set RESTATE_ENV_ID and RESTATE_API_KEY");
+    if (!process.env.RESTATE_ENV_ID || !process.env.RESTATE_API_KEY) {
+      throw new Error(
+        "Required environment variables RESTATE_ENV_ID and RESTATE_API_KEY are not set, please see README.",
+      );
+    }
+
+    const restateEnvironment = new restate.RestateCloudEnvironment(this, "RestateCloud", {
+      environmentId: process.env.RESTATE_ENV_ID! as restate.EnvironmentId,
+      apiKey: new secrets.Secret(this, "RestateCloudApiKey", {
+        secretStringValue: cdk.SecretValue.unsafePlainText(process.env.RESTATE_API_KEY!),
+      }),
+    });
+    const deployer = new restate.ServiceDeployer(this, "ServiceDeployer");
+
+
+    deployer.deployService("Greeter", handler.currentVersion, restateEnvironment);
+    new cdk.CfnOutput(this, "restateIngressUrl", { value: restateEnvironment.ingressUrl });
+  }
 }
-
-const handler: lambda.Function = new lambda.Function(stack, "Service", {
-  runtime: lambda.Runtime.NODEJS_LATEST,
-  code: lambda.Code.fromAsset("../handlers/dist/"),
-  handler: "bundle.handler",
-});
-
-const environment = new RestateCloudEnvironment(stack, "CloudEnv", {
-  environmentId: process.env.RESTATE_ENV_ID! as EnvironmentId,
-  apiKey: new secrets.Secret(stack, "RestateCloudApiKey", {
-    secretStringValue: cdk.SecretValue.unsafePlainText(process.env.RESTATE_API_KEY!),
-  }),
-});
-
-const deployer = new ServiceDeployer(stack, "ServiceDeployer", {
-  code: lambda.Code.fromAsset(path.join(__dirname, "../../../dist/register-service-handler")),
-  removalPolicy: cdk.RemovalPolicy.DESTROY,
-});
-
-deployer.deployService("Greeter", handler.currentVersion, environment);
-
-new cdk.CfnOutput(stack, "RestateIngressUrl", { value: environment.ingressUrl });
-
-app.synth();
 ```
-<GitHubLink url={"https://github.com/restatedev/cdk/blob/main/test/e2e/stacks/restate-cloud-lambda-stack.ts"}/>
+
+View an example of deploying to AWS Lambda with SDK for your SDK here: [TS](https://github.com/restatedev/examples/tree/main/typescript/integrations/deployment-lambda-cdk), [Go](https://github.com/restatedev/examples/tree/main/go/integrations/go-lambda-cdk), [Java](https://github.com/restatedev/examples/tree/main/java/integrations/java-gradle-lambda-cdk), [Kotlin](https://github.com/restatedev/examples/tree/main/kotlin/integrations/kotlin-gradle-lambda-cdk)
 
 
 - The `RESTATE_ENV_ID` can be found in the Restate Cloud UI in the top left corner when you select your environment.
@@ -271,23 +282,9 @@ This ID starts with `env_`.
 
 The `RestateCloudEnvironment` automatically creates an IAM role with an appropriate trust policy for the matching Restate Cloud environment. The `ServiceDeployer` construct automatically grants this role permission to invoke any AWS Lambda functions registered with the environment. For more details, consult the relevant [Restate CDK](https://www.npmjs.com/package/@restatedev/restate-cdk) constructs' API documentation.
 
-### Register your Lambda function
-
-Once you have created the invoker role, you can register your Lambda-backed service(s) with your Restate environment by specifying the role to be assumed:
-
-```shell
-restate deployments register <LAMBDA_FUNCTION_ARN> --assume-role-arn <ROLE_ARN>
-```
+The CDK also registers your service with Restate Cloud, so no need to do this manually.
 
 If something isn't working, the environment logs in the Cloud UI may help you find the issue.
-
-<Info>
-    **Securing your services:**
-
-    If your Lambda has an appropriate trust policy as described above, you do not
-    need to secure incoming requests any further. If you choose to however, the
-    identity verification checks will work on Lambda endpoints as well.
-</Info>
 
 ## Services in private environments
 
