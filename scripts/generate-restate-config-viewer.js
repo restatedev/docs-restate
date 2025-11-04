@@ -23,10 +23,10 @@ async function parseJsonSchema(schemaPath) {
     }
 }
 
-function formatDescription(description) {
+function formatDescription(description, examples) {
     if (!description) return '';
     // Escape HTML-like syntax in code blocks and regular text
-    return description
+    const cleanDescription = description
         .replace(/\n\n/g, '\n\n')
         // Preserve code blocks with backticks but escape any HTML-like content within
         .replace(/`([^`]+)`/g, (match, code) => {
@@ -38,7 +38,12 @@ function formatDescription(description) {
         // Convert markdown links to proper format
         .replace(/\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
         // Escape quotes for JSX attributes
-        .replace(/"/g, '\\"');
+        .replace(/"/g, '\\"')
+
+    const exampleStr = examples && Array.isArray(examples) && examples.length > 0
+        ? '\n\nExamples:\n' + examples.map(ex => `${JSON.stringify(ex, null, 2)}`).join(' or ')
+        : '';
+    return cleanDescription + exampleStr;
 }
 
 function getTypeFromSchema(propSchema) {
@@ -118,6 +123,16 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     if (propSchema.maximum) {
         postTags.push(`\'maximum: ${propSchema.maximum}\'`);
     }
+    if (propSchema.minLength) {
+        postTags.push(`\'minLength: ${propSchema.minLength}\'`);
+    }
+    if (propSchema.maxLength) {
+        postTags.push(`\'maxLength: ${propSchema.maxLength}\'`);
+    }
+    if (propSchema.pattern) {
+        postTags.push(`\'pattern: ${propSchema.pattern}\'`);
+    }
+
     const postAttr = ` post={[${postTags.join(",")}]}`;
 
     let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${defaultAttr}${postAttr}>\n`;
@@ -166,7 +181,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 output += `${indent}    ${description}\n\n`;
             }
             if (optionalVariant.description) {
-                output += `${indent}    ${formatDescription(optionalVariant.description)}\n`
+                output += `${indent}    ${formatDescription(optionalVariant.description, optionalVariant.examples)}\n`
             }
             if (optionalType.type === 'object' && optionalVariant.properties) {
                 const requiredProps = optionalVariant.required || [];
