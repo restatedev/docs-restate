@@ -129,9 +129,6 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     if (propSchema.maxLength) {
         postTags.push(`\'maxLength: ${propSchema.maxLength}\'`);
     }
-    if (propSchema.pattern) {
-        postTags.push(`\'pattern: ${propSchema.pattern}\'`);
-    }
 
     const postAttr = ` post={[${postTags.join(",")}]}`;
 
