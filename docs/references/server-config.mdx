@@ -1366,7 +1366,23 @@ Default: true
     The metadata client type to store metadata
 
     
+    
+<Expandable title="Option 1: Store metadata on the replicated metadata store that runs on nodes with the metadata-server role.">
     <Expandable title="Properties">
+        <ResponseField name="type" type="string" default={"replicated"} post={['enum: "replicated"']}>
+        </ResponseField>
+
+        <ResponseField name="addresses" type="array" post={[]}>
+            Restate metadata server address list
+
+            
+            <Expandable title="Array Items">
+                <ResponseField name="item" type="string" post={[]}>
+                </ResponseField>
+
+            </Expandable>
+        </ResponseField>
+
         <ResponseField name="connect-timeout" type="string" default={"3s"} post={['minLength: 1']}>
             TCP connection timeout for connecting to the metadata store.
 
@@ -1452,6 +1468,310 @@ Examples:
             </Expandable>
         </ResponseField>
 
+    </Expandable>
+    </Expandable>
+<Expandable title="Option 2: Store metadata on an external etcd cluster.
+
+The addresses are formatted as `host:port`">
+    <Expandable title="Properties">
+        <ResponseField name="type" type="string" default={"etcd"} post={['enum: "etcd"']}>
+        </ResponseField>
+
+        <ResponseField name="addresses" type="string" post={[]}>
+            Etcd cluster node address list
+
+        </ResponseField>
+
+        <ResponseField name="connect-timeout" type="string" default={"3s"} post={['minLength: 1']}>
+            TCP connection timeout for connecting to the metadata store.
+
+        </ResponseField>
+
+        <ResponseField name="keep-alive-interval" type="string" default={"5s"} post={['minLength: 1']}>
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+        </ResponseField>
+
+        <ResponseField name="keep-alive-timeout" type="string" default={"5s"} post={['minLength: 1']}>
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+        </ResponseField>
+
+        <ResponseField name="backoff-policy"  default={{"factor":1.399999976158142,"initial-interval":"100ms","max-attempts":10,"max-interval":"1s","type":"exponential"}} post={[]}>
+            Backoff policy used by the metadata client when it encounters concurrent modifications.
+
+            
+            
+            <Expandable title="Option 1: None">
+            No retry strategy.
+
+                <ResponseField name="type" type="string" required default={"none"} post={['enum: "none"']}>
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 2: Fixed delay">
+            Retry with a fixed delay strategy.
+
+                <ResponseField name="type" type="string" required default={"fixed-delay"} post={['enum: "fixed-delay"']}>
+                </ResponseField>
+
+                <ResponseField name="interval" type="string" required post={['minLength: 1']}>
+                    Interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 3: Exponential">
+            Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
+
+                <ResponseField name="type" type="string" required default={"exponential"} post={['enum: "exponential"']}>
+                </ResponseField>
+
+                <ResponseField name="initial_interval" type="string" required post={['minLength: 1']}>
+                    Initial interval for the first retry attempt.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="factor" type="number" required post={['format: float']}>
+                    The factor to use to compute the next retry attempt.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+                <ResponseField name="max_interval" type="string | null" post={[]}>
+                    Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+                </ResponseField>
+
+            </Expandable>
+        </ResponseField>
+
+    </Expandable>
+    </Expandable>
+<Expandable title="Option 3: Store metadata on an external object store.">
+    <Expandable title="Properties">
+        <ResponseField name="type" type="string" default={"object-store"} post={['enum: "object-store"']}>
+        </ResponseField>
+
+        <ResponseField name="path" type="string" post={[]}>
+            This location will be used to persist cluster metadata. Takes the form of a URL with `s3://` as the protocol and bucket name as the authority, plus an optional prefix specified as the path component.
+
+Example: `s3://bucket/prefix`
+
+        </ResponseField>
+
+        <ResponseField name="object_store_retry_policy"  default={{"factor":2,"initial-interval":"100ms","max-attempts":10,"max-interval":"10s","type":"exponential"}} post={[]}>
+            Definition of a retry policy
+
+            
+            
+            <Expandable title="Option 1: None">
+            No retry strategy.
+
+                <ResponseField name="type" type="string" required default={"none"} post={['enum: "none"']}>
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 2: Fixed delay">
+            Retry with a fixed delay strategy.
+
+                <ResponseField name="type" type="string" required default={"fixed-delay"} post={['enum: "fixed-delay"']}>
+                </ResponseField>
+
+                <ResponseField name="interval" type="string" required post={['minLength: 1']}>
+                    Interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 3: Exponential">
+            Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
+
+                <ResponseField name="type" type="string" required default={"exponential"} post={['enum: "exponential"']}>
+                </ResponseField>
+
+                <ResponseField name="initial_interval" type="string" required post={['minLength: 1']}>
+                    Initial interval for the first retry attempt.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="factor" type="number" required post={['format: float']}>
+                    The factor to use to compute the next retry attempt.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+                <ResponseField name="max_interval" type="string | null" post={[]}>
+                    Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+                </ResponseField>
+
+            </Expandable>
+        </ResponseField>
+
+        <ResponseField name="aws-profile" type="string" post={[]}>
+            The AWS configuration profile to use for S3 object store destinations. If you use named profiles in your AWS configuration, you can replace all the other settings with a single profile reference. See the [AWS documentation on profiles] (https://docs.aws.amazon.com/sdkref/latest/guide/file-format.html) for more.
+
+        </ResponseField>
+
+        <ResponseField name="aws-region" type="string" post={[]}>
+            AWS region to use with S3 object store destinations. This may be inferred from the environment, for example the current region when running in EC2. Because of the request signing algorithm this must have a value. For Minio, you can generally set this to any string, such as `us-east-1`.
+
+        </ResponseField>
+
+        <ResponseField name="aws-access-key-id" type="string" post={[]}>
+            Username for Minio, or consult the service documentation for other S3-compatible stores.
+
+        </ResponseField>
+
+        <ResponseField name="aws-secret-access-key" type="string" post={[]}>
+            Password for Minio, or consult the service documentation for other S3-compatible stores.
+
+        </ResponseField>
+
+        <ResponseField name="aws-session-token" type="string" post={[]}>
+            This is only needed with short-term STS session credentials.
+
+        </ResponseField>
+
+        <ResponseField name="aws-endpoint-url" type="string" post={[]}>
+            When you use Amazon S3, this is typically inferred from the region and there is no need to set it. With other object stores, you will have to provide an appropriate HTTP(S) endpoint. If *not* using HTTPS, also set `aws-allow-http` to `true`.
+
+        </ResponseField>
+
+        <ResponseField name="aws-allow-http" type="boolean" post={[]}>
+            Allow plain HTTP to be used with the object store endpoint. Required when the endpoint URL that isn't using HTTPS.
+
+        </ResponseField>
+
+        <ResponseField name="connect-timeout" type="string" default={"3s"} post={['minLength: 1']}>
+            TCP connection timeout for connecting to the metadata store.
+
+        </ResponseField>
+
+        <ResponseField name="keep-alive-interval" type="string" default={"5s"} post={['minLength: 1']}>
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+        </ResponseField>
+
+        <ResponseField name="keep-alive-timeout" type="string" default={"5s"} post={['minLength: 1']}>
+            Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+        </ResponseField>
+
+        <ResponseField name="backoff-policy"  default={{"factor":1.399999976158142,"initial-interval":"100ms","max-attempts":10,"max-interval":"1s","type":"exponential"}} post={[]}>
+            Backoff policy used by the metadata client when it encounters concurrent modifications.
+
+            
+            
+            <Expandable title="Option 1: None">
+            No retry strategy.
+
+                <ResponseField name="type" type="string" required default={"none"} post={['enum: "none"']}>
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 2: Fixed delay">
+            Retry with a fixed delay strategy.
+
+                <ResponseField name="type" type="string" required default={"fixed-delay"} post={['enum: "fixed-delay"']}>
+                </ResponseField>
+
+                <ResponseField name="interval" type="string" required post={['minLength: 1']}>
+                    Interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+            </Expandable>
+            
+            <Expandable title="Option 3: Exponential">
+            Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
+
+                <ResponseField name="type" type="string" required default={"exponential"} post={['enum: "exponential"']}>
+                </ResponseField>
+
+                <ResponseField name="initial_interval" type="string" required post={['minLength: 1']}>
+                    Initial interval for the first retry attempt.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                </ResponseField>
+
+                <ResponseField name="factor" type="number" required post={['format: float']}>
+                    The factor to use to compute the next retry attempt.
+
+                </ResponseField>
+
+                <ResponseField name="max_attempts" type="integer" post={['format: uint','minimum: 1']}>
+                    Number of maximum attempts before giving up. Infinite retries if unset.
+
+                </ResponseField>
+
+                <ResponseField name="max_interval" type="string | null" post={[]}>
+                    Maximum interval between retries.
+
+Can be configured using the [`jiff::fmt::friendly`](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html) format or ISO8601, for example `5 hours`.
+
+                    Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+                </ResponseField>
+
+            </Expandable>
+        </ResponseField>
+
+    </Expandable>
     </Expandable>
 </ResponseField>
 

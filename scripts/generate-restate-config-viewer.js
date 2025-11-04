@@ -142,18 +142,52 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     if (type === 'object' && propSchema.properties) {
         const requiredProps = propSchema.required || [];
         output += `${indent}    \n`;
-        output += `${indent}    <Expandable title="Properties">\n`;
-        
-        Object.entries(propSchema.properties).forEach(([subPropName, subPropSchema]) => {
-            output += generateResponseField(
-                subPropName, 
-                subPropSchema, 
-                requiredProps.includes(subPropName), 
-                level + 2
-            );
-        });
-        
-        output += `${indent}    </Expandable>\n`;
+
+        if (propSchema.oneOf) {
+            const variants = propSchema.oneOf;
+            output += `${indent}    \n`;
+
+            variants.forEach((variant, index) => {
+                let variantName = '';
+
+                output += `${indent}<Expandable title="Option ${index + 1}: ${formatDescription(variant.description)}">\n`;
+                // add description
+                output += `${indent}    <Expandable title="Properties">\n`;
+
+                Object.entries(variant.properties).forEach(([subPropName, subPropSchema]) => {
+                    output += generateResponseField(
+                        subPropName,
+                        subPropSchema,
+                        requiredProps.includes(subPropName),
+                        level + 2
+                    );
+                });
+
+                Object.entries(propSchema.properties).forEach(([subPropName, subPropSchema]) => {
+                    output += generateResponseField(
+                        subPropName,
+                        subPropSchema,
+                        requiredProps.includes(subPropName),
+                        level + 2
+                    );
+                });
+                output += `${indent}    </Expandable>\n`;
+                output += `${indent}    </Expandable>\n`;
+            });
+        } else {
+            output += `${indent}    <Expandable title="Properties">\n`;
+
+            Object.entries(propSchema.properties).forEach(([subPropName, subPropSchema]) => {
+                output += generateResponseField(
+                    subPropName,
+                    subPropSchema,
+                    requiredProps.includes(subPropName),
+                    level + 2
+                );
+            });
+
+            output += `${indent}    </Expandable>\n`;
+        }
     }
     
     // Handle array items
