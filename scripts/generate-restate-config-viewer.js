@@ -79,8 +79,8 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     
     // Format default value properly for the attribute
     let defaultAttr = '';
+    let defaultStr = '';
     if (propSchema.default !== undefined && propSchema.default !== null) {
-        let defaultStr = '';
         if (typeof propSchema.default === 'string') {
             defaultStr = `"${propSchema.default}"`;
         } else if (typeof propSchema.default === 'object') {
@@ -88,19 +88,32 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         } else {
             defaultStr = `${String(propSchema.default)}`;
         }
-        // Escape quotes for the attribute
-        // const escapedDefault = defaultStr.replace(/"/g, '&quot;');
         defaultAttr = ` default={${defaultStr}}`;
+    } else {
+        if (type === 'string' && propSchema.enum !== undefined && Array.isArray(propSchema.enum) && propSchema.enum.length > 0) {
+            // If enum of strings is defined, use the first enum value as default
+            let defaultValue = propSchema.enum[0];
+            if (typeof defaultValue === 'string') {
+                defaultStr = `"${defaultValue}"`;
+                defaultAttr = ` default={${defaultStr}}`;
+            } else if (typeof defaultValue === 'object') {
+                defaultStr = JSON.stringify(defaultValue);
+            } else {
+                defaultStr = `${String(defaultValue)}`;
+            }
+            defaultAttr = ` default={${defaultStr}}`;
+        }
     }
-    
+
+
     let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${defaultAttr}>\n`;
     
     if (description) {
-        output += `${indent}    ${description}\n`;
+        output += `${indent}    ${description}\n\n`;
     }
     
     // Handle object properties
-    if (propSchema.type === 'object' && propSchema.properties) {
+    if (type === 'object' && propSchema.properties) {
         const requiredProps = propSchema.required || [];
         output += `${indent}    \n`;
         output += `${indent}    <Expandable title="Properties">\n`;
@@ -118,7 +131,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     }
     
     // Handle array items
-    if (propSchema.type === 'array' && propSchema.items) {
+    if (type === 'array' && propSchema.items) {
         output += `${indent}    \n`;
         output += `${indent}    <Expandable title="Array Items">\n`;
         output += generateResponseField('item', propSchema.items, false, level + 2);
@@ -126,21 +139,20 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     }
     
     // Handle anyOf
-    if (propSchema.anyOf) {
+    if (type === 'anyOf') {
         const variants = propSchema.anyOf;
-
+        
         // Handle the optional type case of [T, null]
         if (variants.length === 2 && variants.some(variant => variant.type === "null")) {
-            console.log(variants);
             let optionalVariant = variants.find(variant => variant.type !== "null")
 
             const optionalType = getTypeFromSchema(optionalVariant);
             output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${defaultAttr}>\n`;
 
             if (description) {
-                output += `${indent}    ${description}\n`;
+                output += `${indent}    ${description}\n\n`;
             }
-            if (optionalType.type === 'object' && optionalVariant.properties) {
+            if ((['object', 'oneOf', 'array'].some(t => optionalType.type.includes(t))) && optionalVariant.properties) {
                 const requiredProps = optionalVariant.required || [];
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="Properties">\n`;
@@ -160,10 +172,9 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             }
         } else {
             output += `${indent}    \n`;
-            output += `${indent}    <Expandable title="Options">\n`;
 
             variants.forEach((variant, index) => {
-                let variantName;
+                let variantName = '';
                 if (variant.enum && variant.enum.length === 1) {
                     variantName = `${variant.enum[0]}`;
                 } else if (variant.title) {
@@ -173,22 +184,41 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 } else {
                     variantName = `Option ${index + 1}`;
                 }
-                output += generateResponseField(variantName, variant, false, level + 2);
+                if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
+                    const requiredProps = variant.required || [];
+                    output += `${indent}    \n`;
+                    output += `${indent}    <Expandable title="Properties">\n`;
+
+                    Object.entries(variant.properties).forEach(([subPropName, subPropSchema]) => {
+                        output += generateResponseField(
+                            subPropName,
+                            subPropSchema,
+                            requiredProps.includes(subPropName),
+                            level + 2
+                        );
+                    });
+
+                    output += `${indent}    </Expandable>\n`;
+                } else {
+                    output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
+                }
             });
 
-            output += `${indent}    </Expandable>\n`;
         }
     }
 
     // Handle oneOf
-    if (propSchema.oneOf) {
+    if (type === 'oneOf') {
         const variants = propSchema.oneOf
+        console.log(variants);
 
         output += `${indent}    \n`;
-        output += `${indent}    <Expandable title="Options">\n`;
+        // output += `${indent}    <Expandable title="Options">\n`;
+
+        output += `${indent}    \n`;
 
         variants.forEach((variant, index) => {
-            let variantName;
+            let variantName = '';
             if (variant.enum && variant.enum.length === 1) {
                 variantName = `${variant.enum[0]}`;
             } else if (variant.title) {
@@ -198,10 +228,28 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             } else {
                 variantName = `Option ${index + 1}`;
             }
-            output += generateResponseField(variantName, variant, false, level + 2);
+            if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
+                const requiredProps = variant.required || [];
+                output += `${indent}    \n`;
+                output += `${indent}    <Expandable title="${variantName || "Properties"}">\n`;
+                output += `${indent}    ${formatDescription(variant.description)}\n\n`;
+
+                Object.entries(variant.properties).forEach(([subPropName, subPropSchema]) => {
+                    output += generateResponseField(
+                        subPropName,
+                        subPropSchema,
+                        requiredProps.includes(subPropName),
+                        level + 2
+                    );
+                });
+
+                output += `${indent}    </Expandable>\n`;
+            } else {
+                output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
+            }
         });
 
-        output += `${indent}    </Expandable>\n`;
+        // output += `${indent}    </Expandable>\n`;
     }
     
     output += `${indent}</ResponseField>\n\n`;
