@@ -2,23 +2,42 @@
 
 const fs = require('fs');
 const path = require('path');
+const $RefParser = require("@apidevtools/json-schema-ref-parser");
 
 const schemaPath = "docs/schemas/restate-server-configuration-schema.json";
 const outputPath = "docs/references/server-config.mdx";
 
-function parseJsonSchema(schemaPath) {
-    const schemaContent = fs.readFileSync(schemaPath, 'utf8');
-    const schema = JSON.parse(schemaContent);
-    return schema;
+async function parseJsonSchema(schemaPath) {
+    try {
+        // Use $RefParser directly to dereference all $ref pointers
+        return  await $RefParser.dereference(schemaPath, {
+            mutateInputSchema: false,
+            continueOnError: false,
+            dereference: {
+                circular: "ignore"
+            }
+        });
+    } catch (error) {
+        console.error('Error parsing JSON schema:', error);
+        throw error;
+    }
 }
 
 function formatDescription(description) {
     if (!description) return '';
-    // Convert markdown links to proper format and escape quotes
+    // Escape HTML-like syntax in code blocks and regular text
     return description
         .replace(/\n\n/g, '\n\n')
-        .replace(/`([^`]+)`/g, '`$1`')
+        // Preserve code blocks with backticks but escape any HTML-like content within
+        .replace(/`([^`]+)`/g, (match, code) => {
+            return '`' + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '`';
+        })
+        // Escape standalone HTML-like tags that aren't in code blocks
+        .replace(/<(?!\/?\w+[^>]*>)/g, '&lt;')
+        .replace(/(?<!<[^>]*)>/g, '&gt;')
+        // Convert markdown links to proper format
         .replace(/\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
+        // Escape quotes for JSX attributes
         .replace(/"/g, '\\"');
 }
 
@@ -56,7 +75,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     const indent = '    '.repeat(level);
     const { type, optional } = getTypeFromSchema(propSchema);
     const required = isRequired && !optional ? ' required' : '';
-    const description = formatDescription(propSchema.description || propSchema.title || '');
+    const description = formatDescription(propSchema.description|| propSchema.title || '');
     
     // Format default value properly for the attribute
     let defaultAttr = '';
@@ -106,17 +125,82 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         output += `${indent}    </Expandable>\n`;
     }
     
-    // Handle oneOf/anyOf
-    if (propSchema.oneOf || propSchema.anyOf) {
-        const variants = propSchema.oneOf || propSchema.anyOf;
+    // Handle anyOf
+    if (propSchema.anyOf) {
+        const variants = propSchema.anyOf;
+
+        // Handle the optional type case of [T, null]
+        if (variants.length === 2 && variants.some(variant => variant.type === "null")) {
+            console.log(variants);
+            let optionalVariant = variants.find(variant => variant.type !== "null")
+
+            const optionalType = getTypeFromSchema(optionalVariant);
+            output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${defaultAttr}>\n`;
+
+            if (description) {
+                output += `${indent}    ${description}\n`;
+            }
+            if (optionalType.type === 'object' && optionalVariant.properties) {
+                const requiredProps = optionalVariant.required || [];
+                output += `${indent}    \n`;
+                output += `${indent}    <Expandable title="Properties">\n`;
+
+                Object.entries(optionalVariant.properties).forEach(([subPropName, subPropSchema]) => {
+                    output += generateResponseField(
+                        subPropName,
+                        subPropSchema,
+                        requiredProps.includes(subPropName),
+                        level + 2
+                    );
+                });
+
+                output += `${indent}    </Expandable>\n`;
+            } else {
+                output += `${indent}    ${formatDescription(optionalVariant.description)}\n`
+            }
+        } else {
+            output += `${indent}    \n`;
+            output += `${indent}    <Expandable title="Options">\n`;
+
+            variants.forEach((variant, index) => {
+                let variantName;
+                if (variant.enum && variant.enum.length === 1) {
+                    variantName = `${variant.enum[0]}`;
+                } else if (variant.title) {
+                    variantName = `Option ${index + 1}: ${variant.title}`;
+                } else if (variant.const !== undefined) {
+                    variantName = `"${variant.const}"`;
+                } else {
+                    variantName = `Option ${index + 1}`;
+                }
+                output += generateResponseField(variantName, variant, false, level + 2);
+            });
+
+            output += `${indent}    </Expandable>\n`;
+        }
+    }
+
+    // Handle oneOf
+    if (propSchema.oneOf) {
+        const variants = propSchema.oneOf
+
         output += `${indent}    \n`;
         output += `${indent}    <Expandable title="Options">\n`;
-        
+
         variants.forEach((variant, index) => {
-            const variantName = variant.title || `option-${index + 1}`;
+            let variantName;
+            if (variant.enum && variant.enum.length === 1) {
+                variantName = `${variant.enum[0]}`;
+            } else if (variant.title) {
+                variantName = `Option ${index + 1}: ${variant.title}`;
+            } else if (variant.const !== undefined) {
+                variantName = `"${variant.const}"`;
+            } else {
+                variantName = `Option ${index + 1}`;
+            }
             output += generateResponseField(variantName, variant, false, level + 2);
         });
-        
+
         output += `${indent}    </Expandable>\n`;
     }
     
@@ -124,46 +208,6 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     return output;
 }
 
-function expandDefinitions(schema, definitions) {
-    // Helper function to resolve $ref definitions
-    function resolveRef(propSchema) {
-        if (propSchema.$ref && propSchema.$ref.startsWith('#/definitions/')) {
-            const defName = propSchema.$ref.split('/').pop();
-            if (definitions[defName]) {
-                return { ...definitions[defName], _refName: defName };
-            }
-        }
-        return propSchema;
-    }
-    
-    // Recursively expand references in the schema
-    function expandRefs(obj) {
-        if (typeof obj !== 'object' || obj === null) return obj;
-        
-        if (obj.$ref) {
-            return expandRefs(resolveRef(obj));
-        }
-        
-        const result = {};
-        for (const [key, value] of Object.entries(obj)) {
-            if (key === 'properties' && typeof value === 'object') {
-                result[key] = {};
-                for (const [propName, propSchema] of Object.entries(value)) {
-                    result[key][propName] = expandRefs(propSchema);
-                }
-            } else if (Array.isArray(value)) {
-                result[key] = value.map(item => expandRefs(item));
-            } else if (typeof value === 'object') {
-                result[key] = expandRefs(value);
-            } else {
-                result[key] = value;
-            }
-        }
-        return result;
-    }
-    
-    return expandRefs(schema);
-}
 
 function generateRestateConfigViewer(schema) {
     let output = `---\ntitle: "Restate Server Configuration"\ndescription: "Reference of the configuration options for Restate Server."\nmode: "wide"\n---\n\n` +
@@ -171,35 +215,32 @@ function generateRestateConfigViewer(schema) {
         '\n' +
         '<Intro />' +
         '\n\n';
-    
-    // Expand definitions into the main schema
-    const definitions = schema.definitions || {};
-    const expandedSchema = expandDefinitions(schema, definitions);
-    
-    if (expandedSchema.properties) {
-        const requiredProps = expandedSchema.required || [];
-        
-        Object.entries(expandedSchema.properties).forEach(([propName, propSchema]) => {
+
+    if (schema.properties) {
+        const requiredProps = schema.required || [];
+
+        Object.entries(schema.properties).forEach(([propName, propSchema]) => {
             output += generateResponseField(
-                propName, 
-                propSchema, 
-                requiredProps.includes(propName), 
+                propName,
+                propSchema,
+                requiredProps.includes(propName),
                 0
             );
         });
     }
-    
+
     return output;
 }
 
-function main() {
+
+async function generate() {
     if (!fs.existsSync(schemaPath)) {
         console.error(`Schema file not found: ${schemaPath}`);
         process.exit(1);
     }
     
     try {
-        const schema = parseJsonSchema(schemaPath);
+        const schema = await parseJsonSchema(schemaPath);
         const mdxContent = generateRestateConfigViewer(schema);
         
         if (outputPath) {
@@ -215,7 +256,7 @@ function main() {
 }
 
 if (require.main === module) {
-    main();
+    generate();
 }
 
-module.exports = { generateSchemaViewer: generateRestateConfigViewer };
+module.exports = { generateSchemaViewer: generate };
