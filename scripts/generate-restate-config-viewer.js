@@ -75,7 +75,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     const indent = '    '.repeat(level);
     const { type, optional } = getTypeFromSchema(propSchema);
     const required = isRequired && !optional ? ' required' : '';
-    const description = formatDescription(propSchema.description|| propSchema.title || '');
+    let description = formatDescription(propSchema.description|| propSchema.title || '');
     
     // Format default value properly for the attribute
     let defaultAttr = '';
@@ -105,8 +105,22 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         }
     }
 
+    let postTags = []
+    if (propSchema.format) {
+        postTags.push(`\'format: ${propSchema.format}\'`);
+    }
+    if (propSchema.enum) {
+        postTags.push(`\'enum: ${propSchema.enum.map(v => (typeof v === 'string' ? `"${v}"` : v)).join(', ')}\'`);
+    }
+    if (propSchema.minimum) {
+        postTags.push(`\'minimum: ${propSchema.minimum}\'`);
+    }
+    if (propSchema.maximum) {
+        postTags.push(`\'maximum: ${propSchema.maximum}\'`);
+    }
+    const postAttr = ` post={[${postTags.join(",")}]}`;
 
-    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${defaultAttr}>\n`;
+    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${defaultAttr}${postAttr}>\n`;
     
     if (description) {
         output += `${indent}    ${description}\n\n`;
@@ -147,7 +161,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             let optionalVariant = variants.find(variant => variant.type !== "null")
 
             const optionalType = getTypeFromSchema(optionalVariant);
-            output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${defaultAttr}>\n`;
+            output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${defaultAttr}${postAttr}>\n`;
 
             if (description) {
                 output += `${indent}    ${description}\n\n`;
