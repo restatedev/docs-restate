@@ -162,11 +162,13 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
 
             const optionalType = getTypeFromSchema(optionalVariant);
             output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${defaultAttr}${postAttr}>\n`;
-
             if (description) {
                 output += `${indent}    ${description}\n\n`;
             }
-            if ((['object', 'oneOf', 'array'].some(t => optionalType.type.includes(t))) && optionalVariant.properties) {
+            if (optionalVariant.description) {
+                output += `${indent}    ${formatDescription(optionalVariant.description)}\n`
+            }
+            if (optionalType.type === 'object' && optionalVariant.properties) {
                 const requiredProps = optionalVariant.required || [];
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="Properties">\n`;
@@ -181,8 +183,43 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 });
 
                 output += `${indent}    </Expandable>\n`;
-            } else {
-                output += `${indent}    ${formatDescription(optionalVariant.description)}\n`
+            } else if (optionalType.type === 'oneOf') {
+                const oneOfVariants = optionalVariant.oneOf;
+                output += `${indent}    \n`;
+
+                oneOfVariants.forEach((variant, index) => {
+                    let variantName = '';
+                    if (variant.enum && variant.enum.length === 1) {
+                        let variantValue = variant.enum[0];
+                        if (typeof variantValue === 'string') {
+                            variantName = `"${variantValue}"`;
+                        } else if (typeof variantValue === 'object') {
+                            variantName = JSON.stringify(variantValue);
+                        } else {
+                            variantName = `${String(variantValue)}`;
+                        }
+                    } else if (variant.title) {
+                        variantName = `Option ${index + 1}: ${variant.title}`;
+                    } else if (variant.const !== undefined) {
+                        variantName = `"${variant.const}"`;
+                    } else {
+                        variantName = `Option ${index + 1}`;
+                    }
+                    if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
+                        const requiredProps = variant.required || [];
+                        Object.entries(variant.properties).forEach(([subPropName, subPropSchema]) => {
+                            output += generateResponseField(
+                                subPropName,
+                                subPropSchema,
+                                requiredProps.includes(subPropName),
+                                level + 2
+                            );
+                        });
+
+                    } else {
+                        output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
+                    }
+                });
             }
         } else {
             output += `${indent}    \n`;
@@ -190,7 +227,14 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             variants.forEach((variant, index) => {
                 let variantName = '';
                 if (variant.enum && variant.enum.length === 1) {
-                    variantName = `${variant.enum[0]}`;
+                    let variantValue = variant.enum[0];
+                    if (typeof variantValue === 'string') {
+                        variantName = `"${variantValue}"`;
+                    } else if (typeof variantValue === 'object') {
+                        variantName = JSON.stringify(variantValue);
+                    } else {
+                        variantName = `${String(variantValue)}`;
+                    }
                 } else if (variant.title) {
                     variantName = `Option ${index + 1}: ${variant.title}`;
                 } else if (variant.const !== undefined) {
@@ -226,15 +270,24 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         const variants = propSchema.oneOf
         console.log(variants);
 
-        output += `${indent}    \n`;
-        // output += `${indent}    <Expandable title="Options">\n`;
+        output = `${indent}<ResponseField name="${propName}" ${required}${defaultAttr}${postAttr}>\n`;
 
+        if (description) {
+            output += `${indent}    ${description}\n\n`;
+        }
         output += `${indent}    \n`;
 
         variants.forEach((variant, index) => {
             let variantName = '';
             if (variant.enum && variant.enum.length === 1) {
-                variantName = `${variant.enum[0]}`;
+                let variantValue = variant.enum[0];
+                if (typeof variantValue === 'string') {
+                    variantName = `"${variantValue}"`;
+                } else if (typeof variantValue === 'object') {
+                    variantName = JSON.stringify(variantValue);
+                } else {
+                    variantName = `${String(variantValue)}`;
+                }
             } else if (variant.title) {
                 variantName = `Option ${index + 1}: ${variant.title}`;
             } else if (variant.const !== undefined) {
@@ -263,7 +316,6 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             }
         });
 
-        // output += `${indent}    </Expandable>\n`;
     }
     
     output += `${indent}</ResponseField>\n\n`;
