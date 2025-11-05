@@ -23,9 +23,8 @@ async function parseJsonSchema(schemaPath) {
 }
 
 function formatDescription(description, title,  examples) {
-    if (!description) return '';
     // Escape HTML-like syntax in code blocks and regular text
-    const cleanDescription = description
+    const cleanDescription = description ? description
         .replace(/\n\n/g, '\n\n')
         // Preserve code blocks with backticks but escape any HTML-like content within
         .replace(/`([^`]+)`/g, (match, code) => {
@@ -37,11 +36,14 @@ function formatDescription(description, title,  examples) {
         // Convert markdown links to proper format
         .replace(/\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
         // Escape quotes for JSX attributes
-        .replace(/"/g, '\\"')  || ''
+        .replace(/"/g, '\\"')  : ''
 
     const exampleStr = examples && Array.isArray(examples) && examples.length > 0
         ? '\n\nExamples:\n' + examples.map(ex => `${JSON.stringify(ex, null, 2)}`).join(' or ')
         : '';
+    if (title && description && description.includes(title)) {
+        return `${cleanDescription}${exampleStr}`;
+    }
     const titleStr = title ? `${title}: ` : '';
     return `${titleStr}${cleanDescription}${exampleStr}`;
 }
@@ -178,14 +180,14 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             variants.forEach((variant, index) => {
                 const variantName = parseVariantName(variant, index);
                 output += `${indent}<Expandable title="${variantName}">\n`;
-                output = generateResponseFieldsFromProperties(output, variant.properties, propSchema.required, level);
-                output = generateResponseFieldsFromProperties(output, propSchema.properties, propSchema.required, level);
+                output += generateResponseFieldsFromProperties(variant.properties, propSchema.required, level);
+                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level);
                 output += `${indent}    </Expandable>\n`;
             });
 
         } else {
             output += `${indent}    <Expandable title="Properties">\n`;
-            output = generateResponseFieldsFromProperties(output, propSchema.properties, propSchema.required, level);
+            output += generateResponseFieldsFromProperties( propSchema.properties, propSchema.required, level);
             output += `${indent}    </Expandable>\n`;
         }
     }
@@ -217,7 +219,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             if (optionalType.type === 'object' && optionalVariant.properties) {
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="Properties">\n`;
-                output = generateResponseFieldsFromProperties(output, optionalVariant.properties, optionalVariant.required, level);
+                output += generateResponseFieldsFromProperties(optionalVariant.properties, optionalVariant.required, level);
                 output += `${indent}    </Expandable>\n`;
 
             } else if (optionalType.type === 'oneOf') {
@@ -227,7 +229,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 oneOfVariants.forEach((variant, index) => {
                     let variantName = parseVariantName(variant, index)
                     if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
-                        output = generateResponseFieldsFromProperties(output, variant.properties, variant.required, level);
+                        output += generateResponseFieldsFromProperties(variant.properties, variant.required, level);
                     } else {
                         output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
                     }
@@ -241,7 +243,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
                     output += `${indent}    \n`;
                     output += `${indent}    <Expandable title="Properties">\n`;
-                    output = generateResponseFieldsFromProperties(output, variant.properties, variant.required, level);
+                    output += generateResponseFieldsFromProperties(variant.properties, variant.required, level);
                     output += `${indent}    </Expandable>\n`;
                 } else {
                     output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
@@ -267,7 +269,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="${variantName || "Properties"}">\n`;
                 output += `${indent}    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
-                output = generateResponseFieldsFromProperties(output, variant.properties, variant.required, level);
+                output += generateResponseFieldsFromProperties( variant.properties, variant.required, level);
                 output += `${indent}    </Expandable>\n`;
             } else {
                 output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
@@ -288,7 +290,7 @@ function generateRestateConfigViewer(schema) {
         '\n\n';
 
     if (schema.properties) {
-        output = generateResponseFieldsFromProperties(output, schema.properties, schema.required, 0);
+        output += generateResponseFieldsFromProperties(schema.properties, schema.required, -2);
     }
     return output;
 }
