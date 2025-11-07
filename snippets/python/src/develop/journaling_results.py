@@ -117,7 +117,7 @@ async def my_other_handler(ctx: Context, arg):
     claude = ctx.service_call(claude_sonnet, arg=f"What is the weather?")
     openai = ctx.service_call(open_ai, arg=f"What is the weather?")
 
-    pending, done = await restate.wait_completed(claude, openai)
+    done, pending = await restate.wait_completed(claude, openai)
 
     # collect the completed results
     results = [await f for f in done]
