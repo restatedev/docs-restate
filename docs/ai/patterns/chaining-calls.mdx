@@ -1,6 +1,6 @@
 ---
 title: "Chaining LLM calls"
-description: "Build fault-tolerant processing pipelines where each step transforms the previous step's output."
+description: "Build fault-tolerant processing pipelines with automatic retries and recovery."
 tags: ["recipe"]
 ---
 
@@ -8,12 +8,18 @@ tags: ["recipe"]
 Build fault-tolerant processing pipelines where each step transforms the previous step's output.
 If any step fails, Restate automatically resumes from that exact point.
 
-Input → Analysis → Extraction → Summary → Result
+For example:
+```
++----------+    +---------------+    +-------------+    +--------------+
+|  Input   | => | Extract       | => | Sort        | => | Format as    |
+| Message  |    | Metrics       |    | Results     |    | Table        |
++----------+    +---------------+    +-------------+    +--------------+
+```
 
 ## How does Restate help?
 The benefits of using Restate here are:
-- 🔁 **Automatic retries** of failed tasks: LLM API down, timeouts, infrastructure failures, etc.
-- ✅ **Recovery of previous progress**: After a failure, Restate recovers the progress the execution did before the crash.
+- **Automatic retries** of failed tasks: LLM API down, timeouts, infrastructure failures, etc.
+- **Recovery of previous progress**: After a failure, Restate recovers the progress the execution did before the crash.
 - Works with **any AI SDK** (OpenAI, LangChain, Pydantic AI, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
 
 ## Example
@@ -81,7 +87,7 @@ async def run(ctx: restate.Context, prompt: Prompt) -> str | None:
 
 </CodeGroup>
 
-In this example, we parallelize RPC calls, but this can also be used to parallelize `ctx.run` actions.
+Each step in the chain is wrapped with `ctx.run()` to ensure fault tolerance and automatic recovery. If any step fails, Restate will retry from that exact point without losing previous progress.
 
 <Tip>
     This pattern is implementable with any of our SDKs and any AI SDK.
@@ -123,15 +129,12 @@ restate-server
 
     <CodeGroup>
     ```shell TypeScript
-    git clone https://github.com/restatedev/ai-examples.git &&
-    cd ai-examples/typescript-patterns &&
     npm install &&
     npm run dev
     ```
     ```shell Python
-    git clone https://github.com/restatedev/ai-examples.git &&
-    cd ai-examples/python-patterns &&
-    uv run .
+    pip install restate-sdk &&
+    python app.py
     ```
     </CodeGroup>
 </Step>
@@ -145,6 +148,19 @@ restate deployments register localhost:9080
     In the UI (`http://localhost:9070`), click on the `run` handler of the `CallChainingService` to open the playground and send a default request:
 
     <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/chaining_playground.png" alt="Chaining LLM calls - UI"/>
+
+    Or use `curl` to send a request directly to the service:
+
+    <CodeGroup>
+    ```shell TypeScript
+    curl -X POST http://localhost:8080/CallChainingService/run \
+      --json '{"message": "Our sales increased by 25% this quarter. We had 1,200 new customers and revenue of $450,000. Customer satisfaction dropped to 78% from last quarters 85%."}'
+    ```
+    ```shell Python
+    curl -X POST http://localhost:8080/CallChainingService/run \
+      --json '{"message": "Our sales increased by 25% this quarter. We had 1,200 new customers and revenue of $450,000. Customer satisfaction dropped to 78% from last quarters 85%."}'
+    ```
+    </CodeGroup>
 
 </Step>
 
