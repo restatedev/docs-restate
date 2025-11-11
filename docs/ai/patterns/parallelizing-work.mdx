@@ -1,0 +1,401 @@
+---
+title: "Parallelizing Work"
+description: "Execute a list of tasks in parallel and then gather their result."
+tags: ["recipe"]
+---
+
+This guide shows how to use the Restate to **execute a list of tasks in parallel and then gather their result**, also known as fan-out, fan-in.
+
+<img src={"/img/guides/parallelizing-work/parallelizing-work-small.png"} noZoom/>
+
+## How does Restate help?
+- Restate lets you schedule the tasks asynchronously and guarantees that all tasks will run, with **retries and recovery** on failures.
+- Restate **turns Promises/Futures into durable, distributed constructs** that are persisted in Restate and can be recovered and awaited on another process.
+- You can deploy the subtask executors on **serverless** infrastructure, like AWS Lambda, to let them scale automatically. The main task, that is idle while waiting on the subtasks, gets suspended until it can make progress.
+
+**Fan out**: You can fan out tasks with Restate by creating a handler that processes a single subtask,
+and then scheduling it repeatedly from another handler.
+
+**Fan in**: You can fan in the results of the subtasks by using Restate's Promise Combinators to wait for all promises to resolve.
+
+## Example
+
+The example implements a worker service:
+1. It splits a task into subtasks.
+2. It schedules all the subtasks. Each subtask results in a promise that gets added to a list.
+3. The result is gathered by waiting for all promises to resolve.
+
+You can run this on FaaS infrastructure, like AWS Lambda, and it will scale automatically.
+The `run` handler will then suspend while it waits for all subtasks to finish.
+Restate will then resume the handler when all subtasks are done.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/parallelizework/fan_out_worker.ts?collapse_prequel"} 
+const fanOutWorker = restate.service({
+  name: "worker",
+  handlers: {
+    run: async (ctx: Context, task: Task): Promise<Result> => {
+      // Split the task in subtasks
+      const subtasks: SubTask[] = await ctx.run("split task", () => split(task));
+
+      // Fan out the subtasks - run them in parallel
+      const resultPromises = [];
+      for (const subtask of subtasks) {
+        const subResultPromise = ctx.serviceClient(fanOutWorker).runSubtask(subtask);
+        resultPromises.push(subResultPromise);
+      }
+
+      // Fan in - Aggregate the results
+      const results = await RestatePromise.all(resultPromises);
+      return aggregate(ctx, results);
+    },
+
+    // Can also run on FaaS
+    runSubtask: async (ctx: Context, subtask: SubTask): Promise<SubTaskResult> => {
+      // Processing logic goes here ...
+      // Can be moved to a separate service to scale independently
+      return executeSubtask(ctx, subtask);
+    },
+  },
+});
+
+restate.serve({
+  services: [fanOutWorker],
+  port: 9080,
+});
+```
+
+```java Java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/patterns-use-cases/src/main/java/my/example/parallelizework/FanOutWorker.java?collapse_prequel"} 
+@Service
+public class FanOutWorker {
+
+  @Handler
+  public Result run(Context ctx, Task task) {
+    // Split the task in subtasks
+    var subTasks = ctx.run(new TypeRef<>() {}, () -> split(task));
+
+    // Fan out the subtasks - run them in parallel
+    List<DurableFuture<?>> resultFutures = new ArrayList<>();
+    for (SubTask subTask : subTasks) {
+      resultFutures.add(FanOutWorkerClient.fromContext(ctx).runSubtask(subTask));
+    }
+
+    DurableFuture.all(resultFutures).await();
+
+    // Fan in - Aggregate the results
+    var results = resultFutures.stream().map(future -> (SubTaskResult) future.await()).toList();
+    return aggregate(results);
+  }
+
+  // Can also run on FaaS
+  @Handler
+  public SubTaskResult runSubtask(Context ctx, SubTask subTask) {
+    // Processing logic goes here ...
+    // Can be moved to a separate service to scale independently
+    return executeSubtask(ctx, subTask);
+  }
+
+  public static void main(String[] args) {
+    RestateHttpServer.listen(Endpoint.bind(new FanOutWorker()));
+  }
+}
+```
+
+```kotlin Kotlin {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/kotlin/patterns-use-cases/src/main/kotlin/my/example/parallelizework/FanOutWorker.kt?collapse_prequel"} 
+@Service
+class FanOutWorker {
+  @Handler
+  suspend fun run(ctx: Context, task: Task): TaskResult {
+    // Split the task in subtasks
+    val subTasks = ctx.runBlock { task.split() }
+
+    // Fan out the subtasks - run them in parallel
+    // Fan in - Await all results and aggregate
+    val results = subTasks.map { FanOutWorkerClient.fromContext(ctx).runSubtask(it) }.awaitAll()
+
+    return results.aggregate()
+  }
+
+  @Handler
+  suspend fun runSubtask(ctx: Context, subTask: SubTask): SubTaskResult {
+    // Processing logic goes here ...
+    // Can be moved to a separate service to scale independently
+    return subTask.execute(ctx)
+  }
+}
+
+fun main() {
+  RestateHttpServer.listen(endpoint { bind(FanOutWorker()) })
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/python/patterns-use-cases/parallelizework/app.py?collapse_prequel"} 
+fan_out_worker = restate.Service("FanOutWorker")
+
+
+@fan_out_worker.handler()
+async def run(ctx: restate.Context, task: Task) -> Result:
+    # Split the task in subtasks
+    subtasks = await ctx.run_typed("split task", split, task=task)
+
+    # Fan out the subtasks - run them in parallel
+    result_promises = [
+        ctx.run_typed(f"execute {subtask}", execute_subtask, subtask=subtask)
+        for subtask in subtasks.subtasks
+    ]
+
+    # Fan in - Aggregate the results
+    results_done = await restate.gather(*result_promises)
+    results = [await result for result in results_done]
+
+    return aggregate(results)
+
+
+app = restate.app([fan_out_worker])
+
+if __name__ == "__main__":
+    import hypercorn
+    import asyncio
+
+    conf = hypercorn.Config()
+    conf.bind = ["0.0.0.0:9080"]
+    asyncio.run(hypercorn.asyncio.serve(app, conf))
+```
+
+```go Go {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/go/patterns-use-cases/src/parallelizework/fanoutworker.go?collapse_prequel"} 
+type FanOutWorker struct{}
+
+func (FanOutWorker) Run(ctx restate.Context, task Task) (Result, error) {
+  // Split the task into subtasks
+  subtasks, err := split(task)
+  if err != nil {
+    return Result{}, err
+  }
+
+  // Fan out the subtasks - run them in parallel
+  subtaskFutures := make([]restate.Future, 0, len(subtasks))
+  for _, subtask := range subtasks {
+    subtaskFutures = append(subtaskFutures,
+      restate.Service[SubTaskResult](ctx, "FanOutWorker", "RunSubtask").RequestFuture(subtask))
+  }
+
+  // Fan in - Aggregate the results
+  subResults := make([]SubTaskResult, 0, len(subtasks))
+  for fut, err := range restate.Wait(ctx, subtaskFutures...) {
+    if err != nil {
+      return Result{}, err
+    }
+    response, err := fut.(restate.ResponseFuture[SubTaskResult]).Response()
+    if err != nil {
+      return Result{}, err
+    }
+    subResults = append(subResults, response)
+  }
+
+  // Fan in - Aggregate the results
+  return aggregate(subResults)
+}
+
+// RunSubtask can also run on FaaS
+func (FanOutWorker) RunSubtask(ctx restate.Context, subtask SubTask) (SubTaskResult, error) {
+  // Processing logic goes here ...
+  // Can be moved to a separate service to scale independently
+  return executeSubtask(ctx, subtask)
+}
+
+func main() {
+  server := server.NewRestate().
+    Bind(restate.Reflect(FanOutWorker{}))
+
+  if err := server.Start(context.Background(), ":9080"); err != nil {
+    slog.Error("application exited unexpectedly", "err", err.Error())
+    os.Exit(1)
+  }
+}
+```
+</CodeGroup>
+
+In this example, we parallelize RPC calls, but this can also be used to parallelize `ctx.run` actions.
+
+<Info>
+    This pattern is implementable with any of our SDKs. We are still working on translating all patterns to all SDK languages.
+    If you need help with a specific language, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Info>
+
+
+## Running the example
+
+<Steps>
+<Step title="Download the example">
+    <CodeGroup>
+    ```shell TypeScript
+    restate example typescript-patterns-use-cases && cd typescript-patterns-use-cases
+    ```
+    ```shell Java
+    restate example java-patterns-use-cases && cd java-patterns-use-cases
+    ```
+    ```shell Kotlin
+    restate example kotlin-patterns-use-cases && cd kotlin-patterns-use-cases
+    ```
+    ```shell Python
+    restate example python-patterns-use-cases && cd python-patterns-use-cases
+    ```
+    ```shell Go
+    restate example go-patterns-use-cases && cd go-patterns-use-cases
+    ```
+    </CodeGroup>
+</Step>
+<Step title="Start the Restate Server">
+```shell
+restate-server
+```
+</Step>
+<Step title="Start the Service">
+    <CodeGroup>
+    ```shell TypeScript
+    npm install
+    npx tsx watch ./src/parallelizework/fan_out_worker.ts
+    ```
+    ```shell Java
+    ./gradlew -PmainClass=my.example.parallelizework.FanOutWorker run
+    ```
+    ```shell Kotlin
+    ./gradlew -PmainClass=my.example.parallelizework.FanOutWorkerKt run
+    ```
+    ```shell Python
+    uv run parallelizework/app.py
+    ```
+    ```shell Go
+    go run ./src/parallelizework
+    ```
+    </CodeGroup>
+</Step>
+<Step title="Register the services">
+```shell
+restate deployments register localhost:9080
+```
+</Step>
+<Step title="Send a request">
+    <CodeGroup>
+    ```shell TypeScript
+    curl localhost:8080/worker/run \
+        --json '{"description": "get out of bed,shower,make coffee,have breakfast"}'
+    ```
+    ```shell Java
+    curl localhost:8080/FanOutWorker/run \
+        --json '{"description": "get out of bed,shower,make coffee,have breakfast"}'
+    ```
+    ```shell Kotlin
+    curl localhost:8080/FanOutWorker/run \
+        --json '{"description": "get out of bed,shower,make coffee,have breakfast"}'
+    ```
+    ```shell Python
+    curl localhost:8080/FanOutWorker/run \
+        --json '{"description": "get out of bed,shower,make coffee,have breakfast"}'
+    ```
+    ```shell Go
+    curl localhost:8080/FanOutWorker/Run \
+        --json '{"description": "get out of bed,shower,make coffee,have breakfast"}'
+    ```
+    </CodeGroup>
+
+</Step>
+
+<Step title="Check the service logs">
+See how all tasks get spawned in parallel, finish at different times, and then get aggregated.
+<CodeGroup>
+```shell TypeScript
+[restate] [worker/runSubtask][inv_17jBqoqRG0TN3msVqHEpZn2aQMOX5kSKrf][2025-01-17T08:51:44.993Z] INFO:  Started executing subtask: get out of bed
+[restate] [worker/runSubtask][inv_1f8R1NuF0LF27EdQ0R6s7PR8hld245OM8h][2025-01-17T08:51:44.995Z] INFO:  Started executing subtask: shower
+[restate] [worker/runSubtask][inv_101oPhGwxQqZ0sQebkQnpGyV9Rp3oj9CSJ][2025-01-17T08:51:44.997Z] INFO:  Started executing subtask: make coffee
+[restate] [worker/runSubtask][inv_1eKDShaxMCEB6DXasrR5OtRXJEvA2je33X][2025-01-17T08:51:44.998Z] INFO:  Started executing subtask: have breakfast
+[restate] [worker/runSubtask][inv_17jBqoqRG0TN3msVqHEpZn2aQMOX5kSKrf][2025-01-17T08:51:47.003Z] INFO:  Execution subtask finished: get out of bed
+[restate] [worker/runSubtask][inv_101oPhGwxQqZ0sQebkQnpGyV9Rp3oj9CSJ][2025-01-17T08:51:48.007Z] INFO:  Execution subtask finished: make coffee
+[restate] [worker/runSubtask][inv_1f8R1NuF0LF27EdQ0R6s7PR8hld245OM8h][2025-01-17T08:51:48.999Z] INFO:  Execution subtask finished: shower
+[restate] [worker/runSubtask][inv_1eKDShaxMCEB6DXasrR5OtRXJEvA2je33X][2025-01-17T08:51:49.001Z] INFO:  Execution subtask finished: have breakfast
+[restate] [worker/run][inv_18QHSeAYfvim1oNXRl9I5105veQcTW3BEl][2025-01-17T08:51:49.007Z] INFO:  Aggregated result: get out of bed: DONE,shower: DONE,make coffee: DONE,have breakfast: DONE
+```
+```shell Java
+2025-01-17 10:00:58 INFO  [FanOutWorker/run][inv_1jNoSMJtWluo4Ir43OUyDAxD9weMAQ4OeR] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_1kdpBvVXdqyo3saU6KThul6Jgkfot6LcRP] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_1kdpBvVXdqyo3saU6KThul6Jgkfot6LcRP] my.example.parallelizework.utils.Utils - Started executing subtask: get out of bed
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_162MCD5ertQ65pdG0uDIYRMgLBFYZkNPnb] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_162MCD5ertQ65pdG0uDIYRMgLBFYZkNPnb] my.example.parallelizework.utils.Utils - Started executing subtask: shower
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_10bPiFTjBUXX35qtzOTPNr0vfgoYYVehpf] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_10bPiFTjBUXX35qtzOTPNr0vfgoYYVehpf] my.example.parallelizework.utils.Utils - Started executing subtask: make coffee
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_1115lzidXq7M7CtLZn0aEyUvMC4zkXYLWF] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-01-17 10:00:58 INFO  [FanOutWorker/runSubtask][inv_1115lzidXq7M7CtLZn0aEyUvMC4zkXYLWF] my.example.parallelizework.utils.Utils - Started executing subtask: have breakfast
+2025-01-17 10:00:59 INFO  [FanOutWorker/runSubtask][inv_162MCD5ertQ65pdG0uDIYRMgLBFYZkNPnb] my.example.parallelizework.utils.Utils - Execution subtask finished: shower
+2025-01-17 10:00:59 INFO  [FanOutWorker/runSubtask][inv_162MCD5ertQ65pdG0uDIYRMgLBFYZkNPnb] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-01-17 10:01:00 INFO  [FanOutWorker/runSubtask][inv_1kdpBvVXdqyo3saU6KThul6Jgkfot6LcRP] my.example.parallelizework.utils.Utils - Execution subtask finished: get out of bed
+2025-01-17 10:01:00 INFO  [FanOutWorker/runSubtask][inv_1kdpBvVXdqyo3saU6KThul6Jgkfot6LcRP] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-01-17 10:01:04 INFO  [FanOutWorker/runSubtask][inv_10bPiFTjBUXX35qtzOTPNr0vfgoYYVehpf] my.example.parallelizework.utils.Utils - Execution subtask finished: make coffee
+2025-01-17 10:01:04 INFO  [FanOutWorker/runSubtask][inv_10bPiFTjBUXX35qtzOTPNr0vfgoYYVehpf] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-01-17 10:01:05 INFO  [FanOutWorker/runSubtask][inv_1115lzidXq7M7CtLZn0aEyUvMC4zkXYLWF] my.example.parallelizework.utils.Utils - Execution subtask finished: have breakfast
+2025-01-17 10:01:05 INFO  [FanOutWorker/runSubtask][inv_1115lzidXq7M7CtLZn0aEyUvMC4zkXYLWF] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-01-17 10:01:05 INFO  [FanOutWorker/run][inv_1jNoSMJtWluo4Ir43OUyDAxD9weMAQ4OeR] my.example.parallelizework.utils.Utils - Aggregated result: get out of bed: DONE, shower: DONE, make coffee: DONE, have breakfast: DONE
+2025-01-17 10:01:05 INFO  [FanOutWorker/run][inv_1jNoSMJtWluo4Ir43OUyDAxD9weMAQ4OeR] dev.restate.sdk.core.InvocationStateMachine - End invocation
+```
+```shell Kotlin
+2025-03-06 12:20:18 INFO  [FanOutWorker/run][inv_1fGEUyfogPKK5cbSCSWzpCkcDpkQIKSzMB] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_146fBfVLISKb2sCWqesf6uMReXdRKvqmv7] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_146fBfVLISKb2sCWqesf6uMReXdRKvqmv7] FanOutWorker - Started executing subtask: get out of bed
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_18T9WW6paOhm6eciCeBt5iqHXRY4h2NRvP] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_18T9WW6paOhm6eciCeBt5iqHXRY4h2NRvP] FanOutWorker - Started executing subtask: shower
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_10kE3b5UcL8L64ghFpHQjeeAEowKNis4dH] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_10kE3b5UcL8L64ghFpHQjeeAEowKNis4dH] FanOutWorker - Started executing subtask: make coffee
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_1fCFmQ9ulbxL2MBwYCDRgV8Was8PDBedW1] dev.restate.sdk.core.InvocationStateMachine - Start invocation
+2025-03-06 12:20:18 INFO  [FanOutWorker/runSubtask][inv_1fCFmQ9ulbxL2MBwYCDRgV8Was8PDBedW1] FanOutWorker - Started executing subtask: have breakfast
+2025-03-06 12:20:21 INFO  [FanOutWorker/runSubtask][inv_10kE3b5UcL8L64ghFpHQjeeAEowKNis4dH] FanOutWorker - Execution subtask finished: make coffee
+2025-03-06 12:20:21 INFO  [FanOutWorker/runSubtask][inv_10kE3b5UcL8L64ghFpHQjeeAEowKNis4dH] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-03-06 12:20:24 INFO  [FanOutWorker/runSubtask][inv_146fBfVLISKb2sCWqesf6uMReXdRKvqmv7] FanOutWorker - Execution subtask finished: get out of bed
+2025-03-06 12:20:24 INFO  [FanOutWorker/runSubtask][inv_146fBfVLISKb2sCWqesf6uMReXdRKvqmv7] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-03-06 12:20:25 INFO  [FanOutWorker/runSubtask][inv_1fCFmQ9ulbxL2MBwYCDRgV8Was8PDBedW1] FanOutWorker - Execution subtask finished: have breakfast
+2025-03-06 12:20:25 INFO  [FanOutWorker/runSubtask][inv_1fCFmQ9ulbxL2MBwYCDRgV8Was8PDBedW1] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-03-06 12:20:27 INFO  [FanOutWorker/runSubtask][inv_18T9WW6paOhm6eciCeBt5iqHXRY4h2NRvP] FanOutWorker - Execution subtask finished: shower
+2025-03-06 12:20:27 INFO  [FanOutWorker/runSubtask][inv_18T9WW6paOhm6eciCeBt5iqHXRY4h2NRvP] dev.restate.sdk.core.InvocationStateMachine - End invocation
+2025-03-06 12:20:27 INFO  [FanOutWorker/run][inv_1fGEUyfogPKK5cbSCSWzpCkcDpkQIKSzMB] FanOutWorker - Aggregated result: get out of bed: DONE, shower: DONE, make coffee: DONE, have breakfast: DONE
+2025-03-06 12:20:27 INFO  [FanOutWorker/run][inv_1fGEUyfogPKK5cbSCSWzpCkcDpkQIKSzMB] dev.restate.sdk.core.InvocationStateMachine - End invocation
+```
+```shell Python
+[2025-01-17 12:00:05,183] [12245] [INFO] - Started executing subtask: get out of bed
+[2025-01-17 12:00:05,184] [12247] [INFO] - Started executing subtask: shower
+[2025-01-17 12:00:05,184] [12245] [INFO] - Started executing subtask: make coffee
+[2025-01-17 12:00:05,185] [12245] [INFO] - Started executing subtask: have breakfast
+[2025-01-17 12:00:05,188] [12245] [INFO] - Execution subtask finished: make coffee
+[2025-01-17 12:00:08,193] [12245] [INFO] - Execution subtask finished: get out of bed
+[2025-01-17 12:00:10,194] [12247] [INFO] - Execution subtask finished: shower
+[2025-01-17 12:00:15,196] [12245] [INFO] - Execution subtask finished: have breakfast
+[2025-01-17 12:00:15,198] [12245] [INFO] - Aggregated result: get out of bed: DONE,shower: DONE,make coffee: DONE,have breakfast: DONE
+```
+```shell Go
+2025/01/16 16:41:22 INFO Handling invocation method=FanOutWorker/Run invocationID=inv_1lkcVTBmCorR3fSPhE0pNTiO8XFXoV34C5
+2025/01/16 16:41:22 INFO Handling invocation method=FanOutWorker/RunSubtask invocationID=inv_1jpZWOrDK45b2ZwWCapl68GgXzNfoOh0BP
+2025/01/16 16:41:22 Started executing subtask: get out of bed
+2025/01/16 16:41:22 INFO Handling invocation method=FanOutWorker/RunSubtask invocationID=inv_10eVGnmjP1ET4PgI3z82rvXcVlCnSOep3P
+2025/01/16 16:41:22 Started executing subtask: shower
+2025/01/16 16:41:22 INFO Handling invocation method=FanOutWorker/RunSubtask invocationID=inv_1i3RduoDMNnb4ideAtWaWCLRDaIO62eghP
+2025/01/16 16:41:22 Started executing subtask: make coffee
+2025/01/16 16:41:22 INFO Handling invocation method=FanOutWorker/RunSubtask invocationID=inv_142WnXnWDxfy6k4JanZ7DQVqAL6zmktuxP
+2025/01/16 16:41:22 Started executing subtask: have breakfast
+2025/01/16 16:41:24 Execution subtask finished: get out of bed
+2025/01/16 16:41:24 INFO Invocation completed successfully method=FanOutWorker/RunSubtask invocationID=inv_1jpZWOrDK45b2ZwWCapl68GgXzNfoOh0BP
+2025/01/16 16:41:25 Execution subtask finished: shower
+2025/01/16 16:41:25 INFO Invocation completed successfully method=FanOutWorker/RunSubtask invocationID=inv_10eVGnmjP1ET4PgI3z82rvXcVlCnSOep3P
+2025/01/16 16:41:25 Execution subtask finished: have breakfast
+2025/01/16 16:41:25 INFO Invocation completed successfully method=FanOutWorker/RunSubtask invocationID=inv_142WnXnWDxfy6k4JanZ7DQVqAL6zmktuxP
+2025/01/16 16:41:26 Execution subtask finished: make coffee
+2025/01/16 16:41:26 INFO Invocation completed successfully method=FanOutWorker/RunSubtask invocationID=inv_1i3RduoDMNnb4ideAtWaWCLRDaIO62eghP
+2025/01/16 16:41:26 Aggregated result: get out of bed: DONE,shower: DONE,have breakfast: DONE,make coffee: DONE
+2025/01/16 16:41:26 INFO Invocation completed successfully method=FanOutWorker/Run invocationID=inv_1lkcVTBmCorR3fSPhE0pNTiO8XFXoV34C5
+```
+</CodeGroup>
+</Step>
+</Steps>
+
+## Related resources
+- Concurrent tasks docs: [TS](/develop/ts/concurrent-tasks) /
+[Java/Kotlin](/develop/java/concurrent-tasks) /
+[Python](/develop/python/concurrent-tasks) /
+[Go](/develop/go/concurrent-tasks) /
+[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/macro.select.html)

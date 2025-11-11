@@ -1,0 +1,158 @@
+---
+title: "Chaining LLM calls"
+description: "Build fault-tolerant processing pipelines where each step transforms the previous step's output."
+tags: ["recipe"]
+---
+
+
+Build fault-tolerant processing pipelines where each step transforms the previous step's output.
+If any step fails, Restate automatically resumes from that exact point.
+
+Input → Analysis → Extraction → Summary → Result
+
+## How does Restate help?
+The benefits of using Restate here are:
+- 🔁 **Automatic retries** of failed tasks: LLM API down, timeouts, infrastructure failures, etc.
+- ✅ **Recovery of previous progress**: After a failure, Restate recovers the progress the execution did before the crash.
+- Works with **any AI SDK** (OpenAI, LangChain, Pydantic AI, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
+
+## Example
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/patterns-use-cases/src/parallelizework/fan_out_worker.ts?collapse_prequel"}
+async function processReport(
+restate: Context,
+{ message }: { message: string },
+) {
+    // Step 1: Process the initial input with the first prompt
+    const result = await restate.run("Extract metrics", async () =>
+    llmCall(`Extract only the numerical values and their associated metrics from the text.
+            Format each as 'metric name: metric' on a new line. Input: ${message}`),
+    );
+
+    // Step 2: Process the result from Step 1
+    const result2 = await restate.run("Sort metrics", async () =>
+    llmCall(
+    `Sort all lines in descending order by numerical value. Input: ${result}`,
+    ),
+    );
+
+    // Step 3: Process the result from Step 2
+    return restate.run("Format as table", async () =>
+    llmCall(
+    `Format the sorted data as a markdown table with columns 'Metric Name' and 'Value'. Input: ${result2}`,
+    ),
+    );
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/python/patterns-use-cases/parallelizework/app.py?collapse_prequel"}
+@call_chaining_svc.handler()
+async def run(ctx: restate.Context, prompt: Prompt) -> str | None:
+    """Chains multiple LLM calls sequentially, where each step processes the previous step's output."""
+
+    # Step 1: Process the initial input with the first prompt
+    result = await ctx.run_typed(
+    "Extract metrics",
+    llm_call,
+    RunOptions(max_attempts=3),
+    prompt=f"Extract only the numerical values and their associated metrics from the text. "
+    f"Format each as 'metric name: metric' on a new line. Input: {prompt.message}",
+    )
+
+    # Step 2: Process the result from Step 1
+    result2 = await ctx.run_typed(
+    "Sort metrics",
+    llm_call,
+    RunOptions(max_attempts=3),
+    prompt=f"Sort all lines in descending order by numerical value. Input: {result}",
+    )
+
+    # Step 3: Process the result from Step 2
+    result3 = await ctx.run_typed(
+    "Format as table",
+    llm_call,
+    RunOptions(max_attempts=3),
+    prompt=f"Format the sorted data as a markdown table with columns 'Metric Name' and 'Value'. Input: {result2}",
+    )
+
+    return result3.content
+```
+
+</CodeGroup>
+
+In this example, we parallelize RPC calls, but this can also be used to parallelize `ctx.run` actions.
+
+<Tip>
+    This pattern is implementable with any of our SDKs and any AI SDK.
+    If you need help with a specific SDK, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Tip>
+
+
+## Running the example
+
+<Info>
+    **Requirements:**
+
+    - AI SDK of your choice (e.g., OpenAI, LangChain, Pydantic AI, LiteLLM, etc.) to make LLM calls.
+    - API key for your model provider.
+</Info>
+
+<Steps>
+<Step title="Download the example">
+    <CodeGroup>
+    ```shell TypeScript
+    restate example typescript-patterns-use-cases && cd typescript-patterns-use-cases
+    ```
+    ```shell Python
+    restate example python-patterns-use-cases && cd python-patterns-use-cases
+    ```
+    </CodeGroup>
+</Step>
+<Step title="Start the Restate Server">
+```shell
+restate-server
+```
+</Step>
+<Step title="Start the Service">
+
+    Export the API key of your model provider as an environment variable. For example, for OpenAI:
+    ```shell
+    export OPENAI_API_KEY=your_openai_api_key
+    ```
+
+    <CodeGroup>
+    ```shell TypeScript
+    git clone https://github.com/restatedev/ai-examples.git &&
+    cd ai-examples/typescript-patterns &&
+    npm install &&
+    npm run dev
+    ```
+    ```shell Python
+    git clone https://github.com/restatedev/ai-examples.git &&
+    cd ai-examples/python-patterns &&
+    uv run .
+    ```
+    </CodeGroup>
+</Step>
+<Step title="Register the services">
+```shell
+restate deployments register localhost:9080
+```
+</Step>
+<Step title="Send a request">
+
+    In the UI (`http://localhost:9070`), click on the `run` handler of the `CallChainingService` to open the playground and send a default request:
+
+    <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/chaining_playground.png" alt="Chaining LLM calls - UI"/>
+
+</Step>
+
+<Step title="Check the Restate UI">
+
+    You see in the Invocations Tab of the UI how the LLM is called multiple times, and how each result is persisted in Restate:
+    <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/chaining.png" alt="Chaining LLM calls - UI"/>
+
+</Step>
+</Steps>
+
