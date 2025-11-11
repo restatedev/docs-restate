@@ -12,7 +12,7 @@ When your code fails, Restate automatically retries the invocation. Understandin
 
 ## Understanding Retryable vs Terminal Errors
 
-**Retryable errors** are temporary problems that might succeed if you try again:
+**Retryable errors** are temporary problems that might succeed if retried:
 - Database connection timeout
 - Network issues
 - Temporary service unavailability
@@ -22,15 +22,13 @@ When your code fails, Restate automatically retries the invocation. Understandin
 - Authorization failures (user doesn't have permission)
 - Business logic violations (insufficient balance, duplicate order)
 
-**By default, Restate retries ALL errors infinitely**, except `TerminalError`s.
+**By default, Restate retries ALL errors**, except `TerminalError`s.
 
 ## Raising `TerminalError`
 
-Use `TerminalError` to signal permanent failures. The behavior depends on where you throw it:
+Use `TerminalError` to signal permanent failures.
 
-### In Your Handler (fails the entire invocation)
-
-When you throw `TerminalError` in your handler code, it stops the invocation and marks it as permanently failed:
+When you raise `TerminalError` in your handler code, it stops the invocation and marks it as permanently failed:
 
 ```python {"CODE_LOAD::python/src/develop/error_handling.py#terminal"} 
 from restate.exceptions import TerminalError
@@ -38,14 +36,7 @@ from restate.exceptions import TerminalError
 raise TerminalError("Something went wrong.")
 ```
 
-Common use cases:
-- Input validation failures: `raise TerminalError("Invalid email format")`
-- Business rule violations: `raise TerminalError("Insufficient balance")`
-- Resource not found: `raise TerminalError("User ID not found")`
-
-### In `ctx.run` (fails just that step)
-
-When you throw `TerminalError` inside a `ctx.run` block, it fails that specific step but allows your handler to continue and handle the error:
+When you raise `TerminalError` inside a `ctx.run` block, it fails that specific step, allowing your handler to continue and handle the error:
 
 ```python {"CODE_LOAD::python/src/develop/error_handling.py#run"} 
 try:
@@ -54,14 +45,19 @@ try:
         raise TerminalError("Can't write")
     await ctx.run_typed("do transaction", do_transaction)
 except TerminalError as err:
-    # Handle the terminal error raised within ctx.run_typed
+    # Handle the terminal error raised by ctx.run_typed
     # For example, undo previous actions...
     await ctx.run_typed("undo transaction", undo_transaction)
     # ...and propagate the error
     raise err
 ```
 
-Inside `ctx.run`, **all errors are retried** unless you explicitly `raise TerminalError` or set up a [run retry policy](/develop/python/durable-steps#run).
+Inside `ctx.run`, **all errors are retried** unless you `raise TerminalError` explicitly or set up a [run retry policy](/develop/python/durable-steps#run).
+
+Common use cases for terminal error are:
+- Input validation failures: `raise TerminalError("Invalid email format")`
+- Business rule violations: `raise TerminalError("Insufficient balance")`
+- Resource not found: `raise TerminalError("User ID not found")`
 
 <Info>
     When you throw a terminal error, you may need to undo previous actions to keep your system consistent. Check out our [sagas guide](/guides/sagas) to learn about compensations.
@@ -73,10 +69,10 @@ Most of the time, you only need to catch `TerminalError` to handle permanent fai
 
 <Warning>
 **DO NOT** use bare `except:` or `except Exception:` in Restate handlers!
-This will catch internal SDK exceptions that you must not handle, and which resulting action can lead to unexpected behavior.
+This will catch internal SDK exceptions that **you must not handle**, and which resulting action can lead to unexpected behavior.
 </Warning>
 
-**Wrong - This breaks Restate:**
+❌ **Wrong** - This leads to unexpected behavior:
 ```python
 try:
     # Do something with ctx
@@ -84,7 +80,7 @@ except:  # BAD: Catches internal SDK exceptions!
     # What happens here will not get recorded!
 ```
 
-**Correct - Only catch what you need:**
+✅ **Correct** - Only catch what you need:
 ```python
 try:
     # Do something with ctx
@@ -92,29 +88,29 @@ except TerminalError:  # GOOD: Only catches terminal errors
     # Handle permanent failures
 ```
 
-### Advanced: Using Finally for Resource Cleanup
+<Accordion title="Advanced: using finally for resource cleanup">
+    <Note>
+        Most users don't need this section. Only use `finally` blocks if you're managing resources (files, connections, locks) that must be released even when retries happen.
+    </Note>
 
-<Note>
-Most users don't need this section. Only use `finally` blocks if you're managing resources (files, connections, locks) that must be released even when retries happen.
-</Note>
+    When using `finally`, understand what goes where:
 
-When using `finally`, understand what goes where:
+    ```python
+    try:
+        # Do something with ctx
+    except TerminalError as e:
+        # Handle permanent failures
+    finally:
+        # Release resources acquired during THIS invocation attempt
+        # This runs even if the invocation will be retried
+    ```
 
-```python
-try:
-    # Do something with ctx
-except TerminalError as e:
-    # Handle permanent failures
-finally:
-    # Release resources acquired during THIS invocation attempt
-    # This runs even if the invocation will be retried
-```
+    You can alternatively use `restate.is_internal_exception(e)` to identify whether an exception is a Restate SDK internal exception that should be ignored.
 
-You can alternatively use `restate.is_internal_exception(e)` to identify whether an exception is a Restate SDK internal exception that should be ignored.
-
-**Key principle:**
-- `except TerminalError`: For compensations and business logic when the invocation permanently fails
-- `finally`: For releasing resources (files, connections) acquired during the current attempt
+    **Key principle:**
+    - `except TerminalError`: For compensations and business logic when the invocation permanently fails
+    - `finally`: For releasing resources (files, connections) acquired during the current attempt
+</Accordion>
 
 ## Retry strategies
 By default, Restate does infinite retries with an exponential backoff strategy.

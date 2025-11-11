@@ -27,7 +27,7 @@ async def my_handler_2(ctx: Context, arg):
             raise TerminalError("Can't write")
         await ctx.run_typed("do transaction", do_transaction)
     except TerminalError as err:
-        # Handle the terminal error raised within ctx.run_typed
+        # Handle the terminal error raised by ctx.run_typed
         # For example, undo previous actions...
         await ctx.run_typed("undo transaction", undo_transaction)
         # ...and propagate the error
