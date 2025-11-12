@@ -1,0 +1,84 @@
+---
+title: "Sessions and context"
+description: "Build persistent chat sessions that survive interruptions and maintain conversation state."
+tags: ["recipe"]
+---
+
+Build persistent, stateful chat sessions that handle long-running conversations across multiple interactions and users.
+
+In many scenarios, you have long-running multi-turn conversations with agents. A user might start a conversation now, respond hours later, and return again after a few days. Multiple users may be having separate conversations going on, and a single conversation may be open in multiple browser windows.
+
+## How does Restate help?
+The benefits of using Restate here are:
+- **Virtual Objects**: Durable functions with identity and persistent state storage
+- **Session isolation**: Each conversation gets its own isolated state by user/session ID
+- **Automatic queueing**: Concurrent messages to the same session are queued and processed in order
+- **Persistent memory**: Conversation history survives process restarts and failures
+- Works with **any AI SDK** (OpenAI, LangChain, Pydantic AI, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.)
+
+## Example
+
+Use Virtual Objects to create persistent chat sessions. Each session is identified by a key (user_id or session_id) and maintains conversation state across multiple interactions.
+
+```python
+@chat.handler()
+async def send_message(ctx: restate.ObjectContext, message: ChatMessage) -> str | None:
+    """A long-lived stateful chat session that allows for ongoing conversation."""
+
+    memory = await ctx.get("memory", type_hint=list[dict]) or []
+    memory.append({"role": "user", "content": message.text})
+
+    result = await ctx.run_typed(
+        "LLM call",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=memory,
+    )
+
+    memory.append({"role": "assistant", "content": result.content})
+    ctx.set("memory", memory)
+    return result.content
+```
+
+Virtual Objects guarantee that a single instance exists per key, queue interactions, and store transactional state. They offer a convenient way to store the message history and other data, like the last agent who the user talked to.
+
+<Tip>
+    This pattern is complementary to AI memory solutions like mem0 or graffiti. You can use Virtual Objects to enforce session concurrency and queueing while storing the agent's memory in specialized memory systems.
+</Tip>
+
+<Tip>
+    This pattern is implementable with any of our SDKs and any AI SDK.
+    If you need help with a specific SDK, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Tip>
+
+
+## Running the example
+<Steps>
+<StartExample/>
+<Step title="Send messages to a chat session">
+
+    In the UI (`http://localhost:9070`), click on the `send_message` handler of the `ChatService` to open the playground.
+
+    Or use `curl` to send messages directly to a specific chat session:
+
+    <CodeGroup>
+    ```shell First message
+    curl -X POST http://localhost:8080/ChatService/user123/send_message \
+      --json '{"text": "Hello! What can you help me with?"}'
+    ```
+    ```shell Follow-up message
+    curl -X POST http://localhost:8080/ChatService/user123/send_message \
+      --json '{"text": "Can you summarize our conversation so far?"}'
+    ```
+    </CodeGroup>
+
+    The session state (conversation history) is automatically persisted and maintained across calls.
+
+</Step>
+
+<Step title="Check the Restate UI">
+
+    You can see in the Invocations Tab of the UI how each chat session maintains its own state, and in the Objects Tab, you can view the stored conversation memory for each session.
+
+</Step>
+</Steps>

@@ -1,0 +1,92 @@
+---
+title: "Routing to tools and agents"
+description: "Recoverable routing of tasks to tools and agents with Restate."
+tags: ["recipe"]
+---
+
+
+## Routing to tools
+
+Automatically route requests to tools based on LLM outputs. The agent keeps calling the LLM and executing tools until a final answer is returned.
+
+In the UI (`http://localhost:9070`), click on the `route` handler of the `ToolRouterService` to open the playground and send a default request:
+<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools-playground.png" alt="Dynamic routing LLM calls - UI"/>
+
+In the UI, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:
+
+<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools.png" alt="Dynamic routing based on LLM output - UI"/>
+
+## Routing to remote tools
+
+## Routing to agents
+
+For true distributed multi-agent setups, where agents run concurrently as separate processes (to execute and scale independently), the final missing piece is reliable asynchronous communication:
+- Communication channels that recover from failures
+- End-to-end idempotency to avoid kicking off expensive work twice
+- Suspending the calling agent while the callee agents are doing work
+- Reliable scheduling of agent invocations, for periodic work
+
+Restate extends Durable Execution with such messaging and RPC between durable functions, so handing over work to another agent looks just like RPC-ing them. The examples below expose remote agents via tools:
+
+While this looks like a simple RPC client making a call, the invocation of the target agent is asynchronous and durable (like a queue), lets the caller suspend while awaiting a response, can be detached / re-attached, canceled, and lets you kick off and await multiple parallel remote agents. Because Restate acts simultaneously as the message/RPC broker and Durable Execution orchestrator on both caller and callee side, it can transparently guarantee end-to-end idempotency and resilience. The same mechanism also lets us reliably schedule invocations for later, for example, to schedule an agentic task for later.
+
+```python
+SPECIALISTS = {
+    "billing": "Expert in payments, charges, and refunds",
+    "account": "Expert in login issues and security",
+    "product": "Expert in features and how-to guides"
+}
+
+
+# Create the routing service
+router = restate.Service("QuestionRouter")
+
+
+@router.handler()
+async def answer_question(ctx: restate.Context, question: Question) -> str:
+
+    # 1. First, decide if a specialist is needed
+    routing_decision = await ctx.run_typed(
+        "pick_specialist",
+        llm_call,
+        RunOptions(max_attempts=3),  # Retry up to 3 times if needed
+        prompt=question.text,
+        tools=[
+            tool(name=name, description=desc)
+            for name, desc in SPECIALISTS.items()
+        ]
+    )
+
+    # 2. No specialist needed? Give a general answer
+    if not routing_decision.tool_calls:
+        return routing_decision.content
+
+    # 3. Get the specialist's name
+    specialist = routing_decision.tool_calls[0].function.name
+
+    # 4. Ask the specialist to answer
+    answer = await ctx.run_typed(
+        f"ask_{specialist}",
+        llm_call,
+        RunOptions(max_attempts=3),
+        system=f"You are a {SPECIALISTS.get(specialist, 'support')} specialist.",
+        prompt=question.text
+    )
+
+    return answer.content
+```
+
+Route requests to specialized agents based on LLM outputs. Routing decisions are persisted and can be retried.
+
+In the UI (`http://localhost:9070`), click on the `route` handler of the `AgentRouterService` to open the playground and send a default request:
+<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent-playground.png" alt="Multi-agent routing - UI"/>
+
+In the UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
+
+<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent.png" alt="Multi-agent routing - UI"/>
+
+## Routing to remote agents
+
+Route requests to remote agents with resilient communication.
+Restate proxies requests to remote agents, persisting routing decisions and results.
+In case of failures, Restate retries failed executions.
