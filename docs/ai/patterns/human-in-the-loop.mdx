@@ -5,6 +5,7 @@ description: "Build resilient human approval steps in your agent workflows."
 tags: ["recipe"]
 ---
 
+import StartExample from "/snippets/ai-guides/start-example.mdx";
 
 Build resilient workflows that include human approval steps or external signals without worrying about failures or interruptions.
 
@@ -23,44 +24,62 @@ The benefits of using Restate here are:
 
 Use `ctx.awakeable()` to create durable promises that can be resolved externally. The workflow suspends during the wait and resumes automatically when the promise is resolved.
 
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts?collapse_prequel"} 
+export default restate.service({
+  name: "HumanInTheLoopService",
+  handlers: {
+    moderate: restate.createServiceHandler(
+      { input: zodPrompt(examplePrompt) },
+      moderate,
+    ),
+  },
+});
+```
 
-```python
-@content_moderator_svc.handler()
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/human_in_the_loop.py?collapse_prequel"} 
+content_moderator = restate.Service("HumanInTheLoopService")
+
+
+@content_moderator.handler()
 async def moderate(ctx: restate.Context, content: Content) -> str | None:
-    """Moderate content with human-in-the-loop review"""
+    """Moderate content with optional human review."""
 
-    # Durable step for LLM inference, auto retried & recovered
+    # Run LLM moderation
     result = await ctx.run_typed(
         "moderate",
         llm_call,
         RunOptions(max_attempts=3),
-        prompt=f"Decide whether content violates the policy."
-        f"Use the human review tool if you are not sure."
-        f"Content: {content}",
-        tools=[tool(name="get_human_review", description="Get human review for content that may violate policy.")],
+        system="You are a content moderation agent. Decide if the content violates policy.",
+        prompt=content.message,
+        tools=[tool("get_human_review", "Request human review if policy violation is uncertain.")],
     )
 
-    # request human review, if ordered by LLM
+    # Handle human review request
     if result.tool_calls and result.tool_calls[0].function.name == "get_human_review":
-        # Create a durable promise (awakeable),
+        # Create a recoverable approval promise
         approval_id, approval_promise = ctx.awakeable(type_hint=str)
 
-        # Notify moderator, identify the durable promise by its id
         await ctx.run_typed(
-            "notify_moderator",
+            "notify moderator",
             notify_moderator,
             content=content,
             approval_id=approval_id,
         )
 
-        # Pause for completion of the promise.
-        # The workflow suspends here and resumes after the promise resolution.
-        # Check the service logs to see how to resolve it, e.g.:
-        # curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
+        # Suspend until moderator resolves the approval
         return await approval_promise
 
     return result.content
 ```
+
+</CodeGroup>
+
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/human_in_the_loop.py)
+
+Check out the SDK documentation for more details on the awakeables and durable promises API ([TS](/develop/ts/external-events) / [Python](/develop/python/external-events)).
 
 <Tip>
     This pattern is implementable with any of our SDKs and any AI SDK.
@@ -74,20 +93,41 @@ async def moderate(ctx: restate.Context, content: Content) -> str | None:
     <StartExample/>
 <Step title="Send a request">
 
-    In the UI (`http://localhost:9070`), click on the `moderate` handler of the `ContentModerator` to open the playground and send a request with content that requires human review.
+    <Tabs>
+        <Tab title="UI">
+            In the UI (`http://localhost:9070`), click on the `moderate` handler of the `CallChainingService` to open the playground and send a default request:
 
-    Or use `curl` to send a request directly to the service:
+            <img src="/img/ai/patterns/human-in-the-loop-playground.png" alt="Human approval playground - UI"/>
 
-    ```shell
-    curl -X POST http://localhost:8080/ContentModerator/moderate \
-      --json '{"content": "This content might need human review to determine if it violates our policy."}'
-    ```
+        </Tab>
+        <Tab title="curl">
+            Or use `curl` to send a request directly to the service:
+
+            <CodeGroup>
+                ```shell TypeScript
+                curl localhost:8080/HumanInTheLoopService/moderate \
+                --json '{"message": "Very explicit content that might violate the policy."}'
+                ```
+                ```shell Python
+                curl localhost:8080/HumanInTheLoopService/moderate \
+                --json '{"message": "Very explicit content that might violate the policy."}'
+                ```
+            </CodeGroup>
+
+        </Tab>
+    </Tabs>
+
+    This will block on the human approval step, so you will not see a response yet.
+
+    You can see in the Invocations Tab of the UI how the workflow suspends after waiting for a minute:
+
+    <img src="/img/ai/patterns/human-in-the-loop-suspended.png" alt="Human approval suspended journal"/>
 
 </Step>
 
 <Step title="Resolve the approval">
 
-    When the LLM requests human review, check the service logs to find the awakeable ID, then resolve it:
+    Check the service logs to find the curl command to resolve the approval. It will look like this:
 
     ```shell
     curl http://localhost:8080/restate/awakeables/{awakeable_id}/resolve --json '"approved"'
@@ -100,6 +140,8 @@ async def moderate(ctx: restate.Context, content: Content) -> str | None:
 <Step title="Check the Restate UI">
 
     You can see in the Invocations Tab of the UI how the workflow suspends during the human approval step and resumes once the promise is resolved.
+
+    <img src="/img/ai/patterns/human-in-the-loop.png" alt="Human approval - journal"/>
 
 </Step>
 </Steps>
