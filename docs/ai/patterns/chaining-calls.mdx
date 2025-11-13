@@ -25,30 +25,10 @@ The benefits of using Restate here are:
 
 ## Example
 
-Wrap each step in the chain with `ctx.run()` to ensure fault tolerance and automatic recovery. If any step fails, Restate will retry from that exact point without losing previous progress.
+Wrap each step in the chain with `ctx.run()` to ensure fault tolerance and automatic recovery. Restate uses durable execution to persist the result of each step as it completes, so if any step fails, Restate will retry from that exact point without losing previous progress or re-executing completed steps.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/chaining.ts?collapse_imports"} 
-/**
- * LLM Prompt Chaining
- *
- * Build fault-tolerant processing pipelines where each step transforms the previous step's output.
- * If any step fails, Restate automatically resumes from that point.
- *
- * Input → Analysis → Extraction → Summary → Result
- */
-import * as restate from "@restatedev/restate-sdk";
-import { Context } from "@restatedev/restate-sdk";
-import llmCall from "./utils/llm";
-import { zodPrompt } from "./utils/utils";
-import { openai } from "@ai-sdk/openai";
-
-const examplePrompt = `Q3 Performance Summary:
-    Our customer satisfaction score rose to 92 points this quarter.
-    Revenue grew by 45% compared to last year.
-    Market share is now at 23% in our primary market.
-    Customer churn decreased to 5% from 8%.`;
-
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/chaining.ts#here"} 
 async function processReport(ctx: Context, report: { message: string }) {
   // Step 1: Extract metrics
   const extract = await ctx.run(
@@ -78,30 +58,10 @@ async function processReport(ctx: Context, report: { message: string }) {
     { maxRetryAttempts: 3 },
   );
 }
-
-export default restate.service({
-  name: "CallChainingService",
-  handlers: {
-    run: restate.createServiceHandler(
-      { input: zodPrompt(examplePrompt) },
-      processReport,
-    ),
-  },
-});
 ```
 
 ```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/chaining.py?collapse_prequel"} 
 call_chaining_svc = restate.Service("CallChainingService")
-
-example_prompt = """Q3 Performance Summary:
-Our customer satisfaction score rose to 92 points this quarter.
-Revenue grew by 45% compared to last year.
-Market share is now at 23% in our primary market.
-Customer churn decreased to 5% from 8%."""
-
-
-class Report(BaseModel):
-    text: str = example_prompt
 
 
 @call_chaining_svc.handler()

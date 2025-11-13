@@ -24,22 +24,7 @@ The benefits of using Restate here are:
 Use `ctx.awakeable()` to create durable promises that can be resolved externally. The workflow suspends during the wait and resumes automatically when the promise is resolved.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts?collapse_imports"} 
-/**
- * Human-in-the-Loop Pattern
- *
- * Implement resilient human approval steps that suspend execution until feedback is received.
- * Durable promises survive crashes and can be recovered across process restarts.
- */
-import * as restate from "@restatedev/restate-sdk";
-import { Context } from "@restatedev/restate-sdk";
-import { notifyModerator, zodPrompt } from "./utils/utils";
-import { generateText, tool } from "ai";
-import { openai } from "@ai-sdk/openai";
-import z from "zod";
-
-const examplePrompt = "Write a poem about Durable Execution";
-
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts#here"} 
 async function moderate(ctx: Context, { message }: { message: string }) {
   const result = await ctx.run(
     "LLM call",
@@ -59,13 +44,9 @@ async function moderate(ctx: Context, { message }: { message: string }) {
     { maxRetryAttempts: 3 },
   );
 
-  if (
-    result.finishReason === "tool-calls" &&
-    result.toolCalls?.[0]?.toolName === "getHumanReview"
-  ) {
+  if (result.toolCalls?.[0]?.toolName === "getHumanReview") {
     // Create a recoverable approval promise
     const approval = ctx.awakeable<string>();
-
     await ctx.run("Notify moderator", () =>
       notifyModerator(message, approval.id),
     );
@@ -78,16 +59,6 @@ async function moderate(ctx: Context, { message }: { message: string }) {
 
   return result;
 }
-
-export default restate.service({
-  name: "HumanInTheLoopService",
-  handlers: {
-    moderate: restate.createServiceHandler(
-      { input: zodPrompt(examplePrompt) },
-      moderate,
-    ),
-  },
-});
 ```
 
 ```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/human_in_the_loop.py?collapse_prequel"} 
@@ -105,7 +76,12 @@ async def moderate(ctx: restate.Context, content: Content) -> str | None:
         RunOptions(max_attempts=3),
         system="You are a content moderation agent. Decide if the content violates policy.",
         prompt=content.message,
-        tools=[tool("get_human_review", "Request human review if policy violation is uncertain.")],
+        tools=[
+            tool(
+                "get_human_review",
+                "Request human review if policy violation is uncertain.",
+            )
+        ],
     )
 
     # Handle human review request
