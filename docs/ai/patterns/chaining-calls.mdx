@@ -28,7 +28,57 @@ The benefits of using Restate here are:
 Wrap each step in the chain with `ctx.run()` to ensure fault tolerance and automatic recovery. If any step fails, Restate will retry from that exact point without losing previous progress.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/chaining.ts?collapse_prequel"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/chaining.ts?collapse_imports"} 
+/**
+ * LLM Prompt Chaining
+ *
+ * Build fault-tolerant processing pipelines where each step transforms the previous step's output.
+ * If any step fails, Restate automatically resumes from that point.
+ *
+ * Input → Analysis → Extraction → Summary → Result
+ */
+import * as restate from "@restatedev/restate-sdk";
+import { Context } from "@restatedev/restate-sdk";
+import llmCall from "./utils/llm";
+import { zodPrompt } from "./utils/utils";
+import { openai } from "@ai-sdk/openai";
+
+const examplePrompt = `Q3 Performance Summary:
+    Our customer satisfaction score rose to 92 points this quarter.
+    Revenue grew by 45% compared to last year.
+    Market share is now at 23% in our primary market.
+    Customer churn decreased to 5% from 8%.`;
+
+async function processReport(ctx: Context, report: { message: string }) {
+  // Step 1: Extract metrics
+  const extract = await ctx.run(
+    "Extract metrics",
+    async () =>
+      llmCall(`Extract numerical values and their metrics from the text. 
+            Format as 'Metric: Value' per line. Input: ${report.message}`),
+    { maxRetryAttempts: 3 },
+  );
+
+  // Step 2: Process the result from Step 1
+  const sortedMetrics = await ctx.run(
+    "Sort metrics",
+    async () =>
+      llmCall(`Sort lines in descending order by value. Input: ${extract}`),
+    { maxRetryAttempts: 3 },
+  );
+
+  // Step 3: Format as table
+  return ctx.run(
+    "Format as table",
+    async () =>
+      llmCall(
+        `Format the data as a markdown table with columns 
+         'Metric Name' and 'Value'. Input: ${sortedMetrics}`,
+      ),
+    { maxRetryAttempts: 3 },
+  );
+}
+
 export default restate.service({
   name: "CallChainingService",
   handlers: {
@@ -88,7 +138,7 @@ async def process_report(ctx: restate.Context, report: Report) -> str | None:
         ),
     )
 
-    return table
+    return table.content
 ```
 
 </CodeGroup>

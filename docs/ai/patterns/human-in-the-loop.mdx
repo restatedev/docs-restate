@@ -11,7 +11,6 @@ Build resilient workflows that include human approval steps or external signals 
 
 Sometimes you need to include a human evaluator, approval step, or another external signal in an agentic workflow. In a simple standalone app, you could model this by awaiting a promise/future that gets completed via a callback. Luckily, Durable Execution allows us to do the exact same thing, without worrying about failures or interruptions.
 
-
 ## How does Restate help?
 The benefits of using Restate here are:
 - **Durable promises**: Create promises that survive process restarts and failures
@@ -25,7 +24,61 @@ The benefits of using Restate here are:
 Use `ctx.awakeable()` to create durable promises that can be resolved externally. The workflow suspends during the wait and resumes automatically when the promise is resolved.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts?collapse_prequel"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts?collapse_imports"} 
+/**
+ * Human-in-the-Loop Pattern
+ *
+ * Implement resilient human approval steps that suspend execution until feedback is received.
+ * Durable promises survive crashes and can be recovered across process restarts.
+ */
+import * as restate from "@restatedev/restate-sdk";
+import { Context } from "@restatedev/restate-sdk";
+import { notifyModerator, zodPrompt } from "./utils/utils";
+import { generateText, tool } from "ai";
+import { openai } from "@ai-sdk/openai";
+import z from "zod";
+
+const examplePrompt = "Write a poem about Durable Execution";
+
+async function moderate(ctx: Context, { message }: { message: string }) {
+  const result = await ctx.run(
+    "LLM call",
+    async () =>
+      generateText({
+        model: openai("gpt-4o"),
+        prompt: `You are a content moderation agent. Decide if the content violates policy: ${message}`,
+        tools: {
+          getHumanReview: tool({
+            name: "getHumanReview",
+            description:
+              "Request human review if policy violation is uncertain.",
+            inputSchema: z.void(),
+          }),
+        },
+      }),
+    { maxRetryAttempts: 3 },
+  );
+
+  if (
+    result.finishReason === "tool-calls" &&
+    result.toolCalls?.[0]?.toolName === "getHumanReview"
+  ) {
+    // Create a recoverable approval promise
+    const approval = ctx.awakeable<string>();
+
+    await ctx.run("Notify moderator", () =>
+      notifyModerator(message, approval.id),
+    );
+
+    // Suspend until moderator resolves the approval
+    // Check the service logs to see how to resolve it over HTTP, e.g.:
+    // curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
+    return await approval.promise;
+  }
+
+  return result;
+}
+
 export default restate.service({
   name: "HumanInTheLoopService",
   handlers: {
@@ -68,13 +121,14 @@ async def moderate(ctx: restate.Context, content: Content) -> str | None:
         )
 
         # Suspend until moderator resolves the approval
+        # Check the service logs to see how to resolve it over HTTP, e.g.:
+        # curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
         return await approval_promise
 
     return result.content
 ```
 
 </CodeGroup>
-
 
 View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts) /
 [Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/human_in_the_loop.py)
