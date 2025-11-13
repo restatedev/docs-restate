@@ -6,7 +6,22 @@ tags: ["recipe"]
 
 import StartExample from "/snippets/ai-guides/start-example.mdx";
 
-## Routing to tools
+
+Restate lets you write normal code and makes it resilient via durable execution.
+The only thing you need to do is wrap LLM calls and tool execution steps with Restate Context actions.
+
+This means that you do not need to do anything special to implement routing to tools and agents.
+If the LLM decides to route to a tool or agent, this gets persisted in Restate's log and can be retried or resumed after failures.
+
+However, Restate also includes a durable messaging and RPC mechanism that lets you build true distributed multi-agent systems with resilient communication.
+So you can deploy agents or tools as separate services/processes that communicate reliably over Restate's durable RPC.
+They can scale independently, be deployed on different infrastructure (e.g. Kubernetes, Vercel, AWS Lambda, etc.), be implemented in different languages, and still benefit from end-to-end idempotency and failure recovery.
+
+
+This page shows examples of routing to local tools, local agents, and remote tools/agents.
+
+
+## Routing to local tools
 
 Automatically route requests to tools based on LLM outputs. The agent keeps calling the LLM and executing tools until a final answer is returned.
 
@@ -174,17 +189,7 @@ async def route(ctx: restate.Context, question: Question) -> str:
 </Accordion>
 
 
-## Routing to agents
-
-For true distributed multi-agent setups, where agents run concurrently as separate processes (to execute and scale independently), the final missing piece is reliable asynchronous communication:
-- Communication channels that recover from failures
-- End-to-end idempotency to avoid kicking off expensive work twice
-- Suspending the calling agent while the callee agents are doing work
-- Reliable scheduling of agent invocations, for periodic work
-
-Restate extends Durable Execution with such messaging and RPC between durable functions, so handing over work to another agent looks just like RPC-ing them. The examples below expose remote agents via tools:
-
-While this looks like a simple RPC client making a call, the invocation of the target agent is asynchronous and durable (like a queue), lets the caller suspend while awaiting a response, can be detached / re-attached, canceled, and lets you kick off and await multiple parallel remote agents. Because Restate acts simultaneously as the message/RPC broker and Durable Execution orchestrator on both caller and callee side, it can transparently guarantee end-to-end idempotency and resilience. The same mechanism also lets us reliably schedule invocations for later, for example, to schedule an agentic task for later.
+## Routing to local agents
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"}
@@ -302,6 +307,18 @@ Route requests to specialized agents based on LLM outputs. Routing decisions are
 </Accordion>
 
 ## Routing to remote tools and agents
+
+
+For true distributed multi-agent setups, where agents run concurrently as separate processes (to execute and scale independently), the final missing piece is reliable asynchronous communication:
+- Communication channels that recover from failures
+- End-to-end idempotency to avoid kicking off expensive work twice
+- Suspending the calling agent while the callee agents are doing work
+- Reliable scheduling of agent invocations, for periodic work
+
+Restate extends Durable Execution with such messaging and RPC between durable functions, so handing over work to another agent looks just like RPC-ing them. The examples below expose remote agents via tools:
+
+While this looks like a simple RPC client making a call, the invocation of the target agent is asynchronous and durable (like a queue), lets the caller suspend while awaiting a response, can be detached / re-attached, canceled, and lets you kick off and await multiple parallel remote agents. Because Restate acts simultaneously as the message/RPC broker and Durable Execution orchestrator on both caller and callee side, it can transparently guarantee end-to-end idempotency and resilience. The same mechanism also lets us reliably schedule invocations for later, for example, to schedule an agentic task for later.
+
 
 Route requests to remote agents with resilient communication.
 Restate proxies requests to remote agents, persisting routing decisions and results.
