@@ -10,14 +10,169 @@ import StartExample from "/snippets/ai-guides/start-example.mdx";
 
 Automatically route requests to tools based on LLM outputs. The agent keeps calling the LLM and executing tools until a final answer is returned.
 
-In the UI (`http://localhost:9070`), click on the `route` handler of the `ToolRouterService` to open the playground and send a default request:
-<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools-playground.png" alt="Dynamic routing LLM calls - UI"/>
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-tools.ts#here"}
+async function route(
+  ctx: Context,
+  { message, userId }: { message: string; userId: string },
+) {
+  const messages: ModelMessage[] = [{ role: "user", content: message }];
 
-In the UI, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:
+  while (true) {
+    const result = await ctx.run(
+      "LLM call",
+      async () =>
+        generateText({
+          model: openai("gpt-4o"),
+          messages,
+          tools: {
+            fetchServiceStatus: tool({
+              description: "Check service status and outages",
+              inputSchema: z.void(),
+            }),
+            queryUserDatabase: tool({
+              description: "Get user account and billing info",
+              inputSchema: z.void(),
+            }),
+            createSupportTicket: tool({
+              description: "Create support tickets",
+              inputSchema: z.object({
+                user_id: z.string().describe("User ID creating the ticket"),
+                description: z
+                  .string()
+                  .describe("Detailed description of the issue"),
+              }),
+            }),
+          },
+        }),
+      { maxRetryAttempts: 3 },
+    );
 
-<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools.png" alt="Dynamic routing based on LLM output - UI"/>
+    messages.push(...result.response.messages);
 
-## Routing to remote tools
+    if (result.finishReason === "tool-calls") {
+      for (const toolCall of result.toolCalls) {
+        let toolOutput: string;
+
+        switch (toolCall.toolName) {
+          case "queryUserDatabase":
+            toolOutput = await ctx.run("query-user-db", () =>
+              queryUserDb(userId),
+            );
+            break;
+          case "fetchServiceStatus":
+            toolOutput = await ctx.run("fetch-service-status", () =>
+              fetchServiceStatus(),
+            );
+            break;
+          case "createSupportTicket":
+            toolOutput = await ctx.run("create-support-ticket", () =>
+              createSupportTicket(toolCall.input as SupportTicket),
+            );
+            break;
+          default:
+            toolOutput = `Tool not found: ${toolCall.toolName}`;
+        }
+
+        messages.push({
+          role: "tool",
+          content: [
+            {
+              toolName: toolCall.toolName,
+              toolCallId: toolCall.toolCallId,
+              type: "tool-result",
+              output: { type: "json", value: toolOutput },
+            },
+          ],
+        });
+      }
+    } else {
+      return result.text;
+    }
+  }
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/routing_to_tool.py?collapse_prequel"}
+tool_router = restate.Service("ToolRouter")
+
+TOOLS = [
+    tool("fetch_service_status", "Check service status and outages"),
+    tool("query_user_database", "Get user account and billing info"),
+    tool(
+        "create_support_ticket",
+        "Create support tickets",
+        SupportTicket.model_json_schema(),
+    ),
+]
+
+
+@tool_router.handler()
+async def route(ctx: restate.Context, question: Question) -> str:
+    """Route to appropriate tool and execute until final answer"""
+    messages = [{"role": "user", "content": question.message}]
+
+    while True:
+        result = await ctx.run_typed(
+            "LLM call",
+            llm_call,
+            RunOptions(max_attempts=3, type_hint=Message),
+            messages=messages,
+            tools=TOOLS,
+        )
+        messages.append(result.dict())
+
+        if not result.tool_calls:
+            return result.content
+
+        for tool_call in result.tool_calls:
+            fn = tool_call.function
+            match fn.name:
+                case "query_user_database":
+                    result = await ctx.run_typed(
+                        fn.name, query_user_db, user_id=question.user_id
+                    )
+                case "fetch_service_status":
+                    result = await ctx.run_typed(fn.name, fetch_service_status)
+                case "create_support_ticket":
+                    ticket = SupportTicket.model_validate_json(fn.arguments)
+                    result = await ctx.run_typed(
+                        fn.name, create_support_ticket, ticket=ticket
+                    )
+                case _:
+                    result = f"Tool not found: {fn.name}"
+
+            messages.append(
+                {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": fn.name,
+                    "content": result,
+                }
+            )
+```
+
+</CodeGroup>
+
+
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
+
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `route` handler of the `ToolRouterService` to open the playground and send a default request:
+        <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools-playground.png" alt="Dynamic routing LLM calls - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:
+
+        <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-tools.png" alt="Dynamic routing based on LLM output - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
+
 
 ## Routing to agents
 
@@ -31,31 +186,76 @@ Restate extends Durable Execution with such messaging and RPC between durable fu
 
 While this looks like a simple RPC client making a call, the invocation of the target agent is asynchronous and durable (like a queue), lets the caller suspend while awaiting a response, can be detached / re-attached, canceled, and lets you kick off and await multiple parallel remote agents. Because Restate acts simultaneously as the message/RPC broker and Durable Execution orchestrator on both caller and callee side, it can transparently guarantee end-to-end idempotency and resilience. The same mechanism also lets us reliably schedule invocations for later, for example, to schedule an agentic task for later.
 
-```python
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"}
+async function answerQuestion(ctx: Context, question: { message: string }) {
+  const specialistTools: Record<string, any> = {};
+  Object.entries(SPECIALISTS).forEach(([name, { description }]) => {
+    specialistTools[name] = tool({
+      description,
+      inputSchema: z.object({}),
+    });
+  });
+
+  // 1. First, decide if a specialist is needed
+  const routingDecision = await ctx.run(
+    "pick_specialist",
+    async () =>
+      generateText({
+        model: openai("gpt-4o"),
+        prompt: question.message,
+        tools: specialistTools,
+      }),
+    { maxRetryAttempts: 3 },
+  );
+
+  // 2. No specialist needed? Give a general answer
+  if (!routingDecision.toolCalls || routingDecision.toolCalls.length === 0) {
+    return routingDecision.text;
+  }
+
+  // 3. Get the specialist's name
+  const specialist = routingDecision.toolCalls[0].toolName as Specialist;
+
+  // 4. Ask the specialist to answer
+  const answer = await ctx.run(
+    `ask_${specialist}`,
+    async () =>
+      generateText({
+        model: openai("gpt-4o"),
+        system: SPECIALISTS[specialist].system,
+        prompt: question.message,
+      }),
+    { maxRetryAttempts: 3 },
+  );
+
+  return answer.text;
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/routing_to_agent.py?collapse_prequel"}
+router = restate.Service("AgentRouter")
+
+# Our team of AI specialists
 SPECIALISTS = {
     "billing": "Expert in payments, charges, and refunds",
     "account": "Expert in login issues and security",
-    "product": "Expert in features and how-to guides"
+    "product": "Expert in features and how-to guides",
 }
-
-
-# Create the routing service
-router = restate.Service("QuestionRouter")
 
 
 @router.handler()
 async def answer_question(ctx: restate.Context, question: Question) -> str:
+    """Classify request and route to appropriate specialized agent."""
 
     # 1. First, decide if a specialist is needed
     routing_decision = await ctx.run_typed(
         "pick_specialist",
         llm_call,
         RunOptions(max_attempts=3),  # Retry up to 3 times if needed
+        system="You are a customer service routing system. Choose the appropriate specialist, or respond directly if no specialist is needed.",
         prompt=question.text,
-        tools=[
-            tool(name=name, description=desc)
-            for name, desc in SPECIALISTS.items()
-        ]
+        tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
     )
 
     # 2. No specialist needed? Give a general answer
@@ -71,23 +271,135 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
         llm_call,
         RunOptions(max_attempts=3),
         system=f"You are a {SPECIALISTS.get(specialist, 'support')} specialist.",
-        prompt=question.text
+        prompt=question.text,
     )
 
     return answer.content
 ```
 
+</CodeGroup>
+
 Route requests to specialized agents based on LLM outputs. Routing decisions are persisted and can be retried.
 
-In the UI (`http://localhost:9070`), click on the `route` handler of the `AgentRouterService` to open the playground and send a default request:
-<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent-playground.png" alt="Multi-agent routing - UI"/>
 
-In the UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
 
-<img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent.png" alt="Multi-agent routing - UI"/>
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
 
-## Routing to remote agents
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `route` handler of the `AgentRouterService` to open the playground and send a default request:
+        <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent-playground.png" alt="Multi-agent routing - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
+
+        <img src="https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/doc/img/patterns/route-to-agent.png" alt="Multi-agent routing - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
+
+## Routing to remote tools and agents
 
 Route requests to remote agents with resilient communication.
 Restate proxies requests to remote agents, persisting routing decisions and results.
 In case of failures, Restate retries failed executions.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"}
+async function answerQuestion(ctx: Context, question: { message: string }) {
+  const specialistTools: Record<string, any> = {};
+  Object.entries(SPECIALISTS).forEach(([name, { description }]) => {
+    specialistTools[name] = tool({
+      description,
+      inputSchema: z.object({}),
+    });
+  });
+
+  // 1. First, decide if a specialist is needed
+  const routingDecision = await ctx.run(
+    "pick_specialist",
+    async () =>
+      generateText({
+        model: openai("gpt-4o"),
+        prompt: question.message,
+        tools: specialistTools,
+      }),
+    { maxRetryAttempts: 3 },
+  );
+
+  // 2. No specialist needed? Give a general answer
+  if (!routingDecision.toolCalls || routingDecision.toolCalls.length === 0) {
+    return routingDecision.text;
+  }
+
+  // 3. Get the specialist's name
+  const specialist = routingDecision.toolCalls[0].toolName as Specialist;
+
+  // 4. Ask the specialist to answer
+  const answer = await ctx.run(
+    `ask_${specialist}`,
+    async () =>
+      generateText({
+        model: openai("gpt-4o"),
+        system: SPECIALISTS[specialist].system,
+        prompt: question.message,
+      }),
+    { maxRetryAttempts: 3 },
+  );
+
+  return answer.text;
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/routing_to_remote_agent.py?collapse_prequel"}
+remote_agent_router = restate.Service("RemoteAgentRouter")
+
+# Classify the request
+SPECIALISTS = {
+    "BillingAgent": "Expert in payments, charges, and refunds",
+    "AccountAgent": "Expert in login issues and security",
+    "ProductAgent": "Expert in features and how-to guides",
+}
+
+
+@remote_agent_router.handler()
+async def answer_question(ctx: restate.Context, question: Question) -> str:
+    """Classify request and route to appropriate specialized agent."""
+
+    # 1. First, decide if a specialist is needed
+    routing_decision = await ctx.run_typed(
+        "pick_specialist",
+        llm_call,
+        RunOptions(max_attempts=3),  # Retry up to 3 times if needed
+        prompt=question.text,
+        tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
+    )
+
+    # 2. No specialist needed? Give a general answer
+    if not routing_decision.tool_calls:
+        return routing_decision.content
+
+    # 3. Get the specialist's name
+    specialist = routing_decision.tool_calls[0].function.name
+
+    # 4. Call the specialist over HTTP
+    response = await ctx.generic_call(
+        specialist,
+        "run",
+        arg=question.text.encode(),
+    )
+    return response.decode("utf-8")
+```
+
+</CodeGroup>
+
+
+<Accordion title="Run the example">
+    <Steps>
+    <StartExample/>
+
+    </Steps>
+</Accordion>
