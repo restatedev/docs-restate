@@ -1,3 +1,117 @@
-Running multiple strategies in parallel
-First-to-succeed wins pattern
-Resource cleanup for abandoned branches
+---
+title: "Competitive Racing"
+sidebarTitle: "Competitive Racing"
+description: "Start multiple AI approaches simultaneously, return the first successful result, and cancel the rest for optimal performance."
+tags: ["recipe"]
+---
+
+import StartExample from "/snippets/ai-guides/start-example.mdx";
+
+Execute multiple AI approaches or strategies simultaneously and return the result from whichever completes first successfully. This pattern is ideal when you have multiple ways to solve the same problem and want to minimize latency by racing them against each other.
+
+Useful for:
+- Querying multiple AI models (e.g., GPT-4, Claude, Gemini) and returning the fastest response
+- Running different agents, prompts or strategies in parallel and using the first successful outcome
+
+## How does Restate help?
+
+The benefits of using Restate for competitive racing patterns are:
+- **First-to-succeed optimization**: Restate lets you race multiple approaches and automatically return the first successful result
+- **Durable coordination**: Restate turns Promises/Futures into durable, distributed constructs that persist across failures and process restarts
+- **Cancel slow tasks**: Failed or slower approaches can be cancelled, preventing resource waste
+- **Serverless scaling**: Deploy racing strategies on serverless infrastructure for automatic scaling while the main process remains suspended
+- Works with **any AI SDK** (OpenAI, LangChain, Vercel AI SDK, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.)
+
+## Example
+
+When you need a quick response and have access to multiple AI models, race them against each other to get the fastest result:
+
+<CodeGroup>
+```ts TypeScript
+async function raceModels(
+  ctx: Context,
+  { prompt }: { prompt: string },
+): Promise<string> {
+  // Create racing tasks with different models
+  const racingTasks = [
+    ctx.run(
+      "GPT-4-turbo",
+      async () => llmCall(prompt, { model: "gpt-4-turbo" }),
+      { maxRetryAttempts: 2 },
+    ),
+    ctx.run(
+      "Claude-3-sonnet",
+      async () => llmCall(prompt, { model: "claude-3-sonnet-20240229" }),
+      { maxRetryAttempts: 2 },
+    ),
+    ctx.run(
+      "Gemini-pro",
+      async () => llmCall(prompt, { model: "gemini-pro" }),
+      { maxRetryAttempts: 2 },
+    ),
+  ];
+
+  // Race all models - first successful response wins
+  const firstResult = await RestatePromise.race(racingTasks);
+  return firstResult.text;
+}
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/racing_agents.py?collapse_prequel"}
+racing_svc = restate.Service("ModelRacingService")
+
+@racing_svc.handler()
+async def race_models(ctx: restate.Context, request: PromptRequest) -> str:
+    """Race multiple AI models and return the first successful result."""
+
+    # Create racing tasks with different models
+    racing_tasks = [
+        ctx.run_typed(
+            "GPT-4-turbo",
+            llm_call,
+            RunOptions(max_attempts=2),
+            prompt=request.prompt,
+            model="gpt-4-turbo"
+        ),
+        ctx.run_typed(
+            "Claude-3-sonnet",
+            llm_call,
+            RunOptions(max_attempts=2),
+            prompt=request.prompt,
+            model="claude-3-sonnet-20240229"
+        ),
+        ctx.run_typed(
+            "Gemini-pro",
+            llm_call,
+            RunOptions(max_attempts=2),
+            prompt=request.prompt,
+            model="gemini-pro"
+        ),
+    ]
+
+    # Race all models - first successful response wins
+    first_result = await restate.race(*racing_tasks)
+    return first_result.content
+```
+</CodeGroup>
+
+In the Restate UI, you can see how multiple approaches are started simultaneously, with the first successful result being returned while other tasks are automatically cancelled:
+
+<img src="/img/ai/patterns/racing.png" alt="Competitive racing execution - UI"/>
+
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
+
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `run` handler of the `RacingAgent` service to open the playground and send a prompt to race multiple models:
+        <img src="/img/ai/patterns/racing_playground.png" alt="Agent racing - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how multiple models are queried simultaneously, with the fastest response winning the race:
+
+        <img src="/img/ai/patterns/racing.png" alt="Competitive racing execution - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
