@@ -1,5 +1,5 @@
 ---
-title: "Resilient human-in-the-loop steps"
+title: "Human-in-the-loop steps"
 sidebarTitle: "Human-in-the-loop"
 description: "Build resilient human approval steps in your agent workflows."
 tags: ["recipe"]
@@ -25,26 +25,24 @@ Use `ctx.awakeable()` to create durable promises that can be resolved externally
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/human-in-the-loop.ts#here"} 
+const tools = {
+  getHumanReview: tool({
+    description: "Request human review if policy violation is uncertain.",
+    inputSchema: z.void(),
+  }),
+};
 async function moderate(ctx: Context, { message }: { message: string }) {
-  const result = await ctx.run(
+  const { text, toolCalls } = await ctx.run(
     "LLM call",
     async () =>
-      generateText({
-        model: openai("gpt-4o"),
-        prompt: `You are a content moderation agent. Decide if the content violates policy: ${message}`,
-        tools: {
-          getHumanReview: tool({
-            name: "getHumanReview",
-            description:
-              "Request human review if policy violation is uncertain.",
-            inputSchema: z.void(),
-          }),
-        },
-      }),
+      llmCall(
+        `You are a content moderation agent. Decide if the content violates policy: ${message}`,
+        tools,
+      ),
     { maxRetryAttempts: 3 },
   );
 
-  if (result.toolCalls?.[0]?.toolName === "getHumanReview") {
+  if (toolCalls?.[0]?.toolName === "getHumanReview") {
     // Create a recoverable approval promise
     const approval = ctx.awakeable<string>();
     await ctx.run("Notify moderator", () =>
@@ -57,7 +55,7 @@ async function moderate(ctx: Context, { message }: { message: string }) {
     return await approval.promise;
   }
 
-  return result;
+  return text;
 }
 ```
 
@@ -117,7 +115,7 @@ Check out the SDK documentation for more details on the awakeables and durable p
 </Tip>
 
 
-## Running the example
+<Accordion title="Run the example">
 
 <Steps>
     <StartExample/>
@@ -175,3 +173,4 @@ Check out the SDK documentation for more details on the awakeables and durable p
 
 </Step>
 </Steps>
+</Accordion>
