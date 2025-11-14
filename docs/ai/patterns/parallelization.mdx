@@ -1,0 +1,166 @@
+---
+title: "Parallelizing tools/agents"
+sidebarTitle: "Parallelization"
+description: "Recoverable routing of tasks to tools and agents with Restate."
+tags: ["recipe"]
+---
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/parallel-tools.ts#here"}
+// Define your tools as your AI SDK requires (here Vercel AI SDK)
+const tools = {
+  get_weather: tool({
+    description: "Get the current weather for a location",
+    inputSchema: z.object({ city: z.string() }),
+  }),
+};
+
+async function run(ctx: Context, { message }: { message: string }) {
+  const messages: ModelMessage[] = [{ role: "user", content: message }];
+
+  while (true) {
+    // Call LLM with durable execution
+    const resp = await ctx.run("llm-call", () => llmCall(messages, tools), {
+      maxRetryAttempts: 3,
+    });
+    messages.push(...resp.messages);
+
+    if (!resp.toolCalls || resp.toolCalls.length === 0) {
+      return resp.text;
+    }
+
+    // Run all tool calls in parallel
+    // Create parallel promises for all weather requests
+    let toolPromises = [];
+    for (let { toolCallId, toolName, input } of resp.toolCalls) {
+      const { city } = input as { city: string };
+      const promise = ctx.run(`Get weather ${city}`, () => fetchWeather(city));
+      toolPromises.push({ toolCallId, toolName, promise });
+    }
+
+    // Wait for all tools to complete in parallel
+    await RestatePromise.all(toolPromises.map(({ promise }) => promise));
+
+    // Append all results to messages
+    for (const { toolCallId, toolName, promise } of toolPromises) {
+      messages.push(toolResult(toolCallId, toolName, await promise));
+    }
+  }
+}
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/parallel_tools.py?collapse_prequel"} 
+parallel_tools_agent = restate.Service("ParallelToolAgent")
+
+
+@parallel_tools_agent.handler()
+async def run(ctx: Context, prompt: WeatherPrompt) -> str | None:
+    """Main agent loop with tool calling"""
+    messages = [{"role": "user", "content": prompt.message}]
+
+    while True:
+        # Call LLM with durable execution
+        response = await ctx.run_typed(
+            "llm-call",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=messages,
+            tools=[
+                tool(
+                    name="get_weather",
+                    description="Get the current weather for a location",
+                    parameters=WeatherRequest.model_json_schema(),
+                )
+            ],
+        )
+        messages.append(response.dict())
+
+        if not response.tool_calls:
+            return response.content
+
+        # Run all tool calls in parallel
+        tool_promises = {
+            tool_call.id: ctx.run_typed(
+                "Get weather",
+                get_weather,
+                req=WeatherRequest.model_validate_json(tool_call.function.arguments),
+            )
+            for tool_call in response.tool_calls
+            if tool_call.function.name == "get_weather"
+        }
+
+        #  Wait for all tools to complete and append results
+        await restate.gather(*tool_promises.values())
+        for tool_id, promise in tool_promises.items():
+            output = await promise
+            messages.append(tool_result(tool_id, "get_weather", output))
+```
+</CodeGroup>
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/parallel-agents.ts#here"} 
+async function analyzeText(
+  ctx: Context,
+  { message }: { message: string },
+): Promise<string[]> {
+  // Create parallel tasks - each runs independently
+  const tasks = [
+    ctx.run(
+      "Analyze sentiment",
+      async () =>
+        llmCall(`Analyze sentiment (positive/negative/neutral): ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Extract key points",
+      async () => llmCall(`Extract 3 key points as bullets: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Summarize",
+      async () => llmCall(`Summarize in one sentence: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+  ];
+
+  // Wait for all tasks to complete and return the results
+  const results = await RestatePromise.all(tasks);
+  return results.map((res) => res.text);
+}
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/parallel_agents.py?collapse_prequel"} 
+parallelization_svc = restate.Service("ParallelAgentsService")
+
+
+@parallelization_svc.handler()
+async def analyze_text(ctx: restate.Context, text: Text) -> list[str]:
+    """Analyzes multiple aspects of the text in parallel."""
+
+    # Create parallel tasks - each runs independently
+    tasks = [
+        ctx.run_typed(
+            "Analyze sentiment",
+            llm_call,
+            RunOptions(max_attempts=3),
+            prompt=f"Analyze sentiment (positive/negative/neutral): {text}",
+        ),
+        ctx.run_typed(
+            "Extract key points",
+            llm_call,
+            RunOptions(max_attempts=3),
+            prompt=f"Extract 3 key points as bullets: {text}",
+        ),
+        ctx.run_typed(
+            "Summarize",
+            llm_call,
+            RunOptions(max_attempts=3),
+            prompt=f"Summarize in one sentence: {text}",
+        ),
+    ]
+
+    # Wait for all tasks to complete
+    await restate.gather(*tasks)
+
+    # Gather and collect results
+    return [(await task).content for task in tasks]
+```
+</CodeGroup>

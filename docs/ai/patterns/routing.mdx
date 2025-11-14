@@ -40,6 +40,7 @@ The way you specify your tools depends on the AI SDK you are using. Here is an e
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-tools.ts#here"} 
+// TOOLS
 // Define your tools as your AI SDK requires (here Vercel AI SDK)
 const tools = {
   fetchServiceStatus: tool({
@@ -59,10 +60,12 @@ const tools = {
   }),
 };
 
+// AGENT
 async function route(ctx: Context, req: { message: string; userId: string }) {
   const messages: ModelMessage[] = [{ role: "user", content: req.message }];
 
   while (true) {
+      // Call the LLM using your favorite AI SDK
     const result = await ctx.run(
       "LLM call",
       async () => llmCall(messages, tools),
@@ -74,7 +77,8 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
 
     for (const { toolName, toolCallId, input } of result.toolCalls) {
       let output: string;
-      switch (toolName) {
+        // Use ctx.run to ensure durable execution of tool calls
+        switch (toolName) {
         case "queryUserDatabase":
           output = await ctx.run(toolName, () => queryUserDb(req.userId));
           break;
@@ -143,14 +147,7 @@ async def route(ctx: restate.Context, question: Question) -> str:
                 case _:
                     result = f"Tool not found: {fn.name}"
 
-            messages.append(
-                {
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": fn.name,
-                    "content": result,
-                }
-            )
+            messages.append(tool_result(tool_call.id, fn.name, result))
 ```
 
 </CodeGroup>
@@ -251,9 +248,9 @@ router = restate.Service("AgentRouter")
 
 # Our team of AI specialists
 SPECIALISTS = {
-    "billing": "Expert in payments, charges, and refunds",
-    "account": "Expert in login issues and security",
-    "product": "Expert in features and how-to guides",
+    "BillingAgent": "Expert in payments, charges, and refunds",
+    "AccountAgent": "Expert in login issues and security",
+    "ProductAgent": "Expert in features and how-to guides",
 }
 
 
@@ -263,11 +260,11 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
 
     # 1. First, decide if a specialist is needed
     routing_decision = await ctx.run_typed(
-        "pick_specialist",
+        "Pick specialist",
         llm_call,
         RunOptions(max_attempts=3),  # Retry up to 3 times if needed
         system="You are a customer service routing system. Choose the appropriate specialist, or respond directly if no specialist is needed.",
-        prompt=question.text,
+        prompt=question.message,
         tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
     )
 
@@ -280,11 +277,11 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
 
     # 4. Ask the specialist to answer
     answer = await ctx.run_typed(
-        f"ask_{specialist}",
+        f"Ask {specialist}",
         llm_call,
         RunOptions(max_attempts=3),
         system=f"You are a {SPECIALISTS.get(specialist, 'support')} specialist.",
-        prompt=question.text,
+        prompt=question.message,
     )
 
     return answer.content
@@ -399,10 +396,10 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
 
     # 1. First, decide if a specialist is needed
     routing_decision = await ctx.run_typed(
-        "pick_specialist",
+        "Pick specialist",
         llm_call,
         RunOptions(max_attempts=3),  # Retry up to 3 times if needed
-        prompt=question.text,
+        prompt=question.message,
         tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
     )
 
@@ -417,7 +414,7 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
     response = await ctx.generic_call(
         specialist,
         "run",
-        arg=question.text.encode(),
+        arg=question.model_dump_json().encode(),
     )
     return response.decode("utf-8")
 ```
@@ -426,9 +423,40 @@ async def answer_question(ctx: restate.Context, question: Question) -> str:
 
 Each agent is then implemented in its own service. For example, here is the billing agent implementation:
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/utils/utils.ts#here"}
-    ```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/util/util.py#here"}
-    ```
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/utils/utils.ts#here"} 
+export const billingAgent = restate.service({
+  name: "BillingAgent",
+  handlers: {
+    run: async (ctx: restate.Context, question: string): Promise<string> => {
+      const { text } = await ctx.run(
+        "account_response",
+        async () =>
+          llmCall(`You are a billing support specialist.
+            Acknowledge the billing issue, explain charges clearly, provide next steps with timeline.
+            ${question}`),
+        { maxRetryAttempts: 3 },
+      );
+      return text;
+    },
+  },
+});
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/util/util.py#here"} 
+billing_agent_svc = restate.Service("BillingAgent")
+
+
+@billing_agent_svc.handler("run")
+async def get_billing_support(ctx: restate.Context, question: Question) -> str | None:
+    result = await ctx.run_typed(
+        "LLM call",
+        llm_call,
+        RunOptions(max_attempts=3),
+        system=f"""You are a billing support specialist.
+        Acknowledge the billing issue, explain charges clearly, provide next steps with timeline.""",
+        prompt=question.message,
+    )
+    return result.content
+```
 </CodeGroup>
 
 
