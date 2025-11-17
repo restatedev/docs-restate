@@ -56,41 +56,50 @@ async function raceModels(
   return firstResult.text;
 }
 ```
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/racing_agents.py?collapse_prequel"}
-racing_svc = restate.Service("ModelRacingService")
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/racing_agents.py?collapse_prequel"} 
+racing_agent = Service("RacingAgent")
 
-@racing_svc.handler()
-async def race_models(ctx: restate.Context, request: PromptRequest) -> str:
-    """Race multiple AI models and return the first successful result."""
 
-    # Create racing tasks with different models
-    racing_tasks = [
-        ctx.run_typed(
-            "GPT-4-turbo",
-            llm_call,
-            RunOptions(max_attempts=2),
-            prompt=request.prompt,
-            model="gpt-4-turbo"
-        ),
-        ctx.run_typed(
-            "Claude-3-sonnet",
-            llm_call,
-            RunOptions(max_attempts=2),
-            prompt=request.prompt,
-            model="claude-3-sonnet-20240229"
-        ),
-        ctx.run_typed(
-            "Gemini-pro",
-            llm_call,
-            RunOptions(max_attempts=2),
-            prompt=request.prompt,
-            model="gemini-pro"
-        ),
-    ]
+@racing_agent.handler()
+async def run(ctx: Context, query: Question):
+    claude = ctx.service_call(deep_analysis, arg=query)
+    openai = ctx.service_call(quick_response, arg=query)
 
-    # Race all models - first successful response wins
-    first_result = await restate.race(*racing_tasks)
-    return first_result.content
+    done, pending = await restate.wait_completed(claude, openai)
+
+    # collect the completed results
+    results = [await f for f in done]
+
+    # cancel the pending calls
+    for f in pending:
+        call_future = typing.cast(RestateDurableCallFuture, f)
+        ctx.cancel_invocation(await call_future.invocation_id())
+
+    return results[0]
+
+
+
+
+@racing_agent.handler()
+async def deep_analysis(ctx: Context, req: Question) -> str:
+    output = await ctx.run_typed(
+        "deep_analysis",
+        llm_call,
+        RunOptions(max_attempts=3),
+        prompt=f"Analyze this thoroughly: {req}",
+    )
+    return output.content
+
+
+@racing_agent.handler()
+async def quick_response(ctx: Context, req: Question) -> str:
+    output = await ctx.run_typed(
+        "quick_response",
+        llm_call,
+        RunOptions(max_attempts=1),
+        prompt=f"Quick answer: {req}",
+    )
+    return output.content
 ```
 </CodeGroup>
 

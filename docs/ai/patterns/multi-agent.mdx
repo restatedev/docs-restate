@@ -38,15 +38,15 @@ Routing to a local agent is similar to routing to local tools, but instead of ca
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
 const tools = {
-  billing: tool({
+  billingAgent: tool({
     description: "Expert in payments, charges, and refunds",
     inputSchema: z.object({}),
   }),
-  account: tool({
+  accountAgent: tool({
     description: "Expert in login issues and security",
     inputSchema: z.object({}),
   }),
-  product: tool({
+  productAgent: tool({
     description: "Expert in features and how-to guides",
     inputSchema: z.object({}),
   }),
@@ -54,18 +54,18 @@ const tools = {
 type Specialist = keyof typeof tools;
 
 const PROMPTS = {
-  billing:
-    "You are a billing supportagent specializing in payments, charges, and refunds.",
-  account:
+  billingAgent:
+    "You are a billing support agent specializing in payments, charges, and refunds.",
+  accountAgent:
     "You are an account support agent specializing in login issues and security.",
-  product:
+  productAgent:
     "You are a product support agent specializing in features and how-to guides.",
 };
 
-async function answerQuestion(ctx: Context, { message }: { message: string }) {
+async function answer(ctx: Context, { message }: { message: string }) {
   // 1. First, decide if a specialist is needed
   const routingDecision = await ctx.run(
-    "pick_specialist",
+    "Pick specialist",
     async () => llmCall(message, tools),
     { maxRetryAttempts: 3 },
   );
@@ -80,7 +80,7 @@ async function answerQuestion(ctx: Context, { message }: { message: string }) {
 
   // 4. Ask the specialist to answer
   const { text } = await ctx.run(
-    `ask_${specialist}`,
+    `Ask ${specialist}`,
     async () =>
       llmCall([
         { role: "user", content: message },
@@ -105,14 +105,14 @@ SPECIALISTS = {
 
 
 @router.handler()
-async def answer_question(ctx: restate.Context, question: Question) -> str:
+async def answer(ctx: restate.Context, question: Question) -> str:
     """Classify request and route to appropriate specialized agent."""
 
     # 1. First, decide if a specialist is needed
     routing_decision = await ctx.run_typed(
         "Pick specialist",
-        llm_call,
-        RunOptions(max_attempts=3),  # Retry up to 3 times if needed
+        llm_call,  # Use your preferred LLM SDK here
+        RunOptions(max_attempts=3),
         system="You are a customer service routing system. Choose the appropriate specialist, or respond directly if no specialist is needed.",
         prompt=question.message,
         tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
@@ -174,15 +174,15 @@ The example below shows how to route requests to remote agents dynamically by us
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
 const tools = {
-  billing: tool({
+  billingAgent: tool({
     description: "Expert in payments, charges, and refunds",
     inputSchema: z.object({}),
   }),
-  account: tool({
+  accountAgent: tool({
     description: "Expert in login issues and security",
     inputSchema: z.object({}),
   }),
-  product: tool({
+  productAgent: tool({
     description: "Expert in features and how-to guides",
     inputSchema: z.object({}),
   }),
@@ -190,18 +190,18 @@ const tools = {
 type Specialist = keyof typeof tools;
 
 const PROMPTS = {
-  billing:
-    "You are a billing supportagent specializing in payments, charges, and refunds.",
-  account:
+  billingAgent:
+    "You are a billing support agent specializing in payments, charges, and refunds.",
+  accountAgent:
     "You are an account support agent specializing in login issues and security.",
-  product:
+  productAgent:
     "You are a product support agent specializing in features and how-to guides.",
 };
 
-async function answerQuestion(ctx: Context, { message }: { message: string }) {
+async function answer(ctx: Context, { message }: { message: string }) {
   // 1. First, decide if a specialist is needed
   const routingDecision = await ctx.run(
-    "pick_specialist",
+    "Pick specialist",
     async () => llmCall(message, tools),
     { maxRetryAttempts: 3 },
   );
@@ -216,7 +216,7 @@ async function answerQuestion(ctx: Context, { message }: { message: string }) {
 
   // 4. Ask the specialist to answer
   const { text } = await ctx.run(
-    `ask_${specialist}`,
+    `Ask ${specialist}`,
     async () =>
       llmCall([
         { role: "user", content: message },
@@ -241,14 +241,14 @@ SPECIALISTS = {
 
 
 @remote_agent_router.handler()
-async def answer_question(ctx: restate.Context, question: Question) -> str:
+async def answer(ctx: restate.Context, question: Question) -> str:
     """Classify request and route to appropriate specialized agent."""
 
     # 1. First, decide if a specialist is needed
     routing_decision = await ctx.run_typed(
         "Pick specialist",
-        llm_call,
-        RunOptions(max_attempts=3),  # Retry up to 3 times if needed
+        llm_call,  # Use your preferred AI SDK here
+        RunOptions(max_attempts=3),
         prompt=question.message,
         tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
     )
@@ -277,7 +277,7 @@ Each agent is then implemented in its own service. For example, here is the bill
 export const billingAgent = restate.service({
   name: "BillingAgent",
   handlers: {
-    run: async (ctx: restate.Context, question: string): Promise<string> => {
+    run: async (ctx: Context, question: string): Promise<string> => {
       const { text } = await ctx.run(
         "account_response",
         async () =>

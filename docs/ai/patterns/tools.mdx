@@ -1,52 +1,66 @@
 ---
-title: "Tools & Routing"
-sidebarTitle: "Tools & Routing"
+title: "Tools and Workflows"
+sidebarTitle: "Tools and Workflows"
 description: "Implement recoverable routing of tasks to tools and agents with Restate."
 tags: ["recipe"]
 ---
 
 import StartExample from "/snippets/ai-guides/start-example.mdx";
 
-Dynamically route requests to appropriate tools and agents based on context and intent. Restate ensures that all routing decisions, tool calls, and agent interactions are durably logged, enabling automatic retries and recovery from failures.
+Build resilient AI agents that route requests to appropriate tools and workflows. Restate ensures all routing decisions, tool calls, and interactions are durably logged with automatic retries and recovery.
 
 ## How does Restate help?
-At the core of routing is an agent loop that repeatedly calls the LLM, checks for tool/agent calls, executes them, and feeds the results back to the LLM until a final answer is produced.
 
-### Durable routing decisions
-Restate lets you write standard code while making it resilient through durable execution. The key is wrapping LLM calls and tool execution steps with Restate Context actions.
+Restate provides **durable execution** for tool routing and execution:
 
-This design means you don’t need any special logic to implement routing: if the LLM decides to forward a request to a tool or agent, the decision is automatically persisted in Restate’s log, and the workflow can be retried or resumed after failures.
+- **Durable routing decisions**: LLM routing choices are persisted and recovered after failures
+- **Resilient tool execution**: Tool calls are wrapped with retries and failure recovery
+- **Distributed tool communication**: Call remote tools as regular functions with end-to-end durability
+- **Workflow orchestration**: Implement complex multi-step processes with state management and scheduling
 
-### Durable calls to remote agents and tools
+Tools can either be executed **locally** within the same service/process or as **remote services**. Restate supports both options, allowing you to choose the best fit for your architecture and use case.
 
-For distributed systems, Restate also provides **durable messaging and RPC**, enabling multi-agent systems with resilient communication.
-Restate extends Durable Execution with messaging and RPC, making remote agent calls look like normal function calls, while providing end-to-end resilience.
+### Option 1: Local tools with durable execution
 
-- Agents and tools can run as independent services across different infrastructures (Kubernetes, Vercel, AWS Lambda, etc.), in different languages
-- Communication is durable and failure-resistant
-- Work is idempotent, avoiding duplicate processing
-- The calling agent can suspend while awaiting results
-- Reliably schedule delayed or periodic tasks
+**What it provides:**
+- Execute tools within the same service/process
+- Automatic retries and failure recovery for each tool call
 
+**Best for:** Tools with few steps, built-in SDK tools (e.g. search, database queries)
 
-## Routing to local tools
+**What it looks like:** Tools defined as local functions. You can either:
+1. Wrap the entire tool execution in `ctx.run()` for durability.
+2. Do multiple Restate Context actions within the tool for finer-grained durability and retries.
 
-You can automatically route requests to tools based on LLM outputs. The agent will continue calling the LLM and executing tools until a final answer is returned.
+### Option 2: Remote tools as separate services
 
-Restate works well with any AI SDK. Wrap the LLM calls in `ctx.run()` to ensure durability, and process tool calls in a loop until the LLM produces a final answer.
-The tool calls can be wrapped in `ctx.run()` as well to ensure durability and automatic retries. Or they can implement multi-step workflows with multiple Restate Context actions for more fine-grained recovery.
+**What it provides:**
+- Tools can scale independently
+- Tools can run on different infrastructure (e.g. serverless or Kubernetes) or languages
+- Tools can run asynchronously: agent can kick off work and return early
+- Durable communication between services
 
-The way you specify your tools depends on the AI SDK you are using. Here is an example for Typescript's Vercel AI SDK and Python's LiteLLM SDK:
+**Best for:** Complex tools, multi-step workflows, asynchronous or long-running tasks
+
+**What it looks like:** Tools deployed as separate Restate services, called durably over HTTP from the main agent service.
+
+## Example
+
+This example implements an example of a local tool (querying the user database) and a remote workflow (creating a support ticket) for a technical support agent.
+
+1. **Define tools** according to your AI SDK requirements
+2. **Wrap LLM calls** in `ctx.run()` for persistence
+3. **Process tool calls** in a loop until the LLM returns a final answer
+    - Local tools get wrapped in `ctx.run()` for durability and retries (see tool call to query user database)
+    - Remote tools get called with the SDK client (see tool call to create support ticket)
+
+The following examples show how to implement local tool routing with popular AI SDKs:
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-tools.ts#here"} 
 // TOOLS
 // Define your tools as your AI SDK requires (here Vercel AI SDK)
 const tools = {
-  fetchServiceStatus: tool({
-    description: "Check service status and outages",
-    inputSchema: z.void(),
-  }),
   queryUserDatabase: tool({
     description: "Get user account and billing info",
     inputSchema: z.void(),
@@ -65,7 +79,7 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
   const messages: ModelMessage[] = [{ role: "user", content: req.message }];
 
   while (true) {
-      // Call the LLM using your favorite AI SDK
+    // Call the LLM using your favorite AI SDK
     const result = await ctx.run(
       "LLM call",
       async () => llmCall(messages, tools),
@@ -77,17 +91,17 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
 
     for (const { toolName, toolCallId, input } of result.toolCalls) {
       let output: string;
-        // Use ctx.run to ensure durable execution of tool calls
-        switch (toolName) {
+      // Use ctx.run to ensure durable execution of tool calls
+      switch (toolName) {
         case "queryUserDatabase":
+          // Example of a local tool
           output = await ctx.run(toolName, () => queryUserDb(req.userId));
           break;
-        case "fetchServiceStatus":
-          output = await ctx.run(toolName, () => fetchServiceStatus());
-          break;
         case "createSupportTicket":
-          const ticket = input as SupportTicket;
-          output = await ctx.run(toolName, () => createTicket(ticket));
+          // Example of a remote tool/workflow
+          output = await ctx
+            .serviceClient(crmService)
+            .createSupportTicket(input as SupportTicket);
           break;
         default:
           output = `Tool not found: ${toolName}`;
@@ -101,8 +115,8 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
 ```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/routing_to_tool.py?collapse_prequel"} 
 tool_router = restate.Service("ToolRouter")
 
+# Define tools as required by your LLM SDK
 TOOLS = [
-    tool("fetch_service_status", "Check service status and outages"),
     tool("query_user_database", "Get user account and billing info"),
     tool(
         "create_support_ticket",
@@ -120,7 +134,7 @@ async def route(ctx: restate.Context, question: Question) -> str:
     while True:
         result = await ctx.run_typed(
             "LLM call",
-            llm_call,
+            llm_call,  # Use your preferred LLM SDK here
             RunOptions(max_attempts=3, type_hint=Message),
             messages=messages,
             tools=TOOLS,
@@ -134,16 +148,14 @@ async def route(ctx: restate.Context, question: Question) -> str:
             fn = tool_call.function
             match fn.name:
                 case "query_user_database":
+                    # Example of a local tool
                     result = await ctx.run_typed(
-                        fn.name, query_user_db, user_id=question.user_id
+                        "Query DB", query_user_db, user_id=question.user_id
                     )
-                case "fetch_service_status":
-                    result = await ctx.run_typed(fn.name, fetch_service_status)
                 case "create_support_ticket":
+                    # Example of a remote tool/workflow
                     ticket = SupportTicket.model_validate_json(fn.arguments)
-                    result = await ctx.run_typed(
-                        fn.name, create_support_ticket, ticket=ticket
-                    )
+                    result = await ctx.service_call(create_support_ticket, arg=ticket)
                 case _:
                     result = f"Tool not found: {fn.name}"
 
@@ -164,6 +176,8 @@ When you run the example below, you can see how the LLM decides to forward the r
         <Step title="Send a request">
         In the UI (`http://localhost:9070`), click on the `route` handler of the `ToolRouter` service to open the playground and send a default request:
         <img src="/img/ai/patterns/routing_local_tools_playground.png" alt="Dynamic routing LLM calls - UI"/>
+
+        Or send other requests to test different tool routing scenarios.
         </Step>
 
         <Step title="Check the Restate UI">
@@ -174,7 +188,3 @@ When you run the example below, you can see how the LLM decides to forward the r
 
     </Steps>
 </Accordion>
-
-## Routing to remote tools and workflows
-
-Have a look at the [Workflows as Tools](/ai/patterns/workflows-as-tools) page to learn how to route requests to remote tools and workflows over HTTP while ensuring end-to-end durability and failure recovery.
