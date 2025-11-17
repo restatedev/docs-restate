@@ -4,3 +4,72 @@ sidebarTitle: "Rollback & Compensation"
 description: "Implement rollback mechanisms for agent failures."
 tags: ["recipe"]
 ---
+
+import StartExample from "/snippets/ai-guides/start-example.mdx";
+
+Implement compensation and rollback mechanisms for agents that need to undo partial work when failures occur. When agents perform multiple actions and something goes wrong, you need to systematically undo the changes to maintain consistency.
+
+## How does Restate help?
+
+Restate provides durable execution for both the main workflow and compensation actions:
+
+- **Guaranteed compensation**: If the main workflow fails, compensation handlers are reliably executed
+- **Partial rollback support**: Roll back only the actions that completed successfully before the failure
+- **Idempotent compensation**: Compensation actions can be safely retried without side effects
+- **Observability**: Track both forward progress and rollback operations in the Restate UI
+- Works with **any AI SDK** and **any programming language** supported by Restate
+
+## Example
+
+Use Restate's saga pattern to implement compensations. Register compensation actions as you perform forward actions, and Restate will execute them in reverse order if the workflow fails.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/rollback.ts#here"}
+
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/rollback.py?collapse_prequel"}
+
+```
+
+</CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/rollback.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/rollback.py)
+
+The Restate UI shows both the forward execution and rollback operations when failures occur:
+<img src="/img/ai/patterns/rollback.png" alt="Rollback execution - UI"/>
+
+<Tip>
+    Compensation actions should be idempotent since they may be retried. Design them to safely handle cases where the resource to be cleaned up no longer exists.
+</Tip>
+
+<Accordion title="Run the example">
+<Steps>
+<StartExample/>
+<Step title="Send a request">
+    In the UI (`http://localhost:9070`), click on the `process_order` handler of the `RollbackService` to open the playground and send a default request:
+
+    <img src="/img/ai/patterns/rollback_playground.png" alt="Rollback pattern - Playground"/>
+</Step>
+
+<Step title="Trigger a failure">
+    Modify the request to include invalid payment information to see the rollback in action:
+    ```json
+    {
+      "email": "user@example.com",
+      "name": "John Doe",
+      "payment": {
+        "cardNumber": "invalid",
+        "amount": 100
+      }
+    }
+    ```
+</Step>
+
+<Step title="Check the Restate UI">
+    You can see in the Invocations Tab how the workflow executes forward steps, encounters a failure, then executes compensation actions in reverse order:
+    <img src="/img/ai/patterns/rollback.png" alt="Rollback execution - UI"/>
+</Step>
+</Steps>
+</Accordion>
