@@ -7,33 +7,38 @@ tags: ["recipe"]
 
 import StartExample from "/snippets/ai-guides/start-example.mdx";
 
-Dynamically route requests to appropriate tools and agents based on context and intent. Restate ensures that all routing decisions, tool calls, and agent interactions are durably logged, enabling automatic retries and recovery from failures.
+Build resilient multi-agent systems that automatically recover from failures and scale across distributed infrastructure. Restate provides two approaches for routing requests to specialized agents: **local agents** for simple routing within a single service, and **remote agents** for separate scaling or isolation.
 
-## How does Restate help?
-At the core of routing is an agent loop that repeatedly calls the LLM, checks for tool/agent calls, executes them, and feeds the results back to the LLM until a final answer is produced.
+## What Restate offers for multi-agent systems
 
-### Durable routing decisions
-Restate lets you write standard code while making it resilient through durable execution. The key is wrapping LLM calls and tool execution steps with Restate Context actions.
+At the core of every multi-agent system is a routing mechanism that decides which agent should handle each request. Restate makes this routing resilient by ensuring all decisions and agent interactions are durably logged and automatically retried.
 
-This design means you don’t need any special logic to implement routing: if the LLM decides to forward a request to a tool or agent, the decision is automatically persisted in Restate’s log, and the workflow can be retried or resumed after failures.
+### Two routing approaches
 
-### Durable calls to remote agents and tools
+**Local Agent Routing**
+- Route to different specialized prompts within the same service
+- Best for: Simple agent specialization with shared context and without infrastructure complexity
+- Use when: You want different AI personalities/expertise but don't need separate deployments
 
-For distributed systems, Restate also provides **durable messaging and RPC**, enabling multi-agent systems with resilient communication.
-Restate extends Durable Execution with messaging and RPC, making remote agent calls look like normal function calls, while providing end-to-end resilience.
+**Remote Agent Routing**
+- Route to independent services running across different infrastructure
+- Best for: Systems requiring independent scaling, isolation, or different technology stacks
+- Use when: You need agents in different languages/SDKs, separate scaling, or team ownership boundaries
 
-- Agents and tools can run as independent services across different infrastructures (Kubernetes, Vercel, AWS Lambda, etc.), in different languages
-- Communication is durable and failure-resistant
-- Work is idempotent, avoiding duplicate processing
-- The calling agent can suspend while awaiting results
-- Reliably schedule delayed or periodic tasks
+### How Restate ensures resilience
+
+**Durable routing decisions**: When your LLM decides to route to an agent, that decision is automatically persisted. If anything fails, Restate resumes from exactly where it left off—no duplicate work, no lost context.
+
+**Failure-resistant communication**: Whether calling local or remote agents, all interactions are wrapped in Restate's durable execution. Network failures, service restarts, and timeouts are handled automatically with retries and recovery.
+
+**End-to-end observability**: The Restate UI shows the complete execution trace across all agent calls, making it easy to debug complex multi-agent workflows and understand routing decisions.
 
 
 ## Routing to local agents
 
-Route requests to specialized agents based on LLM outputs.
+Local agent routing lets you create specialized AI assistants within a single service by using different prompts and personalities. The LLM first decides which specialist is needed, then you call the LLM again with a specialized prompt for that agent.
 
-Routing to a local agent is similar to routing to local tools, but instead of calling a tool function, you call the LLM again with a specialized prompt for the selected agent.
+This approach is perfect when you want to create focused expertise areas (like billing, technical support, or sales) without the complexity of separate services.
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
@@ -147,7 +152,7 @@ In the Restate UI, you can see how the LLM decides to forward the request to the
         <StartExample/>
 
         <Step title="Send a request">
-        In the UI (`http://localhost:9070`), click on the `answer_question` handler of the `AgentRouter` service to open the playground and send a default request:
+        In the UI (`http://localhost:9070`), click on the `answer` handler of the `AgentRouter` service to open the playground and send a default request:
         <img src="/img/ai/patterns/routing_local_agent_playground.png" alt="Multi-agent routing - UI"/>
         </Step>
 
@@ -162,14 +167,19 @@ In the Restate UI, you can see how the LLM decides to forward the request to the
 
 ## Routing to remote agents
 
-For more complex scenarios, you might want to scale and deploy agents as independent services that can run in different infrastructures, languages, or AI SDKs.
+When you need true separation of concerns, independent scaling, or want to use different technologies for different agents, deploy them as separate services. This approach gives you maximum flexibility but requires more infrastructure planning.
 
-Restate lets you call remote agents over HTTP while ensuring end-to-end durability and failure recovery.
-You can either use request-response calls for synchronous interactions or asynchronous messaging for long-running tasks or background processing.
+Remote agents run as independent services that communicate over HTTP, but Restate makes these calls look like local function calls while providing end-to-end durability and failure recovery.
 
-Have a look at the service communication docs for your SDK to learn more about the APIs: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
+**Key advantages:**
+- **Independent scaling**: Scale each agent based on its specific workload
+- **Technology flexibility**: Use different languages, frameworks, or AI SDKs for each agent
+- **Team ownership**: Different teams can own and deploy different agents
+- **Fault isolation**: Problems in one agent don't affect others
 
-The example below shows how to route requests to remote agents dynamically by using the name of the selected agent as the service name and implementing the agent logic for each specialist agent in their `run` handler.`
+The example below shows dynamic routing where the LLM's decision determines which remote service to call. Each specialist agent runs as its own service with a standard `run` handler.
+
+For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
@@ -320,7 +330,7 @@ This is useful for debugging and monitoring complex multi-agent workflows.
     <Steps>
     <StartExample/>
         <Step title="Send a request">
-            In the UI (`http://localhost:9070`), click on the `answer_question` handler of the `RemoteAgentRouter` service to open the playground and send a default request:
+            In the UI (`http://localhost:9070`), click on the `answer` handler of the `RemoteAgentRouter` service to open the playground and send a default request:
             <img src="/img/ai/patterns/routing_remote_agent_playground.png" alt="Multi-agent routing - UI"/>
         </Step>
 
