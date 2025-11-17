@@ -1,7 +1,7 @@
 ---
 title: "Competitive Racing"
 sidebarTitle: "Competitive Racing"
-description: "Start multiple AI approaches simultaneously, return the first successful result, and cancel the rest for optimal performance."
+description: "Run agents in parallel, return the fastest response and cancel the others."
 tags: ["recipe"]
 ---
 
@@ -27,33 +27,34 @@ The benefits of using Restate for competitive racing patterns are:
 When you need a quick response and have access to multiple AI models, race them against each other to get the fastest result:
 
 <CodeGroup>
-```ts TypeScript
-async function raceModels(
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/racing-agents.ts#here"} 
+async function run(
   ctx: Context,
-  { prompt }: { prompt: string },
+  { message }: { message: string },
 ): Promise<string> {
-  // Create racing tasks with different models
-  const racingTasks = [
-    ctx.run(
-      "GPT-4-turbo",
-      async () => llmCall(prompt, { model: "gpt-4-turbo" }),
-      { maxRetryAttempts: 2 },
-    ),
-    ctx.run(
-      "Claude-3-sonnet",
-      async () => llmCall(prompt, { model: "claude-3-sonnet-20240229" }),
-      { maxRetryAttempts: 2 },
-    ),
-    ctx.run(
-      "Gemini-pro",
-      async () => llmCall(prompt, { model: "gemini-pro" }),
-      { maxRetryAttempts: 2 },
-    ),
-  ];
+  // Start both service calls concurrently
+  const slowCall = ctx.serviceClient(racingAgent).thinkLonger({ message });
+  const slowResponse = slowCall.map((res) => ({ tag: "slow", res }));
 
-  // Race all models - first successful response wins
-  const firstResult = await RestatePromise.race(racingTasks);
-  return firstResult.text;
+  const fastCall = ctx.serviceClient(racingAgent).respondQuickly({ message });
+  const fastResponse = fastCall.map((res) => ({ tag: "fast", res }));
+
+  const pending = [slowResponse, fastResponse];
+
+  // Wait for the first one to complete
+  const { tag, res } = await RestatePromise.any(pending);
+
+  if (tag === "fast") {
+    console.log("Quick response won the race!");
+    const slowInvocationId = await slowCall.invocationId;
+    ctx.cancel(slowInvocationId);
+  } else {
+    console.log("Deep analysis won the race!");
+    const quickInvocationId = await fastCall.invocationId;
+    ctx.cancel(quickInvocationId);
+  }
+
+  return res ?? "LLM gave no response";
 }
 ```
 ```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/racing_agents.py?collapse_prequel"} 
@@ -62,28 +63,28 @@ racing_agent = Service("RacingAgent")
 
 @racing_agent.handler()
 async def run(ctx: Context, query: Question):
-    claude = ctx.service_call(deep_analysis, arg=query)
-    openai = ctx.service_call(quick_response, arg=query)
+    """Run two approaches in parallel and return the fastest response."""
+    # Start both service calls concurrently
+    slow_response = ctx.service_call(think_longer, arg=query)
+    quick_response = ctx.service_call(respond_quickly, arg=query)
 
-    done, pending = await restate.wait_completed(claude, openai)
-
-    # collect the completed results
-    results = [await f for f in done]
+    done, pending = await restate.wait_completed(slow_response, quick_response)
 
     # cancel the pending calls
     for f in pending:
         call_future = typing.cast(RestateDurableCallFuture, f)
         ctx.cancel_invocation(await call_future.invocation_id())
 
-    return results[0]
+    # return the fastest result
+    return await done[0]
 
 
 
 
 @racing_agent.handler()
-async def deep_analysis(ctx: Context, req: Question) -> str:
+async def think_longer(ctx: Context, req: Question) -> str:
     output = await ctx.run_typed(
-        "deep_analysis",
+        "Deep analysis",
         llm_call,
         RunOptions(max_attempts=3),
         prompt=f"Analyze this thoroughly: {req}",
@@ -92,16 +93,19 @@ async def deep_analysis(ctx: Context, req: Question) -> str:
 
 
 @racing_agent.handler()
-async def quick_response(ctx: Context, req: Question) -> str:
+async def respond_quickly(ctx: Context, req: Question) -> str:
     output = await ctx.run_typed(
-        "quick_response",
+        "Quick response",
         llm_call,
-        RunOptions(max_attempts=1),
+        RunOptions(max_attempts=3),
         prompt=f"Quick answer: {req}",
     )
     return output.content
 ```
 </CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/racing-agents.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/racing_agents.py)
 
 In the Restate UI, you can see how multiple approaches are started simultaneously, with the first successful result being returned while other tasks are automatically cancelled:
 

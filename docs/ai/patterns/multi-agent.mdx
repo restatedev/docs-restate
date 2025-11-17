@@ -174,33 +174,29 @@ Restate makes these calls look like local function calls while providing end-to-
 The example below shows dynamic routing where the LLM's decision determines which remote service to call. Each specialist agent runs as its own service with a standard `run` handler.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-remote-agent.ts#here"}
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-remote-agent.ts#here"} 
+// Define your agents as tools as your AI SDK requires (here Vercel AI SDK)
 const SPECIALISTS = {
-  billingAgent: {
-    description: "Expert in payments, charges, and refunds",
-    prompt:
-      "You are a billing support agent specializing in payments, charges, and refunds.",
-  },
-  accountAgent: {
-    description: "Expert in login issues and security",
-    prompt:
-      "You are an account support agent specializing in login issues and security.",
-  },
-  productAgent: {
-    description: "Expert in features and how-to guides",
-    prompt:
-      "You are a product support agent specializing in features and how-to guides.",
-  },
+  BillingAgent: { description: "Expert in payments, charges, and refunds" },
+  AccountAgent: { description: "Expert in login issues and security" },
+  ProductAgent: { description: "Expert in features and how-to guides" },
 } as const;
-
 type Specialist = keyof typeof SPECIALISTS;
 
 async function answer(ctx: Context, { message }: { message: string }) {
   // 1. First, decide if a specialist is needed
+  const messages: ModelMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a routing agent. Route the question to a specialist or respond directly if no specialist is needed.",
+    },
+    { role: "user", content: message },
+  ];
   const routingDecision = await ctx.run(
     "Pick specialist",
     // Use your preferred LLM SDK here - specify agents as tools
-    async () => llmCall(message, createTools(SPECIALISTS)),
+    async () => llmCall(messages, createTools(SPECIALISTS)),
     { maxRetryAttempts: 3 },
   );
 
@@ -212,18 +208,14 @@ async function answer(ctx: Context, { message }: { message: string }) {
   // 3. Get the specialist's name
   const specialist = routingDecision.toolCalls[0].toolName as Specialist;
 
-  // 4. Ask the specialist to answer
-  const { text } = await ctx.run(
-    `Ask ${specialist}`,
-    async () =>
-      llmCall([
-        { role: "user", content: message },
-        { role: "system", content: SPECIALISTS[specialist].prompt },
-      ]),
-    { maxRetryAttempts: 3 },
-  );
-
-  return text;
+  // 4. Call the specialist over HTTP
+  return ctx.genericCall<string, string>({
+    service: specialist,
+    method: "run",
+    parameter: message,
+    inputSerde: restate.serde.json,
+    outputSerde: restate.serde.json,
+  });
 }
 ```
 
@@ -273,7 +265,9 @@ View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_p
 [Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_remote_agent.py)
 
 
-Each agent is then implemented in its own service. For example, here is the billing agent implementation:
+Each agent is then implemented in its own service. For example, here is the billing agent implementation.
+
+<Accordion title="Billing Agent implementation">
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/utils/utils.ts#here"} 
 export const billingAgent = restate.service({
@@ -310,6 +304,7 @@ async def get_billing_support(ctx: restate.Context, question: Question) -> str |
     return result.content
 ```
 </CodeGroup>
+</Accordion>
 
 For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
 
