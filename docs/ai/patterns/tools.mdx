@@ -58,30 +58,36 @@ The following examples show how to implement local tool routing with popular AI 
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-tools.ts#here"} 
-// TOOLS
 // Define your tools as your AI SDK requires (here Vercel AI SDK)
 const tools = {
   queryUserDatabase: tool({
     description: "Get user account and billing info",
-    inputSchema: z.void(),
+    inputSchema: z.object({}),
   }),
   createSupportTicket: tool({
     description: "Create support tickets",
     inputSchema: z.object({
-      user_id: z.string().describe("User ID creating the ticket"),
       description: z.string().describe("Detailed description of the issue"),
     }),
   }),
 };
 
-// AGENT
 async function route(ctx: Context, req: { message: string; userId: string }) {
-  const messages: ModelMessage[] = [{ role: "user", content: req.message }];
+  const messages: ModelMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a support agent. Use the available tools to answer the user's question. " +
+        "If you don't know the answer, create a support ticket",
+    },
+    { role: "user", content: req.message },
+  ];
 
   while (true) {
     // Call the LLM using your favorite AI SDK
     const result = await ctx.run(
       "LLM call",
+      // Use your preferred LLM SDK here
       async () => llmCall(messages, tools),
       { maxRetryAttempts: 3 },
     );
@@ -95,7 +101,7 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
       switch (toolName) {
         case "queryUserDatabase":
           // Example of a local tool
-          output = await ctx.run(toolName, () => queryUserDb(req.userId));
+          output = await ctx.run("Query DB", () => queryUserDb(req.userId));
           break;
         case "createSupportTicket":
           // Example of a remote tool/workflow
@@ -163,6 +169,9 @@ async def route(ctx: restate.Context, question: Question) -> str:
 ```
 
 </CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-tools.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_tool.py)
 
 
 When you run the example below, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:

@@ -42,36 +42,32 @@ This approach is perfect when you want to create focused expertise areas (like b
 
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
-const tools = {
-  billingAgent: tool({
+const SPECIALISTS = {
+  billingAgent: {
     description: "Expert in payments, charges, and refunds",
-    inputSchema: z.object({}),
-  }),
-  accountAgent: tool({
+    prompt:
+      "You are a billing support agent specializing in payments, charges, and refunds.",
+  },
+  accountAgent: {
     description: "Expert in login issues and security",
-    inputSchema: z.object({}),
-  }),
-  productAgent: tool({
+    prompt:
+      "You are an account support agent specializing in login issues and security.",
+  },
+  productAgent: {
     description: "Expert in features and how-to guides",
-    inputSchema: z.object({}),
-  }),
+    prompt:
+      "You are a product support agent specializing in features and how-to guides.",
+  },
 } as const;
-type Specialist = keyof typeof tools;
 
-const PROMPTS = {
-  billingAgent:
-    "You are a billing support agent specializing in payments, charges, and refunds.",
-  accountAgent:
-    "You are an account support agent specializing in login issues and security.",
-  productAgent:
-    "You are a product support agent specializing in features and how-to guides.",
-};
+type Specialist = keyof typeof SPECIALISTS;
 
 async function answer(ctx: Context, { message }: { message: string }) {
   // 1. First, decide if a specialist is needed
   const routingDecision = await ctx.run(
     "Pick specialist",
-    async () => llmCall(message, tools),
+    // Use your preferred LLM SDK here - specify agents as tools
+    async () => llmCall(message, createTools(SPECIALISTS)),
     { maxRetryAttempts: 3 },
   );
 
@@ -89,7 +85,7 @@ async function answer(ctx: Context, { message }: { message: string }) {
     async () =>
       llmCall([
         { role: "user", content: message },
-        { role: "system", content: PROMPTS[specialist] },
+        { role: "system", content: SPECIALISTS[specialist].prompt },
       ]),
     { maxRetryAttempts: 3 },
   );
@@ -144,6 +140,9 @@ async def answer(ctx: restate.Context, question: Question) -> str:
 
 </CodeGroup>
 
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-agent.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_agent.py)
+
 In the Restate UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
 <img src="/img/ai/patterns/routing_local_agent.png" alt="Dynamic routing based on LLM output - UI"/>
 
@@ -167,52 +166,41 @@ In the Restate UI, you can see how the LLM decides to forward the request to the
 
 ## Routing to remote agents
 
-When you need true separation of concerns, independent scaling, or want to use different technologies for different agents, deploy them as separate services. This approach gives you maximum flexibility but requires more infrastructure planning.
+Deploy specialized agents as separate services when you need independent scaling, isolation, or different technology stacks.
 
-Remote agents run as independent services that communicate over HTTP, but Restate makes these calls look like local function calls while providing end-to-end durability and failure recovery.
-
-**Key advantages:**
-- **Independent scaling**: Scale each agent based on its specific workload
-- **Technology flexibility**: Use different languages, frameworks, or AI SDKs for each agent
-- **Team ownership**: Different teams can own and deploy different agents
-- **Fault isolation**: Problems in one agent don't affect others
+Remote agents run as independent services that communicate over HTTP.
+Restate makes these calls look like local function calls while providing end-to-end durability and failure recovery.
 
 The example below shows dynamic routing where the LLM's decision determines which remote service to call. Each specialist agent runs as its own service with a standard `run` handler.
 
-For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
-
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-agent.ts#here"} 
-const tools = {
-  billingAgent: tool({
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-remote-agent.ts#here"}
+const SPECIALISTS = {
+  billingAgent: {
     description: "Expert in payments, charges, and refunds",
-    inputSchema: z.object({}),
-  }),
-  accountAgent: tool({
+    prompt:
+      "You are a billing support agent specializing in payments, charges, and refunds.",
+  },
+  accountAgent: {
     description: "Expert in login issues and security",
-    inputSchema: z.object({}),
-  }),
-  productAgent: tool({
+    prompt:
+      "You are an account support agent specializing in login issues and security.",
+  },
+  productAgent: {
     description: "Expert in features and how-to guides",
-    inputSchema: z.object({}),
-  }),
+    prompt:
+      "You are a product support agent specializing in features and how-to guides.",
+  },
 } as const;
-type Specialist = keyof typeof tools;
 
-const PROMPTS = {
-  billingAgent:
-    "You are a billing support agent specializing in payments, charges, and refunds.",
-  accountAgent:
-    "You are an account support agent specializing in login issues and security.",
-  productAgent:
-    "You are a product support agent specializing in features and how-to guides.",
-};
+type Specialist = keyof typeof SPECIALISTS;
 
 async function answer(ctx: Context, { message }: { message: string }) {
   // 1. First, decide if a specialist is needed
   const routingDecision = await ctx.run(
     "Pick specialist",
-    async () => llmCall(message, tools),
+    // Use your preferred LLM SDK here - specify agents as tools
+    async () => llmCall(message, createTools(SPECIALISTS)),
     { maxRetryAttempts: 3 },
   );
 
@@ -230,7 +218,7 @@ async function answer(ctx: Context, { message }: { message: string }) {
     async () =>
       llmCall([
         { role: "user", content: message },
-        { role: "system", content: PROMPTS[specialist] },
+        { role: "system", content: SPECIALISTS[specialist].prompt },
       ]),
     { maxRetryAttempts: 3 },
   );
@@ -281,6 +269,10 @@ async def answer(ctx: restate.Context, question: Question) -> str:
 
 </CodeGroup>
 
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-remote-agent.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_remote_agent.py)
+
+
 Each agent is then implemented in its own service. For example, here is the billing agent implementation:
 <CodeGroup>
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/utils/utils.ts#here"} 
@@ -289,7 +281,7 @@ export const billingAgent = restate.service({
   handlers: {
     run: async (ctx: Context, question: string): Promise<string> => {
       const { text } = await ctx.run(
-        "account_response",
+        "LLM call",
         async () =>
           llmCall(`You are a billing support specialist.
             Acknowledge the billing issue, explain charges clearly, provide next steps with timeline.
@@ -319,6 +311,7 @@ async def get_billing_support(ctx: restate.Context, question: Question) -> str |
 ```
 </CodeGroup>
 
+For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
 
 The Restate UI shows how the LLM decides to forward the request to the specialized remote support agents, and shows the execution trace of the nested calls in a single view.
 This is useful for debugging and monitoring complex multi-agent workflows.
