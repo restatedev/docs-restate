@@ -34,10 +34,10 @@ async function process(ctx: Context, report: { message: string }) {
   // Step 1: Extract metrics
   const extract = await ctx.run(
     "Extract metrics",
+    // Use your preferred LLM SDK here
     async () =>
-      // Use your preferred LLM SDK here
       llmCall(`Extract numerical values and their metrics from the text. 
-            Format as 'Metric: Value' per line. Input: ${report.message}`),
+            Format as 'Metric Name: Value' per line. Input: ${report.message}`),
     { maxRetryAttempts: 3 },
   );
 
@@ -45,9 +45,7 @@ async function process(ctx: Context, report: { message: string }) {
   const sortedMetrics = await ctx.run(
     "Sort metrics",
     async () =>
-      llmCall(
-        `Sort lines in descending order by value. Input: ${extract.text}`,
-      ),
+      llmCall(`Sort lines in descending order by value: ${extract.text}`),
     { maxRetryAttempts: 3 },
   );
 
@@ -55,10 +53,7 @@ async function process(ctx: Context, report: { message: string }) {
   const table = await ctx.run(
     "Format as table",
     async () =>
-      llmCall(
-        `Format the data as a markdown table with columns 
-         'Metric Name' and 'Value'. Input: ${sortedMetrics.text}`,
-      ),
+      llmCall(`Format the data as a markdown table: ${sortedMetrics.text}`),
     { maxRetryAttempts: 3 },
   );
 
@@ -81,7 +76,7 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         RunOptions(max_attempts=3),  # Avoid infinite retries
         prompt=(
             "Extract numerical values and their metrics from the text. "
-            f"Format as 'Metric: Value' per line. Input: {report.text}"
+            f"Format as 'Metric Name: Value' per line. Input: {report.message}"
         ),
     )
 
@@ -90,7 +85,7 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         "Sort metrics",
         llm_call,
         RunOptions(max_attempts=3),
-        prompt=f"Sort lines in descending order by value. Input: {extract}",
+        prompt=f"Sort lines in descending order by value: {extract}",
     )
 
     # Step 3: Format as table
@@ -98,10 +93,7 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         "Format as table",
         llm_call,
         RunOptions(max_attempts=3),
-        prompt=(
-            "Format the data as a markdown table with columns "
-            f"'Metric Name' and 'Value'. Input: {sorted_metrics}"
-        ),
+        prompt=f"Format the data as a markdown table:{sorted_metrics}"
     )
 
     return table.content
