@@ -7,7 +7,7 @@ toolchain go1.24.8
 require (
 	github.com/aws/aws-lambda-go v1.50.0
 	github.com/google/uuid v1.6.0
-	github.com/restatedev/sdk-go v0.21.0
+	github.com/restatedev/sdk-go v0.22.0
 	google.golang.org/protobuf v1.36.10
 )
 
