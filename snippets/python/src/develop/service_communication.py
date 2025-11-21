@@ -37,7 +37,7 @@ async def calling_handler(ctx: Context, arg):
 
     # <start_one_way>
     # To message a Service:
-    ctx.service_send(my_service_handler.my_handler, arg="Hi")
+    ctx.service_send(my_service_handler, arg="Hi")
 
     # To message a Virtual Object:
     ctx.object_send(my_object_handler, key="Mary", arg="Hi")
