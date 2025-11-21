@@ -30,14 +30,14 @@ async def calling_handler(ctx: Context, arg):
     # <end_request_response>
 
     # <start_request_response_generic>
-    response = await ctx.generic_call(
+    response_bytes = await ctx.generic_call(
         "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
     )
     # <end_request_response_generic>
 
     # <start_one_way>
     # To message a Service:
-    ctx.service_send(my_service_handler.my_handler, arg="Hi")
+    ctx.service_send(my_service_handler, arg="Hi")
 
     # To message a Virtual Object:
     ctx.object_send(my_object_handler, key="Mary", arg="Hi")
