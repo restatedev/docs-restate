@@ -204,8 +204,6 @@ sidebarTitle: "Overview"
 description: "Learn how to do common tasks with Restate."
 ---
 
-import { ProductCard } from '/snippets/blocks/guides/product-cards.mdx';
-
 ${sections.join('\n\n')}
 `;
 }
