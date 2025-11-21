@@ -1,0 +1,231 @@
+---
+title: "Parallelizing Tools and Agents"
+sidebarTitle: "Parallelization"
+description: "Execute multiple AI tools and agent tasks in parallel with automatic recovery and coordination."
+tags: ["recipe"]
+---
+
+import StartExample from "/snippets/ai-guides/start-example.mdx";
+
+Execute multiple AI tools or agent tasks simultaneously to improve performance and efficiency. Restate ensures that all parallel operations are durably logged and automatically coordinated, enabling recovery from failures while maintaining consistency across concurrent executions.
+
+## How does Restate help?
+The benefits of using Restate for parallel agent and tool execution are:
+- **Guaranteed execution**: Restate lets you schedule tasks asynchronously and guarantees that all tasks will run, with retries and recovery on failures
+- **Durable coordination**: Restate turns Promises/Futures into durable, distributed constructs that are persisted in Restate and can be recovered and awaited on another process
+- **Serverless scaling**: You can deploy the subtask executors on serverless infrastructure, like AWS Lambda, to let them scale automatically. The main task, that is idle while waiting on the subtasks, gets suspended until it can make progress
+- **Independent failure handling**: Failed operations are automatically retried without affecting successful ones
+- Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
+
+## Parallelizing tool calls
+
+When an LLM decides to call multiple tools, you can execute all tool calls in parallel instead of sequentially. This significantly reduces latency when tools are independent.
+
+Wrap tool executions in `ctx.run()` to ensure durability, and use `RestatePromise.all()` (TypeScript) or `restate.gather()` (Python) to coordinate parallel execution.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/parallel-tools.ts#here"} 
+// Define your tools as your AI SDK requires (here Vercel AI SDK)
+const tools = {
+  get_weather: tool({
+    description: "Get the current weather for a location",
+    inputSchema: z.object({ city: z.string() }),
+  }),
+};
+
+async function run(ctx: Context, { message }: { message: string }) {
+  const history: ModelMessage[] = [{ role: "user", content: message }];
+
+  while (true) {
+    // Use your preferred LLM SDK here
+    let { text, toolCalls, messages } = await ctx.run(
+      "LLM call",
+      async () => llmCall(history, tools),
+      { maxRetryAttempts: 3 },
+    );
+    history.push(...messages);
+
+    if (!toolCalls || toolCalls.length === 0) {
+      return text;
+    }
+
+    // Run all tool calls in parallel
+    let toolPromises = [];
+    for (let { toolCallId, toolName, input } of toolCalls) {
+      const { city } = input as { city: string };
+      const promise = ctx.run(`Get weather ${city}`, () => fetchWeather(city));
+      toolPromises.push({ toolCallId, toolName, promise });
+    }
+
+    // Wait for all tools to complete in parallel
+    await RestatePromise.all(toolPromises.map(({ promise }) => promise));
+
+    // Append all results to messages
+    for (const { toolCallId, toolName, promise } of toolPromises) {
+      messages.push(toolResult(toolCallId, toolName, await promise));
+    }
+  }
+}
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/parallel_tools.py?collapse_prequel"} 
+parallel_tools_agent = restate.Service("ParallelToolAgent")
+
+
+@parallel_tools_agent.handler()
+async def run(ctx: Context, prompt: WeatherPrompt) -> str | None:
+    """Main agent loop with tool calling"""
+    messages = [{"role": "user", "content": prompt.message}]
+
+    while True:
+        # Call LLM with durable execution
+        response = await ctx.run_typed(
+            "LLM call",
+            llm_call,  # Use your preferred LLM SDK here
+            RunOptions(max_attempts=3),
+            messages=messages,
+            tools=[
+                tool(
+                    name="get_weather",
+                    description="Get the current weather for a location",
+                    parameters=WeatherRequest.model_json_schema(),
+                )
+            ],
+        )
+        messages.append(response.dict())
+
+        if not response.tool_calls:
+            return response.content
+
+        # Run all tool calls in parallel
+        tool_promises = {}
+        for tool_call in response.tool_calls:
+            if tool_call.function.name == "get_weather":
+                req = WeatherRequest.model_validate_json(tool_call.function.arguments)
+                tool_promises[tool_call.id] = ctx.run_typed(
+                    f"Get weather {req.city}",
+                    get_weather,
+                    req=req,
+                )
+
+        #  Wait for all tools to complete and append results
+        await restate.gather(*tool_promises.values())
+        for tool_id, promise in tool_promises.items():
+            output = await promise
+            messages.append(tool_result(tool_id, "get_weather", str(output)))
+```
+</CodeGroup>
+
+When you run the example below, you can see how multiple tool calls are executed in parallel, significantly reducing the total execution time compared to sequential processing:
+
+<img src="/img/ai/patterns/parallel_tools.png" alt="Parallel tool execution - UI"/>
+
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
+
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `run` handler of the `ParallelToolAgent` service to open the playground and send a request that triggers multiple tool calls:
+        <img src="/img/ai/patterns/parallel_tools_playground.png" alt="Parallel tool calls - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how multiple tool calls are executed concurrently, with all operations completing in parallel:
+
+        <img src="/img/ai/patterns/parallel_tools.png" alt="Parallel tool execution - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
+
+## Parallelizing agents
+
+Execute multiple independent agents simultaneously, such as analyzing different aspects of the same input or processing multiple requests concurrently.
+
+This pattern is useful when you need to perform multiple analysis tasks that don't depend on each other, like sentiment analysis, key point extraction, and summarization.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/parallel-agents.ts#here"} 
+async function analyze(ctx: Context, { message }: { message: string }) {
+  // Create parallel tasks - each runs independently
+  const tasks = [
+    ctx.run(
+      "Analyze sentiment",
+      // Use your preferred LLM SDK here
+      async () => llmCall(`Analyze sentiment: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Extract key points",
+      async () => llmCall(`Extract 3 key points as bullets: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Summarize",
+      async () => llmCall(`Summarize in one sentence: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+  ];
+
+  // Wait for all tasks to complete and return the results
+  const results = await RestatePromise.all(tasks);
+  return results.map((res) => res.text);
+}
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/parallel_agents.py?collapse_prequel"} 
+parallelization_svc = restate.Service("ParallelAgentsService")
+
+
+@parallelization_svc.handler()
+async def analyze(ctx: restate.Context, text: Text) -> list[str | None]:
+    """Analyzes multiple aspects of the text in parallel."""
+
+    # Create parallel tasks - each runs independently
+    tasks = [
+        ctx.run_typed(
+            "Analyze sentiment",
+            llm_call,  # Use your preferred LLM SDK here
+            RunOptions(max_attempts=3),
+            messages=f"Analyze sentiment (positive/negative/neutral): {text}",
+        ),
+        ctx.run_typed(
+            "Extract key points",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=f"Extract 3 key points as bullets: {text}",
+        ),
+        ctx.run_typed(
+            "Summarize",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=f"Summarize in one sentence: {text}",
+        ),
+    ]
+
+    # Wait for all tasks to complete
+    await restate.gather(*tasks)
+
+    # Gather and collect results
+    return [(await task).content for task in tasks]
+```
+</CodeGroup>
+
+In the Restate UI, you can see how multiple analysis tasks are executed concurrently, each with independent retry policies and failure handling:
+<img src="/img/ai/patterns/parallel_agents.png" alt="Parallel agent execution - UI"/>
+
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
+
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `analyze_text` handler of the `ParallelAgentsService` service to open the playground and send a text for analysis:
+        <img src="/img/ai/patterns/parallel_agents_playground.png" alt="Parallel agent analysis - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how multiple analysis tasks are executed in parallel, with each task having its own execution trace and retry policy:
+
+        <img src="/img/ai/patterns/parallel_agents.png" alt="Parallel agent execution - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
