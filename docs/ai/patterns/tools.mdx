@@ -58,7 +58,7 @@ This example implements an example of a local tool (querying the user database) 
 The following examples show how to implement local tool routing with popular AI SDKs:
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/routing-to-tools.ts#here"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-tools.ts#here"} 
 // Define your tools as your AI SDK requires (here Vercel AI SDK)
 const tools = {
   queryUserDatabase: tool({
@@ -119,7 +119,7 @@ async function route(ctx: Context, req: { message: string; userId: string }) {
 }
 ```
 
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/routing_to_tool.py?collapse_prequel"} 
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_tool.py?collapse_prequel"} 
 tool_router = restate.Service("ToolRouter")
 
 # Define tools as required by your LLM SDK
@@ -134,26 +134,28 @@ TOOLS = [
 
 
 @tool_router.handler()
-async def route(ctx: restate.Context, question: Question) -> str:
+async def route(ctx: restate.Context, question: Question) -> str | None:
     """Route to appropriate tool and execute until final answer"""
     messages = [{"role": "user", "content": question.message}]
 
     while True:
-        result = await ctx.run_typed(
+        response = await ctx.run_typed(
             "LLM call",
             llm_call,  # Use your preferred LLM SDK here
             RunOptions(max_attempts=3, type_hint=Message),
             messages=messages,
             tools=TOOLS,
         )
-        messages.append(result.dict())
+        messages.append(response.dict())
 
-        if not result.tool_calls:
-            return result.content
+        if not response.tool_calls:
+            return response.content
 
-        for tool_call in result.tool_calls:
+        for tool_call in response.tool_calls:
             fn = tool_call.function
-            match fn.name:
+            tool_name = fn.name or "unknown"
+            result = ""
+            match tool_name:
                 case "query_user_database":
                     # Example of a local tool
                     result = await ctx.run_typed(
@@ -164,9 +166,9 @@ async def route(ctx: restate.Context, question: Question) -> str:
                     ticket = SupportTicket.model_validate_json(fn.arguments)
                     result = await ctx.service_call(create_support_ticket, arg=ticket)
                 case _:
-                    result = f"Tool not found: {fn.name}"
+                    result = f"Tool not found: {tool_name}"
 
-            messages.append(tool_result(tool_call.id, fn.name, result))
+            messages.append(tool_result(tool_call.id, tool_name, result))
 ```
 
 </CodeGroup>

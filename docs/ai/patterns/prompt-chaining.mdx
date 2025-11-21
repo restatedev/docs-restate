@@ -29,7 +29,7 @@ The benefits of using Restate here are:
 Wrap each step in the chain with `ctx.run()` to ensure fault tolerance and automatic recovery. Restate uses durable execution to persist the result of each step as it completes, so if any step fails, Restate will retry from that exact point without losing previous progress or re-executing completed steps.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/chaining.ts#here"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/chaining.ts#here"} 
 async function process(ctx: Context, report: { message: string }) {
   // Step 1: Extract metrics
   const extract = await ctx.run(
@@ -61,7 +61,7 @@ async function process(ctx: Context, report: { message: string }) {
 }
 ```
 
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/chaining.py?collapse_prequel"} 
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/chaining.py?collapse_prequel"} 
 call_chaining_svc = restate.Service("CallChainingService")
 
 
@@ -74,10 +74,8 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         "Extract metrics",
         llm_call,  # Use your preferred LLM SDK here
         RunOptions(max_attempts=3),  # Avoid infinite retries
-        prompt=(
-            "Extract numerical values and their metrics from the text. "
-            f"Format as 'Metric Name: Value' per line. Input: {report.message}"
-        ),
+        messages=f"""Extract numerical values and their metrics from the text. 
+        Format as 'Metric Name: Value' per line. Input: {report.message}""",
     )
 
     # Step 2: Sort by value
@@ -85,7 +83,7 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         "Sort metrics",
         llm_call,
         RunOptions(max_attempts=3),
-        prompt=f"Sort lines in descending order by value: {extract}",
+        messages=f"Sort lines in descending order by value: {extract}",
     )
 
     # Step 3: Format as table
@@ -93,7 +91,7 @@ async def process(ctx: restate.Context, report: Report) -> str | None:
         "Format as table",
         llm_call,
         RunOptions(max_attempts=3),
-        prompt=f"Format the data as a markdown table:{sorted_metrics}"
+        messages=f"Format the data as a markdown table:{sorted_metrics}",
     )
 
     return table.content
@@ -118,11 +116,9 @@ The Restate UI shows how each step in the chain is executed and persisted:
 <Steps>
 <StartExample/>
 <Step title="Send a request">
-    <Tabs>
-        In the UI (`http://localhost:9070`), click on the `process` handler of the `CallChainingService` to open the playground and send a default request:
+    In the UI (`http://localhost:9070`), click on the `process` handler of the `CallChainingService` to open the playground and send a default request:
 
-        <img src="/img/ai/patterns/chaining_playground.png" alt="Chaining LLM calls - UI"/>
-    </Tabs>
+    <img src="/img/ai/patterns/chaining_playground.png" alt="Chaining LLM calls - UI"/>
 </Step>
 
 <Step title="Check the Restate UI">

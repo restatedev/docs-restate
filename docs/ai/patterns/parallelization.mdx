@@ -24,7 +24,7 @@ When an LLM decides to call multiple tools, you can execute all tool calls in pa
 Wrap tool executions in `ctx.run()` to ensure durability, and use `RestatePromise.all()` (TypeScript) or `restate.gather()` (Python) to coordinate parallel execution.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/parallel-tools.ts#here"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/parallel-tools.ts#here"} 
 // Define your tools as your AI SDK requires (here Vercel AI SDK)
 const tools = {
   get_weather: tool({
@@ -67,7 +67,7 @@ async function run(ctx: Context, { message }: { message: string }) {
   }
 }
 ```
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/parallel_tools.py?collapse_prequel"} 
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/parallel_tools.py?collapse_prequel"} 
 parallel_tools_agent = restate.Service("ParallelToolAgent")
 
 
@@ -79,7 +79,7 @@ async def run(ctx: Context, prompt: WeatherPrompt) -> str | None:
     while True:
         # Call LLM with durable execution
         response = await ctx.run_typed(
-            "llm-call",
+            "LLM call",
             llm_call,  # Use your preferred LLM SDK here
             RunOptions(max_attempts=3),
             messages=messages,
@@ -144,7 +144,7 @@ Execute multiple independent agents simultaneously, such as analyzing different 
 This pattern is useful when you need to perform multiple analysis tasks that don't depend on each other, like sentiment analysis, key point extraction, and summarization.
 
 <CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/typescript-patterns/src/parallel-agents.ts#here"} 
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/parallel-agents.ts#here"} 
 async function analyze(ctx: Context, { message }: { message: string }) {
   // Create parallel tasks - each runs independently
   const tasks = [
@@ -171,12 +171,12 @@ async function analyze(ctx: Context, { message }: { message: string }) {
   return results.map((res) => res.text);
 }
 ```
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/typescript_patterns/python-patterns/app/parallel_agents.py?collapse_prequel"} 
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/parallel_agents.py?collapse_prequel"} 
 parallelization_svc = restate.Service("ParallelAgentsService")
 
 
 @parallelization_svc.handler()
-async def analyze(ctx: restate.Context, text: Text) -> list[str]:
+async def analyze(ctx: restate.Context, text: Text) -> list[str | None]:
     """Analyzes multiple aspects of the text in parallel."""
 
     # Create parallel tasks - each runs independently
@@ -185,19 +185,19 @@ async def analyze(ctx: restate.Context, text: Text) -> list[str]:
             "Analyze sentiment",
             llm_call,  # Use your preferred LLM SDK here
             RunOptions(max_attempts=3),
-            prompt=f"Analyze sentiment (positive/negative/neutral): {text}",
+            messages=f"Analyze sentiment (positive/negative/neutral): {text}",
         ),
         ctx.run_typed(
             "Extract key points",
             llm_call,
             RunOptions(max_attempts=3),
-            prompt=f"Extract 3 key points as bullets: {text}",
+            messages=f"Extract 3 key points as bullets: {text}",
         ),
         ctx.run_typed(
             "Summarize",
             llm_call,
             RunOptions(max_attempts=3),
-            prompt=f"Summarize in one sentence: {text}",
+            messages=f"Summarize in one sentence: {text}",
         ),
     ]
 
