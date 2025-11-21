@@ -10,7 +10,7 @@ class Order(BaseModel):
 
 
 @order_workflow.main()
-async def run(ctx: WorkflowContext, order: Order) -> None:
+async def run(ctx: WorkflowContext, order: Order):
     pass
 
 

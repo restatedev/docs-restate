@@ -30,7 +30,7 @@ async def calling_handler(ctx: Context, arg):
     # <end_request_response>
 
     # <start_request_response_generic>
-    response = await ctx.generic_call(
+    response_bytes = await ctx.generic_call(
         "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
     )
     # <end_request_response_generic>

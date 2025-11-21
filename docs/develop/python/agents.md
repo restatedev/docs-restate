@@ -123,7 +123,7 @@ ctx.service_send(
 Call a service without using the generated client, but just String names.
 
 ```python {"CODE_LOAD::python/src/develop/agentsmd/actions.py#request_response_generic"} 
-response = await ctx.generic_call(
+response_bytes = await ctx.generic_call(
     "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
 )
 ```
