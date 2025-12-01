@@ -103,25 +103,25 @@ While the number of partitions is configured at cluster creation today, the addr
 To make the mechanics concrete, the flow below traces an end-to-end invocation of processPayment keyed by idempotency key K.
 
 <Steps>
-    <Step title={"Client → Ingress (enqueue)"}>
+    <Step title="Client → Ingress (enqueue)">
         A client invokes processPayment with key K. The ingress hashes K to select the target partition and enqueues the invocation to that partition’s log.
     </Step>
-    <Step title={"Processor leader claims and starts execution"}>
+    <Step title="Processor leader claims and starts execution">
         The partition’s processor leader consumes the enqueue event, checks its local idempotency state for K, and sees that K is not present for processPayment. It atomically records K (idempotency) and transitions the invocation to RUNNING, then opens a bidirectional stream to the target service endpoint and pushes the initial invoke journal entry to the handler.
     </Step>
-    <Step title={"Durable step commit (ctx.run)"}>
+    <Step title="Durable step commit (ctx.run)">
         As the service executes, it streams back a step result event (e.g., from `ctx.run`). The processor appends this step journal entry to the log. The moment this append is replicated to quorum defines “the step happened.” From then on, the step will be recovered on retries and won’t be re-executed.
     </Step>
-    <Step title={"Materialization and ack"}>
+    <Step title="Materialization and ack">
         When the processor subsequently reads the committed step event back from the log (confirming it still holds leadership), it adds the entry to the invocation’s journal state (and any relevant indexes) and acks the handler so the user code can proceed with the next step.
     </Step>
-    <Step title={"Other durable actions (state/timers/RPC/promises)"}>
+    <Step title="Other durable actions (state/timers/RPC/promises)">
         The same pattern applies to state updates, timers, inter-service RPC/messages, or durable promises/futures: each action is added to the log first, and upon reading the committed record, the processor applies it (e.g., updates key-scoped state, registers/fires a timer, routes an RPC to another partition via the internal shuffler, or resolves a promise).
     </Step>
-    <Step title={"Completion"}>
+    <Step title="Completion">
         When the handler finishes, the processor appends a Result event to the log. After reading that event back, it marks the invocation COMPLETE and returns the result to the client (or emits the completion signal for async flows).
     </Step>
-    <Step title={"Failures and retries (epoch fencing)"}>
+    <Step title="Failures and retries (epoch fencing)">
         If execution fails at any point (process crash, stream loss, user exception), the processor dispatches a new attempt and attaches the full journal so far. Attempts carry monotonically increasing epochs; the processor rejects any events from superseded epochs (late messages from older attempts), preventing split-brain effects. This bookkeeping is partition-local and efficient because invocations are sticky to a single partition with a strong leader.
     </Step>
 </Steps>
