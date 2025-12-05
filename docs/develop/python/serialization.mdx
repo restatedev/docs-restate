@@ -53,6 +53,48 @@ Pydantic integrates well with [OpenAPI](https://www.openapis.org/). Restate gene
 If you use Pydantic, you can use the OpenAPI-generated clients to interact with your services.
 You can find example clients in the UI playground (click on your service in the overview and then on playground).
 
+## msgspec
+
+[msgspec](https://jcristharif.com/msgspec/) is a fast serialization and validation library, with builtin support for JSON, MessagePack, YAML, and TOML.
+You can use msgspec Structs to define the structure of your data: handler input/output, state, etc.
+
+### Using msgspec
+Make sure to install the optional `serde` dependency of the Restate SDK: `restate-sdk[serde]`.
+
+Then do the following:
+
+```python {"CODE_LOAD::python/src/develop/serialization.py#using_msgspec"}
+class Package(msgspec.Struct):
+    timestamp: datetime
+    dimensions: tuple[int, int]
+
+
+class CompletedPackage(msgspec.Struct):
+    status: str
+    timestamp: datetime
+
+
+# For the input/output serialization of your handlers
+@my_object.handler()
+async def ship(ctx: ObjectContext, package: Package) -> CompletedPackage:
+
+    # To get state
+    await ctx.get("package", type_hint=Package)
+
+    # To serialize awakeable payloads
+    ctx.awakeable(type_hint=Package)
+
+    # To serialize the results of actions
+    await ctx.run_typed("some-task", do_package_task, restate.RunOptions(type_hint=Package))
+
+    return CompletedPackage(status="shipped", timestamp=datetime.now())
+```
+
+### msgspec & OpenAPI
+msgspec integrates well with [OpenAPI](https://www.openapis.org/). Restate generates the OpenAPI specifications for you.
+If you use msgspec, you can use the OpenAPI-generated clients to interact with your services.
+You can find example clients in the UI playground (click on your service in the overview and then on playground).
+
 ## Dataclasses
 
 You can also use Python's built-in `dataclasses` to define the structure of your data.

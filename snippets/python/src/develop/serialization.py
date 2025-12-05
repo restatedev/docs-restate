@@ -6,6 +6,7 @@ import restate
 from restate.serde import Serde, PydanticJsonSerde
 from restate import ObjectContext, VirtualObject
 from pydantic import BaseModel
+import msgspec
 
 
 # <start_custom>
@@ -92,3 +93,38 @@ async def deliver(ctx: ObjectContext, delivery: Delivery) -> CompletedDelivery:
 
 def do_something() -> Delivery:
     return Delivery(timestamp=datetime.now(), dimensions=(10, 20))
+
+
+# <start_using_msgspec>
+class Package(msgspec.Struct):
+    timestamp: datetime
+    dimensions: tuple[int, int]
+
+
+class CompletedPackage(msgspec.Struct):
+    status: str
+    timestamp: datetime
+
+
+# For the input/output serialization of your handlers
+@my_object.handler()
+async def ship(ctx: ObjectContext, package: Package) -> CompletedPackage:
+
+    # To get state
+    await ctx.get("package", type_hint=Package)
+
+    # To serialize awakeable payloads
+    ctx.awakeable(type_hint=Package)
+
+    # To serialize the results of actions
+    await ctx.run_typed("some-task", do_package_task, restate.RunOptions(type_hint=Package))
+
+    return CompletedPackage(status="shipped", timestamp=datetime.now())
+
+
+# <end_using_msgspec>
+
+
+def do_package_task() -> Package:
+    return Package(timestamp=datetime.now(), dimensions=(10, 20))
+
