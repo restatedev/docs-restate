@@ -46,8 +46,8 @@ To test your setup, invoke the weather agent, either via the UI playground by cl
 
 Or via `curl`:
 ```bash
-curl localhost:8080/WeatherAgent/user123/run \
-  --json '{"message": "What is the weather like in San Francisco?", "session_id": "session-123"}'
+curl localhost:8080/WeatherAgent/run \
+  --json '{"message": "What is the weather like in San Francisco?", "user_id": "user-123", "session_id": "session-123"}'
 ```
 
 You should see the weather information printed in the terminal.
@@ -86,15 +86,17 @@ agent = Agent(
 )
 
 app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
-runner = Runner(app=app, session_service=RestateSessionService())
+session_service = InMemorySessionService()
 
-agent_service = restate.VirtualObject("WeatherAgent")
+agent_service = restate.Service("WeatherAgent")
 
 
 @agent_service.handler()
-async def run(ctx: restate.ObjectContext, req: WeatherPrompt) -> str | None:
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str | None:
+    await get_or_create_session(session_service, APP_NAME, req.user_id, req.session_id)
+    runner = Runner(app=app, session_service=session_service)
     events = runner.run_async(
-        user_id=ctx.key(),
+        user_id=req.user_id,
         session_id=req.session_id,
         new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
     )
@@ -112,7 +114,6 @@ First, you implement your agent and its tools, similar to how you would do it wi
 
 With these three additions, you make the agent durable:
 1. **Restate Plugin**: Add the `RestatePlugin` to your Google ADK App. This enables Restate's durability features for model calls and tool executions within the agent.
-2. **Restate Session Service**: Use the `RestateSessionService` in the Google ADK Runner. This service persists the agent's session state in Restate, allowing it to recover from failures and maintain context across invocations. We will cover session management in more detail later.
 2. **Resilient Tools**: Wrap tool logic in durable steps using the Restate Context. In the `get_weather` tool, the call to the weather API is wrapped in `restate_context().run_typed`, making it a durable step that Restate can retry and recover.
 
 To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
@@ -123,8 +124,8 @@ The agent can now be called at `http://localhost:8080/WeatherAgent/run`.
 <Accordion title="Try out Durable Execution" icon={"laptop"}>
 Ask for the weather in Denver:
 ```bash
-curl localhost:8080/WeatherAgent/user123/run \
---json '{"message": "What is the weather like in Denver?", "session_id": "session-234"}'
+curl localhost:8080/WeatherAgent/run \
+--json '{"message": "What is the weather like in Denver?", "user_id": "user-123", "session_id": "session-234"}'
 ```
 
 On the invocation page in the UI, click on the invocation ID of the failing invocation.
@@ -177,13 +178,11 @@ Here's a tool that asks for human approval for high-value claims:
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/human_approval_agent.py#here"} 
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
-    ctx = restate_object_context()
-
     # Create an awakeable for human approval
-    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
 
     # Request human review
-    await ctx.run_typed(
+    await restate_context().run_typed(
         "Request review",
         request_human_review,
         claim=claim,
@@ -206,8 +205,8 @@ You can also use awakeables outside of tools, for example, to implement human ap
     Start a request for a high-value claim that needs human approval.
     Use the playground or `curl` with `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
-    curl localhost:8080/HumanClaimApprovalAgent/user123/run/send \
-    --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
+    curl localhost:8080/HumanClaimApprovalAgent/run/send \
+    --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
     ```
 
     You can restart the service to see how Restate continues waiting for the approval.
@@ -239,7 +238,7 @@ Restate persists the timer and the approval promise, so if the service crashes o
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
-    timeout=ctx.sleep(timedelta(hours=3)),
+    timeout=restate_context().sleep(timedelta(hours=3)),
 ):
     case ["approval", approved]:
         return "Approved" if approved else "Rejected"
@@ -250,8 +249,8 @@ match await restate.select(
 
 Try it out by sending a request to the service:
 ```bash
-curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/user123/run/send \
---json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
 ```
 You restart the service and check in the UI how the process will block for the remaining time without starting over.
 
@@ -293,7 +292,7 @@ This can now be called from the main agent via a service client:
 ```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"} 
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
-    return await restate_object_context().service_call(review, claim)
+    return await restate_context().service_call(review, claim)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
 
@@ -305,8 +304,8 @@ They can be developed, deployed, and scaled independently.
     Start a request for a high-value claim that needs human approval.
     Use `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
-    curl localhost:8080/SubWorkflowClaimApprovalAgent/user123/run/send \
-    --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
+    curl localhost:8080/SubWorkflowClaimApprovalAgent/run/send \
+    --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
     ```
 
     In the UI, you can see that the agent called the workflow service and is waiting for the response.
@@ -453,7 +452,7 @@ You can store any context information in Virtual Objects, for example, user pref
 
 Use `ctx.set` and `ctx.get` in your handler to store and retrieve state.
 
-We will show an example of this in the next section when we orchestrate multiple agents.
+Have a look [here for more information](/ai/patterns/sessions-and-chat).
 
 
 ## Resilient multi-agent coordination
@@ -777,7 +776,7 @@ Many AI SDKs also have their own retry behavior for LLM calls and tool execution
 
 Configure the number of retries for LLM calls when activating the Restate plugin for your ADK App:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#retries"}
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#retries"} 
 app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin(max_model_call_retries=3)])
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py" />
@@ -791,7 +790,28 @@ For errors which should not be retried, you can raise terminal errors from withi
 
 You can catch these terminal errors in your handler and handle them accordingly.
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#handle"}
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#handle"} 
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str | None:
+    try:
+        await get_or_create_session(session_service, APP_NAME, req.user_id, req.session_id)
+        runner = Runner(app=app, session_service=session_service)
+        events = runner.run_async(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
+        )
+
+        final_response = None
+        async for event in events:
+            if event.is_final_response() and event.content and event.content.parts:
+                if event.content.parts[0].text:
+                    final_response = event.content.parts[0].text
+        return final_response
+    except TerminalError as e:
+        # Handle the error appropriately, e.g., log it or return a default response
+        print(f"An error occurred: {e}")
+        return "Sorry, I'm unable to process your request at the moment."
 ```
 
 <Info>
