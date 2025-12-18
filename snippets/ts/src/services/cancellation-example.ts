@@ -11,12 +11,14 @@ interface Order {
 const notificationService = restate.service({
   name: "notificationService",
   handlers: {
-    notify: async (ctx: restate.Context, message: string) => {
-    }
-  }
-})
+    notify: async (ctx: restate.Context, message: string) => {},
+  },
+});
 // Function stubs
-async function processPayment(paymentId: string, order: Order): Promise<string> {
+async function processPayment(
+  paymentId: string,
+  order: Order
+): Promise<string> {
   // Simulate payment processing
   return "payment_id_" + order.id;
 }
@@ -41,7 +43,6 @@ async function processOrder(ctx: restate.ObjectContext, order: Order) {
 
     // If cancellation happened before this line, this still executes
     ctx.serviceSendClient(notificationService).notify("Payment processed");
-
   } catch (error) {
     if (error instanceof restate.TerminalError) {
       // Cancellation detected - run compensation
