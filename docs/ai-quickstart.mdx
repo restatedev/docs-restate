@@ -317,12 +317,14 @@ If you want to develop with a local service, you can expose it using our [tunnel
 <Step title="Send weather requests to the AI Agent">
 Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
 <Frame>
-<img src={"/img/quickstart/agent-quickstart/playground.png"} alt="Restate UI Playground"/>
+<img src={"/img/quickstart/agent-quickstart/openai-playground.png"} alt="Restate UI Playground"/>
 </Frame>
 
 Or invoke via `curl`:
 ```shell
-curl localhost:8080/agent/run --json '"What is the weather in Detroit?"'
+curl localhost:8080/agent/run --json '{
+        "message": "What is the weather in Detroit?"
+    }'
 ```
 Output: `The weather in Detroit is currently 17°C with misty conditions.`
 
@@ -332,7 +334,7 @@ Output: `The weather in Detroit is currently 17°C with misty conditions.`
 
 The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
 
-We did this by using the `DurableModelCalls` model provider to persist LLM responses and using [Restate Context actions](/foundations/actions) (e.g. `ctx.run`) to make the tool executions resilient:
+We did this by using Restate's `DurableRunner` to persist LLM responses, and by using [Restate Context actions](/foundations/actions) (e.g. `restate_context().run_typed`) to make the tool executions resilient:
 
 ```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/template/agent.py?collapse_imports"} 
 @function_tool(failure_error_function=raise_restate_errors)
@@ -381,10 +383,12 @@ The Invocations tab of the Restate UI shows us how Restate captured each LLM cal
 <Accordion title="See how a failing tool call is retried">
 Ask about the weather in Denver:
 ```shell
-curl localhost:8080/agent/run --json '"What is the weather in Denver?"'
+curl localhost:8080/agent/run --json '{
+        "message": "What is the weather in Denvewr?"
+    }'
 ```
 
-You can see in the service logs and in the Restate UI how each LLM call and tool step gets durably executed.
+You can see in the Restate UI how each LLM call and tool step gets durably executed.
 We can see how the weather tool is currently stuck, because the weather API is down.
 
 <Frame>
