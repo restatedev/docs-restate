@@ -65,7 +65,7 @@ To implement a durable agent, you can use the Restate SDK in combination with th
 Here's the implementation of the durable weather agent you just invoked:
 
 ```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/durable_agent.py?collapse_imports"} 
-@function_tool
+@durable_function_tool
 async def get_weather(city: WeatherRequest) -> WeatherResponse:
     """Get the current weather for a given city."""
     return await restate_context().run_typed("get weather", fetch_weather, req=city)
@@ -93,7 +93,7 @@ The main difference compared to a standard OpenAI agent is the use of the Restat
 Any action with the Context is automatically recorded by the Restate Server and survives failures.
 We use this for:
 1. **Persisting LLM responses**: We use the `DurableRunner`, so that every LLM response is saved in Restate Server and can be replayed during recovery. The `DurableRunner` is provided to us via the OpenAI extensions in the Restate SDK.
-2. **Resilient tool execution**: Tools can make steps durable by using Restate Context actions (available via `restate_context()` or `restate_object_context()`). Whenever you do an action with the Restate Context, the result gets persisted in Restate and can be recovered after a failure. The example uses `restate_context().run_typed`, which runs the function you provide to it and persists its result (e.g. database interaction, API calls, non-deterministic actions).
+2. **Resilient tool execution**: Tools can make steps durable by annotating them with `@durable_function_tool` and using Restate Context actions (available via `restate_context()` or `restate_object_context()`). Whenever you do an action with the Restate Context, the result gets persisted in Restate and can be recovered after a failure. The example uses `restate_context().run_typed`, which runs the function you provide to it and persists its result (e.g. database interaction, API calls, non-deterministic actions).
 
 
 To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
@@ -156,7 +156,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 Here's a tool that asks for human approval for high-value claims:
 
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent.py#here"} 
-@function_tool
+@durable_function_tool
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
 
@@ -269,7 +269,7 @@ async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
 
 This can now be called from the main agent via a service client:
 ```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
-@function_tool
+@durable_function_tool
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
     return await restate_context().service_call(review, claim)
@@ -453,7 +453,7 @@ car_agent = Agent(
 intake_agent = Agent(
     name="IntakeAgent",
     instructions="Route insurance claims to the appropriate specialist",
-    handoffs = [medical_agent, car_agent]
+    handoffs=[medical_agent, car_agent],
 )
 
 agent_dict = {
@@ -522,7 +522,7 @@ Restate invokes your main agent again once the remote agent returns.
 
 ```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent_remote.py#here"} 
 # Durable service call to the fraud agent; persisted and retried by Restate
-@function_tool
+@durable_function_tool
 async def check_fraud(claim: InsuranceClaim) -> str:
     """Analyze the probability of fraud."""
     return await restate_context().service_call(run_fraud_agent, claim)
@@ -594,7 +594,7 @@ Therefore, the only way to run multiple tool steps in parallel is to implement a
 Here is an insurance claim agent tool that runs multiple analyses in parallel:
 
 ```python parallel_tools_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/parallel_tools_agent.py#here"} 
-@function_tool
+@durable_function_tool
 async def calculate_metrics(claim: InsuranceClaim) -> list[str]:
     """Calculate claim metrics."""
     ctx = restate_context()
@@ -726,22 +726,14 @@ By default, the runner retries ten times with an initial interval of one second.
 
 ### Tool execution errors
 
-By default, the OpenAI Agent SDK will convert any error in tool execution into a message to the LLM, and the LLM will decide how to proceed.
-This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
+By default, the Restate OpenAI integration will raise any terminal errors in tool executions and will let you handle them in your handler, similar to what we did above for model calls.
 
-#### Raising terminal errors
-In case you want to fail the agent execution on terminal errors, you can configure the OpenAI Agent SDK to raise terminal errors instead of converting them into LLM messages.
+If you use Restate Context actions in your tool execution, Restate retries any transient errors in these actions until they succeed.
+So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
 
-To raise terminal errors, set your tool's `failure_error_function`:
-
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/error_handling.py#here"} 
-@function_tool(failure_error_function=raise_terminal_errors)
-async def get_weather(city: WeatherRequest) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    return await restate_context().run_typed("get weather", fetch_weather, req=city)
-```
-
-You can then handle the terminal error in your agent logic if needed, or let it fail the invocation:
+<Info>
+You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `.run` actions in your tool executions.
+</Info>
 
 <Warning>
     The OpenAI Agent SDK also allows setting `failure_error_function` to `None`, which will rethrow any error in the agent execution as-is.
@@ -751,35 +743,6 @@ You can then handle the terminal error in your agent logic if needed, or let it 
     Therefore, be careful when using this option and handle errors appropriately in your agent logic.
     You also might want to set [a retry policy at the service or handler level](/services/configuration#how-to-configure) to avoid infinite retries.
 </Warning>
-
-#### Retry-ing transient errors
-
-If you use Restate Context actions in your tool execution, Restate will retry any transient errors in these actions until they succeed.
-So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
-
-Here is a small practical example:
-```typescript {"CODE_LOAD::ts/src/tour/agents/inline-tool-errors.ts#here"} 
-// Without ctx.run - error goes straight to agent
-async function myTool() {
-  const result = await fetch('/api/data'); // Might fail due to network
-  // If this fails, agent gets the error immediately
-}
-
-// With ctx.run - Restate handles retries
-async function myToolWithRestate(ctx: restate.Context) {
-  const result = await ctx.run('fetch-data', () =>
-      fetch('/api/data')
-  );
-  // Network failures get retried automatically
-  // Only terminal errors reach the AI
-}
-```
-
-
-<Info>
-You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `.run` actions in your tool executions.
-</Info>
-
 
 ## Advanced patterns
 
@@ -815,7 +778,7 @@ class BookingContext(BaseModel):
 
 
 # Functions raise terminal errors instead of feeding them back to the agent
-@function_tool(failure_error_function=raise_terminal_errors)
+@durable_function_tool
 async def book_hotel(
     wrapper: RunContextWrapper[BookingContext], booking: HotelBooking
 ) -> BookingResult:
@@ -833,7 +796,7 @@ async def book_hotel(
     )
 
 
-@function_tool(failure_error_function=raise_terminal_errors)
+@durable_function_tool
 async def book_flight(
     wrapper: RunContextWrapper[BookingContext], booking: FlightBooking
 ) -> BookingResult:
