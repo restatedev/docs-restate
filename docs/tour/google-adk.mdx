@@ -8,7 +8,6 @@ description: "Build stateful, observable AI agents that recover from failures."
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import Intro from '/snippets/tour/ai/intro.mdx';
 import DurableExecution from '/snippets/tour/ai/durable-execution.mdx';
-import Observability from '/snippets/tour/ai/observability.mdx';
 
 <Intro agentsdk="Google Agent Development Kit (ADK)" />
 
@@ -23,7 +22,7 @@ Get the example:
 git clone git@github.com:restatedev/ai-examples.git
 cd ai-examples/google-adk/tour-of-agents
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/google_adk_tour/google-adk/tour-of-agents" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/google-adk/tour-of-agents" />
 
 Export your [Google API key](https://aistudio.google.com/app/apikey) and run the agent:
 ```bash
@@ -65,7 +64,7 @@ To implement a durable agent, you can use the Restate SDK in combination with th
 
 Here's the implementation of the durable weather agent you just invoked:
 
-```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/durable_agent.py?collapse_imports"} 
+```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/durable_agent.py?collapse_imports"} 
 APP_NAME = "agents"
 
 
@@ -108,7 +107,7 @@ async def run(_ctx: restate.Context, req: WeatherPrompt) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/durable_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/durable_agent.py" />
 
 First, you implement your agent and its tools, similar to how you would do it with the Google ADK.
 
@@ -137,7 +136,7 @@ You can see that your request is retrying because the weather API is down:
 
 To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `app/utils/utils.py` file:
 
-```python utils/utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/utils/utils.py#weather"} 
+```python utils/utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/utils/utils.py#weather"} 
 async def call_weather_api(city: str) -> WeatherResponse:
     fail_on_denver(city)
     weather_data = await fetch_weather(city)
@@ -175,7 +174,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 
 Here's a tool that asks for human approval for high-value claims:
 
-```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/human_approval_agent.py#here"} 
+```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent.py#here"} 
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
     # Create an awakeable for human approval
@@ -192,7 +191,7 @@ async def human_approval(claim: InsuranceClaim) -> str:
     # Wait for human approval
     return await approval_promise
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/human_approval_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/human_approval_agent.py" />
 
 To implement human approval steps, you can use Restate's awakeables. An awakeable is a promise that can be resolved externally via an API call by providing its ID.
 When you create the awakeable, you get back an ID and a promise. You can send the ID to the human approver, and then wait for the promise to be resolved.
@@ -234,7 +233,7 @@ Add timeouts to human approval steps to prevent workflows from hanging indefinit
 
 Restate persists the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time:
 
-```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
+```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
@@ -245,7 +244,7 @@ match await restate.select(
     case _:
         return "Approval timed out - Evaluate with AI"
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
 Try it out by sending a request to the service:
 ```bash
@@ -267,7 +266,7 @@ The Restate SDK gives you clients to call these workflows durably from your agen
 All calls are proxied via Restate. Restate persists the call and takes care of retries and recovery.
 
 For example, let's implement the human approval tool as a separate service:
-```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py#wf"} 
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/sub_workflow_agent.py#wf"} 
 # Sub-workflow service for human approval
 human_approval_workflow = restate.Service("HumanApprovalWorkflow")
 
@@ -286,15 +285,15 @@ async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
     # Wait for human approval
     return await approval_promise
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
 
 This can now be called from the main agent via a service client:
-```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"} 
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"} 
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
     return await restate_context().service_call(review, claim)
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
 
 These workflows have access to all Restate SDK features, including durable execution, state management, awakeables, and observability.
 They can be developed, deployed, and scaled independently.
@@ -342,7 +341,7 @@ With Google ADK and Restate, you can create stateful agents that maintain conver
 
 Here is an example of a chat agent represented as a Virtual Object that is keyed by user ID:
 
-```python chat.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/chat.py?collapse_imports"} 
+```python chat.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/chat.py?collapse_imports"} 
 APP_NAME = "agents"
 
 agent = Agent(
@@ -372,7 +371,7 @@ async def message(ctx: restate.ObjectContext, req: ChatMessage) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/chat.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/chat.py" />
 
 This automatically persists the agent events (LLM calls, tool calls, etc.) and the conversation history in Restate.
 It uses Restate as the session provider for the Google ADK Agent.
@@ -469,7 +468,7 @@ If you want to share context between agents, run the agents in the same process 
 
 You don't need to do anything special to make this work with Restate:
 
-```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"} 
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"} 
 APP_NAME = "agents"
 
 # AGENTS
@@ -520,7 +519,7 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/multi_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/multi_agent.py" />
 
 The execution trace in the Restate UI will allow you to see the full chain of calls between agents and their individual steps.
 
@@ -557,7 +556,7 @@ Your main agent can suspend and save resources while waiting for the remote agen
 Restate invokes your main agent again once the remote agent returns.
 
 
-```python multi_agent_remote.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/multi_agent_remote.py#here"} 
+```python multi_agent_remote.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent_remote.py#here"} 
 # Durable service call to the fraud agent; persisted and retried by Restate
 async def check_fraud(claim: InsuranceClaim) -> str:
     """Analyze the probability of fraud."""
@@ -595,7 +594,7 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/multi_agent_remote.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/multi_agent_remote.py" />
 
 Note, any shared context between agents needs to be passed explicitly via the input.
 
@@ -648,7 +647,7 @@ Therefore, the only way to run multiple tool steps in parallel is to implement a
 
 Here is an insurance claim agent tool that runs multiple analyses in parallel:
 
-```python parallel_tools.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/parallel_tools.py#here"} 
+```python parallel_tools.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/parallel_tools.py#here"} 
 async def calculate_metrics(claim: InsuranceClaim) -> List[str]:
     """Calculate claim metrics using parallel execution."""
     ctx = restate_object_context()
@@ -661,7 +660,7 @@ async def calculate_metrics(claim: InsuranceClaim) -> List[str]:
     )
     return [await result for result in results_done]
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/parallel_tools.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/parallel_tools.py" />
 
 Restate makes sure that all parallel tasks are retried and recovered until they succeed.
 
@@ -696,7 +695,7 @@ For example, to race agents against each other and [use the first result that re
 
 Or to let a main orchestrator agent combine the results of multiple specialized agents in parallel:
 
-```python parallel_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/parallel_agents.py#here"} 
+```python parallel_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/parallel_agents.py#here"} 
 @agent_service.handler()
 async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
 
@@ -730,7 +729,7 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/parallel_agents.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/parallel_agents.py" />
 
 <Accordion title="Try out parallel agents" icon={"laptop"}>
     Start a request for a claim that needs to be analyzed by multiple agents in parallel.
@@ -776,10 +775,10 @@ Many AI SDKs also have their own retry behavior for LLM calls and tool execution
 
 Configure the number of retries for LLM calls when activating the Restate plugin for your ADK App:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#retries"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/error_handling.py#retries"} 
 app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin(max_model_call_retries=3)])
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/error_handling.py" />
 
 By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
 
@@ -790,7 +789,7 @@ For errors which should not be retried, you can raise terminal errors from withi
 
 You can catch these terminal errors in your handler and handle them accordingly.
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/google_adk_tour/google-adk/tour-of-agents/app/error_handling.py#handle"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/error_handling.py#handle"} 
 @agent_service.handler()
 async def run(_ctx: restate.Context, req: WeatherPrompt) -> str | None:
     try:
