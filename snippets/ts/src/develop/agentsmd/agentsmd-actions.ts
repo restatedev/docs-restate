@@ -1,10 +1,8 @@
 import * as restate from "@restatedev/restate-sdk";
-import {
-  RestatePromise,
-} from "@restatedev/restate-sdk";
-import {myService} from "../my_service";
-import {myWorkflow} from "../workflow";
-import {myObject} from "../virtual_object";
+import { RestatePromise } from "@restatedev/restate-sdk";
+import { myService } from "../my_service";
+import { myWorkflow } from "../workflow";
+import { myObject } from "../virtual_object";
 
 // Type definitions for examples
 type UserProfile = {
@@ -149,10 +147,9 @@ const ActionsExampleService = restate.service({
       { userId, message }: any
     ) => {
       // <start_delayed_messages>
-      ctx.serviceSendClient(myService).myHandler(
-          "Hi",
-          restate.rpc.sendOpts({ delay: { hours: 5 } })
-      );
+      ctx
+        .serviceSendClient(myService)
+        .myHandler("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
       // <end_delayed_messages>
     },
 
@@ -165,10 +162,9 @@ const ActionsExampleService = restate.service({
       await ctx.sleep({ seconds: 30 });
 
       // Schedule delayed call (different from sleep + send)
-      ctx.serviceSendClient(myService).myHandler(
-          "Hi",
-          restate.rpc.sendOpts({ delay: { hours: 5 } })
-      );
+      ctx
+        .serviceSendClient(myService)
+        .myHandler("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
       // <end_durable_timers>
     },
   },
@@ -183,10 +179,10 @@ const AwakeablesObject = restate.object({
   name: "AwakeablesExample",
   handlers: {
     stateGetExample: async (ctx: restate.ObjectContext) => {
-      const name = ""
+      const name = "";
       // <start_awakeables>
       // Create awakeable
-      const {id, promise} = ctx.awakeable<string>();
+      const { id, promise } = ctx.awakeable<string>();
 
       // Send ID to external system
       await ctx.run(() => requestHumanReview(name, id));
@@ -217,8 +213,8 @@ const AwakeablesObject = restate.object({
       // <end_state>
     },
     all: async (ctx: restate.ObjectContext, prompt: string) => {
-      const call1 = new Promise(() => callLLM("gpt-4", prompt))
-      const call2 = new Promise(() => callLLM("claude", prompt))
+      const call1 = new Promise(() => callLLM("gpt-4", prompt));
+      const call2 = new Promise(() => callLLM("claude", prompt));
       // <start_promise_all>
       // ❌ BAD
       const results1 = await Promise.all([call1, call2]);
@@ -230,8 +226,8 @@ const AwakeablesObject = restate.object({
       // <end_promise_all>
     },
     race: async (ctx: restate.ObjectContext, prompt: string) => {
-      const call1 = new Promise(() => callLLM("gpt-4", prompt))
-      const call2 = new Promise(() => callLLM("claude", prompt))
+      const call1 = new Promise(() => callLLM("gpt-4", prompt));
+      const call2 = new Promise(() => callLLM("claude", prompt));
       // <start_promise_race>
       // ❌ BAD
       const result1 = await Promise.race([call1, call2]);
@@ -244,9 +240,8 @@ const AwakeablesObject = restate.object({
       // <end_promise_race>
     },
     any: async (ctx: restate.ObjectContext, prompt: string) => {
-
-      const call1 = new Promise(() => callLLM("gpt-4", prompt))
-      const call2 = new Promise(() => callLLM("claude", prompt))
+      const call1 = new Promise(() => callLLM("gpt-4", prompt));
+      const call2 = new Promise(() => callLLM("claude", prompt));
 
       // <start_promise_any>
       // ❌ BAD - using Promise.any (not journaled)
@@ -255,13 +250,13 @@ const AwakeablesObject = restate.object({
       // ✅ GOOD
       const result2 = await RestatePromise.any([
         ctx.run(() => callLLM("gpt-4", prompt)),
-        ctx.run(() => callLLM("claude", prompt))
+        ctx.run(() => callLLM("claude", prompt)),
       ]);
       // <end_promise_any>
     },
     allSettled: async (ctx: restate.ObjectContext, prompt: string) => {
-      const call1 = new Promise(() => callLLM("gpt-4", prompt))
-      const call2 = new Promise(() => callLLM("claude", prompt))
+      const call1 = new Promise(() => callLLM("gpt-4", prompt));
+      const call2 = new Promise(() => callLLM("claude", prompt));
       // <start_promise_allsettled>
       // ❌ BAD
       const results1 = await Promise.allSettled([call1, call2]);
@@ -269,7 +264,7 @@ const AwakeablesObject = restate.object({
       // ✅ GOOD
       const results2 = await RestatePromise.allSettled([
         ctx.serviceClient(service1).call(),
-        ctx.serviceClient(service2).call()
+        ctx.serviceClient(service2).call(),
       ]);
 
       results2.forEach((result, i) => {
@@ -283,17 +278,16 @@ const AwakeablesObject = restate.object({
     },
     message: async (ctx: restate.ObjectContext, prompt: string) => {
       // <start_cancel>
-      const handle = ctx.serviceSendClient(myService).myHandler(
-          "Hi",
-          restate.rpc.sendOpts({ idempotencyKey: "my-key" })
-      );
+      const handle = ctx
+        .serviceSendClient(myService)
+        .myHandler("Hi", restate.rpc.sendOpts({ idempotencyKey: "my-key" }));
       const invocationId = await handle.invocationId;
       const response = await ctx.attach(invocationId);
 
       // Cancel invocation
       ctx.cancel(invocationId);
       // <end_cancel>
-    }
+    },
   },
 });
 
@@ -310,22 +304,21 @@ const WorkflowExampleWorkflow = restate.workflow({
       await ctx.promise<string>("review").resolve(review);
       // <end_workflow_promises>
     },
-
   },
 });
 
 function callLLM(arg0: string, prompt: any): any {
-    throw new Error("Function not implemented.");
+  throw new Error("Function not implemented.");
 }
 
 const claudeAgent = restate.service({
-    name: "ClaudeAgent",
-    handlers: {
-        ask: async (ctx: restate.Context, question: string) => {
-        return "42";
-        },
+  name: "ClaudeAgent",
+  handlers: {
+    ask: async (ctx: restate.Context, question: string) => {
+      return "42";
     },
-})
+  },
+});
 
 const openAiAgent = restate.service({
   name: "OpenAIAgent",
@@ -334,16 +327,16 @@ const openAiAgent = restate.service({
       return "42";
     },
   },
-})
+});
 
 const service1 = restate.service({
-    name: "Service1",
-    handlers: {
-        call: async (ctx: restate.Context) => {
-        return "done";
-        },
+  name: "Service1",
+  handlers: {
+    call: async (ctx: restate.Context) => {
+      return "done";
     },
-})
+  },
+});
 
 const service2 = restate.service({
   name: "Service1",
@@ -352,6 +345,4 @@ const service2 = restate.service({
       return "done";
     },
   },
-})
-
-
+});
