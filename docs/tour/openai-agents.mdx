@@ -1,13 +1,13 @@
 ---
 title: "Tour of Restate for Agents with OpenAI SDK"
-sidebarTitle: "OpenAI Agent SDK - Python"
+sidebarTitle: "OpenAI Agent SDK"
+icon: "/img/languages/python.svg"
 description: "Build stateful, observable AI agents that recover from failures."
 ---
 
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import Intro from '/snippets/tour/ai/intro.mdx';
 import DurableExecution from '/snippets/tour/ai/durable-execution.mdx';
-import Observability from '/snippets/tour/ai/observability.mdx';
 
 <Intro agentsdk="OpenAI Agent SDK for Python" />
 
@@ -89,16 +89,17 @@ async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
 
 First, you implement your agent and its tools, similar to how you would do it with the OpenAI Agent SDK.
 
-To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
-Here, the agent logic is called from the `run` handler.
-The endpoint that serves the agents of this tour over HTTP is defined in [`__main__.py`](https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/__main__.py).
-The agent can now be called at `http://localhost:8080/WeatherAgent/run`.
-
 The main difference compared to a standard OpenAI agent is the use of the Restate Context at key points throughout the agent logic.
 Any action with the Context is automatically recorded by the Restate Server and survives failures.
 We use this for:
 1. **Persisting LLM responses**: We use the `DurableRunner`, so that every LLM response is saved in Restate Server and can be replayed during recovery. The `DurableRunner` is provided to us via the OpenAI extensions in the Restate SDK.
 2. **Resilient tool execution**: Tools can make steps durable by using Restate Context actions (available via `restate_context()` or `restate_object_context()`). Whenever you do an action with the Restate Context, the result gets persisted in Restate and can be recovered after a failure. The example uses `restate_context().run_typed`, which runs the function you provide to it and persists its result (e.g. database interaction, API calls, non-deterministic actions).
+
+
+To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
+Here, the agent logic is called from the `run` handler.
+The endpoint that serves the agents of this tour over HTTP is defined in [`__main__.py`](https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/__main__.py).
+The agent can now be called at `http://localhost:8080/WeatherAgent/run`.
 
 <Accordion title="Try out Durable Execution" icon={"laptop"}>
 Ask for the weather in Denver:
@@ -152,7 +153,7 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 - If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
 - If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while it's waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
 
-Here's an insurance claim agent that asks for human approval for high-value claims:
+Here's a tool that asks for human approval for high-value claims:
 
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/mcp_openai/openai-agents/tour-of-agents/app/human_approval_agent.py#here"} 
 @function_tool
@@ -191,6 +192,10 @@ You can also use awakeables outside of tools, for example, to implement human ap
 
     If you wait for more than a minute, the invocation will get suspended.
 
+    <Frame>
+        <img src="/img/tour/agents/openai/suspensions.png" alt="Invocation overview" />
+    </Frame>
+
     Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
 
     ```bash
@@ -212,7 +217,7 @@ Restate persists the timer and the approval promise, so if the service crashes o
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
-    timeout=restate_context().sleep(timedelta(seconds=3)),
+    timeout=restate_context().sleep(timedelta(hours=3)),
 ):
     case ["approval", approved]:
         return "Approved" if approved else "Rejected"
@@ -237,7 +242,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 You can pull out complex parts of your tool logic into separate workflows.
 This lets you break down complex agents into smaller, reusable components that can be developed, deployed, and scaled independently.
 
-The Restate SDK gives you clients to call other Restate services durably from your agent logic.
+The Restate SDK gives you clients to call these workflows durably from your agent logic.
 All calls are proxied via Restate. Restate persists the call and takes care of retries and recovery.
 
 For example, let's implement the human approval tool as a separate service:
@@ -266,7 +271,7 @@ This can now be called from the main agent via a service client:
 ```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/mcp_openai/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
 @function_tool
 async def human_approval(claim: InsuranceClaim) -> str:
-    """Ask for human approval for high-value claims using sub-workflow."""
+    """Ask for human approval for high-value claims."""
     return await restate_context().service_call(review, claim)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/sub_workflow_agent.py" />
@@ -432,30 +437,29 @@ You don't need to do anything special to make this work with Restate.
 Use Virtual Object state to maintain context between runs. For example, store the last agent that was called in the object state, so the user can connect back seamlessly on the next interaction:
 
 ```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/mcp_openai/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"} 
-intake_agent = Agent(
-    name="IntakeAgent",
-    instructions="Route insurance claims to the appropriate specialist: medical, auto, or property.",
-)
-
-medical_specialist = Agent(
+medical_agent = Agent(
     name="MedicalSpecialist",
     handoff_description="I handle medical insurance claims from intake to final decision.",
     instructions="Review medical claims for coverage and necessity. Approve/deny up to $50,000.",
 )
 
-auto_specialist = Agent(
-    name="AutoSpecialist",
-    handoff_description="I handle auto insurance claims from intake to final decision.",
-    instructions="Assess auto claims for liability and damage. Approve/deny up to $25,000.",
+car_agent = Agent(
+    name="CarSpecialist",
+    handoff_description="I handle car insurance claims from intake to final decision.",
+    instructions="Assess car claims for liability and damage. Approve/deny up to $25,000.",
 )
 
-# Configure handoffs so intake agent can route to specialists
-intake_agent.handoffs = [medical_specialist, auto_specialist]
+
+intake_agent = Agent(
+    name="IntakeAgent",
+    instructions="Route insurance claims to the appropriate specialist",
+    handoffs = [medical_agent, car_agent]
+)
 
 agent_dict = {
     "IntakeAgent": intake_agent,
-    "MedicalSpecialist": medical_specialist,
-    "AutoSpecialist": auto_specialist,
+    "MedicalSpecialist": medical_agent,
+    "AutoSpecialist": car_agent,
 }
 
 agent_service = restate.VirtualObject("MultiAgentClaimApproval")
@@ -576,19 +580,16 @@ The execution trace in the Restate UI will allow you to see the full chain of ca
 
 Now that our agents are broken down into smaller parts, let's have a look at how to run different parts of our agent logic in parallel to speed up execution.
 
-<Warning>
-    When using the OpenAI Agent SDK with Restate, tool calls are forced to be executed sequentially to ensure deterministic execution during replays.
-    When multiple tools execute in parallel and use the Restate Context, the order of operations might differ between the original execution and the replay, leading to inconsistencies.
-</Warning>
-
 Restate provides primitives that allow you to run tasks concurrently while maintaining deterministic execution during replays.
 
 Most actions on the Restate Context can be composed using `restate.gather` to gather their results or `restate.select` to wait for the first one to complete.
 
 
 ### Parallel Tool Steps
+When using the OpenAI SDK with Restate, tool calls are forced to be executed sequentially to ensure deterministic execution during replays.
+When multiple tools execute in parallel and use the Restate Context, the order of operations might differ between the original execution and the replay, leading to inconsistencies.
 
-To parallelize tool steps, implement an orchestrator tool that uses durable execution to run multiple steps in parallel.
+Therefore, the only way to run multiple tool steps in parallel is to implement an orchestrator tool that uses durable execution to run multiple steps in parallel.
 
 Here is an insurance claim agent tool that runs multiple analyses in parallel:
 
@@ -635,7 +636,7 @@ Restate makes sure that all parallel tasks are retried and recovered until they 
 
 You can use the same durable execution primitives to run multiple agents in parallel.
 
-For example, to race agents against each other and [use the first result that returns](/develop/ts/concurrent-tasks#wait-for-the-first-successful-completion), while [cancelling the others](/foundations/invocations#cancelling-invocations).
+For example, to race agents against each other and [use the first result that returns, while cancelling the others](/ai/patterns/competitive-racing).
 
 Or to let a main orchestrator agent combine the results of multiple specialized agents in parallel:
 
