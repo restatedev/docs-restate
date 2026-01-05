@@ -11,11 +11,38 @@ Therefore, Restate needs to serialize and deserialize the journal entries.
 
 By default, Typescript SDK uses the built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) support to perform (de)serialization.
 
-## Zod schemas
+## Standard Schema & Zod
 
-You can use [Zod](https://zod.dev/) to define the schema of your handler input/output.
+You can use any [Standard schema](http://standardschema.dev/) compliant library for your handler input/output schemas, such as [Zod](https://zod.dev/):
 
-Make sure to install the extra dependency for zod integration: [`@restatedev/restate-sdk-zod`](https://www.npmjs.com/package/@restatedev/restate-sdk-zod).
+```typescript {"CODE_LOAD::ts/src/develop/serialization_standard_schema.ts#standard_schema"} 
+import * as restate from "@restatedev/restate-sdk";
+import { z } from "zod";
+
+const Greeting = z.object({
+  name: z.string(),
+});
+
+const GreetingResponse = z.object({
+  result: z.string(),
+});
+
+const greeter = restate.service({
+  name: "Greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      { input: restate.serde.schema(Greeting), output: restate.serde.schema(GreetingResponse) },
+      async (ctx: restate.Context, { name }) => {
+        return { result: `You said hi to ${name}!` };
+      }
+    ),
+  },
+});
+```
+
+<Accordion title="For Zod < 4.2">
+
+If you're using Zod versions earlier than 4.2, you should use the ad-hoc Zod integration instead: [`@restatedev/restate-sdk-zod`](https://www.npmjs.com/package/@restatedev/restate-sdk-zod).
 
 Then do the following:
 
@@ -44,6 +71,8 @@ const greeter = restate.service({
   },
 });
 ```
+
+</Accordion>
 
 ## Custom serialization
 
