@@ -11,6 +11,10 @@ This page helps with deploying and operating [Restate clusters](/deploy/server/c
     To understand the terminology used on this page, it might be helpful to read through the [architecture reference](/references/architecture).
 </Info>
 
+<Info>
+    For details on configuring network ports, addresses, and listeners, see the [networking guide](/server/networking).
+</Info>
+
 <Tip>
     To migrate an existing single-node deployment into a multi-node deployment without losing data, check out [this guide](/guides/local-to-replicated).
 </Tip>
@@ -25,8 +29,6 @@ To deploy a distributed Restate cluster without external dependencies, you need 
 node-name = "UNIQUE_NODE_NAME"
 # All nodes need to have the same cluster name
 cluster-name = "CLUSTER_NAME"
-# It is crucial that all peer nodes are able to resolve and connect to every other node's advertised address
-advertised-address = "ADVERTISED_ADDRESS"
 # At most one node can be configured with auto-provision = true
 auto-provision = false
 # Default replication factor for both the logs and the partitions.
@@ -39,6 +41,11 @@ auto-provision = false
 # reconstruct partition state if the partition leader becomes unavailable.
 default-replication = 2
 
+# Optional: Override the auto-detected advertised address if needed
+# advertised-address = "http://NODE_PUBLIC_IP:5122/"
+# Or just set the hostname and let Restate derive the full URL:
+# advertised-host = "NODE_PUBLIC_HOSTNAME"
+
 [bifrost]
 # Only the replicated Bifrost provider can be used in a distributed deployment
 default-provider = "replicated"
@@ -48,21 +55,26 @@ default-provider = "replicated"
 type = "replicated"
 
 [metadata-client]
-# List all the advertised addresses of the nodes that run the metadata-server role
-addresses = ["ADVERTISED_ADDRESS_1", "ADVERTISED_ADDRESS_2", ...]
+# List the advertised addresses of at least one node that runs the metadata-server role
+# This node will auto-include itself if it runs the metadata-server role
+addresses = ["PEER_ADVERTISED_ADDRESS"]
 
 [admin]
-# Make sure it does not conflict with the other nodes
+# Make sure it does not conflict with the other nodes when running multiple nodes on same host
 bind-address = "ADMIN_BIND_ADDRESS"
 
 [ingress]
-# Make sure it does not conflict with other nodes
+# Make sure it does not conflict with other nodes when running multiple nodes on same host
 bind-address = "INGRESS_BIND_ADDRESS"
 ```
 
 It is important that every Restate node you start has a **unique `node-name`** specified.
 The node name defaults to the hostname. Restate uses a subdirectory inside `restate-data` named after the node name to store local data. You will not be able to change the node name once it is in use without removing the node from the cluster, or else risk data loss.
 Nodes can have identical configurations aside from node name.
+
+<Info>
+    Restate now automatically detects a publicly routable IP address for the advertised address. You only need to explicitly set `advertised-address` or `advertised-host` if the auto-detection doesn't work for your environment (e.g., behind certain NAT configurations or load balancers).
+</Info>
 
 All nodes that are part of the cluster need to have the same `cluster-name` specified.
 
@@ -87,7 +99,7 @@ Metadata availability is crucial for cluster availability, and the default metad
 Every node that runs the `metadata-server` role will join the metadata store cluster.
 To tolerate `n` metadata node failures, you need to run at least `2 * n + 1` Restate nodes with the `metadata-server` role configured.
 
-The `metadata-client` should be configured with the advertised addresses of all nodes that run the `metadata-server` role.
+The `metadata-client` should be configured with at least one advertised address of a node that runs the `metadata-server` role. Nodes automatically include themselves if they run the metadata-server role, so for single-node setups, this field can be left empty.
 
 Restate nodes running the `worker` role host partitions and handle service invocations, journaling execution, and data storage and queries. The `default-replication` property sets the total number of replicas that the cluster will schedule for any given partition. Only one of these partitions is designated as a leader and actively processes invocations; additional partition replicas are followers and serve as hot standby in case they need to take over processing. Running additional partition replicas does not increase durability, which is determined by log replication and object store snapshots, however it can increase system availability by ensuring a new partition leader can be quickly promoted.
 

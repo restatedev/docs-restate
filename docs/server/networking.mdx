@@ -1,0 +1,379 @@
+---
+title: "Networking"
+sidebar_position: 3
+description: "Configure network ports, addresses, and listeners for Restate Server"
+icon: "network-wired"
+---
+
+This page covers how to configure network listeners, ports, and advertised addresses for Restate Server.
+
+## Overview
+
+Restate Server exposes several network services:
+
+| Service | Default Port | Description |
+|---------|-------------|-------------|
+| **Ingress** | 8080 | HTTP API for invoking services and managing invocations |
+| **Admin** | 9070 | Admin API for registering deployments and introspection |
+| **Fabric** | 5122 | Node-to-node communication for clustered deployments |
+
+By default, Restate listens on both TCP sockets and Unix domain sockets for each service.
+
+## Listen Modes
+
+Restate supports three listen modes controlled by the `listen-mode` configuration option:
+
+| Mode | Description |
+|------|-------------|
+| `all` | **[Default]** Listen on both TCP and Unix sockets |
+| `tcp` | Only listen on TCP sockets |
+| `unix` | Only listen on Unix domain sockets |
+
+```toml restate.toml
+# Listen on TCP only (useful if Unix sockets are not needed)
+listen-mode = "tcp"
+```
+
+Or via environment variable:
+```bash
+RESTATE_LISTEN_MODE=tcp
+```
+
+### Unix Domain Sockets
+
+When Unix sockets are enabled (the default), Restate creates socket files under the data directory:
+
+| Service | Socket Path |
+|---------|-------------|
+| Ingress | `restate-data/ingress.sock` |
+| Admin | `restate-data/admin.sock` |
+| Fabric | `restate-data/fabric.sock` |
+
+Unix sockets are automatically cleaned up on shutdown. They are useful for:
+- Local development without port conflicts
+- Tools like `curl` that support `--unix-socket`
+- Secure local communication without exposing network ports
+
+**Example using Unix sockets with curl:**
+```bash
+curl --unix-socket restate-data/ingress.sock http://local/MyService/myHandler --json '{}'
+```
+
+**Example using Unix sockets with restatectl:**
+```bash
+restatectl -s unix:restate-data/admin.sock status
+```
+
+## Configuration Cascading
+
+Networking configuration follows a cascading model where global options provide defaults that can be overridden per-service. The resolution order is:
+
+1. **Global options** (top-level in config file) apply to all services
+2. **Per-service options** (in `[admin]`, `[ingress]` sections) override global options for that specific service
+3. **Environment variables** override config file values
+4. **Command-line arguments** have the highest precedence
+
+For example, if you set `bind-ip = "192.168.1.10"` at the top level, all services will bind to that IP unless a specific service overrides it with its own `bind-address`.
+
+The following options cascade from global to per-service:
+- `use-random-ports`
+- `listen-mode`
+- `bind-ip`
+- `advertised-host`
+
+The following options have per-service defaults and can be overridden individually:
+- `bind-port` (each service has its own default port)
+- `advertised-address` (auto-generated per service, but can be explicitly set for full control)
+
+## Configuring Ports and Addresses
+
+### Global Options
+
+These options apply to all services unless overridden per-service:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `bind-ip` | `0.0.0.0` | Local interface IP to bind on |
+| `bind-port` | `5122` | Port for the fabric service |
+| `use-random-ports` | `false` | Use random available ports instead of defaults |
+| `advertised-host` | Auto-detected | Hostname to advertise to peers |
+
+```toml restate.toml
+# Bind all services to a specific interface
+bind-ip = "192.168.1.10"
+
+# Or use random ports (useful for testing)
+use-random-ports = true
+```
+
+### Per-Service Configuration
+
+Each service can override the global settings. Use `bind-port` to change just the port while keeping the default bind IP (`0.0.0.0`):
+
+```toml restate.toml
+# Fabric service (node-to-node) - uses global bind-ip with custom port
+bind-port = 5122
+
+[admin]
+# Override just the port
+bind-port = 9070
+
+[ingress]
+# Override just the port
+bind-port = 8080
+```
+
+Or use `bind-address` for full control over both IP and port:
+
+```toml restate.toml
+[admin]
+bind-address = "192.168.1.10:9070"
+
+[ingress]
+bind-address = "192.168.1.10:8080"
+```
+
+### Environment Variable Overrides
+
+All networking options can be set via environment variables:
+
+| Config Option | Environment Variable |
+|---------------|---------------------|
+| `listen-mode` | `RESTATE_LISTEN_MODE` |
+| `use-random-ports` | `RESTATE_USE_RANDOM_PORTS` |
+| `bind-ip` | `RESTATE_BIND_IP` |
+| `bind-port` | `RESTATE_BIND_PORT` |
+| `bind-address` | `RESTATE_BIND_ADDRESS` |
+| `advertised-host` | `RESTATE_ADVERTISED_HOST` |
+| `advertised-address` | `RESTATE_ADVERTISED_ADDRESS` |
+
+Per-service overrides use double underscores:
+```bash
+RESTATE_ADMIN__BIND_PORT=9070
+RESTATE_INGRESS__BIND_PORT=8080
+```
+
+## Advertised Addresses
+
+Advertised addresses are the URLs that Restate publishes for others to connect to its services. Each service has its own advertised address that is **automatically generated** based on the bound address and detected network configuration. You can optionally set these explicitly if you need full control.
+
+<Note>
+Restate does **not** validate the reachability of advertised addresses. It trusts that the configured addresses are correct and reachable by the intended clients or peers.
+</Note>
+
+### Fabric Advertised Address
+
+The **fabric advertised address** (configured at the top level) is the network address that cluster nodes use to communicate with each other. This is the most critical advertised address and requires careful consideration:
+
+- **Must be resolvable and reachable** from all other nodes in the cluster
+- **Should not be behind a proxy** to avoid performance issues or connectivity problems
+- **Should be unique** within the cluster
+
+<Warning>
+We recommend using **IP addresses** rather than DNS names for the fabric advertised address. This avoids DNS resolution latency, potential caching issues, and DNS-related errors during node-to-node communication. DNS names are supported but not recommended for production clusters.
+</Warning>
+
+```toml restate.toml
+# Recommended: Use IP address for cluster communication
+advertised-address = "http://10.0.1.15:5122/"
+```
+
+### Ingress Advertised Address
+
+The **ingress advertised address** is shared with:
+- The **Admin UI** (Web UI service playground)
+- The **Restate CLI** (`restate` command)
+
+This address needs to be accessible by users who invoke services through Restate. For example, when users run `restate whoami`, this is the address they will see for the ingress endpoint.
+
+Unlike the fabric address, it's perfectly fine to expose the ingress behind an HTTPS proxy or load balancer on a different host:
+
+```toml restate.toml
+[ingress]
+# Ingress exposed behind an HTTPS proxy
+advertised-address = "https://my-ingress.example.com/"
+```
+
+### Admin Advertised Address
+
+The **admin advertised address** is used by:
+- The **Restate CLI** for administrative operations
+- The **Admin UI** for deployment management
+
+This is the address shown when users run `restate whoami` for the admin endpoint. Like the ingress address, it can be behind a proxy if needed:
+
+```toml restate.toml
+[admin]
+# Admin API behind an HTTPS proxy
+advertised-address = "https://admin.example.com/"
+```
+
+### Auto-Detection
+
+Restate automatically generates advertised addresses for all services based on:
+
+1. The listen mode (TCP vs Unix)
+2. The bound address
+3. The publicly routable IP address of the host (auto-detected)
+
+For most deployments, especially single-node setups, you don't need to configure advertised addresses explicitly.
+
+### When to Set Explicitly
+
+You may want to explicitly set advertised addresses when:
+
+- Running ingress or admin behind a load balancer or reverse proxy
+- In containerized environments where auto-detection doesn't work correctly
+- Using NAT with specific port mappings
+- You want users to connect via a specific hostname or domain
+
+**Using `advertised-host` (recommended for simple cases):**
+```toml restate.toml
+# Restate will construct full URLs using this hostname with the correct ports
+advertised-host = "restate.mycompany.internal"
+```
+
+This sets the hostname for all services. Restate will construct URLs like:
+- Fabric: `http://restate.mycompany.internal:5122/`
+- Admin: `http://restate.mycompany.internal:9070/`
+- Ingress: `http://restate.mycompany.internal:8080/`
+
+**Using per-service `advertised-address` for full control:**
+```toml restate.toml
+# Cluster communication - use IP address, no proxy
+advertised-address = "http://10.0.1.15:5122/"
+
+[admin]
+# Admin API behind HTTPS proxy
+advertised-address = "https://admin.example.com/"
+
+[ingress]
+# Ingress behind HTTPS proxy on different host
+advertised-address = "https://api.example.com/"
+```
+
+### Docker and Kubernetes
+
+In Docker Compose or Kubernetes, set the fabric advertised address to the internal hostname that other containers/pods can resolve:
+
+```yaml
+environment:
+  # Use the container/service name for cluster communication
+  RESTATE_ADVERTISED_ADDRESS: "http://restate-node-1:5122"
+```
+
+This ensures nodes can reach each other using internal DNS names provided by Docker or Kubernetes. For ingress and admin, you may want to set separate advertised addresses pointing to your external load balancer or ingress controller.
+
+## Random Ports
+
+For testing or running multiple instances on the same host, enable random port selection:
+
+```bash
+restate-server --use-random-ports=true
+```
+
+Or via environment variable:
+```bash
+RESTATE_USE_RANDOM_PORTS=true restate-server
+```
+
+When using random ports:
+- Restate prints the actual bound addresses on startup
+- Unix sockets remain at predictable paths, so tools can connect via Unix socket while ports are dynamic
+- Use `restate-server --no-logo` to have the addresses printed first on stdout (useful for scripting)
+
+## Common Configurations
+
+### Local Development (Default)
+
+No configuration needed. Restate listens on:
+- TCP: `0.0.0.0:8080` (ingress), `0.0.0.0:9070` (admin), `0.0.0.0:5122` (fabric)
+- Unix: `restate-data/*.sock`
+
+### Multi-Node Cluster
+
+```toml restate.toml
+node-name = "node-1"
+cluster-name = "production"
+# We don't want this node to provision its own cluster
+auto-provision = false
+
+# Use IP address for reliable cluster communication
+# You don't need to specify this if this IP address is the public routable IP address of the host (it'll be auto-detected)
+advertised-address = "http://10.0.1.15:5122/"
+
+[metadata-client]
+# Point to at least one peer running metadata-server role
+addresses = ["http://10.0.1.16:5122"]
+```
+
+### Running Multiple Instances on Same Host
+
+When running multiple Restate instances on the same host, each instance needs unique ports and a separate data directory:
+
+```toml restate-1.toml
+# Instance 1
+node-name = "node-1"
+cluster-name = "test-cluster"
+```
+
+```toml restate-2.toml
+# Instance 2
+node-name = "node-2"
+cluster-name = "test-cluster"
+# We don't want this node to provision its own cluster
+auto-provision = false
+
+bind-port = 5123
+
+[admin]
+bind-port = 9071
+
+[ingress]
+bind-port = 8081
+
+
+# Important to join the same cluster as node-1. Connect to node-1's metadata-server to join the cluster.
+[metadata-client]
+addresses = ["http://127.0.0.1:5122"]
+```
+
+Start each instance with its config file. It's best to run each instance in its own terminal window to avoid confusion:
+
+First node:
+```bash
+restate-server -c restate-1.toml
+```
+The second node:
+```bash
+restate-server -c restate-2.toml &
+```
+
+### TCP Only (No Unix Sockets)
+
+```toml restate.toml
+listen-mode = "tcp"
+```
+
+## CLI Options
+
+Networking options can also be set via command-line flags:
+
+```bash
+restate-server \
+  --listen-mode=tcp \
+  --bind-ip=0.0.0.0 \
+  --bind-port=5122 \
+  --advertised-host=my-host.example.com
+```
+
+Use `restate-server --help` for the full list of CLI options.
+
+## Deprecated Options
+
+The following options are deprecated and will be removed in a future release:
+
+| Deprecated Option | Replacement |
+|-------------------|-------------|
+| `[admin] advertised-admin-endpoint` | `[admin] advertised-address` |
+| `[ingress] advertised-ingress-endpoint` | `[ingress] advertised-address` |
