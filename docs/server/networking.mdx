@@ -85,6 +85,8 @@ The following options have per-service defaults and can be overridden individual
 - `bind-port` (each service has its own default port)
 - `advertised-address` (auto-generated per service, but can be explicitly set for full control)
 
+Additionally, `networking.message-size-limit` cascades to component-specific limits. See [Message Size Limits](#message-size-limits) for details.
+
 ## Configuring Ports and Addresses
 
 ### Global Options
@@ -368,6 +370,69 @@ restate-server \
 ```
 
 Use `restate-server --help` for the full list of CLI options.
+
+## Message Size Limits
+
+Restate enforces message size limits to prevent oversized messages from causing issues during network transmission and replication. The limits follow a cascading configuration model similar to other networking options.
+
+### Global Limit
+
+The primary configuration option is `networking.message-size-limit`, which controls the maximum size of messages transmitted over the cluster internal network:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `networking.message-size-limit` | `32 MiB` | Maximum size of network messages between cluster nodes |
+
+```toml restate.toml
+[networking]
+# Increase the message size limit to 64 MiB
+message-size-limit = "64 MiB"
+```
+
+Or via environment variable:
+```bash
+RESTATE_NETWORKING__MESSAGE_SIZE_LIMIT="64 MiB"
+```
+
+### Cascading to Component Limits
+
+Several components have their own message size limits that cascade from the global `networking.message-size-limit`:
+
+| Component | Config Option | Description |
+|-----------|---------------|-------------|
+| **Invoker** | `worker.invoker.message-size-limit` | Maximum size of journal messages from services |
+| **Metadata Client** | `metadata-client.message-size-limit` | Maximum size of metadata messages |
+
+These component-specific limits follow cascading rules:
+- **If not set**: Defaults to `networking.message-size-limit`
+- **If set explicitly**: Clamped to not exceed `networking.message-size-limit`
+
+This ensures that no component can send messages larger than what the network layer can handle.
+
+### Example: Increasing Limits
+
+To allow larger Virtual Object state values or journal entries, increase the global limit:
+
+```toml restate.toml
+[networking]
+# Allow messages up to 64 MiB
+message-size-limit = "64 MiB"
+```
+
+The invoker and other components will automatically inherit this limit. If you want a component to use a smaller limit than the global setting, you can set it explicitly:
+
+```toml restate.toml
+[networking]
+message-size-limit = "64 MiB"
+
+[worker.invoker]
+# Invoker uses a smaller limit than global
+message-size-limit = "32 MiB"
+```
+
+<Note>
+Increasing message size limits affects memory usage and network bandwidth. Only increase these limits if your workload requires larger payloads, and ensure your infrastructure can handle the increased resource requirements.
+</Note>
 
 ## Deprecated Options
 
