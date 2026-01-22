@@ -11,10 +11,6 @@ Restate helps with the concept of **immutable deployments**. When you deploy a v
 Restate then makes sure that requests start and end on the same version, by sending any retry attempts always to the same endpoint.
 This eliminates mid-execution version mismatches: no version compatibility logic is needed in your code.
 
-<Note>
-    TODO add journal mismatch description
-</Note>
-
 ## Service deployments
 
 A deployment is a specific instance of your service code associated with an HTTP endpoint, a Lambda function, or other supported environment.
@@ -39,6 +35,32 @@ restate deployments list
 <Tip>
     Avoid long-running handlers (days or months) - otherwise you need to keep old deployments around until all invocations complete. Instead, break work into smaller chunks using delayed calls.
 </Tip>
+
+## Journal mismatch errors
+
+Restate performs journal compatibility checks during replay to prevent corruption.
+When you see a journal mismatch error ([RT0016](/references/errors#rt0016)), it means the code executed during replay has produced a different journal than the original execution.
+This is typically caused by two scenarios:
+
+**Non-deterministic code**: Code that produces different results on each execution, even with the same inputs.
+
+Examples of non-deterministic operations:
+- External operations such as HTTP requests
+- Random value generation: `Math.random()`, `uuid.v4()`, etc.
+- Getting the current time or date: `new Date()`
+- Iterating over unordered collections, such as hash maps
+
+To record non-deterministic operation results for replay, see the **durable steps** documentation: [TypeScript](/develop/ts/durable-steps), [Python](/develop/python/durable-steps), [Java/Kotlin](/develop/java/durable-steps), [Go](/develop/go/durable-steps).
+
+**In-place code changes**: Modifying deployed code at the same endpoint. This violates the immutable deployment principle and can cause in-flight invocations to fail when they replay with the updated code.
+
+Unsafe changes include:
+- Reordering Restate SDK operations (`run`, state access, service calls, awakeables)
+- Adding or removing SDK operations in the execution path
+- Changing operation inputs (state keys, service call payloads)
+- Modifying conditional logic that affects which operations execute
+
+See the sections below for deployment best practices and how to [fix in-flight invocations](#common-operations).
 
 ## Local development
 
