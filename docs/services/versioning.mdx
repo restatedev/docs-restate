@@ -36,33 +36,6 @@ restate deployments list
     Avoid long-running handlers (days or months) - otherwise you need to keep old deployments around until all invocations complete. Instead, break work into smaller chunks using delayed calls.
 </Tip>
 
-## Journal mismatch errors
-
-Restate performs journal compatibility checks during replay to prevent corruption.
-When you see a journal mismatch error ([RT0016](/references/errors#rt0016)), it means the code executed during replay has produced a different journal than the original execution.
-This is typically caused by two scenarios:
-
-**Non-deterministic code**: Code that produces different results on each execution, even with the same inputs.
-
-Examples of non-deterministic operations:
-- External operations such as HTTP requests
-- Random value generation: `Math.random()`, `uuid.v4()`, etc.
-- Getting the current time or date: `new Date()`
-- Iterating over unordered collections, such as hash maps
-
-To record non-deterministic operation results for replay, you need to record its results using `ctx.run`.
-For more info, see the **durable steps** documentation: [TypeScript](/develop/ts/durable-steps), [Python](/develop/python/durable-steps), [Java/Kotlin](/develop/java/durable-steps), [Go](/develop/go/durable-steps).
-
-**In-place code changes**: Modifying deployed code at the same endpoint. This violates the immutable deployment principle and can cause in-flight invocations to fail when they replay with the updated code.
-
-Unsafe changes include:
-- Reordering Restate SDK operations (`run`, state access, service calls, awakeables)
-- Adding or removing SDK operations in the execution path
-- Changing operation inputs (state keys, service call payloads)
-- Modifying conditional logic that affects which operations execute
-
-See the sections below for deployment best practices and how to [fix in-flight invocations](#common-operations).
-
 ## Local development
 
 During local development, you're iterating quickly on your code and don't need immutable deployments.
@@ -147,9 +120,99 @@ For non-FaaS deployments, you can use either the UI or the CLI to manage deploym
     Virtual Object state persists across versions. Ensure your state schema remains backward compatible.
 </Note>
 
-## Common operations
+## Advanced operations and troubleshooting
 
-This section covers common scenarios you may encounter when managing deployments.
+This section covers common scenarios you may encounter when managing deployments, and some of the troubleshooting best practices we recommend.
+
+### Journal mismatch errors
+
+Restate performs journal compatibility checks during replay to prevent corruption.
+When you see a journal mismatch error ([RT0016](/references/errors#rt0016)), it means the code executed during replay has produced a different journal than the original execution.
+This is typically caused by two scenarios:
+
+**Non-deterministic code**: Code that produces different results on each execution, even with the same inputs.
+
+Examples of non-deterministic operations:
+- External operations such as HTTP requests
+- Random value generation: `Math.random()`, `uuid.v4()`, etc.
+- Getting the current time or date: `new Date()`
+- Iterating over unordered collections, such as hash maps
+
+To record non-deterministic operation results for replay, you need to record its results using `ctx.run`.
+For more info, see the **durable steps** documentation: [TypeScript](/develop/ts/durable-steps), [Python](/develop/python/durable-steps), [Java/Kotlin](/develop/java/durable-steps), [Go](/develop/go/durable-steps).
+
+**In-place code changes**: Modifying deployed code at the same endpoint. This violates the immutable deployment principle and can cause in-flight invocations to fail when they replay with the updated code.
+
+Unsafe changes include:
+- Reordering Restate SDK operations (`run`, state access, service calls, awakeables)
+- Adding or removing SDK operations in the execution path
+- Changing operation inputs (state keys, service call payloads)
+- Modifying conditional logic that affects which operations execute
+
+See the sections above for deployment best practices and the sections below for how to fix in-flight invocations.
+
+### Fixing a bug by updating deployed code
+
+If you have a bug in your deployment code, sometimes it is safe to fix it by updating the deployment in-place.
+
+| Change                                                                 | Safe? |
+|------------------------------------------------------------------------|-------|
+| Fixing a bug inside `ctx.run`                                          | ✅     |
+| Fixing a bug that consistently reproduces (e.g. deserialization error) | ✅     |
+| Changing the order of Restate operations, or adding/removing them      | ❌     |
+| Changing operation inputs (state keys, call payloads, etc.)            | ❌     |
+
+<Note>
+    This approach doesn't work on FaaS platforms (e.g. Lambda) or with the Kubernetes Operator, since these use immutable deployments by design.
+    In those cases, use [pause and resume](#pause-invocations-and-resume-on-a-new-deployment) instead.
+</Note>
+
+### Pause invocations and resume on a new deployment
+
+This is the **recommended approach** for fixing bugs affecting in-flight invocations. It works on all platforms, including FaaS and Kubernetes.
+
+When a bug affects in-flight invocations, they remain pinned to the original deployment.
+Registering a new deployment with a fix only helps new invocations. To fix existing invocations:
+
+<Steps>
+    <Step title="Register a new deployment with the fix">
+        Deploy your fixed code and register it with Restate:
+        ```shell
+        restate deployments register http://greeter-v2/
+        ```
+    </Step>
+    <Step title="Pause the affected invocations">
+        ```shell
+        restate invocations pause <invocation_id>
+        ```
+    </Step>
+    <Step title="Resume on the new deployment">
+        ```shell
+        restate invocations resume <invocation_id> --deployment <new_deployment_id>
+        ```
+    </Step>
+</Steps>
+
+The fix must be compatible with already-executed journal entries so they can replay successfully.
+If the business logic differs, the invocation will fail with [non-determinism errors](/references/errors#rt0016).
+
+For more details, see [managing invocations](/services/invocation/managing-invocations#resume).
+
+### Reassigning a deployment endpoint
+
+<Warning>
+    This is an advanced technique. In most cases, use [pause and resume](#pause-invocations-and-resume-on-a-new-deployment) instead.
+</Warning>
+
+You can use the Admin API to change which endpoint a deployment points to.
+This is useful when you've deployed a fix to a new URL and want stuck invocations to use it:
+
+```shell
+curl -X PUT localhost:9070/deployments/dp_14LsPzGz9HBxXIeBoH5wYUh \
+  --json '{"uri": "http://greeter-patched/"}'
+```
+
+The same determinism rules apply: the fix must be compatible with already-executed journal entries.
 
 ### Updating a service interface
 
@@ -185,66 +248,3 @@ So make sure that you first deploy the services you want to keep in a separate n
 restate deployments remove dp_14LsPzGz9HBxXIeBoH5wYUh
 ```
 If the deployment isn't drained yet but you still want to remove it, use the `--force` flag in CLI.
-
-### Advanced: Fixing a bug by updating deployed code
-
-If you have a bug in your deployment code, sometimes it is safe to fix it by updating the deployment in-place.
-
-| Change                                                                 | Safe? |
-|------------------------------------------------------------------------|-------|
-| Fixing a bug inside `ctx.run`                                          | ✅     |
-| Fixing a bug that consistently reproduces (e.g. deserialization error) | ✅     |
-| Changing the order of Restate operations, or adding/removing them      | ❌     |
-| Changing operation inputs (state keys, call payloads, etc.)            | ❌     |
-
-<Note>
-    This approach doesn't work on FaaS platforms (e.g. Lambda) or with the Kubernetes Operator, since these use immutable deployments by design.
-    In those cases, use [pause and resume](#pause-invocations-and-resume-on-a-new-deployment) instead.
-</Note>
-
-### Advanced: Pause invocations and resume on a new deployment
-
-This is the **recommended approach** for fixing bugs affecting in-flight invocations. It works on all platforms, including FaaS and Kubernetes.
-
-When a bug affects in-flight invocations, they remain pinned to the original deployment.
-Registering a new deployment with a fix only helps new invocations. To fix existing invocations:
-
-<Steps>
-    <Step title="Register a new deployment with the fix">
-        Deploy your fixed code and register it with Restate:
-        ```shell
-        restate deployments register http://greeter-v2/
-        ```
-    </Step>
-    <Step title="Pause the affected invocations">
-        ```shell
-        restate invocations pause <invocation_id>
-        ```
-    </Step>
-    <Step title="Resume on the new deployment">
-        ```shell
-        restate invocations resume <invocation_id> --deployment <new_deployment_id>
-        ```
-    </Step>
-</Steps>
-
-The fix must be compatible with already-executed journal entries so they can replay successfully.
-If the business logic differs, the invocation will fail with [non-determinism errors](/references/errors#rt0016).
-
-For more details, see [managing invocations](/services/invocation/managing-invocations#resume).
-
-### Advanced: Reassigning a deployment endpoint
-
-<Warning>
-    This is an advanced technique. In most cases, use [pause and resume](#advanced-pause-invocations-and-resume-on-a-new-deployment) instead.
-</Warning>
-
-You can use the Admin API to change which endpoint a deployment points to.
-This is useful when you've deployed a fix to a new URL and want stuck invocations to use it:
-
-```shell
-curl -X PUT localhost:9070/deployments/dp_14LsPzGz9HBxXIeBoH5wYUh \
-  --json '{"uri": "http://greeter-patched/"}'
-```
-
-The same determinism rules apply: the fix must be compatible with already-executed journal entries.
