@@ -1,0 +1,251 @@
+---
+title: "Roll back on failures"
+sidebarTitle: "Roll back on failures"
+description: "Implement rollback mechanisms for agent failures."
+tags: ["recipe"]
+---
+
+Implement compensation and rollback mechanisms for agents that need to undo partial work when failures occur. When agents perform multiple actions and something goes wrong, you need to systematically undo the changes to maintain consistency.
+
+<Tip>
+This pattern is also called sagas in the context of microservices. [See the guide.](/guides/sagas)
+</Tip>
+
+
+## How does Restate help?
+
+Restate provides durable execution for both the main workflow and compensation actions:
+
+- **Guaranteed compensation**: If the main workflow fails, compensation handlers are reliably executed
+- **No state management**: No manual state tracking or extra infra required
+- **Observability**: Track both forward progress and rollback operations in the Restate UI
+- Works with **any AI SDK** and **any programming language** supported by Restate
+
+## Example
+
+Track the rollback actions as you go, let the agent raise terminal tool errors, and execute the rollback actions in reverse order.
+
+Here is an example of a travel booking agent that first reserves a hotel, flight and car, and then either confirms them or rolls back if any step fails with a terminal error (e.g. car type not available).
+
+We let tools add rollback actions to the list for each booking step the do.
+The `run` handler catches any terminal errors and runs all the rollback actions.
+
+<CodeGroup>
+```typescript Vercel AI SDK {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/advanced/rollback-agent.ts#here"} 
+const book = async (ctx: restate.Context, { bookingId, prompt }: { bookingId: string, prompt: string }) => {
+  const on_rollback: { (): restate.RestatePromise<any> }[] = [];
+
+  const model = wrapLanguageModel({
+    model: openai("gpt-4o"),
+    middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+  });
+
+  try {
+    const { text } = await generateText({
+      model,
+      system: `Book a complete travel package with the requirements in the prompt.
+        Use tools to first book the hotel, then the flight.`,
+      prompt,
+      tools: {
+        bookHotel: tool({
+          description: "Book a hotel reservation",
+          inputSchema: HotelBookingSchema,
+          execute: async (req: HotelBooking) => {
+            on_rollback.push(() =>
+              ctx.run("cancel-hotel", () => cancelHotel(bookingId)),
+            );
+            return ctx.run("book-hotel", () => reserveHotel(bookingId, req));
+          },
+        }),
+        bookFlight: tool({
+          description: "Book a flight",
+          inputSchema: FlightBookingSchema,
+          execute: async (req: FlightBooking) => {
+            on_rollback.push(() =>
+              ctx.run("cancel-flight", () => cancelFlight(bookingId)),
+            );
+            return ctx.run("book-flight", () => reserveFlight(bookingId, req));
+          },
+        }),
+        // ... similar for car rental ...
+      },
+      stopWhen: [stepCountIs(10)],
+      onStepFinish: rethrowTerminalToolError,
+      providerOptions: { openai: { parallelToolCalls: false } },
+    });
+    return text;
+  } catch (error) {
+    console.log("Error occurred, rolling back all bookings...");
+    for (const rollback of on_rollback.reverse()) {
+      await rollback();
+    }
+    throw error;
+  }
+};
+```
+
+```python OpenAI Agents {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/examples/app/rollback_agent.py?collapse_imports"} 
+class BookingContext(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    booking_id: str
+    on_rollback: list[Callable] = Field(default=[])
+
+
+# Functions raise terminal errors instead of feeding them back to the agent
+@durable_function_tool
+async def book_hotel(
+    wrapper: RunContextWrapper[BookingContext], booking: HotelBooking
+) -> BookingResult:
+    """Book a hotel"""
+    ctx = restate_context()
+    booking_ctx, booking_id = wrapper.context, wrapper.context.booking_id
+    # Register a rollback action for each step, in case of failures further on in the workflow
+    booking_ctx.on_rollback.append(
+        lambda: ctx.run_typed("Cancel hotel", cancel_hotel, id=booking_id)
+    )
+
+    # Execute the workflow step
+    return await ctx.run_typed(
+        "Book hotel", reserve_hotel, id=booking_id, booking=booking
+    )
+
+
+@durable_function_tool
+async def book_flight(
+    wrapper: RunContextWrapper[BookingContext], booking: FlightBooking
+) -> BookingResult:
+    """Book a flight"""
+    ctx = restate_context()
+    booking_ctx, booking_id = wrapper.context, wrapper.context.booking_id
+    booking_ctx.on_rollback.append(
+        lambda: ctx.run_typed("Cancel flight", cancel_flight, id=booking_id)
+    )
+    return await ctx.run_typed(
+        "Book flight", reserve_flight, id=booking_id, booking=booking
+    )
+
+
+# ... Do the same for cars ...
+
+
+agent = Agent[BookingContext](
+    name="BookingWithRollbackAgent",
+    instructions="Book a complete travel package with the requirements in the prompt."
+    "Use tools to first book the hotel, then the flight.",
+    tools=[book_hotel, book_flight],
+)
+
+
+agent_service = restate.Service("BookingWithRollbackAgent")
+
+
+@agent_service.handler()
+async def book(_ctx: restate.Context, req: BookingPrompt) -> str:
+    booking_ctx = BookingContext(booking_id=req.booking_id)
+    try:
+        result = await DurableRunner.run(agent, req.message, context=booking_ctx)
+    except restate.TerminalError as e:
+        # Run all the rollback actions on terminal errors
+        for compensation in reversed(booking_ctx.on_rollback):
+            await compensation()
+        raise e
+
+    return result.final_output
+```
+
+</CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/advanced/rollback-agent.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/openai-agents/examples/app/rollback_agent.py)
+
+Compensation actions should be idempotent since they may be retried. Design them to safely handle cases where the resource to be cleaned up no longer exists.
+Have a look [at the sagas guide](/guides/sagas#advanced:-idempotency-and-compensations) for more information.
+
+
+The Restate UI shows both the forward execution and rollback operations when failures occur:
+<Frame>
+    <img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
+</Frame>
+
+<Tip>
+    This pattern is implementable with any of our SDKs and any AI SDK.
+    If you need help with a specific SDK, please reach out to us via [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA).
+</Tip>
+
+
+<Accordion title="Run the example">
+<Steps>
+<Step title="Requirements">
+    - AI SDK of your choice (e.g., OpenAI, LangChain, Pydantic AI, LiteLLM, etc.) to make LLM calls.
+    - API key for your model provider.
+</Step>
+<Step title="Download the example">
+    <CodeGroup>
+        ```shell TypeScript
+        git clone git@github.com:restatedev/ai-examples.git
+        cd ai-examples/vercel-ai/tour-of-agents
+        npm install
+        ```
+        ```shell Python
+        git clone https://github.com/restatedev/ai-examples.git &&
+        cd ai-examples/openai-agents/examples
+        ```
+    </CodeGroup>
+</Step>
+<Step title="Start the Restate Server">
+    ```shell
+    restate-server
+    ```
+</Step>
+<Step title="Start the Service">
+
+    Export the API key of your model provider as an environment variable and then start the agent. For example, for OpenAI:
+
+    <CodeGroup>
+        ```shell TypeScript
+        export OPENAI_API_KEY=your_openai_api_key
+        npm run dev
+        ```
+        ```shell Python
+        export OPENAI_API_KEY=your_openai_api_key
+        uv run .
+        ```
+    </CodeGroup>
+</Step>
+<Step title="Register the services">
+
+    <Tabs>
+        <Tab title="UI">
+            <img src="/img/ai/patterns/registration.png" alt="Service Registration"/>
+        </Tab>
+        <Tab title="CLI">
+            ```shell
+            restate deployments register localhost:9080
+            ```
+        </Tab>
+    </Tabs>
+
+</Step>
+<Step title="Send a request">
+    In the UI (`http://localhost:9070`), click on the `book` handler of the `BookingWithRollbackAgent` to open the playground and send a default request:
+
+    ```json
+    {
+        "bookingId": "booking_123",
+        "prompt": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."
+    }
+    ```
+</Step>
+
+<Step title="Check the Restate UI">
+    You can see in the Invocations Tab how the workflow executes forward steps, encounters a failure, then executes compensation actions in reverse order:
+    <Frame>
+        <img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
+    </Frame>
+</Step>
+</Steps>
+</Accordion>
+
+
+
+

@@ -15,6 +15,97 @@ This page helps with deploying and operating [Restate clusters](/deploy/server/c
     To migrate an existing single-node deployment into a multi-node deployment without losing data, check out [this guide](/guides/local-to-replicated).
 </Tip>
 
+## Understanding Partition and Log Replication
+
+Restate uses two complementary replication mechanisms to ensure both availability and durability in a distributed cluster:
+
+### Partition Replication
+
+**Partition replication** determines how many partition processors apply the log for each partition. Each partition handles service invocations for a specific key range. Partition processors run in a leader-follower model where one is the leader (actively processing invocations) while followers replay the log for redundancy.
+
+**Key benefits:**
+- **Fast failover**: Followers are already caught up with the log and can quickly take over as leader without reconstructing state from snapshots, reducing Mean Time To Recovery (MTTR) when a node fails
+
+**Trade-offs:**
+- Each partition replica consumes disk space and I/O resources to apply log records locally
+- Does not improve data durability (that's the role of log replication)
+
+**What it controls:**
+- How many nodes simultaneously run partition processors that apply the log for each partition
+
+### Log Replication
+
+**Log replication** determines how many log-server nodes store copies of the durable write-ahead log (Bifrost). This is the foundation of data durability in Restate — the log stores the replicated data, not the partition processors.
+
+**Key characteristics:**
+- **Durability guarantee**: The log is the source of truth for all partition state changes. Your data is safe as long as you don't lose `n` log-server nodes, where `n` is the replication property value
+- **Quorum-based writes**: Log records are replicated to multiple nodes before being acknowledged
+- **Enables partition recovery**: Partitions can be restored on any node by replaying the log or loading from snapshots
+
+**Trade-offs:**
+- **Write latency**: Higher replication factors increase susceptibility to straggler delays, as writes must wait for slower nodes in the quorum
+- **Storage costs**: Each log-server replica stores a full copy of the log segments
+
+**What it controls:**
+- How many log-server nodes store copies of each log segment
+
+### Replication Properties
+
+Both partition and log replication use the same **replication property** format, which can be either:
+
+1. **Simple node count**: `2` means 2 replicas across any nodes
+2. **Location-aware replication**: `{zone: 2, node: 3}` means 3 total replicas distributed across at least 2 zones (requires setting the `location` configuration option on nodes)
+
+The `default-replication` setting in your configuration controls both partition and log replication by default, though they can be configured independently using `restatectl config set`.
+
+<Info>
+    We recommend setting partition replication to at most 2 unless you have strict Mean Time To Recovery (MTTR) requirements. Higher values consume more resources without improving durability.
+</Info>
+
+### Location-Aware Replication
+
+Restate supports location-aware placement to improve fault tolerance across failure domains like zones and regions.
+
+**Configuration:**
+Each node can declare its location in the cluster configuration:
+
+```toml restate.toml
+# Specify the location of this node
+location = "us-west.a1"  # format: "region[.zone]"
+```
+
+**Examples:**
+- `"us-east"` — Region only
+- `"eu-central.zone-1"` — Region and zone
+- `""` (empty) — Default location (no specific assignment)
+
+**Replication property examples:**
+- `{node: 3}` — 3 replicas, distributed across any 3 nodes
+- `{zone: 2, node: 3}` — 3 replicas, distributed across at least 2 different zones
+- `{region: 2, zone: 3, node: 5}` — 5 replicas, across at least 2 regions and 3 zones
+
+<Warning>
+    Node locations should not change after initial node registration, especially for nodes running the `log-server` role, as this can affect replication guarantees.
+</Warning>
+
+### Relationship Between the Two
+
+**Partition replication** and **log replication** work together to provide complete availability and durability:
+
+1. **Log replication** ensures your data is durable and survives node failures—the log stores the actual replicated data across log-server nodes
+2. **Partition replication** ensures your application stays available by maintaining hot standby partition processors that apply the log
+3. Partition processors don't store the replicated data; they apply log records to their local state. The log is the authoritative source
+4. You must set log replication high enough to tolerate node failures and maintain durability
+
+**Example configuration:**
+```toml restate.toml
+# Replicate log data to 2 nodes for durability
+# Run 2 partition processors for fast failover
+default-replication = 2
+```
+
+This cluster requires 2 nodes to become operational. With 3 nodes, it can tolerate 1 node failure while maintaining both availability of the system and durability of the data.
+
 
 ## Deploying Restate clusters
 
@@ -25,8 +116,13 @@ To deploy a distributed Restate cluster without external dependencies, you need 
 node-name = "UNIQUE_NODE_NAME"
 # All nodes need to have the same cluster name
 cluster-name = "CLUSTER_NAME"
+# Address to bind for the Node server.
+bind-address = "BIND_ADDRESS"
 # It is crucial that all peer nodes are able to resolve and connect to every other node's advertised address
 advertised-address = "ADVERTISED_ADDRESS"
+# Optional: Specify the location of this node for location-aware replication
+# Format: "region[.zone]" (e.g., "us-west.a1" or "eu-central")
+location = "REGION[.ZONE]"
 # At most one node can be configured with auto-provision = true
 auto-provision = false
 # Default replication factor for both the logs and the partitions.
@@ -37,6 +133,8 @@ auto-provision = false
 # This also controls the default partition replication. A value of 2 means each partition
 # will be running on up to 2 nodes whenever possible, ensuring fast fail-over without needing to
 # reconstruct partition state if the partition leader becomes unavailable.
+#
+# For location-aware replication, you can use: {zone: 2, node: 3} or {region: 2, zone: 3, node: 5}
 default-replication = 2
 
 [bifrost]
@@ -78,8 +176,12 @@ Refer to the [Cluster provisioning](#cluster-provisioning) section for more info
 
 ### Sizing Clusters
 
+<Info>
+    See [Understanding Partition and Log Replication](#understanding-partition-and-log-replication) for details on how replication works.
+</Info>
+
 The replicated log provider must be used with `default-provider = "replicated"` (this is the default).
-The `default-replication` determines the minimum number of nodes the data must be replicated to.
+The `default-replication` determines the minimum number of nodes the data must be replicated to for both log and partition replication.
 If you run at least `2 * default-replication-property - 1` nodes, then the cluster can tolerate `default-replication-property - 1` node failures.
 Nodes running the `log-server` role store segments of replicated logs.
 
@@ -134,7 +236,7 @@ This tool is specifically designed for system operators to manage Restate server
 The `restatectl` tool communicates with Restate at the advertised address specified in the [server configuration](/references/server-config) - by default TCP port 5122.
 
 <AccordionGroup>
-<Accordion title={"View the cluster's current state"}>
+<Accordion title="View the cluster's current state">
 
     ```shell
     restatectl status
@@ -231,7 +333,7 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
     ```
 </Accordion>
 
-<Accordion title={"View the cluster settings"}>
+<Accordion title="View the cluster settings">
 
     ```shell
     restatectl config get
@@ -249,7 +351,7 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
     ```
 
 </Accordion>
-<Accordion title={"Update the cluster settings"}>
+<Accordion title="Update the cluster settings">
 
     ```shell
     restatectl config set --help # check options
@@ -269,6 +371,16 @@ L-ID  FROM-LSN  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
      └ Nodeset size: 0
 
     ? Apply changes? (y/n) › yes
+    ```
+
+    You can also configure partition and log replication independently:
+
+    ```shell
+    # Set different partition and log replication
+    restatectl config set --partition-replication 3 --log-replication 2
+
+    # Use location-aware replication (requires nodes to have configured locations)
+    restatectl config set --replication '{zone: 2, node: 3}'
     ```
 
 </Accordion>
@@ -307,7 +419,7 @@ You can expand an existing cluster by adding new nodes after it has been started
     restatectl config set --replication 2
     ```
 
-    <Accordion title={"Output"}>
+    <Accordion title="Output">
     ```shell
     ⚙️ Cluster Configuration
     ├ Number of partitions: 24
@@ -328,7 +440,7 @@ You can expand an existing cluster by adding new nodes after it has been started
     restatectl logs list
     ```
 
-    <Accordion title={"Output"}>
+    <Accordion title="Output">
     ```shell
     Log chain v5
     └ Logs Provider: replicated
@@ -374,7 +486,7 @@ You can view the current storage state of log servers in your cluster using the 
 restatectl replicated-loglet list-servers
 ```
 
-<Accordion title={"Output"}>
+<Accordion title="Output">
 ```shell
 Node configuration v12
 Log chain v3
@@ -403,7 +515,7 @@ Use the `set-storage-state` sub-command to manually update the log server state,
 restatectl replicated-loglet set-storage-state --node N.. --storage-state read-only
 ```
 
-<Accordion title={"Output"}>
+<Accordion title="Output">
 ```shell
 Node N.. storage-state updated from read-write to read-only
 ```
@@ -534,7 +646,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
     restatectl replicated-loglet servers
     ```
 
-    <Accordion title={"Output"}>
+    <Accordion title="Output">
     ```log
     Node configuration v21
     Log chain v6
@@ -550,7 +662,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
     ```shell
     restatectl logs list
     ```
-    <Accordion title={"Output"}>
+    <Accordion title="Output">
     ```log
     Logs v3
     └ Logs Provider: replicated
@@ -572,7 +684,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
     restatectl replicated-loglet set-storage-state --node N.. --storage-state 'read-write' --force
     ```
 
-    <Accordion title={"Output"}>
+    <Accordion title="Output">
     ```text
     Node N.. storage-state updated from data-loss to read-write
     ```
@@ -582,7 +694,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
 
 </Accordion>
 
-<Accordion title={"Handling missing snapshots"}>
+<Accordion title="Handling missing snapshots">
     You are observing a partition processor repeatedly crash-looping with a `TrimGapEncountered` error, or see one of the following errors in the Restate server logs:
 
     - `A log trim gap was encountered, but no snapshot repository is configured!`

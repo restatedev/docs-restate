@@ -19,7 +19,7 @@ my_service = restate.Service("MyService")
 
 @my_service.handler("myHandler")
 async def my_handler(ctx: restate.Context, greeting: str) -> str:
-    return f"${greeting}!"
+    return f"{greeting}!"
 
 
 app = restate.app([my_service])
@@ -34,12 +34,12 @@ my_object = restate.VirtualObject("MyVirtualObject")
 
 @my_object.handler("myHandler")
 async def my_handler(ctx: restate.ObjectContext, greeting: str) -> str:
-    return f"${greeting} ${ctx.key()}!"
+    return f"{greeting} {ctx.key()}!"
 
 
 @my_object.handler(kind="shared")
 async def my_concurrent_handler(ctx: restate.ObjectSharedContext, greeting: str) -> str:
-    return f"${greeting} ${ctx.key()}!"
+    return f"{greeting} {ctx.key()}!"
 
 
 app = restate.app([my_object])
@@ -123,7 +123,7 @@ ctx.service_send(
 Call a service without using the generated client, but just String names.
 
 ```python {"CODE_LOAD::python/src/develop/agentsmd/actions.py#request_response_generic"} 
-response = await ctx.generic_call(
+response_bytes = await ctx.generic_call(
     "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
 )
 ```

@@ -150,22 +150,21 @@ function generateOverviewContent(guides) {
             const imgPath = `/img/guides/${guideName}/${guideName}.png`;
             const href = `/guides/${guideName}`;
             
-            return `    <ProductCard
+            return `    <Card
         title="${guide.title}"
-        description="${guide.description}"
         href="${href}"
         img="${imgPath}"
-        model="Microservices"
-        type="Recipe"
-    />`;
+    > 
+        ${guide.description} 
+    </Card>`;
         }).join('\n');
         
         const sectionHeader = getHeaderForTag(tag);
         sections.push(`## ${sectionHeader}
 
-<Columns cols={3}>
+<CardGroup cols={3}>
 ${productCards}
-</Columns>`);
+</CardGroup>`);
     }
     
     // Handle any remaining tags not in the preferred order
@@ -204,8 +203,6 @@ title: "Guides"
 sidebarTitle: "Overview"
 description: "Learn how to do common tasks with Restate."
 ---
-
-import { ProductCard } from '/snippets/blocks/guides/product-cards.mdx';
 
 ${sections.join('\n\n')}
 `;

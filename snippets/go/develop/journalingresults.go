@@ -1,6 +1,7 @@
 package develop
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -146,6 +147,56 @@ func (JournalingResults) SelectCombinators(ctx restate.Context, name string) (st
 	// <end_all>
 
 	return fmt.Sprintf("All subtasks completed with results: %v", subResults), nil
+}
+
+func (JournalingResults) ContextPropagation(ctx restate.Context, name string) error {
+	// <start_wrap_context>
+	// Wrap an external context (like OpenTelemetry) into the Restate context
+	externalCtx := context.Background()
+	ctx = restate.WrapContext(ctx, externalCtx)
+
+	// Use the wrapped context in Run blocks
+	_, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+		// The external context is now available here
+		return callExternalAPI(ctx)
+	})
+	// <end_wrap_context>
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (JournalingResults) CustomValuePropagation(ctx restate.Context, name string) error {
+	// <start_with_value>
+	// Propagate custom values through the context
+	type contextKey string
+	const userIDKey contextKey = "userID"
+
+	// Set a value in the context
+	ctx = restate.WithValue(ctx, userIDKey, "user-123")
+
+	// The value is available in Run blocks
+	_, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+		// Extract the value using standard context APIs
+		userID := ctx.Value(userIDKey).(string)
+		return processWithUserID(userID)
+	})
+	// <end_with_value>
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func callExternalAPI(ctx context.Context) (string, error) {
+	return "", nil
+}
+
+func processWithUserID(userID string) (string, error) {
+	return "", nil
 }
 
 func doDbRequest() (string, error) {

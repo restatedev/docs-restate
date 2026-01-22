@@ -68,9 +68,47 @@ if err != nil {
 
     However, some business logic can take longer to complete—for example, an LLM call that takes up to 3 minutes to respond.
 
-    In such cases, you can adjust the service’s [abort timeout and inactivity timeout](/services/configuration) settings to accommodate longer execution times.
+    In such cases, you can adjust the service's [abort timeout and inactivity timeout](/services/configuration) settings to accommodate longer execution times.
 
     For more information, see the [error handling guide](/guides/error-handling).
+  </Accordion>
+
+  <Accordion title="Context propagation">
+    The Go SDK supports wrapping external contexts within Restate contexts, enabling seamless integration with libraries relying on Go's context propagation like OpenTelemetry.
+
+    Use [`WrapContext`](https://pkg.go.dev/github.com/restatedev/sdk-go#WrapContext) to embed an external context into your Restate context:
+
+```go {"CODE_LOAD::go/develop/journalingresults.go#wrap_context"} 
+// Wrap an external context (like OpenTelemetry) into the Restate context
+externalCtx := context.Background()
+ctx = restate.WrapContext(ctx, externalCtx)
+
+// Use the wrapped context in Run blocks
+_, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+  // The external context is now available here
+  return callExternalAPI(ctx)
+})
+```
+
+    You can also propagate custom values using [`WithValue`](https://pkg.go.dev/github.com/restatedev/sdk-go#WithValue):
+
+```go {"CODE_LOAD::go/develop/journalingresults.go#with_value"} 
+// Propagate custom values through the context
+type contextKey string
+const userIDKey contextKey = "userID"
+
+// Set a value in the context
+ctx = restate.WithValue(ctx, userIDKey, "user-123")
+
+// The value is available in Run blocks
+_, err := restate.Run(ctx, func(ctx restate.RunContext) (string, error) {
+  // Extract the value using standard context APIs
+  userID := ctx.Value(userIDKey).(string)
+  return processWithUserID(userID)
+})
+```
+
+    This feature enables you to maintain context across Restate operations, preserving tracing information and custom metadata throughout your handler execution.
   </Accordion>
 
 </AccordionGroup>

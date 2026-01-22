@@ -1,32 +1,15 @@
 ---
 title: "Tour of Restate for Agents with OpenAI SDK"
-sidebarTitle: "OpenAI Agent SDK - Python"
+sidebarTitle: "OpenAI Agent SDK"
+icon: "/img/languages/python.svg"
 description: "Build stateful, observable AI agents that recover from failures."
 ---
 
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import Intro from '/snippets/tour/ai/intro.mdx';
+import DurableExecution from '/snippets/tour/ai/durable-execution.mdx';
 
-AI agents are long-running processes that combine LLMs with tools and external APIs to complete complex tasks. With Restate, you can build agents that are **resilient to failures**, **stateful across conversations**, and **observable** without managing complex retry logic or external state stores.
-
-In this guide, you'll learn how to:
-- Build durable AI agents that recover automatically from crashes and API failures
-- Integrate Restate with the OpenAI Agent SDK for Python
-- Observe and debug agent executions with detailed traces
-- Implement resilient human-in-the-loop workflows with approvals and timeouts
-- Manage conversation history and state across multi-turn interactions
-- Orchestrate multiple agents working together on complex tasks
-
-## Getting Started
-
-A Restate AI application has two main components:
-- **Restate Server**: The core engine that takes care of the orchestration and resiliency of your agents
-- **Agent Services**: Your agent or AI workflow logic using the Restate SDK for durability
-
-<img src="/img/tour/agents/ai-app-layout.png" alt="Application Structure"/>
-
-Restate works with how you already deploy your agents, whether that's in Docker, on Kubernetes, or via serverless platforms (Modal, AWS Lambda...). You don't need to run your agents in any special way.
-
-Let's run an example locally to get a better feel for how it works.
+<Intro agentsdk="OpenAI Agent SDK for Python" />
 
 ### Run the agent
 [Install Restate](/installation) and launch it:
@@ -72,14 +55,8 @@ Let's have a look at what happened under the hood to make your agents resilient.
 
 ## Durable Execution
 
-AI agents make multiple LLM calls and tool executions that can fail due to rate limits, network issues, or service outages.
-Restate uses Durable Execution to make your agents withstand failures without losing progress.
+<DurableExecution/>
 
-The Restate SDK records the steps the agent executes in a log and replays them if the process crashes or is restarted:
-<img src="/img/tour/agents/durable-execution-animation-agents.gif" alt="Durable AI Agent Execution" />
-
-Durable Execution is the basis of how Restate makes your agents resilient to failures.
-Restate offers durable execution primitives via its SDK.
 
 ## Creating a Durable Agent
 
@@ -88,67 +65,43 @@ To implement a durable agent, you can use the Restate SDK in combination with th
 Here's the implementation of the durable weather agent you just invoked:
 
 ```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/durable_agent.py?collapse_imports"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def get_weather(
-    wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
-) -> WeatherResponse:
+@durable_function_tool
+async def get_weather(city: WeatherRequest) -> WeatherResponse:
     """Get the current weather for a given city."""
-    # Do durable steps using the Restate context
-    restate_context = wrapper.context
-    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
+    return await restate_context().run_typed("get weather", fetch_weather, req=city)
 
 
-weather_agent = Agent[restate.Context](
+agent = Agent(
     name="WeatherAgent",
     instructions="You are a helpful agent that provides weather updates.",
     tools=[get_weather],
 )
 
-
 agent_service = restate.Service("WeatherAgent")
 
 
 @agent_service.handler()
-async def run(restate_context: restate.Context, prompt: WeatherPrompt) -> str:
-
-    result = await Runner.run(
-        weather_agent,
-        input=prompt.message,
-        # Pass the Restate context to tools to make tool execution steps durable
-        context=restate_context,
-        # Choose any model and let Restate persist your calls
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
-    )
-
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    result = await DurableRunner.run(agent, req.message)
     return result.final_output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/durable_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/durable_agent.py" />
 
 First, you implement your agent and its tools, similar to how you would do it with the OpenAI Agent SDK.
-
-To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
-Here, the agent logic is called from the `run` handler.
-The endpoint that serves the agents of this tour over HTTP is defined in [`__main__.py`](https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/__main__.py).
-The agent can now be called at `http://localhost:8080/WeatherAgent/run`.
 
 The main difference compared to a standard OpenAI agent is the use of the Restate Context at key points throughout the agent logic.
 Any action with the Context is automatically recorded by the Restate Server and survives failures.
 We use this for:
-1. **Persisting LLM responses**: We use the `DurableModelCalls(restate_context)` model provider in `Runner.run`, so that every LLM response is saved in Restate Server and can be replayed during recovery.
-2. **Resilient tool execution**: Tools can make steps durable by using Context actions. Their outcome will then be persisted for recovery and retried until they succeed. `restate_context.run_typed` runs an action durably, retrying it until it succeeds and persisting the result in Restate (e.g. database interaction, API calls, non-deterministic actions).
+1. **Persisting LLM responses**: We use the `DurableRunner`, so that every LLM response is saved in Restate Server and can be replayed during recovery. The `DurableRunner` is provided to us via the OpenAI extensions in the Restate SDK.
+2. **Resilient tool execution**: Tools can make steps durable by annotating them with `@durable_function_tool` and using Restate Context actions (available via `restate_context()` or `restate_object_context()`). Whenever you do an action with the Restate Context, the result gets persisted in Restate and can be recovered after a failure. The example uses `restate_context().run_typed`, which runs the function you provide to it and persists its result (e.g. database interaction, API calls, non-deterministic actions).
 
-<Accordion title ="Propagating Restate Context to tools">
-The Restate Context gets supplied to the `run` handler by the Restate SDK when the handler is invoked.
-This context is then propagated to tools via the agent context.
-The Restate Context can also be contained in an object together with additional context.
-Learn more from [the OpenAI docs](https://openai.github.io/openai-agents-python/context/).
-</Accordion>
 
-<Accordion title={"Try out Durable Execution"} icon={"laptop"}>
+To serve the agent over HTTP with Restate, you create a Restate Service and define handlers.
+Here, the agent logic is called from the `run` handler.
+The endpoint that serves the agents of this tour over HTTP is defined in [`__main__.py`](https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/__main__.py).
+The agent can now be called at `http://localhost:8080/WeatherAgent/run`.
+
+<Accordion title="Try out Durable Execution" icon={"laptop"}>
 Ask for the weather in Denver:
 ```bash
 curl localhost:8080/WeatherAgent/run \
@@ -165,9 +118,9 @@ You can see that your request is retrying because the weather API is down:
 To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `app/utils/utils.py` file:
 
 ```python utils/utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/utils/utils.py#weather"} 
-async def fetch_weather(city: str) -> WeatherResponse:
-    fail_on_denver(city)
-    weather_data = await call_weather_api(city)
+async def fetch_weather(req: WeatherRequest) -> WeatherResponse:
+    fail_on_denver(req.city)
+    weather_data = await call_weather_api(req.city)
     return parse_weather_data(weather_data)
 ```
 
@@ -184,7 +137,7 @@ The Invocations tab shows all agent executions with detailed traces of every LLM
     <img src="/img/tour/agents/openai/weather-agent.png" alt="Invocation overview" />
 </Frame>
 
-<Accordion title={"OpenTelemetry Integration"}>
+<Accordion title="OpenTelemetry Integration">
     Restate supports OpenTelemetry for exporting traces to external systems like Langfuse, DataDog, or Jaeger:
 
     Have a look at the [tracing docs](/server/monitoring/tracing) to set this up.
@@ -200,28 +153,25 @@ Many AI agents need human oversight for high-risk decisions or gathering additio
 - If the agent crashes while waiting for human input, Restate continues waiting and recovers the promise on another process.
 - If the agent runs on function-as-a-service platforms, the Restate SDK lets the function suspend while it's waiting. Once the approval comes in, the Restate Server invokes the function again and lets it resume where it left off. This way, you don't pay for idle waiting time ([Learn more](https://www.restate.dev/blog/resilient-serverless-agents#cost-efficiency-scaling-to-zero-while-waiting)).
 
-Here's an insurance claim agent that asks for human approval for high-value claims:
+Here's a tool that asks for human approval for high-value claims:
 
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent.py#here"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def human_approval(
-    wrapper: RunContextWrapper[restate.Context], claim: InsuranceClaim
-) -> str:
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
-    restate_context = wrapper.context
 
     # Create an awakeable for human approval
-    approval_id, approval_promise = restate_context.awakeable(type_hint=str)
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
 
     # Request human review
-    await restate_context.run_typed(
+    await restate_context().run_typed(
         "Request review", request_human_review, claim=claim, awakeable_id=approval_id
     )
 
     # Wait for human approval
     return await approval_promise
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/human_approval_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/human_approval_agent.py" />
 
 To implement human approval steps, you can use Restate's awakeables. An awakeable is a promise that can be resolved externally via an API call by providing its ID.
 When you create the awakeable, you get back an ID and a promise. You can send the ID to the human approver, and then wait for the promise to be resolved.
@@ -230,7 +180,7 @@ When you create the awakeable, you get back an ID and a promise. You can send th
 You can also use awakeables outside of tools, for example, to implement human approval steps in between agent iterations.
 </Info>
 
-<Accordion title={"Try out human approval"} icon={"laptop"}>
+<Accordion title="Try out human approval" icon={"laptop"}>
     Start a request for a high-value claim that needs human approval.
     Use the playground or `curl` with `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
@@ -241,6 +191,10 @@ You can also use awakeables outside of tools, for example, to implement human ap
     You can restart the service to see how Restate continues waiting for the approval.
 
     If you wait for more than a minute, the invocation will get suspended.
+
+    <Frame>
+        <img src="/img/tour/agents/openai/suspensions.png" alt="Invocation overview" />
+    </Frame>
 
     Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
 
@@ -254,7 +208,7 @@ You can also use awakeables outside of tools, for example, to implement human ap
     </Frame>
 </Accordion>
 
-<Accordion title={"Timeouts and Escalation"}>
+<Accordion title="Timeouts and Escalation">
 Add timeouts to human approval steps to prevent workflows from hanging indefinitely.
 
 Restate persists the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time:
@@ -263,14 +217,14 @@ Restate persists the timer and the approval promise, so if the service crashes o
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
-    timeout=restate_context.sleep(timedelta(hours=3)),
+    timeout=restate_context().sleep(timedelta(hours=3)),
 ):
     case ["approval", approved]:
         return "Approved" if approved else "Rejected"
     case _:
         return "Approval timed out - Evaluate with AI"
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/human_approval_agent_with_timeout.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
 Try it out by sending a request to the service:
 ```bash
@@ -288,7 +242,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 You can pull out complex parts of your tool logic into separate workflows.
 This lets you break down complex agents into smaller, reusable components that can be developed, deployed, and scaled independently.
 
-The Restate SDK gives you clients to call other Restate services durably from your agent logic.
+The Restate SDK gives you clients to call these workflows durably from your agent logic.
 All calls are proxied via Restate. Restate persists the call and takes care of retries and recovery.
 
 For example, let's implement the human approval tool as a separate service:
@@ -297,43 +251,36 @@ For example, let's implement the human approval tool as a separate service:
 human_approval_workflow = restate.Service("HumanApprovalWorkflow")
 
 
-@human_approval_workflow.handler("requestApproval")
-async def request_approval(
-    restate_context: restate.Context, claim: InsuranceClaim
-) -> str:
+@human_approval_workflow.handler()
+async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
     """Request human approval for a claim and wait for response."""
     # Create an awakeable that can be resolved via HTTP
-    approval_id, approval_promise = restate_context.awakeable(type_hint=str)
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
 
     # Request human review
-    await restate_context.run_typed(
+    await ctx.run_typed(
         "Request review", request_human_review, claim=claim, awakeable_id=approval_id
     )
 
     # Wait for human approval
     return await approval_promise
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/sub_workflow_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py" />
 
 This can now be called from the main agent via a service client:
 ```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def human_approval(
-    wrapper: RunContextWrapper[restate.Context], claim: InsuranceClaim
-) -> str:
-    """Ask for human approval for high-value claims using sub-workflow."""
-    restate_context = wrapper.context
-
-    # Call the human approval sub-workflow
-    return await restate_context.service_call(request_approval, claim)
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/sub_workflow_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py" />
 
 These workflows have access to all Restate SDK features, including durable execution, state management, awakeables, and observability.
 They can be developed, deployed, and scaled independently.
 
 
-<Accordion title={"Try out sub-workflows"} icon={"laptop"}>
+<Accordion title="Try out sub-workflows" icon={"laptop"}>
     Start a request for a high-value claim that needs human approval.
     Use `/send` to start the claim asynchronously, without waiting for the result.
     ```bash
@@ -361,90 +308,83 @@ They can be developed, deployed, and scaled independently.
 
 The next ingredient we need to build AI agents is the ability to maintain context and memory across multiple interactions.
 
-The OpenAI SDK allows plugging in custom [session providers](https://openai.github.io/openai-agents-python/sessions/) to manage conversation history.
+To implement stateful entities like chat sessions, or stateful agents, Restate provides a special service type called Virtual Objects.
 
-This integrates very well with Restate's stateful entities, called Virtual Objects.
+When you send a message to a Virtual Object, you provide a unique key that identifies the object instance (for example, a chat session ID or user ID).
 
-Virtual Objects are Restate's way of implementing stateful services with durable state management and built-in concurrency control.
-To implement stateful entities like chat sessions, or stateful agents, Restate provides Virtual Objects.
+Each instance of a Virtual Object maintains isolated state. The handlers of the Virtual Object can read and modify the object's state via the Restate `ObjectContext`.
 
-Each Virtual Object instance maintains isolated state and is identified by a unique key.
+<img src="/img/tour/agents/chat_objects.png" alt="Objects"/>
 
+### Virtual Objects for stateful agents
 
-### Virtual Objects as OpenAI Session Providers
-
-The Restate OpenAI middleware includes a SessionProvider that automatically persists the agent's conversation history in the Virtual Object state.
+Restate's DurableRunner includes a configuration setting to automatically store your agent's events and state in Restate.
 
 Here is an example of a stateful, durable agent represented as a Virtual Object:
-<img src="/img/tour/agents/chat_objects.png" alt="Objects"/>
 
 ```python chat.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/chat.py?collapse_imports"} 
 chat = VirtualObject("Chat")
 
 
 @chat.handler()
-async def message(restate_context: ObjectContext, chat_message: ChatMessage) -> dict:
-
-    restate_session = await RestateSession.create(
-        session_id=restate_context.key(), ctx=restate_context
-    )
-
-    result = await Runner.run(
+async def message(_ctx: ObjectContext, req: ChatMessage) -> dict:
+    # Set use_restate_session=True to store the session in Restate's key-value store
+    # Make sure you use a VirtualObject to enable this feature
+    result = await DurableRunner.run(
         Agent(name="Assistant", instructions="You are a helpful assistant."),
-        input=chat_message.message,
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
-        session=restate_session,
+        req.message,
+        use_restate_session=True,
     )
     return result.final_output
-
-
-@chat.handler(kind="shared")
-async def get_history(ctx: ObjectSharedContext):
-    return await ctx.get("items") or []
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/chat.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/chat.py" />
 
-Virtual Objects are ideal for implementing any entity with mutable state:
+This automatically persists the agent events (LLM calls, tool calls, etc.) and the conversation history in Restate.
+It uses Restate as the session provider for the OpenAI Agent SDK.
+
+<Accordion title="Try out Virtual Objects" icon={"laptop"}>
+    Ask the agent to do some task and provide a session ID as the object key:
+    ```bash
+    curl localhost:8080/Chat/session123/message \
+    --json '{"message": "Make a poem about durable execution."}'
+    ```
+
+    Continue the conversation with the same session ID. The agent will remember previous context:
+    ```bash
+    curl localhost:8080/Chat/session123/message \
+    --json '{"message": "Shorten it to 2 lines."}'
+    ```
+
+    Go to the state tab of the UI to view the conversation history.
+</Accordion>
+
+
+Virtual Objects are ideal for implementing stateful agents because they provide:
 - **Long-lived state**: K/V state is stored permanently. It has no automatic expiry. Clear it via `ctx.clear()`.
 - **Durable state changes**: State changes are logged with Durable Execution, so they survive failures and are consistent with code execution
 - **State is queryable** via the state tab in the UI.
 <Frame>
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
-- **Built-in concurrency control**: Restate’s Virtual Objects have built-in queuing and consistency guarantees per object key. Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context).
-    - Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions (for example `message()`).
-    - Handlers with read-only access can run concurrently to the write-access handlers (for example `get_history()`).
+
+
+### Built-in concurrency control
+
+Restate’s Virtual Objects have built-in queuing and consistency guarantees per object key.
+
+You provide the unique key when invoking the Virtual Object, for example, the chat session ID or user ID.
+When multiple requests come in for the same object key, Restate automatically queues them and ensures consistency.
+
 <img src="/img/tour/agents/chat_queue.png" alt="Queue"/>
 
-<Accordion title={"Try out Virtual Objects"} icon={"laptop"}>
-    **Stateful Chat Agent:**
+The semantics are as follows:
+- Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context).
+- Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions (for example `message()`).
+- Handlers with read-only access can run concurrently to the write-access handlers (for example `get_history()`).
 
-    Ask the agent to do some task:
-    ```bash
-    curl localhost:8080/Chat/session123/message \
-    --json '{"message": "Make a poem about durable execution."}'
-    ```
+<Accordion title="Try out queuing" icon={"laptop"}>
 
-    Continue the conversation - the agent remembers previous context:
-    ```bash
-    curl localhost:8080/Chat/session123/message \
-    --json '{"message": "Shorten it to 2 lines."}'
-    ```
-
-    Get conversation history or view it in the UI:
-    ```bash
-    curl localhost:8080/Chat/session123/get_history
-    ```
-
-    **Seeing concurrency control in action:**
-
-    In the chat service, the `message` handler is an exclusive handler, while the `getHistory` handler is a shared handler.
-
-    Let's send some messages to a chat session:
+    Let's send several messages concurrently to different chat sessions:
     ```bash
     curl localhost:8080/Chat/session123/message/send --json '{"message": "make a poem about durable execution"}' &
     curl localhost:8080/Chat/session456/message/send --json '{"message": "what are the benefits of durable execution?"}' &
@@ -463,7 +403,7 @@ Virtual Objects are ideal for implementing any entity with mutable state:
 
 </Accordion>
 
-<Accordion title={"Stateful Serverless Agents"}>
+<Accordion title="Stateful Serverless Agents">
     You can run Virtual Objects on serverless platforms like Modal, Render, or AWS Lambda.
     When the request comes in, Restate attaches the correct state to the request, so your handler can access it locally.
 
@@ -497,69 +437,53 @@ You don't need to do anything special to make this work with Restate.
 Use Virtual Object state to maintain context between runs. For example, store the last agent that was called in the object state, so the user can connect back seamlessly on the next interaction:
 
 ```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"} 
-intake_agent = Agent[restate.ObjectContext](
-    name="IntakeAgent",
-    instructions="Route insurance claims to the appropriate specialist: medical, auto, or property.",
-)
-
-medical_specialist = Agent[restate.ObjectContext](
+medical_agent = Agent(
     name="MedicalSpecialist",
     handoff_description="I handle medical insurance claims from intake to final decision.",
     instructions="Review medical claims for coverage and necessity. Approve/deny up to $50,000.",
 )
 
-auto_specialist = Agent[restate.ObjectContext](
-    name="AutoSpecialist",
-    handoff_description="I handle auto insurance claims from intake to final decision.",
-    instructions="Assess auto claims for liability and damage. Approve/deny up to $25,000.",
+car_agent = Agent(
+    name="CarSpecialist",
+    handoff_description="I handle car insurance claims from intake to final decision.",
+    instructions="Assess car claims for liability and damage. Approve/deny up to $25,000.",
 )
 
-# Configure handoffs so intake agent can route to specialists
-intake_agent.handoffs = [medical_specialist, auto_specialist]
+
+intake_agent = Agent(
+    name="IntakeAgent",
+    instructions="Route insurance claims to the appropriate specialist",
+    handoffs=[medical_agent, car_agent],
+)
 
 agent_dict = {
     "IntakeAgent": intake_agent,
-    "MedicalSpecialist": medical_specialist,
-    "AutoSpecialist": auto_specialist,
+    "MedicalSpecialist": medical_agent,
+    "AutoSpecialist": car_agent,
 }
 
 agent_service = restate.VirtualObject("MultiAgentClaimApproval")
 
 
 @agent_service.handler()
-async def run(restate_context: restate.ObjectContext, claim: InsuranceClaim) -> str:
-
+async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
     # Store context in Restate's key-value store
-    last_agent_name = (
-        await restate_context.get("last_agent_name", type_hint=str) or "IntakeAgent"
-    )
+    last_agent_name = await ctx.get("last_agent_name", type_hint=str) or "IntakeAgent"
     last_agent = agent_dict.get(last_agent_name, intake_agent)
 
-    restate_session = await RestateSession.create(
-        session_id=restate_context.key(), ctx=restate_context
-    )
-    result = await Runner.run(
-        last_agent,
-        input=f"Claim: {claim.model_dump_json()}",
-        context=restate_context,
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
-        session=restate_session,
+    result = await DurableRunner.run(
+        last_agent, f"Claim: {claim.model_dump_json()}", session=RestateSession()
     )
 
-    restate_context.set("last_agent_name", result.last_agent.name)
-
+    ctx.set("last_agent_name", result.last_agent.name)
     return result.final_output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/multi_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/multi_agent.py" />
 
 The execution trace in the Restate UI will allow you to see the full chain of calls between agents and their individual steps.
 
 
-<Accordion title={"Try out multi-agent systems"} icon={"laptop"}>
+<Accordion title="Try out multi-agent systems" icon={"laptop"}>
     Start a request for a claim that needs to be analyzed by multiple agents.
     ```bash
     curl localhost:8080/MultiAgentClaimApproval/session123/run --json '{
@@ -598,50 +522,33 @@ Restate invokes your main agent again once the remote agent returns.
 
 ```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent_remote.py#here"} 
 # Durable service call to the fraud agent; persisted and retried by Restate
-@function_tool(failure_error_function=raise_restate_errors)
-async def check_fraud(
-    wrapper: RunContextWrapper[restate.Context], claim: InsuranceClaim
-) -> str:
+@durable_function_tool
+async def check_fraud(claim: InsuranceClaim) -> str:
     """Analyze the probability of fraud."""
-    restate_context = wrapper.context
-    return await restate_context.service_call(run_fraud_agent, claim)
+    return await restate_context().service_call(run_fraud_agent, claim)
 
 
-claim_approval_coordinator = Agent[restate.Context](
+agent = Agent(
     name="ClaimApprovalCoordinator",
     instructions="You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve it.",
-    tools=[check_fraud, check_eligibility],
+    tools=[check_eligibility, check_fraud],
 )
 
 agent_service = restate.Service("RemoteMultiAgentClaimApproval")
 
 
 @agent_service.handler()
-async def run(restate_context: restate.Context, claim: InsuranceClaim) -> str:
-    result = await Runner.run(
-        claim_approval_coordinator,
-        input=f"Claim: {claim.model_dump_json()}",
-        context=restate_context,
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
-    )
+async def run(_ctx: restate.Context, claim: InsuranceClaim) -> str:
+    result = await DurableRunner.run(agent, f"Claim: {claim.model_dump_json()}")
     return result.final_output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/multi_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/multi_agent.py" />
 
 Note, any shared context between agents needs to be passed explicitly via the input.
 
 The execution trace in the Restate UI will allow you to see the full chain of calls between agents and their individual steps.
 
-<Warning>
-You cannot put both agents within the same Virtual Object, because this leads to deadlocks.
-The main agent would block on the call to the sub-agent, preventing the sub-agent from executing, cause only one handler can run at a time per object key.
-</Warning>
-
-<Accordion title={"Try out multi-agent systems"} icon={"laptop"}>
+<Accordion title="Try out multi-agent systems" icon={"laptop"}>
     Start a request for a claim that needs to be analyzed by multiple agents.
     ```bash
     curl localhost:8080/RemoteMultiAgentClaimApproval/run --json '{
@@ -663,14 +570,15 @@ The main agent would block on the call to the sub-agent, preventing the sub-agen
     </Frame>
 </Accordion>
 
+<Warning>
+    You cannot put both agents within the same Virtual Object, because this leads to deadlocks.
+    The main agent would block on the call to the sub-agent, preventing the sub-agent from executing, cause only one handler can run at a time per object key.
+</Warning>
+
+
 ## Parallel Work
 
 Now that our agents are broken down into smaller parts, let's have a look at how to run different parts of our agent logic in parallel to speed up execution.
-
-<Warning>
-    When using the OpenAI Agent SDK with Restate, tool calls are executed sequentially by default to ensure deterministic execution during replays.
-    When multiple tools execute in parallel and use the Restate Context, the order of operations might differ between the original execution and the replay, leading to inconsistencies.
-</Warning>
 
 Restate provides primitives that allow you to run tasks concurrently while maintaining deterministic execution during replays.
 
@@ -678,35 +586,31 @@ Most actions on the Restate Context can be composed using `restate.gather` to ga
 
 
 ### Parallel Tool Steps
+When using the OpenAI SDK with Restate, tool calls are forced to be executed sequentially to ensure deterministic execution during replays.
+When multiple tools execute in parallel and use the Restate Context, the order of operations might differ between the original execution and the replay, leading to inconsistencies.
 
-To parallelize tool steps, implement an orchestrator tool that uses durable execution to run multiple steps in parallel.
+Therefore, the only way to run multiple tool steps in parallel is to implement an orchestrator tool that uses durable execution to run multiple steps in parallel.
 
 Here is an insurance claim agent tool that runs multiple analyses in parallel:
 
 ```python parallel_tools_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/parallel_tools_agent.py#here"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def calculate_metrics(
-    wrapper: RunContextWrapper[restate.Context], claim: InsuranceClaim
-) -> list[str]:
+@durable_function_tool
+async def calculate_metrics(claim: InsuranceClaim) -> list[str]:
     """Calculate claim metrics."""
-    restate_context = wrapper.context
+    ctx = restate_context()
 
     # Run tools/steps in parallel with durable execution
     results_done = await restate.gather(
-        restate_context.run_typed("eligibility", check_eligibility, claim=claim),
-        restate_context.run_typed("cost", compare_to_standard_rates, claim=claim),
-        restate_context.run_typed("fraud", check_fraud, claim=claim),
+        ctx.run_typed("eligibility", check_eligibility, claim=claim),
+        ctx.run_typed("cost", compare_to_standard_rates, claim=claim),
+        ctx.run_typed("fraud", check_fraud, claim=claim),
     )
     return [await result for result in results_done]
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/parallel_tools_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/parallel_tools_agent.py" />
 Restate makes sure that all parallel tasks are retried and recovered until they succeed.
 
-<Info>
-If you want to allow the LLM to call multiple tools in parallel, then you need to [manually implement the agent tool execution loop](#advanced-patterns) using `restate.select` and durable promises.
-</Info>
-
-<Accordion title={"Try out parallel tool steps"} icon={"laptop"}>
+<Accordion title="Try out parallel tool steps" icon={"laptop"}>
     Start a request for a claim that needs to be analyzed by multiple tools in parallel.
     ```bash
     curl localhost:8080/ParallelToolClaimAgent/run --json '{
@@ -732,14 +636,13 @@ If you want to allow the LLM to call multiple tools in parallel, then you need t
 
 You can use the same durable execution primitives to run multiple agents in parallel.
 
-For example, to race agents against each other and [use the first result that returns](/develop/ts/concurrent-tasks#wait-for-the-first-successful-completion), while [cancelling the others](/foundations/invocations#cancelling-invocations).
+For example, to race agents against each other and [use the first result that returns, while cancelling the others](/ai/patterns/competitive-racing).
 
 Or to let a main orchestrator agent combine the results of multiple specialized agents in parallel:
 
 ```python parallel_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/parallel_agents.py#here"} 
 @agent_service.handler()
 async def run(restate_context: restate.Context, claim: InsuranceClaim) -> str:
-
     # Start multiple agents in parallel with auto retries and recovery
     eligibility = restate_context.service_call(run_eligibility_agent, claim)
     cost = restate_context.service_call(run_rate_comparison_agent, claim)
@@ -749,24 +652,19 @@ async def run(restate_context: restate.Context, claim: InsuranceClaim) -> str:
     await restate.gather(eligibility, cost, fraud)
 
     # Run decision agent on outputs
-    result = await Runner.run(
+    result = await DurableRunner.run(
         Agent(
             name="ClaimApprovalAgent", instructions="You are a claim decision engine."
         ),
         input=f"Decide about claim: {claim.model_dump_json()}. "
         "Base your decision on the following analyses:"
         f"Eligibility: {await eligibility} Cost {await cost} Fraud: {await fraud}",
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context),
-            model_settings=ModelSettings(parallel_tool_calls=False),
-        ),
     )
     return result.final_output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/parallel_agents.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/parallel_agents.py" />
 
-<Accordion title={"Try out parallel agents"} icon={"laptop"}>
+<Accordion title="Try out parallel agents" icon={"laptop"}>
     Start a request for a claim that needs to be analyzed by multiple agents in parallel.
     ```bash
     curl localhost:8080/ParallelAgentClaimApproval/run --json '{
@@ -807,61 +705,35 @@ Many AI SDKs also have their own retry behavior for LLM calls and tool execution
 
 ### Retries of LLM calls
 
-Restate's `DurableModelCalls` provider lets you specify the maximum number of retries for LLM calls.
+Restate's `DurableRunner` lets you specify the retry behavior for LLM calls as follows:
 
-```python
-run_config=RunConfig(
-    model="gpt-4o",
-    model_provider=DurableModelCalls(restate_context, max_retries=3),
-    model_settings=ModelSettings(parallel_tool_calls=False)
-),
-```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/errorhandling_fail_on_terminal_tool_agent.py" />
-
-By default, the middleware retries three times. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
-
-### Tool execution errors
-
-By default, the OpenAI Agent SDK will convert any error in tool execution into a message to the LLM, and the LLM will decide how to proceed.
-This is often desirable, as the LLM can decide to retry the tool call, use a different tool, or provide a fallback answer.
-
-#### Surfacing suspensions and terminal errors
-There are some Restate errors that should not be handled by the LLM, for example, if a tool execution is suspended waiting for human input.
-Restate lets tool executions suspend if they need to wait for a long time. This suspension is started by raising an artificial error.
-These errors should be re-raised by the agent, instead of ingested.
-
-Therefore, you should always set your tool's `failure_error_function` to raise Restate errors like suspensions.
-
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/error_handling.py#here"} 
-@function_tool(failure_error_function=raise_restate_errors)
-async def get_weather(
-    wrapper: RunContextWrapper[restate.Context], req: WeatherRequest
-) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    restate_context = wrapper.context
-    return await restate_context.run_typed("Get weather", fetch_weather, city=req.city)
-```
-
-This error function will also re-raise any terminal errors that happen during tool execution.
-
-You can then handle the terminal error in your agent logic if needed, or let it fail the invocation:
 ```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
 try:
-    result = await Runner.run(
-        weather_agent,
-        input=prompt.message,
-        context=restate_context,
-        run_config=RunConfig(
-            model="gpt-4o",
-            model_provider=DurableModelCalls(restate_context, max_retries=2),
-            model_settings=ModelSettings(parallel_tool_calls=False),
+    result = await DurableRunner.run(
+        agent,
+        req.message,
+        llm_retry_opts=LlmRetryOpts(
+            max_attempts=3, initial_retry_interval=timedelta(seconds=2)
         ),
     )
 except restate.TerminalError as e:
     # Handle terminal errors gracefully
-    return "The agent couldn't complete the request."
+    return f"The agent couldn't complete the request: {e.message}"
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/errorhandling.py" />
 
+By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+
+### Tool execution errors
+
+By default, the Restate OpenAI integration will raise any terminal errors in tool executions and will let you handle them in your handler, similar to what we did above for model calls.
+
+If you use Restate Context actions in your tool execution, Restate retries any transient errors in these actions until they succeed.
+So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
+
+<Info>
+You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `.run` actions in your tool executions.
+</Info>
 
 <Warning>
     The OpenAI Agent SDK also allows setting `failure_error_function` to `None`, which will rethrow any error in the agent execution as-is.
@@ -871,272 +743,6 @@ except restate.TerminalError as e:
     Therefore, be careful when using this option and handle errors appropriately in your agent logic.
     You also might want to set [a retry policy at the service or handler level](/services/configuration#how-to-configure) to avoid infinite retries.
 </Warning>
-
-#### Retry-ing transient errors
-
-If you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
-So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
-
-Here is a small practical example:
-```typescript {"CODE_LOAD::ts/src/tour/agents/inline-tool-errors.ts#here"} 
-// Without ctx.run - error goes straight to agent
-async function myTool() {
-  const result = await fetch('/api/data'); // Might fail due to network
-  // If this fails, agent gets the error immediately
-}
-
-// With ctx.run - Restate handles retries
-async function myToolWithRestate(ctx: restate.Context) {
-  const result = await ctx.run('fetch-data', () =>
-      fetch('/api/data')
-  );
-  // Network failures get retried automatically
-  // Only terminal errors reach the AI
-}
-```
-
-
-<Info>
-You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `ctx.run` steps in your tool executions.
-</Info>
-
-
-## Advanced patterns
-
-<AccordionGroup>
-<Accordion title="Manual Agent Loop">
-If you need more control over the agent loop, you can implement it manually using Restate's durable primitives.
-
-This allows you to:
-- Parallelize tool calls with [`restate.select`](/develop/python/concurrent-tasks#select) and [`restate.gather`](/develop/python/concurrent-tasks#waiting-for-all-tasks-to-complete)
-- Implement custom stopping conditions
-- Implement custom logic between steps (e.g. human approval)
-- Interact with external systems between steps
-- Handle errors in a custom way
-
-Here is an example of a manual agent loop:
-
-```python advanced/manual_loop_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/advanced/manual_loop_agent.py?collapse_imports"} 
-    ChatCompletionToolMessageParam, ChatCompletionUserMessageParam
-from pydantic import BaseModel
-from restate import Context
-from openai import OpenAI, pydantic_function_tool
-
-from app.utils.models import WeatherRequest
-from app.utils.utils import fetch_weather, as_chat_completion_param
-
-# Initialize OpenAI client
-client = OpenAI()
-
-# Tool definitions
-TOOLS = [
-    pydantic_function_tool(
-        WeatherRequest,
-        name="get_weather",
-        description="Get the current weather in a given location",
-    )
-]
-
-
-manual_loop_agent = restate.Service("ManualLoopAgent")
-
-
-class MultiWeatherPrompt(BaseModel):
-    message: str = "What is the weather like in New York and San Francisco?"
-
-
-@manual_loop_agent.handler()
-async def run(ctx: Context, prompt: MultiWeatherPrompt) -> str | None:
-    """Main agent loop with tool calling"""
-    messages: list[ChatCompletionMessageParam] = [
-        ChatCompletionUserMessageParam(role="user", content=prompt.message)
-    ]
-
-    while True:
-        # Call OpenAI with durable execution
-        def llm_call() -> ChatCompletion:
-            return client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                tools=TOOLS,
-            )
-
-        response = await ctx.run_typed(
-            "llm-call",
-            llm_call,
-            restate.RunOptions(
-                max_attempts=3
-            ),  # To avoid using too many credits on infinite retries during development
-        )
-
-        # Save function call outputs for subsequent requests
-        assistant_message = response.choices[0].message
-        messages.append(as_chat_completion_param(assistant_message))
-
-        if not assistant_message.tool_calls:
-            return assistant_message.content
-
-        # Check if we need to call tools
-        for tool_call in assistant_message.tool_calls:
-            if isinstance(tool_call, ChatCompletionMessageFunctionToolCall) and tool_call.function.name == "get_weather":
-                req = WeatherRequest.model_validate_json(tool_call.function.arguments)
-                tool_output = await ctx.run_typed(
-                    "Get weather", fetch_weather, city=req.city
-                )
-
-                # Add tool response to messages
-                messages.append(
-                    ChatCompletionToolMessageParam(
-                        role="tool",
-                        tool_call_id=tool_call.id,
-                        content=tool_output.model_dump_json(),
-                    )
-                )
-```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/advanced/manual_loop_agent.py" />
-
-This can be extended to include any custom control flow you need: persistent state, parallel tool calls, custom stopping conditions, or custom error handling.
-
-Try it out by sending a request to the service:
-```bash
-curl localhost:8080/ManualLoopAgent/run \
---json '{"message": "What is the weather like in New York and San Francisco?"}'
-```
-
-In the UI, you can see how the agent runs multiple iterations and calls tools.
-
-<Frame>
-<img src="/img/tour/agents/manual-loop-agent.png" alt="Invocation overview" />
-</Frame>
-
-</Accordion>
-<Accordion title="Rolling back tool executions on failure">
-
-Sometimes you need to undo previous agent actions when a later step fails. Restate makes it easy to implement compensation patterns (Sagas) for AI agents.
-
-Just track the rollback actions as you go, let the agent rethrow terminal tool errors, and execute the rollback actions in reverse order.
-
-Here is an example of a travel booking agent that first reserves a hotel, flight and car, and then either confirms them or rolls back if any step fails with a terminal error (e.g. car type not available).
-
-We let tools add rollback actions to the agent context for each booking step the do.
-The `run` handler catches any terminal errors and runs all the rollback actions.
-```python advanced/rollback_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/advanced/rollback_agent.py?collapse_imports"} 
-class BookingContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    booking_id: str
-    restate_context: restate.Context
-    on_rollback: list[Callable] = Field(default=[])
-
-
-# Functions raise terminal errors instead of feeding them back to the agent
-@function_tool(failure_error_function=raise_restate_errors)
-async def book_hotel(
-    wrapper: RunContextWrapper[BookingContext], booking: HotelBooking
-) -> BookingResult:
-    """Book a hotel"""
-    booking_context = wrapper.context
-
-    # Register a rollback action for each step, in case of failures further on in the workflow
-    booking_context.on_rollback.append(
-        lambda: booking_context.restate_context.run_typed(
-            "Cancel hotel", cancel_hotel, booking_id=booking_context.booking_id
-        )
-    )
-
-    # Execute the workflow step
-    return await booking_context.restate_context.run_typed(
-        "Book hotel", reserve_hotel, booking_id=booking_context.booking_id, booking=booking
-    )
-
-
-@function_tool(failure_error_function=raise_restate_errors)
-async def book_flight(
-    wrapper: RunContextWrapper[BookingContext], booking: FlightBooking
-) -> BookingResult:
-    """Book a flight"""
-    booking_context = wrapper.context
-
-    booking_context.on_rollback.append(
-        lambda: booking_context.restate_context.run_typed(
-            "Cancel flight", cancel_flight, booking_id=booking_context.booking_id
-        )
-    )
-    return await booking_context.restate_context.run_typed(
-        "Book flight", reserve_flight, booking_id=booking_context.booking_id, booking=booking
-    )
-
-
-# ... Do the same for cars ...
-
-
-agent_service = restate.Service("BookingWithRollbackAgent")
-
-
-@agent_service.handler()
-async def book(restate_context: restate.Context, prompt: BookingPrompt) -> str:
-
-    booking_context = BookingContext(
-        booking_id=prompt.booking_id, restate_context=restate_context
-    )
-
-    booking_agent = Agent[BookingContext](
-        name="BookingWithRollbackAgent",
-        instructions="Book a complete travel package with the requirements in the prompt."
-        "Use tools to first book the hotel, then the flight.",
-        tools=[book_hotel, book_flight],
-    )
-
-    try:
-        result = await Runner.run(
-            booking_agent,
-            input=prompt.message,
-            context=booking_context,
-            run_config=RunConfig(
-                model="gpt-4o", model_provider=DurableModelCalls(restate_context)
-            ),
-        )
-    except TerminalError as e:
-        # Run all the rollback actions on terminal errors
-        for compensation in reversed(booking_context.on_rollback):
-            await compensation()
-        raise e
-
-    return result.final_output
-```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/tour-of-agents/app/advanced/rollback_agent.py" />
-
-Try it out by sending the following request:
-```bash
-curl localhost:8080/BookingWithRollbackAgent/book \
---json '{
-    "booking_id": "booking_123",
-    "message": "I need to book a business trip to San Francisco from March 15-17. Flying from JFK, need a hotel downtown for 1 guest."
-}'
-```
-
-Have a look at the UI to see how the flight booking fails, and the bookings are rolled back.
-
-Check out the [sagas guide](/guides/sagas) for more details.
-
-<Frame>
-<img src="/img/tour/agents/rollback-agent.png" alt="Invocation overview" />
-</Frame>
-</Accordion>
-<Accordion title="Long-running background agents">
-    Restate supports implementing scheduling and timer logic in your agents.
-This allows you to build agents that run periodically, wait for specific times, or implement complex scheduling logic.
-    Agents can either be long-running or reschedule themselves for later execution.
-
-    Have a look at the [scheduling docs](/develop/python/durable-timers) to learn more.
-</Accordion>
-<Accordion title="Streaming back intermediate results">
-Have a look at the [pub-sub example](https://github.com/igalshilman/agent47/tree/main/packages/pubsub).
-</Accordion>
-<Accordion title="Interrupting agents">
-Have a look at the [interruptible coding agent](https://github.com/igalshilman/agent47/tree/main/packages/agent).
-</Accordion>
-</AccordionGroup>
 
 ## Summary
 
@@ -1150,6 +756,6 @@ Durable Execution, paired with your existing SDKs, gives your agents a powerful 
 - **Advanced Patterns**: Real-time progress updates, interruptions, and long-running workflows
 
 ## Next Steps
-- Learn more about how to implement resilient tools with Restate in the [Tour of Workflows](/tour/workflows)
-- Check out the [other Restate AI examples on GitHub](https://github.com/restatedev/ai-examples)
+- [AI Agent documentation](/ai): for advanced patterns and other integrations.
+- [Restate AI examples repository](https://github.com/restatedev/ai-examples)
 - Sign up for [Restate Cloud](https://restate.dev/cloud/) and start building agents without managing infrastructure

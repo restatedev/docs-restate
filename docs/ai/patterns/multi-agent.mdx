@@ -1,0 +1,336 @@
+---
+title: "Multi-Agent Systems"
+sidebarTitle: "Multi-Agent Systems"
+description: "Implement recoverable routing of tasks to tools and agents with Restate."
+tags: ["recipe"]
+---
+
+import StartExample from "/snippets/ai-guides/start-example.mdx";
+
+Build resilient multi-agent systems that automatically recover from failures and scale across distributed infrastructure. Restate provides two approaches for routing requests to specialized agents: **local agents** for simple routing within a single service, and **remote agents** for separate scaling or isolation.
+
+## What Restate offers for multi-agent systems
+
+At the core of every multi-agent system is a routing mechanism that decides which agent should handle each request. Restate makes this routing resilient by ensuring all decisions and agent interactions are durably logged and automatically retried.
+
+### Two routing approaches
+
+**Local Agent Routing**
+- Route to different specialized prompts within the same service
+- Best for: Simple agent specialization with shared context and without infrastructure complexity
+- Use when: You want different AI personalities/expertise but don't need separate deployments
+
+**Remote Agent Routing**
+- Route to independent services running across different infrastructure
+- Best for: Systems requiring independent scaling, isolation, or different technology stacks
+- Use when: You need agents in different languages/SDKs, separate scaling, or team ownership boundaries
+
+### How Restate ensures resilience
+
+**Durable routing decisions**: When your LLM decides to route to an agent, that decision is automatically persisted. If anything fails, Restate resumes from exactly where it left off—no duplicate work, no lost context.
+
+**Failure-resistant communication**: Whether calling local or remote agents, all interactions are wrapped in Restate's durable execution. Network failures, service restarts, and timeouts are handled automatically with retries and recovery.
+
+**End-to-end observability**: The Restate UI shows the complete execution trace across all agent calls, making it easy to debug complex multi-agent workflows and understand routing decisions.
+
+Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
+
+
+## Routing to local agents
+
+Local agent routing lets you create specialized AI assistants within a single service by using different prompts and personalities. The LLM first decides which specialist is needed, then you call the LLM again with a specialized prompt for that agent.
+
+This approach is perfect when you want to create focused expertise areas (like billing, technical support, or sales) without the complexity of separate services.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-agent.ts#here"} 
+const SPECIALISTS = {
+  billingAgent: {
+    description: "Expert in payments, charges, and refunds",
+    prompt:
+      "You are a billing support agent specializing in payments, charges, and refunds.",
+  },
+  accountAgent: {
+    description: "Expert in login issues and security",
+    prompt:
+      "You are an account support agent specializing in login issues and security.",
+  },
+  productAgent: {
+    description: "Expert in features and how-to guides",
+    prompt:
+      "You are a product support agent specializing in features and how-to guides.",
+  },
+} as const;
+
+type Specialist = keyof typeof SPECIALISTS;
+
+async function answer(ctx: Context, { message }: { message: string }) {
+  // 1. First, decide if a specialist is needed
+  const routingDecision = await ctx.run(
+    "Pick specialist",
+    // Use your preferred LLM SDK here - specify agents as tools
+    async () => llmCall(message, createTools(SPECIALISTS)),
+    { maxRetryAttempts: 3 },
+  );
+
+  // 2. No specialist needed? Give a general answer
+  if (!routingDecision.toolCalls || routingDecision.toolCalls.length === 0) {
+    return routingDecision.text;
+  }
+
+  // 3. Get the specialist's name
+  const specialist = routingDecision.toolCalls[0].toolName as Specialist;
+
+  // 4. Ask the specialist to answer
+  const { text } = await ctx.run(
+    `Ask ${specialist}`,
+    async () =>
+      llmCall([
+        { role: "user", content: message },
+        { role: "system", content: SPECIALISTS[specialist].prompt },
+      ]),
+    { maxRetryAttempts: 3 },
+  );
+
+  return text;
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_agent.py?collapse_prequel"} 
+router = restate.Service("AgentRouter")
+
+# Our team of AI specialists
+SPECIALISTS = {
+    "BillingAgent": "Expert in payments, charges, and refunds",
+    "AccountAgent": "Expert in login issues and security",
+    "ProductAgent": "Expert in features and how-to guides",
+}
+
+
+@router.handler()
+async def answer(ctx: restate.Context, question: Question) -> str | None:
+    """Classify request and route to appropriate specialized agent."""
+
+    # 1. First, decide if a specialist is needed
+    routing_decision = await ctx.run_typed(
+        "Pick specialist",
+        llm_call,  # Use your preferred LLM SDK here
+        RunOptions(max_attempts=3),
+        messages=f"""You are a customer service routing system. 
+        Choose the appropriate specialist, or respond directly if no specialist is needed. 
+        {question.message}""",
+        tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
+    )
+
+    # 2. No specialist needed? Give a general answer
+    if not routing_decision.tool_calls:
+        return routing_decision.content
+
+    # 3. Get the specialist's name
+    specialist = routing_decision.tool_calls[0].function.name or "ProductAgent"
+
+    # 4. Ask the specialist to answer
+    response = await ctx.run_typed(
+        f"Ask {specialist}",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"""You are a {SPECIALISTS.get(specialist)} specialist."
+        Answer the question: {question.message}""",
+    )
+
+    return response.content
+```
+
+</CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-agent.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_agent.py)
+
+In the Restate UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
+<img src="/img/ai/patterns/routing_local_agent.png" alt="Dynamic routing based on LLM output - UI"/>
+
+<Accordion title="Run the example">
+    <Steps>
+        <StartExample/>
+
+        <Step title="Send a request">
+        In the UI (`http://localhost:9070`), click on the `answer` handler of the `AgentRouter` service to open the playground and send a default request:
+        <img src="/img/ai/patterns/routing_local_agent_playground.png" alt="Multi-agent routing - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+        In the UI, you can see how the LLM decides to forward the request to the specialized support agents, and how the response is processed:
+
+        <img src="/img/ai/patterns/routing_local_agent.png" alt="Dynamic routing based on LLM output - UI"/>
+        </Step>
+
+    </Steps>
+</Accordion>
+
+## Routing to remote agents
+
+Deploy specialized agents as separate services when you need independent scaling, isolation, or different technology stacks.
+
+Remote agents run as independent services that communicate over HTTP.
+Restate makes these calls look like local function calls while providing end-to-end durability and failure recovery.
+
+The example below shows dynamic routing where the LLM's decision determines which remote service to call. Each specialist agent runs as its own service with a standard `run` handler.
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-remote-agent.ts#here"} 
+// Define your agents as tools as your AI SDK requires (here Vercel AI SDK)
+const SPECIALISTS = {
+  BillingAgent: { description: "Expert in payments, charges, and refunds" },
+  AccountAgent: { description: "Expert in login issues and security" },
+  ProductAgent: { description: "Expert in features and how-to guides" },
+} as const;
+type Specialist = keyof typeof SPECIALISTS;
+
+async function answer(ctx: Context, { message }: { message: string }) {
+  // 1. First, decide if a specialist is needed
+  const messages: ModelMessage[] = [
+    {
+      role: "system",
+      content:
+        "You are a routing agent. Route the question to a specialist or respond directly if no specialist is needed.",
+    },
+    { role: "user", content: message },
+  ];
+  const routingDecision = await ctx.run(
+    "Pick specialist",
+    // Use your preferred LLM SDK here - specify agents as tools
+    async () => llmCall(messages, createTools(SPECIALISTS)),
+    { maxRetryAttempts: 3 },
+  );
+
+  // 2. No specialist needed? Give a general answer
+  if (!routingDecision.toolCalls || routingDecision.toolCalls.length === 0) {
+    return routingDecision.text;
+  }
+
+  // 3. Get the specialist's name
+  const specialist = routingDecision.toolCalls[0].toolName as Specialist;
+
+  // 4. Call the specialist over HTTP
+  return ctx.genericCall<string, string>({
+    service: specialist,
+    method: "run",
+    parameter: message,
+    inputSerde: restate.serde.json,
+    outputSerde: restate.serde.json,
+  });
+}
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_remote_agent.py?collapse_prequel"} 
+remote_agent_router = restate.Service("RemoteAgentRouter")
+
+# Classify the request
+SPECIALISTS = {
+    "BillingAgent": "Expert in payments, charges, and refunds",
+    "AccountAgent": "Expert in login issues and security",
+    "ProductAgent": "Expert in features and how-to guides",
+}
+
+
+@remote_agent_router.handler()
+async def answer(ctx: restate.Context, question: Question) -> str | None:
+    """Classify request and route to appropriate specialized agent."""
+
+    # 1. First, decide if a specialist is needed
+    routing_decision = await ctx.run_typed(
+        "Pick specialist",
+        llm_call,  # Use your preferred AI SDK here
+        RunOptions(max_attempts=3),
+        messages=question.message,
+        tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
+    )
+
+    # 2. No specialist needed? Give a general answer
+    if not routing_decision.tool_calls:
+        return routing_decision.content
+
+    # 3. Get the specialist's name
+    specialist = routing_decision.tool_calls[0].function.name
+    if not specialist:
+        return "Unable to determine specialist"
+
+    # 4. Call the specialist over HTTP
+    response = await ctx.generic_call(
+        specialist,
+        "run",
+        arg=question.model_dump_json().encode(),
+    )
+    return response.decode("utf-8")
+```
+
+</CodeGroup>
+
+View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-remote-agent.ts) /
+[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_remote_agent.py)
+
+
+Each agent is then implemented in its own service. For example, here is the billing agent implementation.
+
+<Accordion title="Billing Agent implementation">
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/utils/utils.ts#here"} 
+export const billingAgent = restate.service({
+  name: "BillingAgent",
+  handlers: {
+    run: async (ctx: Context, question: string): Promise<string> => {
+      const { text } = await ctx.run(
+        "LLM call",
+        async () =>
+          llmCall(`You are a billing support specialist.
+            Acknowledge the billing issue, explain charges clearly, provide next steps with timeline.
+            ${question}`),
+        { maxRetryAttempts: 3 },
+      );
+      return text;
+    },
+  },
+});
+```
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/util/util.py#here"} 
+billing_agent_svc = restate.Service("BillingAgent")
+
+
+@billing_agent_svc.handler("run")
+async def get_billing_support(ctx: restate.Context, question: Question) -> str | None:
+    result = await ctx.run_typed(
+        "LLM call",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"""You are a billing support specialist.
+        Acknowledge the billing issue, explain charges clearly, provide next steps with timeline.
+        {question.message}""",
+    )
+    return result.content
+```
+</CodeGroup>
+</Accordion>
+
+For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
+
+The Restate UI shows how the LLM decides to forward the request to the specialized remote support agents, and shows the execution trace of the nested calls in a single view.
+This is useful for debugging and monitoring complex multi-agent workflows.
+
+<img src="/img/ai/patterns/routing_remote_agent.png" alt="Dynamic routing based on LLM output - UI"/>
+
+
+<Accordion title="Run the example">
+    <Steps>
+    <StartExample/>
+        <Step title="Send a request">
+            In the UI (`http://localhost:9070`), click on the `answer` handler of the `RemoteAgentRouter` service to open the playground and send a default request:
+            <img src="/img/ai/patterns/routing_remote_agent_playground.png" alt="Multi-agent routing - UI"/>
+        </Step>
+
+        <Step title="Check the Restate UI">
+            In the UI, you can see how the LLM decides to forward the request to the specialized support agents, and the nested execution trace of the remote calls:
+
+            <img src="/img/ai/patterns/routing_remote_agent.png" alt="Dynamic routing based on LLM output - UI"/>
+        </Step>
+    </Steps>
+</Accordion>
