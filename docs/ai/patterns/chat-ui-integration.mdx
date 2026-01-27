@@ -1,0 +1,247 @@
+---
+title: "Chat UI Integration"
+sidebarTitle: "Chat UI Integration"
+description: "Call Restate agents from frontend applications, such as Next.js, React or any web framework."
+tags: ["recipe"]
+---
+
+This guide explains how to invoke Restate services from frontend applications using the Restate SDK clients or plain HTTP requests.
+
+## Calling agents from the frontend
+
+You can call your agents in two ways:
+1. Via the SDK clients (type-safe, recommended). Supported for [TypeScript](/services/invocation/clients/typescript-sdk),
+                                                          [Python](/services/invocation/clients/python-sdk),
+                                                          [Java](/services/invocation/clients/java-sdk),
+                                                          [Go](/services/invocation/clients/go-sdk).
+2. Via [plain HTTP requests](/services/invocation/http) (works anywhere in any language).
+
+Restate supports calling your agents via:
+- **Request-response**: short operations where the user is waiting (< few seconds)
+- **Fire-and-forget**: longer operations where you'll receive updates via a separate channel ([pubsub](/ai/patterns/streaming-responses)/webhooks) or want to retrieve the result later
+- **Scheduled/delayed calls**: schedules a request to an agent with a delay
+
+### Example: TypeScript SDK client
+
+Install the Restate SDK clients package:
+
+```bash
+npm install @restatedev/restate-sdk-clients
+```
+
+[Export the type definition](/develop/ts/service-communication#advanced:-sharing-service-type-definitions) of your agent:
+
+```typescript {"CODE_LOAD::ts/src/ai/guides/my_agent.ts#export"} 
+export type MyAgent = typeof myAgent;
+```
+
+Create a client connection to the Restate ingress, then use the client for your service type to send a request:
+
+```typescript {"CODE_LOAD::ts/src/ai/guides/ui_sdk_clients.ts#here"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+// import {MyAgent} from "./my_agent";
+
+const ingress = clients.connect({ url: "http://localhost:8080" });
+
+// Send a message without waiting for completion
+const handle = await ingress
+    .serviceSendClient<MyAgent>({ name: "my-agent" })
+    .run({ message: "How are you?" });
+```
+
+Consult the [client SDK docs](/services/invocation/clients/typescript-sdk) to learn about calling Virtual Objects or doing other types of calls.
+
+### Example: Next.js API Route
+
+You can use the SDK clients to send requests from your NextJS app to Restate services.
+
+Here's an example of an API route that calls a Restate service:
+
+```typescript app/agent/[topic]/api/route.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/examples/app/agent/%5Btopic%5D/api/route.ts"} 
+import { NextRequest } from "next/server";
+import * as clients from "@restatedev/restate-sdk-clients";
+import { MultiToolAgent } from "@/restate/services/multi_tool";
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ topic: string }> },
+) {
+  const { topic } = await params;
+  const { message } = await request.json();
+  const ingressUrl = process.env.INGRESS_URL || "http://localhost:8080";
+
+  const ingress = clients.connect({
+    url: ingressUrl,
+  });
+
+  await ingress
+    .serviceSendClient<MultiToolAgent>({ name: "tools" })
+    .message({ prompt: message, topic });
+
+  return Response.json({ ok: true });
+}
+```
+
+[Check out the full NextJS example here.](https://github.com/restatedev/ai-examples/tree/main/vercel-ai/examples)
+
+
+### Using HTTP requests
+
+You can also call Restate services using plain HTTP requests without the SDK.
+
+For example, in JavaScript:
+```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#here"} 
+// Request-response
+const response = await fetch("http://localhost:8080/my-agent/run", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({message: "How are you?"}),
+});
+const result = await response.json();
+
+// Fire-and-forget: add /send to the URL
+await fetch("http://localhost:8080/my-agent/run/send", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({message: "How are you?"}),
+});
+```
+
+## Retrieving conversation history
+
+Have a look at the [sessions guide](/ai/patterns/sessions-and-chat) to understand how to model conversations as Virtual Objects.
+
+The state you store in Virtual Objects lives forever. If you want to resume a session, this means simply sending a new message to the same virtual object.
+
+For example, add a handler to your Virtual Object to get the history:
+
+<CodeGroup>
+
+```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/chat.ts#here"} 
+export default restate.object({
+  name: "Chat",
+  handlers: {
+    message: restate.createObjectHandler(
+      { input: zodPrompt(examplePrompt) },
+      async (ctx: ObjectContext, { message }: { message: string }) => {
+        const messages = (await ctx.get<Array<ModelMessage>>("memory")) ?? [];
+        messages.push({ role: "user", content: message });
+
+        // Use your preferred LLM SDK here
+        const result = await ctx.run("LLM call", async () => llmCall(messages));
+
+        messages.push({ role: "assistant", content: result.text });
+        ctx.set("memory", messages);
+
+        return result.text;
+      },
+    ),
+    getHistory: restate.createObjectSharedHandler(
+      async (ctx: restate.ObjectSharedContext) =>
+        ctx.get<Array<ModelMessage>>("memory"),
+    ),
+  },
+});
+```
+
+```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/chat.py?collapse_prequel"} 
+chat = restate.VirtualObject("Chat")
+
+
+@chat.handler()
+async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> str | None:
+    """A long-lived stateful chat session that allows for ongoing conversation."""
+
+    # Retrieve conversation memory from Restate
+    messages = await ctx.get("memory", type_hint=list[dict]) or []
+    messages.append({"role": "user", "content": msg.message})
+
+    result = await ctx.run_typed(
+        "LLM call",
+        llm_call,  # Use your preferred LLM SDK here
+        RunOptions(max_attempts=3),
+        messages=messages,
+    )
+
+    # Update conversation memory in Restate
+    messages.append({"role": "assistant", "content": result.content})
+    ctx.set("memory", messages)
+
+    return result.content
+
+
+@chat.handler(kind="shared")
+async def get_history(ctx: restate.ObjectSharedContext):
+    return await ctx.get("memory", type_hint=list[dict]) or []
+```
+
+</CodeGroup>
+
+Follow the [instructions](/ai/patterns/sessions#example) on the sessions page to run this, and then call the handler via:
+<CodeGroup>
+```shell TypeScript
+curl localhost:8080/Chat/user123/getHistory
+```
+```shell Python
+curl localhost:8080/Chat/user123/get_history
+```
+</CodeGroup>
+
+The Virtual Object makes sure that if you open the chat in different browsers/devices, you still get unified view/behavior via sequentializing requests per key.
+
+To stream responses back to the UI, use the [pubsub](/ai/patterns/streaming-responses) package.
+
+## Request deduplication / idempotency
+
+You can let Restate deduplicate requests by adding an idempotency key to the header of your request.
+
+```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#idempotency"} 
+await fetch("http://localhost:8080/my-agent/run/send", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "idempotency-key": "abc-123"},
+    body: JSON.stringify("How are you?"),
+});
+```
+
+This can help with implementing retries and avoiding rage clicking to lead to many invocations.
+
+## Re-attach to executions
+
+Restate lets you re-attach to ongoing executions. This is useful to retrieve the response from another processs, for example after a crash or as part of your application logic.idempotency
+
+There are three ways to do this:
+1. If you use an idempotency key, then sending the same request with the same idempotency key will re-attach you to the original invocation.
+
+2. If you have the invocation ID, then you can use that to attach to it:
+
+```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#attach"} 
+// start the invocation
+const handle = await fetch("http://localhost:8080/agent/run/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json"},
+    body: JSON.stringify("How are you?"),
+});
+
+// retrieve the invocationId
+const {invocationId, status} = await handle.json();
+
+// retrieve the result
+const result = await fetch(`http://localhost:8080/restate/invocation/${invocationId}/attach`, {
+    method: "GET"
+});
+await result.json();
+```
+
+3. If you started the invocation with an idempotency key, then you can use that to attach to it. This does not start the invocation as opposed to point 1:
+
+```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#attach_idem"} 
+// start the invocation with idempotency key
+const idempotencyKey = "abc-123";
+const result = await fetch(`http://localhost:8080/restate/invocation/agent/run/${idempotencyKey}/attach`, {
+    method: "GET"
+});
+await result.json();
+```
+
+Consult the [HTTP requests](/services/invocation/http#attach-to-an-invocation) page for more information.
+

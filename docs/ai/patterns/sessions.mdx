@@ -1,5 +1,5 @@
 ---
-title: "Sessions and context"
+title: "Durable Sessions"
 description: "Build persistent chat sessions that survive interruptions and maintain conversation state."
 tags: ["recipe"]
 ---
@@ -33,25 +33,27 @@ Use Virtual Objects to create persistent chat sessions. Each session is identifi
 <CodeGroup>
 
 ```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/chat.ts#here"} 
-async function message(ctx: ObjectContext, { message }: { message: string }) {
-  const messages = (await ctx.get<Array<ModelMessage>>("memory")) ?? [];
-  messages.push({ role: "user", content: message });
-
-  // Use your preferred LLM SDK here
-  const result = await ctx.run("LLM call", async () => llmCall(messages));
-
-  messages.push({ role: "assistant", content: result.text });
-  ctx.set("memory", messages);
-
-  return result.text;
-}
-
 export default restate.object({
   name: "Chat",
   handlers: {
     message: restate.createObjectHandler(
       { input: zodPrompt(examplePrompt) },
-      message,
+      async (ctx: ObjectContext, { message }: { message: string }) => {
+        const messages = (await ctx.get<Array<ModelMessage>>("memory")) ?? [];
+        messages.push({ role: "user", content: message });
+
+        // Use your preferred LLM SDK here
+        const result = await ctx.run("LLM call", async () => llmCall(messages));
+
+        messages.push({ role: "assistant", content: result.text });
+        ctx.set("memory", messages);
+
+        return result.text;
+      },
+    ),
+    getHistory: restate.createObjectSharedHandler(
+      async (ctx: restate.ObjectSharedContext) =>
+        ctx.get<Array<ModelMessage>>("memory"),
     ),
   },
 });
@@ -81,6 +83,11 @@ async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> str | None:
     ctx.set("memory", messages)
 
     return result.content
+
+
+@chat.handler(kind="shared")
+async def get_history(ctx: restate.ObjectSharedContext):
+    return await ctx.get("memory", type_hint=list[dict]) or []
 ```
 
 </CodeGroup>
@@ -126,7 +133,7 @@ The UI lets you query the state of each chat session:
       --json '{"message": "Write a poem about Durable Execution?"}'
     ```
     ```shell Python
-    curl http://localhost:8080/Chat/user123/on_message \
+    curl localhost:8080/Chat/user123/on_message \
       --json '{"message": "Write a poem about Durable Execution?"}'
     ```
     </CodeGroup>
@@ -147,3 +154,5 @@ The UI lets you query the state of each chat session:
 </Steps>
 
 </Accordion>
+
+Consult the [Chat UI integration guide](/ai/patterns/chat-ui-integration) next, to learn how to call the session object from your Chat UI.
