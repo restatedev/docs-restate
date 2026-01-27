@@ -8,27 +8,18 @@ import StartExample from "/snippets/ai-guides/start-example.mdx";
 
 Build persistent, stateful chat sessions that handle long-running conversations across multiple interactions and users.
 
-In many scenarios, you have long-running multi-turn conversations with agents. A user might start a conversation now, respond hours later, and return again after a few days. Multiple users may be having separate conversations going on, and a single conversation may be open in multiple browser windows.
+A user might start a conversation now, respond hours later, and return again after a few days. Multiple users may be having separate conversations going on, and a single conversation may be open in multiple browser windows.
 
-## How does Restate help?
+This guide helps you with implementing persistent chat sessions with Restate.
 
-To implement stateful entities like chat sessions, or stateful agents, Restate provides Virtual Objects.
+## Virtual Objects
+
+To implement stateful entities like chat sessions, or stateful agents, Restate provides the service type **Virtual Objects**.
+
 Each Virtual Object instance maintains isolated state and is identified by a unique key.
-Virtual Objects let you build durable chat sessions that maintain conversation state across multiple interactions, survive process restarts, and handle concurrent messages gracefully.
 
-<img src="/img/ai/patterns/chat_objects.png" alt="Chat playground"/>
-
-Restate provides:
-- **Durable state**: Conversation history persists across failures and restarts
-- **Session isolation**: Each chat gets isolated state with automatic concurrency control
-- Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
-- **Message ordering**: Concurrent messages are queued and processed sequentially
-
-<img src="/img/ai/patterns/chat_queue.png" alt="Chat playground"/>
-
-## Example
-
-Use Virtual Objects to create persistent chat sessions. Each session is identified by a key (user_id or session_id) and maintains conversation state across multiple interactions.
+Here is an example of a Virtual Object that represents chat sessions:
+<img src="/img/tour/agents/chat_objects.png" alt="Objects"/>
 
 <CodeGroup>
 
@@ -96,6 +87,11 @@ View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_p
 [Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/chat.py)
 
 
+Virtual Objects provide:
+- **Durable state**: Conversation history or any other K/V state (e.g. user preferences) that persists across failures and restarts
+- **Session isolation**: Each chat gets isolated state with automatic concurrency control ([see below](/ai/patterns/sessions#built-in-concurrency-control)
+- Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
+
 The UI lets you query the state of each chat session:
 
 <img src="/img/ai/patterns/chat-state.png" alt="Chat session state - UI"/>
@@ -155,7 +151,36 @@ The UI lets you query the state of each chat session:
 
 </Accordion>
 
-## Retrieving conversation history
+## Built-in concurrency control
+Restate’s Virtual Objects have built-in queuing and consistency guarantees per object key. Handlers either have read-write access (`ObjectContext`) or read-only access (shared object context).
+- Only one handler with write access can run at a time per object key to prevent concurrent/lost writes or race conditions (for example `message()`).
+- Handlers with read-only access can run concurrently to the write-access handlers (for example `getHistory()`).
+<img src="/img/tour/agents/chat_queue.png" alt="Queue"/>
+
+**Seeing concurrency control in action:**
+
+In the chat service, the `message` handler is an exclusive handler, while the `getHistory` handler is a shared handler.
+
+Let's send some messages to a chat session:
+```bash
+curl localhost:8080/Chat/session123/message/send --json '{"message": "make a poem about durable execution"}' &
+curl localhost:8080/Chat/session456/message/send --json '{"message": "what are the benefits of durable execution?"}' &
+curl localhost:8080/Chat/session789/message/send --json '{"message": "how does workflow orchestration work?"}' &
+curl localhost:8080/Chat/session123/message/send --json '{"message": "can you make it rhyme better?"}' &
+curl localhost:8080/Chat/session456/message/send --json '{"message": "what about fault tolerance in distributed systems?"}' &
+curl localhost:8080/Chat/session789/message/send --json '{"message": "give me a practical example"}' &
+curl localhost:8080/Chat/session101/message/send --json '{"message": "explain event sourcing in simple terms"}' &
+curl localhost:8080/Chat/session202/message/send --json '{"message": "what is the difference between async and sync processing?"}'
+```
+
+The UI shows how Restate queues the requests per session to ensure consistency. Only one chat agent is running per session ID:
+<Frame>
+    <img src="/img/tour/agents/exclusive-handlers.png" alt="Conversation State Management" />
+</Frame>
+
+
+
+## Retrieving state
 
 The state you store in Virtual Objects lives forever. If you want to resume a session, this means simply sending a new message to the same virtual object.
 
