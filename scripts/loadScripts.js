@@ -11,6 +11,10 @@ const LANGUAGE_SYMBOLS = {
         commentSymbol: "//",
         serviceSymbol: ["restate.service", "restate.object", "restate.workflow"],
     },
+    js: {
+        commentSymbol: "//",
+        serviceSymbol: ["restate.service", "restate.object", "restate.workflow"],
+    },
     java: {
         commentSymbol: "//",
         serviceSymbol: ["@Service", "@VirtualObject", "@Workflow", "@RestateService", "@RestateVirtualObject", "@RestateWorkflow"],
@@ -49,6 +53,7 @@ function extractLanguageSymbol(filePath) {
     if (filePath.endsWith(".java")) return LANGUAGE_SYMBOLS.java;
     if (filePath.endsWith(".kt")) return LANGUAGE_SYMBOLS.kotlin;
     if (filePath.endsWith(".ts")) return LANGUAGE_SYMBOLS.ts;
+    if (filePath.endsWith(".js")) return LANGUAGE_SYMBOLS.js;
     if (filePath.endsWith(".py")) return LANGUAGE_SYMBOLS.python;
     if (filePath.endsWith(".go")) return LANGUAGE_SYMBOLS.go;
     if (filePath.endsWith(".rs")) return LANGUAGE_SYMBOLS.rust;
