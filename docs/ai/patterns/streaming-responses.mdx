@@ -1,7 +1,498 @@
+---
+title: "Streaming Responses"
+description: "Stream updates from Restate Services to the UI."
+tags: ["recipe"]
+---
 
 
-
-- streaming responses from the LLM: either intermediate results or token-per-token
-- streaming updates back to the UI/user
+## Streaming intermediate updates
 
 pub/sub library
+
+### Streaming updates back to the UI/user
+
+
+## Streaming token-per-token
+
+Not yet possible, but on the roadmap. Contact us on Discord/Slack for more info.back
+
+
+
+
+This guide explains how to stream real-time updates from Restate services to frontend applications using Server-Sent Events (SSE) and the Restate pubsub system.
+
+## Architecture Overview
+
+For long-running operations (like AI agents), use a two-channel architecture:
+
+1. **Request Channel**: Send requests via the SDK client (fire-and-forget)
+2. **Response Channel**: Receive real-time updates via Server-Sent Events (SSE)
+
+```
+┌─────────────────┐     POST /api/send      ┌─────────────────┐
+│                 │ ───────────────────────▶│   API Route     │
+│    Frontend     │                         │  (Next.js/etc)  │
+│                 │◀─────────────────────── │                 │
+└────────┬────────┘    { ok: true }         └────────┬────────┘
+         │                                           │
+         │                                           │ serviceSendClient()
+         │ EventSource                               │
+         │ (SSE)                                     ▼
+         │                                  ┌─────────────────┐
+         │                                  │                 │
+         └─────────────────────────────────▶│ Restate Ingress │
+                  /pubsub/{topic}           │                 │
+                                            └────────┬────────┘
+                                                     │
+                                                     ▼
+                                            ┌─────────────────┐
+                                            │ Restate Service │
+                                            │  publishes to   │
+                                            │     pubsub      │
+                                            └─────────────────┘
+```
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk-clients
+npm install @restatedev/pubsub
+npm install @restatedev/pubsub-client
+```
+
+## Step 1: Register the Pubsub Virtual Object
+
+Add the pubsub virtual object to your Restate endpoint:
+
+```typescript
+// restate/endpoint.ts
+import * as restate from "@restatedev/restate-sdk/fetch";
+import { createPubsubObject } from "@restatedev/pubsub";
+import myService from "./services/my-service";
+
+const pubsub = createPubsubObject("pubsub", {});
+
+export const endpoint = restate.createEndpointHandler({
+  services: [myService, pubsub],
+});
+```
+
+## Step 2: Publish Updates from Your Service
+
+Use the pubsub client to publish messages from your service handlers:
+
+```typescript
+// restate/services/my-service.ts
+import * as restate from "@restatedev/restate-sdk";
+import { createPubsubClient } from "@restatedev/pubsub-client";
+
+const pubsub = createPubsubClient({
+  url: "http://localhost:8080",
+  name: "pubsub",
+});
+
+const myService = restate.service({
+  name: "my-service",
+  handlers: {
+    processMessage: async (
+      ctx: restate.Context,
+      { prompt, topic }: { prompt: string; topic: string }
+    ) => {
+      // Publish the user's message
+      await pubsub.publish(topic, {
+        role: "user",
+        content: prompt,
+      });
+
+      // Do some processing...
+      const result = await ctx.run("process", async () => {
+        return "Processing complete";
+      });
+
+      // Publish the result
+      await pubsub.publish(topic, {
+        role: "assistant",
+        content: result,
+      });
+
+      return result;
+    },
+  },
+});
+
+export default myService;
+export type MyService = typeof myService;
+```
+
+## Step 3: Create an SSE Endpoint
+
+Create an API route that streams pubsub messages as Server-Sent Events:
+
+```typescript
+// app/pubsub/[topic]/route.ts
+import { createPubsubClient } from "@restatedev/pubsub-client";
+import { NextRequest } from "next/server";
+
+const pubsub = createPubsubClient({
+  url: process.env.RESTATE_INGRESS_URL || "http://localhost:8080",
+  name: "pubsub",
+});
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ topic: string }> }
+) {
+  const { topic } = await params;
+  const searchParams = request.nextUrl.searchParams;
+  const offset = Number(searchParams.get("offset") || 0);
+
+  const stream = pubsub.sse({
+    topic,
+    offset,
+    signal: request.signal,
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
+}
+```
+
+## Step 4: Create an API Route to Send Messages
+
+```typescript
+// app/api/send/route.ts
+import { NextRequest } from "next/server";
+import * as clients from "@restatedev/restate-sdk-clients";
+import type { MyService } from "@/restate/services/my-service";
+
+export async function POST(request: NextRequest) {
+  const { message, topic } = await request.json();
+
+  const ingress = clients.connect({
+    url: process.env.RESTATE_INGRESS_URL || "http://localhost:8080",
+  });
+
+  // Fire-and-forget - updates will come via pubsub
+  await ingress
+    .serviceSendClient<MyService>({ name: "my-service" })
+    .processMessage({ prompt: message, topic });
+
+  return Response.json({ ok: true });
+}
+```
+
+## Step 5: Subscribe from the Frontend
+
+Use the browser's `EventSource` API to receive real-time updates:
+
+```typescript
+// app/chat/[sessionId]/page.tsx
+"use client";
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+
+interface Message {
+  role: string;
+  content: string;
+}
+
+export default function Chat() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+
+  useEffect(() => {
+    let offset = 0;
+    let eventSource: EventSource;
+
+    const connect = () => {
+      eventSource = new EventSource(`/pubsub/${sessionId}?offset=${offset}`);
+
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        setMessages((prev) => {
+          const newMessages = [...prev, data];
+          offset = newMessages.length;
+          return newMessages;
+        });
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        // Reconnect after a delay
+        setTimeout(connect, 1000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      eventSource?.close();
+    };
+  }, [sessionId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+
+    await fetch("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: input, topic: sessionId }),
+    });
+
+    setInput("");
+  };
+
+  return (
+    <div className="flex flex-col h-screen">
+      <div className="flex-1 overflow-y-auto p-4">
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={`mb-2 p-2 rounded ${
+              msg.role === "user" ? "bg-blue-100 ml-auto" : "bg-gray-100"
+            }`}
+          >
+            {msg.content}
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-4 border-t">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type a message..."
+          className="w-full p-2 border rounded"
+        />
+        <button type="submit" className="mt-2 px-4 py-2 bg-blue-500 text-white rounded">
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+```
+
+## Complete Example: AI Agent with Progress Updates
+
+Here's a more complete example showing an AI agent that streams tool calls and results:
+
+### Service
+
+```typescript
+// restate/services/agent.ts
+import * as restate from "@restatedev/restate-sdk";
+import { createPubsubClient } from "@restatedev/pubsub-client";
+import { generateText, tool } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
+
+const pubsub = createPubsubClient({
+  url: "http://localhost:8080",
+  name: "pubsub",
+});
+
+const agent = restate.service({
+  name: "agent",
+  handlers: {
+    chat: async (
+      ctx: restate.Context,
+      { prompt, topic }: { prompt: string; topic: string }
+    ) => {
+      // Publish user message
+      await pubsub.publish(topic, { role: "user", content: prompt });
+
+      const { text } = await generateText({
+        model: openai("gpt-4o"),
+        tools: {
+          calculate: tool({
+            description: "Evaluate a math expression",
+            parameters: z.object({ expression: z.string() }),
+            execute: async ({ expression }) => {
+              // Publish tool call
+              await pubsub.publish(topic, {
+                role: "tool",
+                content: `Calculating: ${expression}`,
+              });
+
+              const result = eval(expression); // Use a proper math library in production
+
+              // Publish tool result
+              await pubsub.publish(topic, {
+                role: "tool-result",
+                content: `Result: ${result}`,
+              });
+
+              return result;
+            },
+          }),
+        },
+        onStepFinish: async (step) => {
+          if (step.text) {
+            await pubsub.publish(topic, {
+              role: "assistant",
+              content: step.text,
+            });
+          }
+        },
+        prompt,
+      });
+
+      return text;
+    },
+  },
+});
+
+export default agent;
+export type Agent = typeof agent;
+```
+
+### Frontend with Message Type Styling
+
+```typescript
+// app/agent/[topic]/page.tsx
+"use client";
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+
+interface Message {
+  role: "user" | "assistant" | "tool" | "tool-result";
+  content: string;
+}
+
+export default function AgentChat() {
+  const { topic } = useParams<{ topic: string }>();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    let offset = 0;
+    const eventSource = new EventSource(`/pubsub/${topic}?offset=${offset}`);
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setMessages((prev) => {
+        const newMessages = [...prev, data];
+        offset = newMessages.length;
+        return newMessages;
+      });
+      setIsLoading(false);
+    };
+
+    return () => eventSource.close();
+  }, [topic]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+
+    setIsLoading(true);
+    await fetch("/api/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: input, topic }),
+    });
+    setInput("");
+  };
+
+  const getMessageStyle = (role: string) => {
+    switch (role) {
+      case "user":
+        return "bg-blue-100 ml-auto max-w-[80%]";
+      case "assistant":
+        return "bg-white border max-w-[80%]";
+      case "tool":
+        return "bg-yellow-50 border-yellow-200 border text-sm";
+      case "tool-result":
+        return "bg-green-50 border-green-200 border text-sm";
+      default:
+        return "bg-gray-100";
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto h-screen flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {messages.map((msg, i) => (
+          <div key={i} className={`p-3 rounded-lg ${getMessageStyle(msg.role)}`}>
+            <span className="text-xs text-gray-500 uppercase">{msg.role}</span>
+            <p className="mt-1">{msg.content}</p>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="text-gray-500">Thinking...</div>
+        )}
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-4 border-t">
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask the agent..."
+            className="flex-1 p-2 border rounded"
+          />
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="px-4 py-2 bg-blue-500 text-white rounded disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+```
+
+## Key Concepts
+
+### Topics
+
+Topics are string identifiers that group related messages. Common patterns:
+- Use a unique session ID per conversation
+- Use a user ID for user-specific notifications
+- Use a workflow ID for workflow progress updates
+
+### Offsets
+
+The `offset` parameter tracks which messages the client has already received:
+- Start with `offset=0` to get all messages
+- Update the offset as messages arrive to avoid duplicates
+- On reconnect, use the last known offset to resume
+
+### Message Format
+
+You can publish any JSON-serializable data. Common patterns:
+
+```typescript
+// Chat messages
+{ role: "user" | "assistant", content: string }
+
+// Progress updates
+{ type: "progress", step: number, total: number, message: string }
+
+// Status updates
+{ type: "status", status: "processing" | "complete" | "error", data?: any }
+```
+
+## Summary
+
+| Component | Purpose |
+|-----------|---------|
+| `createPubsubObject` | Register pubsub with Restate endpoint |
+| `createPubsubClient` | Publish messages from services |
+| `pubsub.sse()` | Create SSE stream for API routes |
+| `EventSource` | Browser API to receive SSE updates |
+| `serviceSendClient` | Fire-and-forget to trigger long-running work |
+
+This architecture enables responsive UIs for long-running operations while maintaining Restate's durability guarantees.
