@@ -21,7 +21,7 @@ A disaster recovery and backup strategy must address all three plus the configur
 
 ### Snapshots
 Internal mechanism for cluster operations and state sharing between nodes:
-- **Goal**: Enable fast bootstrap of new nodes and support [log trimming](/server/snapshots#log-trimming-and-snapshots) in clusters
+- **Goal**: Enable fast bootstrap of new nodes and support [log trimming](/server/snapshots#log-trimming-and-durability) in clusters
 - **Scope**: A snapshot of the most recent state of a specific partition, produced by a fully caught up partition processor
 - **When**: Essential for multi-node clusters; optional for single-node deployments
 
@@ -45,7 +45,7 @@ Full copies of all data stored by Restate for disaster recovery:
 ### Use Snapshots When:
 - Operating a multi-node cluster (required)
 - Adding or removing nodes from a cluster
-- Enabling [log trimming](/server/snapshots#log-trimming-and-snapshots) to manage storage
+- Enabling [log trimming](/server/snapshots#log-trimming-and-durability) to manage storage
 - Supporting fast partition processor failover (having warm standbys ready for near-instant takeover)
 - Growing the cluster or replacing completely failed nodes (newly added nodes can bootstrap from snapshots)
 
@@ -57,7 +57,7 @@ Full copies of all data stored by Restate for disaster recovery:
 
 [Snapshots](operate/data-backup#snapshots) are essential for multi-node cluster operations, enabling efficient state sharing and log management.
 
-Snapshots are essential to support safe [log trimming](/server/snapshots#log-trimming-and-snapshots) and fast partition fail-over to a different cluster node. Snapshots are optional for single-node deployments and required for multi-node clusters.
+Snapshots are essential to support safe [log trimming](/server/snapshots#log-trimming-and-durability) and fast partition fail-over to a different cluster node. Snapshots are optional for single-node deployments and required for multi-node clusters.
 
 Restate Partition Processors can be configured to periodically publish snapshots of their partition state to a shared S3-compatible object store.
 
@@ -137,29 +137,82 @@ region = us-east-1
 role_arn = arn:aws:iam::123456789012:role/restate-local-dev-role
 ```
 
-### Log trimming and Snapshots
+### Log Trimming and Durability
 
-In a distributed environment, the shared log is the mechanism for replicating partition state among nodes.
-Therefore it is critical to that all cluster members can get all the relevant events recorded in the log, even newly built nodes that will join the cluster in the future.
-This requirement is at odds with an immutable log growing unboundedly. Snapshots enable log trimming - the process of removing older segments of the log.
+In a distributed environment, the Bifrost log is the mechanism for replicating partition state among nodes. Partition processors apply records from Bifrost to build and maintain their local **partition store** (a materialized view of the partition state in RocksDB). This partition store enables fast reads and efficient processing, but it's derived from the log and can always be rebuilt by replaying log records.
 
-By default, Restate will attempt to trim logs once an hour which you can override or disable in the server configuration:
+The challenge is that all cluster members need access to the relevant log records, including newly added nodes that will join the cluster in the future. This requirement is at odds with an immutable log growing unboundedly. **Log trimming** is the process of removing older segments of the log that are no longer needed.
+
+#### Why Snapshots Matter for Log Trimming
+
+When the log is trimmed, any partition processor that hasn't yet applied those records loses the ability to catch up by replaying the log. Instead, it must:
+
+1. **Fetch a snapshot** from the object store that covers the trimmed records
+2. **Replay only the remaining log records** after the snapshot's LSN
+
+This is why configuring a snapshot repository is essential for multi-node clusters: without snapshots, trimmed log records are permanently lost, and any node that falls behind cannot recover.
+
+#### Understanding Durability Modes
+
+The **durability mode** defines the criteria that tell Restate when the partition store's state has been durably persisted elsewhere, making it safe to trim the corresponding log records. In other words, it controls when Restate considers the materialized view "backed up" enough that the original log records can be discarded.
+
+<Accordion title="Available durability modes">
+
+| Mode | Description |
+|------|-------------|
+| `balanced` | Partition store is durable when covered by a snapshot **and** at least one replica has flushed to local storage. This is the **default when a snapshot repository is configured**.
+| `snapshot-only` | Partition store is durable only after a snapshot has been created, regardless of local replica state.
+| `snapshot-and-replica-set` | Partition store is durable when **all** replicas have flushed locally **and** a snapshot exists.
+| `replica-set-only` | Partition store is durable when all replicas have flushed locally, regardless of snapshot state. This is the **default when no snapshot repository is configured**. Often used in Single-node setups or for testing.
+| `none` | Disables automatic durability tracking and trimming entirely.
+
+</Accordion>
+
+You can configure the durability mode in your server configuration:
 
 ```toml
-[admin]
-log-trim-check-interval = "1h"
+[worker]
+# Controls when partition store state is considered durable enough to trim the log
+# Values: "balanced", "snapshot-only", "snapshot-and-replica-set", "replica-set-only", "none"
+durability-mode = "balanced"
 ```
 
-This interval determines only how frequently the check is performed, and does not guarantee that logs will be trimmed. Restate will automatically determine the appropriate safe trim point for each partition's log.
+<Warning>
+    The `replica-set-only` mode should only be used for single-node deployments or testing. Without snapshots, if the entire cluster fails or a new node needs to bootstrap, there is no way to recover partition state for the trimmed portion of the log. This can result in permanent data loss.
+</Warning>
 
-In multi-node clusters, or any time a snapshot repository is configured, the log safe trim point is determined based on the archived LSN. If a snapshot repository is not configured, then archived LSNs are not reported. Therefore, on multi-node deployments, always make sure to configure a snapshot repository so that the log size can be kept in check. On single-node deployments without a snapshot repository, the log is trimmed based on the latest LSN durably committed to local storage. If you decide to expand a single-node into a multi-node cluster in the future, you will need to configure snapshotting for partition state transfer to the new nodes.
+#### Delayed Log Trimming
 
-The presence of unreachable nodes in a cluster does not affect trimming, as long as the remaining nodes continue to produce snapshots. However, active partition processors that behind the archived LSN will cause trimming to be delayed to allow them to catch up.
+In some scenarios, you may want to delay log trimming even after the durability condition is met. This is particularly useful for geo-replicated deployments where snapshots need time to replicate across regions (e.g., S3 Cross-Region Replication).
 
-Nodes that are temporarily down when the log is trimmed will use snapshots to fast-forward local state when they come back.
+```toml
+[worker]
+# Delay trimming by 5 minutes after durability condition is met
+trim-delay-interval = "5m"
+```
+
+This gives the snapshot repository time to replicate snapshots to other regions before the log segments they depend on are trimmed. Check your object store's cross-region replication SLA to determine an appropriate delay.
+
+#### How Trimming Works
+
+Each partition leader runs a **durability tracker** that monitors:
+- **Durable LSN**: The log position that has been flushed to local storage on each replica (partition store flush)
+- **Archived LSN**: The log position of the latest published snapshot in the object store (or the oldest retained snapshot if `worker.snapshots.experimental-num-retained` is configured)
+
+Based on the configured durability mode, the tracker calculates the **durability point**: the LSN up to which the partition store state is considered safely persisted. Once determined:
+
+1. The partition reports its durability point
+2. If `trim-delay-interval` is configured, the actual trim is delayed by that duration
+3. Log records up to the durability point are trimmed
+
+The presence of unreachable nodes in a cluster does not affect trimming, as long as the remaining nodes continue to produce snapshots. However, active partition processors that are behind the archived LSN will cause trimming to be delayed to allow them to catch up.
+
+Nodes that are temporarily down when the log is trimmed will fetch snapshots from the object store to fast-forward their local partition store state when they come back.
 
 <Info title="Handling log trim gap errors">
-    If you observe repeated `Shutting partition processor down because it encountered a trim gap in the log.` errors in the Restate server log, it is an indication that a processor is failing to start up due to missing log records. To recover, you must ensure that a snapshot repository is correctly configured and accessible from the node reporting errors. You can still recover even if no snapshots were taken previously as long as there is at least one healthy node with a copy of the partition data. In that case, you must first configure the existing node(s) to publish snapshots for the affected partition(s) to a shared destination. See the [Handling missing snapshots](/server/clusters#handling-missing-snapshots) section for detailed recovery steps.
+    If you observe repeated `Shutting partition processor down because it encountered a trim gap in the log.` errors in the Restate server log, it indicates that a processor cannot start because log records it needs have been trimmed. This happens when the processor's local partition store is behind the log's trim point and no snapshot is available to bridge the gap.
+    
+    To recover, ensure a snapshot repository is correctly configured and accessible from the node reporting errors. You can still recover even if no snapshots were taken previously, as long as there is at least one healthy node with a copy of the partition data. In that case, first configure the existing node(s) to publish snapshots for the affected partition(s) to a shared destination. See the [Handling missing snapshots](/server/clusters#handling-missing-snapshots) section for detailed recovery steps.
 </Info>
 
 ### Observing processor persisted state
@@ -189,7 +242,7 @@ There are three notable persistence-related attributes in `restatectl`'s partiti
 
 - **Applied LSN** - the latest log record record applied by this processor
 - **Durable LSN** - the log position of the latest partition store flushed to local node storage; by default processors optimize performance by relying on Bifrost for durability and only periodically flush partition store to disk
-- **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot; this determines the log safe trim point in multi-node clusters
+- **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot (or the oldest retained snapshot if `worker.snapshots.experimental-num-retained` is configured); this determines the log safe trim point in multi-node clusters
 
 ### Pruning the snapshot repository
 
