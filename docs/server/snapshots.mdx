@@ -75,10 +75,18 @@ To set up a snapshot destination, update your [server configuration](/server/con
 ```toml
 [worker.snapshots]
 destination = "s3://snapshots-bucket/cluster-prefix"
-snapshot-interval-num-records = 10000
+snapshot-interval-num-records = 100000
+snapshot-interval = "60m"
 ```
 
-This enables automated periodic snapshots to be written to the specified bucket. You can also trigger snapshot creation manually using [`restatectl`](/installation#advanced%3A-operating-clusters-with-restatectl):
+When both options are set, snapshots are triggered when *both* conditions are met: the specified time has elapsed *and* at least the minimum number of records have been applied. You can also set only one:
+
+- `snapshot-interval` alone triggers time-based snapshots unconditionally
+- `snapshot-interval-num-records` alone triggers snapshots based on record count only
+
+Records correspond to persisted actions in Restate such as receiving an ingress request, appending to an invocation journal, or storing a state key-value pair. As these are variable in size, the exact amount of data accumulated between snapshots will vary depending on the workload. You should tune the snapshot frequency based on the observed partition processor catch-up times and your availability goals.
+
+You can also trigger snapshots manually using [`restatectl`](/installation#advanced%3A-operating-clusters-with-restatectl):
 
 ```shell
 restatectl snapshots create-snapshot --partition-id <PARTITION_ID>
@@ -256,10 +264,23 @@ There are three notable persistence-related attributes in `restatectl`'s partiti
 - **Durable LSN** - the log position of the latest partition store flushed to local node storage; by default processors optimize performance by relying on Bifrost for durability and only periodically flush partition store to disk
 - **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot (or the oldest retained snapshot if `worker.snapshots.experimental-num-retained` is configured); this determines the log safe trim point in multi-node clusters
 
-### Pruning the snapshot repository
+### Snapshot retention
+
+By default, Restate adds new snapshots without removing old ones. You can configure automatic pruning using the experimental `experimental-num-retained` option:
+
+```toml
+[worker.snapshots]
+experimental-num-retained = 1
+```
+
+This keeps only the most recent snapshot and automatically deletes older ones.
+
+<Info>
+    This feature is only available in Restate v1.6 and newer. Only newly uploaded snapshots after the experimental feature was activated will be pruned. Existing snapshots predating the configuration change will not be affected.
+</Info>
 
 <Warning>
-    Restate does not currently support pruning older snapshots from the snapshot repository. We recommend implementing an object lifecycle policy directly in the object store to manage retention.
+    When `experimental-num-retained` is greater than 1, the archived LSN advances to the *oldest* retained snapshot rather than the latest. This delays log trimming and increases storage usage on log servers. For most deployments, `experimental-num-retained = 1` is recommended unless you need the ability to fall back to older snapshots.
 </Warning>
 
 
