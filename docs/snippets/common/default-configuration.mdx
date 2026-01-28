@@ -2,7 +2,12 @@
 
 The following is the default configuration. It does not include all possible configuration options, since some can be conflicting. Take a look at the configuration reference below for a full list of options.
 
-Note that configuration defaults might change across server releases, if you want to make sure you use stable values, use an explicit configuration file an pass the path via `--config-path=<PATH>` as described above.
+Note that configuration defaults might change across server releases, if you want to make sure you use stable values, use an explicit configuration file and pass the path via `--config-path=<PATH>` as described above.
+
+**Important changes in recent versions:**
+- Restate now listens on both TCP and Unix sockets by default (`listen-mode = "all"`). Unix sockets are created under `restate-data/*.sock`.
+- Advertised addresses are automatically detected based on your network configuration. You no longer need to explicitly set `advertised-address` for most deployments.
+- The `metadata-client.addresses` field is now optional for single-node setups.
 
 ```toml restate.toml expandable {"CODE_LOAD::../docs/schemas/restate.toml"} 
 roles = [
@@ -14,7 +19,12 @@ roles = [
 ]
 cluster-name = "localcluster"
 auto-provision = true
-advertised-address = "http://127.0.0.1:5122/"
+# listen-mode = "all"  # Can be "tcp", "unix", or "all" (default)
+# use-random-ports = false
+# bind-ip = "0.0.0.0"
+# bind-port = 5122  # Fabric port
+# advertised-host = "my-hostname"  # Optional, auto-detected if not set
+# advertised-address = "http://127.0.0.1:5122/"  # Optional, auto-detected if not set
 default-num-partitions = 24
 default-replication = 1
 shutdown-timeout = "1m"
@@ -49,7 +59,8 @@ default-journal-retention = "1d"
 
 [metadata-client]
 type = "replicated"
-addresses = ["http://127.0.0.1:5122/"]
+# addresses is optional for single-node setups, auto-populated if this node runs metadata-server role
+addresses = []
 connect-timeout = "3s"
 keep-alive-interval = "5s"
 keep-alive-timeout = "5s"
@@ -103,6 +114,7 @@ max-interval = "10s"
 
 [admin]
 bind-address = "0.0.0.0:9070"
+# advertised-address = "http://127.0.0.1:9070/"  # Optional, auto-detected if not set
 heartbeat-interval = "1s 500ms"
 log-trim-check-interval = "1h"
 disable-web-ui = false
@@ -113,6 +125,7 @@ memory-size = "4.0 GiB"
 
 [ingress]
 bind-address = "0.0.0.0:8080"
+# advertised-address = "http://127.0.0.1:8080/"  # Optional, auto-detected if not set
 kafka-clusters = []
 
 [bifrost]
