@@ -59,7 +59,7 @@ Full copies of all data stored by Restate for disaster recovery:
 
 Snapshots are essential to support safe [log trimming](/server/snapshots#log-trimming-and-durability) and fast partition fail-over to a different cluster node. Snapshots are optional for single-node deployments and required for multi-node clusters.
 
-Restate Partition Processors can be configured to periodically publish snapshots of their partition state to a shared S3-compatible object store.
+Restate Partition Processors can be configured to periodically publish snapshots of their partition state to a shared object store.
 
 Snapshots serve to allow nodes that do not have an up-to-date local copy of a partition's state to quickly start a processor for the given partition.
 Without snapshots, trimming the log could lead to data loss if all the nodes replicating a particular partition are lost. Additionally, starting new partition processors would require the full replay of that partition's log which might take a long time.
@@ -69,7 +69,7 @@ When partition processors successfully publish a snapshot, this is reflected in 
 ### Configuring Automatic Snapshotting
 
 Restate clusters should always be configured with a snapshot repository to allow nodes to efficiently share partition state, and for new nodes to be added to the cluster in the future.
-Restate currently supports using Amazon S3 (or an API-compatible object store) as a shared snapshot repository.
+Restate supports Amazon S3 (or S3-compatible stores), Google Cloud Storage, and Azure Blob Storage as shared snapshot repositories.
 To set up a snapshot destination, update your [server configuration](/server/configuration) as follows:
 
 ```toml
@@ -91,15 +91,27 @@ No additional configuration is required to enable restoring snapshots.
 When partition processors first start up, and no local partition state is found, the processor will attempt to restore the latest snapshot from the repository.
 This allows for efficient bootstrapping of additional partition workers.
 
-<Info title="Experimenting with snapshots without an object store">
-    For testing purposes, you can also use the `file://` protocol to publish snapshots to a local directory. This is mostly useful when experimenting with multi-node configurations on a single machine. The `file` provider does not support conditional updates, which makes it unsuitable for potentially contended operation.
+<Info title="Local development with Azurite or fake-gcs-server">
+    For local development without cloud access, you can use emulators like [Azurite](https://github.com/Azure/Azurite) for Azure or [fake-gcs-server](https://github.com/fsouza/fake-gcs-server) for GCS. See the Minio example below for S3-compatible local development.
 </Info>
 
 ### Object Store endpoint and access credentials
 
-Restate supports Amazon S3 and S3-compatible object stores. In typical server deployments to AWS, the configuration will be automatically inferred. Object store locations are specified in the form of a URL where the scheme is `s3://` and the authority is the name of the _bucket_. Optionally, you may supply an additional path within the bucket, which will be used as a common prefix for all operations. If you need to specify a custom endpoint for S3-compatible stores, you can override the API endpoint using the `aws-endpoint-url` config key.
+Restate supports Amazon S3 (and S3-compatible stores), Google Cloud Storage, and Azure Blob Storage. Object store locations are specified as a URL where the scheme indicates the provider and the authority is the bucket name:
 
-For typical server deployments in AWS, you might not need to set region or credentials at all when using Amazon S3 beyond setting the path. Restate's object store support uses the conventional [AWS SDKs and Tools](https://docs.aws.amazon.com/sdkref/latest/guide/file-format.html) credentials discovery. We strongly recommend against using long-lived credentials in configuration. For development, you can use short-term credentials provided by a profile.
+| Provider | URL Scheme | Example |
+|----------|------------|---------|
+| Amazon S3 | `s3://` | `s3://bucket/prefix` |
+| Google Cloud Storage | `gs://` | `gs://bucket/prefix` |
+| Azure Blob Storage | `az://` | `az://container/prefix` |
+
+Optionally, you may supply an additional path within the bucket, which will be used as a common prefix for all operations.
+
+In typical cloud deployments, credentials are automatically discovered from the environment (instance metadata, workload identity, managed identity, etc.):
+
+- **Amazon S3**: Uses [AWS SDK credential discovery](https://docs.aws.amazon.com/sdkref/latest/guide/file-format.html). For S3-compatible stores, override the endpoint with `aws-endpoint-url`.
+- **Google Cloud Storage**: Uses [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials). Set `GOOGLE_SERVICE_ACCOUNT_PATH` to use a specific service account JSON file.
+- **Azure Blob Storage**: Uses the [Azure credential chain](https://docs.rs/object_store/latest/object_store/azure/index.html). Set `AZURE_STORAGE_ACCOUNT_NAME` and `AZURE_STORAGE_ACCESS_KEY` for explicit credentials.
 
 #### Local development with Minio
 
