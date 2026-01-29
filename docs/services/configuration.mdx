@@ -20,12 +20,21 @@ When attempts are exhausted, you can configure what Restate should do with the i
 - **Pause** it, requiring the user to [**manually resume it**](/services/invocation/managing-invocations#resume).
 - **Kill** it, which automatically fails the invocation and responds to the caller with a terminal error. Note: **compensation logic will not be executed**, so this may leave your service in an inconsistent state. For more details, check [killing the invocation](/services/invocation/managing-invocations#kill).
 
-**Default:** Unlimited retries with exponential policy up to 10 seconds of interval (tunable in self-hosted Restate as [`default-retry-policy`](/references/server-config#param-default-retry-policy))
+**Default:**
+```toml restate.toml
+[invocation.default-retry-policy]
+initial-interval = "50ms"
+exponentiation-factor = 2.0
+max-attempts = 70
+max-interval = "60s"
+on-max-attempts = "pause"  # Use "pause" (default) or "kill"
+```
+
 
 **When to adjust:** To bound the maximum number of attempts when running on FaaS, avoiding costs for unnecessary retries. For example, when an invocation constantly fails on the same bug. Use longer retry intervals when you want to reduce the load on downstream services, or shorter intervals when you want snappier retries.
 
 <Info>
-    [Learn how to configure this](#how-to-configure)
+    Learn how to configure this at the [global level](/guides/error-handling#configure-restate-server-defaults), [service level](/services/configuration#service-level-configuration), or [handler level](/services/configuration#handler-level-configuration).
 </Info>
 
 ## Retention of completed invocations
@@ -92,7 +101,7 @@ You should tune these values if you have long-running operations in your code.
         Once the inactivity timeout is reached, Restate will wait for the abort timeout before interrupting the user code.
         So this is the maximum time Restate will wait for a service to suspend before it forcibly aborts the execution.
 
-        **Default**: 1 minute (tunable in self-hosted Restate as [`worker.invoker.abort-timeout`](/references/server-config#param-abort-timeout))
+        **Default**: 10 minutes (tunable in self-hosted Restate as [`worker.invoker.abort-timeout`](/references/server-config#param-abort-timeout))
 
         **When to adjust:** For long-running operations like LLM calls, long-running tasks, or external API calls that take longer than the default timeout.
     </Accordion>
