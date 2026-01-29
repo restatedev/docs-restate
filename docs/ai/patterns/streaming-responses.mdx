@@ -1,7 +1,127 @@
+---
+title: "Streaming Responses"
+description: "Stream updates from Restate Services to the UI via Server-Sent Events."
+tags: ["recipe"]
+---
 
+import Admonition from '/snippets/admonition.mdx';
 
+<Admonition type="note">
+    For the full working example, see the [Next.js example app](https://github.com/restatedev/ai-examples/tree/main/vercel-ai/nextjs-example-app).
+</Admonition>
 
-- streaming responses from the LLM: either intermediate results or token-per-token
-- streaming updates back to the UI/user
+This guide shows how to stream real-time updates from Restate services to a chat UI.
 
-pub/sub library
+## Via Server-Sent Events (SSE)
+
+Restate has a TypeScript library to implement streaming updates from Restate services to frontends.
+You can use this, for example, to stream agent updates to your chat UI.
+
+<Card title="restatedev/pubsub" icon="github" horizontal href="https://github.com/restatedev/pubsub">
+</Card>
+
+[Have a look at the NextJS chat app example that uses this library to see how to use it.](https://github.com/restatedev/ai-examples/tree/main/vercel-ai/nextjs-example-app)
+
+In general, the steps are as follows:
+<Steps>
+<Step title="Install dependencies">
+
+```bash
+npm install @restatedev/pubsub @restatedev/pubsub-client
+```
+
+</Step>
+<Step title="Register the pubsub object">
+
+Add the pubsub virtual object to your Restate endpoint:
+
+```typescript {"CODELOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/nextjs-example-app/restate/endpoint.ts"}
+import * as restate from "@restatedev/restate-sdk/fetch";
+import { createPubsubObject } from "@restatedev/pubsub";
+import agent from "./services/agent";
+
+const pubsub = createPubsubObject("pubsub", {});
+
+export const endpoint = restate.createEndpointHandler({
+  services: [agent, pubsub],
+});
+```
+
+</Step>
+<Step title="Publish messages from your service">
+
+Use the pubsub client to publish messages:
+
+```typescript
+import { createPubsubClient } from "@restatedev/pubsub-client";
+
+const pubsub = createPubsubClient({
+  url: "http://localhost:8080",
+  name: "pubsub",
+});
+
+// In your handler:
+await pubsub.publish(topic, { role: "user", content: prompt }, ctx.rand.uuidv4());
+```
+
+</Step>
+<Step title="Create an SSE endpoint">
+
+Create an API route that streams pubsub messages:
+
+```typescript
+// app/pubsub/[topic]/route.ts
+import { createPubsubClient } from "@restatedev/pubsub-client";
+import { NextRequest } from "next/server";
+
+const pubsub = createPubsubClient({
+  url: process.env.INGRESS_URL || "http://localhost:8080",
+  name: "pubsub",
+});
+
+export async function GET(request: NextRequest, { params }: any) {
+  const topic = (await params).topic;
+  const offset = Number(request.nextUrl.searchParams.get("offset") || 0);
+
+  const stream = pubsub.sse({
+    topic,
+    offset,
+    signal: request.signal,
+  });
+
+  return new Response(stream, {
+    headers: { "Content-Type": "text/event-stream" },
+  });
+}
+```
+
+</Step>
+<Step title="Subscribe from the frontend">
+
+Use the browser's `EventSource` API to receive updates:
+
+```typescript
+let offset = 0;
+const evtSource = new EventSource(`/pubsub/${topic}?offset=${offset}`);
+
+evtSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  setMessages((prev) => {
+    const newMessages = [...prev, { role: data.role, content: data.content }];
+    offset = newMessages.length;
+    return newMessages;
+  });
+};
+
+evtSource.onerror = () => {
+  evtSource.close();
+  setTimeout(() => { /* reconnect */ }, 1000);
+};
+```
+
+</Step>
+</Steps>
+
+## Streaming token-by-token
+
+Token-by-token streaming is not yet supported but is on the roadmap. Contact us on [Discord](https://discord.gg/skW3AZ6uGd) for more info.
