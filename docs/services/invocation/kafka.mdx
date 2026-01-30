@@ -70,6 +70,40 @@ Note the quotation marks around the configuration keys.
 For Confluent Cloud, the rest of the configuration can be copied from the Confluent Cloud "Rust client" configuration.
 
 </Accordion>
+<Accordion title="Using SASL OAuth2.0 / OpenID Connect">
+The Kafka ingress supports SASL OAUTHBEARER authentication, enabling OAuth 2.0/OpenID Connect (OIDC) token-based connections to managed Kafka services.
+
+Configure SASL OAUTHBEARER via the `additional_options` field in your Kafka cluster configuration. These options are passed directly to librdkafka.
+
+**Example for Confluent Cloud:**
+```toml
+[[ingress.kafka-clusters]]
+name = "my-cluster"
+brokers = ["SASL_SSL://pkc-xxxxxx.eu-central-1.aws.confluent.cloud:9092"]
+"security.protocol"="SASL_SSL"
+"sasl.mechanisms"="OAUTHBEARER"
+"sasl.oauthbearer.method"="oidc"
+"sasl.oauthbearer.client.id"="<your-client-id>"
+"sasl.oauthbearer.client.secret"="<your-client-secret>"
+"sasl.oauthbearer.token.endpoint.url"="<your-token-endpoint>"
+"sasl.oauthbearer.scope"="kafka"
+```
+
+**Common OAUTHBEARER options:**
+
+| Option | Description |
+|--------|-------------|
+| `security.protocol` | Set to `SASL_SSL` for encrypted connections |
+| `sasl.mechanism` | Set to `OAUTHBEARER` |
+| `sasl.oauthbearer.method` | Set to `oidc` for OIDC-based token retrieval |
+| `sasl.oauthbearer.client.id` | OAuth client ID |
+| `sasl.oauthbearer.client.secret` | OAuth client secret |
+| `sasl.oauthbearer.token.endpoint.url` | OAuth token endpoint URL |
+| `sasl.oauthbearer.scope` | OAuth scope (if required by provider) |
+
+For the full list of available options, see the [librdkafka CONFIGURATION.md](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+
+</Accordion>
 <Accordion title="Configuring Kafka clusters via environment variables">
 
 You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTERS` environment variable:
@@ -77,6 +111,30 @@ You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTE
 ```bash
 RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker:9092"]}]
 ```
+</Accordion>
+
+<Accordion title="Experimental: Improved Kafka batch ingestion">
+    In certain scenarios, such as consuming from a Kafka topic with few partitions, the new batch ingestion can significantly improve ingestion throughput compared to the legacy implementation.
+
+    **This feature is disabled by default and should be used with caution.**
+
+    All nodes in the cluster must be running Restate v1.6 before enabling this feature.
+
+    **Once enabled and data has been ingested, you cannot roll back to a version prior to Restatev1.6.**
+
+    To enable the experimental Kafka batch ingestion, set the following environment variable on all nodes:
+
+    ```bash
+    RESTATE_EXPERIMENTAL_KAFKA_BATCH_INGESTION=true
+    ```
+
+    Or in your configuration file:
+
+    ```toml
+    experimental-kafka-batch-ingestion = true
+    ```
+
+    Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) to test it together with us.
 </Accordion>
 </AccordionGroup>
 </Step>
@@ -87,9 +145,9 @@ Let Restate forward events from the Kafka topic to the event handler by creating
 
 ```bash
 curl localhost:9070/subscriptions --json '{
-"source": "kafka://my-cluster/my-topic",
-"sink": "service://MyService/handle",
-"options": {"auto.offset.reset": "earliest"}
+    "source": "kafka://my-cluster/my-topic",
+    "sink": "service://MyService/handle",
+    "options": {"auto.offset.reset": "earliest"}
 }'
 ```
 
@@ -136,14 +194,14 @@ And then, when creating the subscriptions, you refer to the specific cluster by 
 ```bash
 # Subscription to my-cluster-1
 curl localhost:9070/subscriptions --json '{
-"source": "kafka://my-cluster-1/topic-1",
-"sink": "service://MyService/handleCluster1"
+    "source": "kafka://my-cluster-1/topic-1",
+    "sink": "service://MyService/handleCluster1"
 }'
 
 # Subscription to my-cluster-2
 curl localhost:9070/subscriptions --json '{
-"source": "kafka://my-cluster-2/topic-2",
-"sink": "service://MyService/handleCluster2"
+    "source": "kafka://my-cluster-2/topic-2",
+    "sink": "service://MyService/handleCluster2"
 }'
 ```
 </Accordion>
@@ -190,9 +248,9 @@ Subscribe a handler to a Kafka topic:
 
 ```bash
 curl localhost:9070/subscriptions --json '{
-"source": "kafka://my-cluster/my-topic",
-"sink": "service://MyService/Handle",
-"options": {"auto.offset.reset": "earliest"}
+    "source": "kafka://my-cluster/my-topic",
+    "sink": "service://MyService/Handle",
+    "options": {"auto.offset.reset": "earliest"}
 }'
 ```
 
@@ -209,18 +267,18 @@ curl localhost:9070/subscriptions
 **Example response:**
 ```json
 {
-"subscriptions": [
-{
-"id": "sub_11XHoawrCiWtv8kzhEyGtsR",
-"source": "kafka://my-cluster/my-topic",
-"sink": "service://Greeter/greet",
-"options": {
-"auto.offset.reset": "earliest",
-"client.id": "restate",
-"group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
-}
-}
-]
+    "subscriptions": [
+        {
+            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
+            "source": "kafka://my-cluster/my-topic",
+            "sink": "service://Greeter/greet",
+            "options": {
+                "auto.offset.reset": "earliest",
+                "client.id": "restate",
+                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
+            }
+        }
+    ]
 }
 ```
 
