@@ -1,7 +1,139 @@
+---
+title: "Streaming Responses"
+description: "Stream updates from Restate Services to the UI via Server-Sent Events."
+tags: ["recipe"]
+---
 
+import {GitHubLink} from "/snippets/blocks/github-link.mdx";
 
+This guide shows how to stream real-time updates from Restate services to a chat UI.
 
-- streaming responses from the LLM: either intermediate results or token-per-token
-- streaming updates back to the UI/user
+## Via Server-Sent Events (SSE)
 
-pub/sub library
+Restate has a TypeScript library to implement streaming updates from Restate services to frontends via SSE.
+You can use this, for example, to stream agent updates to your chat UI.
+
+<Card title="restatedev/pubsub" icon="github" horizontal href="https://github.com/restatedev/pubsub">
+Explore the library.
+</Card>
+
+To use the library, have a look at the example and the steps below.
+
+<Card title="nextjs-example-app" icon="github" horizontal href="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/nextjs-example-app">
+NextJS Chat app backed by an AI SDK Agent that streams updates using SSE.
+</Card>
+
+<Steps>
+<Step title="Install dependencies">
+
+```bash
+npm install @restatedev/pubsub @restatedev/pubsub-client
+```
+
+</Step>
+<Step title="Register the pubsub object">
+
+Add the pubsub Virtual Object to your Restate endpoint:
+
+```typescript restate/endpoint.ts {"CODE_LOAD::ts/src/ai/guides/streaming-responses/endpoint.ts"} 
+import * as restate from "@restatedev/restate-sdk/fetch";
+import { createPubsubObject } from "@restatedev/pubsub";
+import { agent } from "./services/agent";
+
+const pubsub = createPubsubObject("pubsub", {});
+
+export const endpoint = restate.createEndpointHandler({
+    services: [agent, pubsub],
+});
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/nextjs-example-app/restate/endpoint.ts"}/>
+
+</Step>
+<Step title="Publish messages from your service">
+
+Use the pubsub client to publish messages:
+
+```typescript restate/services/agent.ts {"CODE_LOAD::ts/src/ai/guides/streaming-responses/services/agent.ts"} 
+import * as restate from "@restatedev/restate-sdk";
+import { createPubsubClient } from "@restatedev/pubsub-client";
+
+const pubsub = createPubsubClient({
+    url: "http://localhost:8080",
+    name: "pubsub",
+});
+
+export const agent = restate.service({
+    name: "MyAgent",
+    handlers: {
+        run: async (ctx: restate.Context, prompt: string) => {
+            await pubsub.publish("session-123", { role: "user", content: prompt }, ctx.rand.uuidv4());
+        },
+    },
+});
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/nextjs-example-app/restate/services/agent.ts"}/>
+
+Note that the UUID, in the publish step, is an idempotency key that Restate will use to deduplicate events.
+This is necessary since this publish step goes via the Restate ingress.
+Without this idempotency key, each replay/retry leads to duplicate events.
+Alternatively, you can use [service-to-service calls](/develop/python/service-communication#sending-messages) to publish events.
+
+</Step>
+<Step title="Create an SSE endpoint">
+
+For example for NextJS, create an API route that streams pubsub messages:
+
+```typescript app/pubsub/[topic]/route.ts {"CODE_LOAD::ts/src/ai/guides/streaming-responses/pubsub-client.ts"} 
+import { createPubsubClient } from "@restatedev/pubsub-client";
+import { NextRequest } from "next/server";
+
+const pubsub = createPubsubClient({
+    url: process.env.INGRESS_URL || "http://localhost:8080",
+    name: "pubsub",
+});
+
+export async function GET(request: NextRequest, { params }: any) {
+    const topic = (await params).topic;
+    const offset = Number(request.nextUrl.searchParams.get("offset") || 0);
+
+    const stream = pubsub.sse({
+        topic,
+        offset,
+        signal: request.signal,
+    });
+
+    return new Response(stream, {
+        headers: { "Content-Type": "text/event-stream" },
+    });
+}
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/nextjs-example-app/app/pubsub/%5Btopic%5D/route.ts"}/>
+
+</Step>
+<Step title="Subscribe from the frontend">
+
+Use the browser's `EventSource` API to receive updates:
+
+```typescript app/agent/[topic]/page.tsx {"CODE_LOAD::ts/src/ai/guides/streaming-responses/frontend.ts#here"}
+let offset = 0;
+const evtSource = new EventSource(`/pubsub/${topic}?offset=${offset}`);
+
+evtSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  // show the new messages in the UI...
+};
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/vercel-ai/nextjs-example-app/app/agent/%5Btopic%5D/page.tsx"}/>
+
+</Step>
+</Steps>
+
+<Tip>
+We are planning to add support for SSE with the Python SDK.
+Contact us on [Discord](https://discord.gg/skW3AZ6uGd) or or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) for more info.
+</Tip>
+
+## Streaming token-by-token
+
+Token-by-token streaming is not yet supported but is on the roadmap.
+Contact us on [Discord](https://discord.gg/skW3AZ6uGd) or or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) for more info.
