@@ -6,15 +6,14 @@ Note that configuration defaults might change across server releases, if you wan
 
 ```toml restate.toml expandable {"CODE_LOAD::../docs/schemas/restate.toml"} 
 roles = [
-    "worker",
-    "admin",
-    "metadata-server",
-    "log-server",
     "http-ingress",
+    "admin",
+    "worker",
+    "log-server",
+    "metadata-server",
 ]
 cluster-name = "localcluster"
 auto-provision = true
-advertised-address = "http://127.0.0.1:5122/"
 default-num-partitions = 24
 default-replication = 1
 shutdown-timeout = "1m"
@@ -22,16 +21,12 @@ tracing-filter = "info"
 log-filter = "warn,restate=info"
 log-format = "pretty"
 log-disable-ansi-codes = false
-tokio-console-bind-address = "0.0.0.0:6669"
-no-proxy = []
 connect-timeout = "10s"
 request-compression-threshold = "4.0 MiB"
 disable-prometheus = false
-rocksdb-total-memory-size = "6.0 GiB"
-rocksdb-total-memtables-ratio = 0.5
+rocksdb-total-memory-size = "2.0 GiB"
+rocksdb-total-memtables-ratio = 0.85
 rocksdb-high-priority-bg-threads = 2
-rocksdb-write-stall-threshold = "3s"
-rocksdb-enable-stall-on-memory-limit = false
 rocksdb-perf-level = "enable-count"
 metadata-update-interval = "10s"
 metadata-fetch-from-peer-timeout = "3s"
@@ -45,11 +40,14 @@ gossip-suspect-interval = "5s"
 gossip-loneliness-threshold = 30
 gossip-extras-exchange-frequency = 10
 gossip-time-skew-threshold = "1s"
+hlc-max-drift = "5s"
+experimental-kafka-batch-ingestion = false
+experimental-shuffler-batch-ingestion = false
 default-journal-retention = "1d"
 
 [metadata-client]
 type = "replicated"
-addresses = ["http://127.0.0.1:5122/"]
+addresses = []
 connect-timeout = "3s"
 keep-alive-interval = "5s"
 keep-alive-timeout = "5s"
@@ -57,7 +55,7 @@ keep-alive-timeout = "5s"
 [metadata-client.backoff-policy]
 type = "exponential"
 initial-interval = "100ms"
-factor = 1.399999976158142
+factor = 1.4
 max-attempts = 10
 max-interval = "1s"
 
@@ -72,6 +70,13 @@ factor = 2.0
 max-attempts = 15
 max-interval = "5s"
 
+[default-retry-policy]
+initial-interval = "500ms"
+exponentiation-factor = 2.0
+max-attempts = 70
+on-max-attempts = "pause"
+max-interval = "1m"
+
 [worker]
 internal-queue-length = 1000
 cleanup-interval = "1h"
@@ -79,20 +84,17 @@ max-command-batch-size = 32
 
 [worker.storage]
 rocksdb-disable-wal = true
-rocksdb-memory-ratio = 0.49000000953674316
+rocksdb-memory-ratio = 0.49
 
 [worker.invoker]
 inactivity-timeout = "1m"
-abort-timeout = "1m"
+abort-timeout = "10m"
 message-size-warning = "10.0 MiB"
 in-memory-queue-length-limit = 66049
 concurrent-invocations-limit = 1000
 
-[worker.invoker.retry-policy]
-type = "exponential"
-initial-interval = "50ms"
-factor = 2.0
-max-interval = "10s"
+[worker.snapshots]
+enable-cleanup = true
 
 [worker.snapshots.object-store-retry-policy]
 type = "exponential"
@@ -101,19 +103,36 @@ factor = 2.0
 max-attempts = 10
 max-interval = "10s"
 
+[worker.shuffle]
+inflight-memory-budget = "10.0 MiB"
+request-batch-size = "50.0 KiB"
+
+[worker.shuffle.connection-retry-policy]
+type = "exponential"
+initial-interval = "10ms"
+factor = 2.0
+max-interval = "1s"
+
 [admin]
-bind-address = "0.0.0.0:9070"
 heartbeat-interval = "1s 500ms"
-log-trim-check-interval = "1h"
 disable-web-ui = false
 disable-cluster-controller = false
 
 [admin.query-engine]
-memory-size = "4.0 GiB"
+memory-size = "1.0 GiB"
 
 [ingress]
-bind-address = "0.0.0.0:8080"
 kafka-clusters = []
+
+[ingress.ingestion]
+inflight-memory-budget = "1.0 MiB"
+request-batch-size = "50.0 KiB"
+
+[ingress.ingestion.connection-retry-policy]
+type = "exponential"
+initial-interval = "10ms"
+factor = 2.0
+max-interval = "2s"
 
 [bifrost]
 default-provider = "replicated"
@@ -161,7 +180,7 @@ max-interval = "1s"
 
 [metadata-server]
 request-queue-length = 32
-rocksdb-memory-ratio = 0.009999999776482582
+rocksdb-memory-ratio = 0.01
 rocksdb-disable-wal = false
 raft-election-tick = 10
 raft-heartbeat-tick = 2
