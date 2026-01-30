@@ -22,29 +22,38 @@ async function parseJsonSchema(schemaPath) {
     }
 }
 
-function formatDescription(description, title,  examples) {
-    // Escape HTML-like syntax in code blocks and regular text
-    const cleanDescription = description ? description
-        .replace(/\n\n/g, '\n\n')
-        // Preserve code blocks with backticks but escape any HTML-like content within
-        .replace(/`([^`]+)`/g, (match, code) => {
-            return '`' + code.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '`';
-        })
-        // Escape standalone HTML-like tags that aren't in code blocks
-        .replace(/<(?!\/?\w+[^>]*>)/g, '&lt;')
-        .replace(/(?<!<[^>]*)>/g, '&gt;')
+function formatDescription(description, title, examples) {
+    const titleStr = title ? `${title}: ` : '';
+    
+    if (!description) {
+        // Return title if present, even without description
+        return titleStr;
+    }
+
+    // Split by backtick-delimited code blocks, keeping the delimiters
+    const parts = description.split(/(`[^`]+`)/g);
+    
+    const cleanDescription = parts.map(part => {
+        if (part.startsWith('`') && part.endsWith('`')) {
+            // Code block - escape < and > inside
+            const inner = part.slice(1, -1);
+            return '`' + inner.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '`';
+        } else {
+            // Regular text - escape ALL < and > characters
+            return part.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+    }).join('')
         // Convert markdown links to proper format
         .replace(/\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
         // Escape quotes for JSX attributes
-        .replace(/"/g, '\\"')  : ''
+        .replace(/"/g, '\\"');
 
     const exampleStr = examples && Array.isArray(examples) && examples.length > 0
         ? '\n\nExamples:\n' + examples.map(ex => `${JSON.stringify(ex, null, 2)}`).join(' or ')
         : '';
-    if (title && description && description.includes(title)) {
+    if (title && description.includes(title)) {
         return `${cleanDescription}${exampleStr}`;
     }
-    const titleStr = title ? `${title}: ` : '';
     return `${titleStr}${cleanDescription}${exampleStr}`;
 }
 
