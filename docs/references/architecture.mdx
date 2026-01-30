@@ -63,9 +63,9 @@ An operation “happens” when the partition leader appends its record to the l
 The processor leader maintains a full cache of the partition’s materialized state in RocksDB for fast random reads and updates during execution. This cache is derivative—it can always be rebuilt from the log—and is not a second source of truth. In typical configurations, partitions also have processor followers, which maintain a materialization of the partition state, for fast failover.
 
 ### Recovery bounded by snapshots
-Processors create periodic snapshots of RocksDB and upload them to S3 . On restart or takeover, a fresh partition processor can download the latest snapshot and replays the log suffix since the snapshot’s sequence number. After a snapshot is durably stored on S3, the log can trim entries up to the snapshot point to cap local storage and replay cost.
+Processors create periodic snapshots of their RocksDB partition store and upload them to S3. On restart or takeover, a fresh partition processor can download the latest snapshot and replay only the log suffix since the snapshot's sequence number. Once the partition store state is considered safely persisted (based on the configured [durability mode](/server/snapshots#understanding-durability-modes)), the corresponding log entries can be trimmed to cap storage and replay cost.
 
-Partition processors pull the snapshots only when they were not previously leader or follower and need to bootstrap a new copy of the partition state.
+Partition processors fetch snapshots only when they were not previously a leader or follower and need to bootstrap a new copy of the partition state, or when they fall behind the log's trim point.
 
 <Frame>
     <img

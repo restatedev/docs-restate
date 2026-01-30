@@ -11,6 +11,10 @@ This page helps with deploying and operating [Restate clusters](/deploy/server/c
     To understand the terminology used on this page, it might be helpful to read through the [architecture reference](/references/architecture).
 </Info>
 
+<Info>
+    For details on configuring network ports, addresses, and listeners, see the [networking guide](/server/networking).
+</Info>
+
 <Tip>
     To migrate an existing single-node deployment into a multi-node deployment without losing data, check out [this guide](/guides/local-to-replicated).
 </Tip>
@@ -116,8 +120,6 @@ To deploy a distributed Restate cluster without external dependencies, you need 
 node-name = "UNIQUE_NODE_NAME"
 # All nodes need to have the same cluster name
 cluster-name = "CLUSTER_NAME"
-# It is crucial that all peer nodes are able to resolve and connect to every other node's advertised address
-advertised-address = "ADVERTISED_ADDRESS"
 # Optional: Specify the location of this node for location-aware replication
 # Format: "region[.zone]" (e.g., "us-west.a1" or "eu-central")
 location = "REGION[.ZONE]"
@@ -135,30 +137,41 @@ auto-provision = false
 # For location-aware replication, you can use: {zone: 2, node: 3} or {region: 2, zone: 3, node: 5}
 default-replication = 2
 
-[bifrost]
-# Only the replicated Bifrost provider can be used in a distributed deployment
-default-provider = "replicated"
+# Optional: Override the auto-detected advertised address if needed
+# advertised-address = "http://NODE_PUBLIC_IP:5122/"
+# Or just set the hostname and let Restate derive the full URL:
+# advertised-host = "NODE_PUBLIC_HOSTNAME"
 
-[metadata-server]
-# To tolerate node failures, use the replicated metadata server
-type = "replicated"
+# Make sure it does not conflict with the other nodes when running multiple nodes on same host
+# [default] 5122
+bind-port = FABRIC_BIND_PORT
 
 [metadata-client]
-# List all the advertised addresses of the nodes that run the metadata-server role
-addresses = ["ADVERTISED_ADDRESS_1", "ADVERTISED_ADDRESS_2", ...]
+# List the advertised addresses of at least one node that runs the metadata-server role
+# This node will auto-include itself if it runs the metadata-server role
+addresses = ["PEER_ADVERTISED_FABRIC_ADDRESS"]
 
 [admin]
-# Make sure it does not conflict with the other nodes
-bind-address = "ADMIN_BIND_ADDRESS"
+# Make sure it does not conflict with the other nodes when running multiple nodes on same host
+bind-port = ADMIN_BIND_PORT
 
 [ingress]
-# Make sure it does not conflict with other nodes
-bind-address = "INGRESS_BIND_ADDRESS"
+# Make sure it does not conflict with other nodes when running multiple nodes on same host
+bind-port = INGRESS_BIND_PORT
 ```
+
+<Info>
+    For detailed information about metadata storage options including DynamoDB, etcd, and object store alternatives, see [Metadata Storage](/server/metadata).
+</Info>
+
 
 It is important that every Restate node you start has a **unique `node-name`** specified.
 The node name defaults to the hostname. Restate uses a subdirectory inside `restate-data` named after the node name to store local data. You will not be able to change the node name once it is in use without removing the node from the cluster, or else risk data loss.
 Nodes can have identical configurations aside from node name.
+
+<Info>
+    As of Restate v1.6, the server automatically detects a publicly routable IP address for the advertised address. You only need to explicitly set `advertised-address` or `advertised-host` if the auto-detection doesn't work for your environment (e.g., behind certain NAT configurations or load balancers).
+</Info>
 
 All nodes that are part of the cluster need to have the same `cluster-name` specified.
 
@@ -180,14 +193,14 @@ Refer to the [Cluster provisioning](#cluster-provisioning) section for more info
 
 The replicated log provider must be used with `default-provider = "replicated"` (this is the default).
 The `default-replication` determines the minimum number of nodes the data must be replicated to for both log and partition replication.
-If you run at least `2 * default-replication-property - 1` nodes, then the cluster can tolerate `default-replication-property - 1` node failures.
+If you run at least `2 * default-replication - 1` nodes, then the cluster can tolerate `default-replication - 1` node failures.
 Nodes running the `log-server` role store segments of replicated logs.
 
 Metadata availability is crucial for cluster availability, and the default metadata server type `replicated` can tolerate node failures.
 Every node that runs the `metadata-server` role will join the metadata store cluster.
 To tolerate `n` metadata node failures, you need to run at least `2 * n + 1` Restate nodes with the `metadata-server` role configured.
 
-The `metadata-client` should be configured with the advertised addresses of all nodes that run the `metadata-server` role.
+The `metadata-client` should be configured with at least one advertised address of a node that runs the `metadata-server` role. Nodes automatically include themselves if they run the metadata-server role, so for single-node setups, this field can be left empty.
 
 Restate nodes running the `worker` role host partitions and handle service invocations, journaling execution, and data storage and queries. The `default-replication` property sets the total number of replicas that the cluster will schedule for any given partition. Only one of these partitions is designated as a leader and actively processes invocations; additional partition replicas are followers and serve as hot standby in case they need to take over processing. Running additional partition replicas does not increase durability, which is determined by log replication and object store snapshots, however it can increase system availability by ensuring a new partition leader can be quickly promoted.
 
@@ -701,7 +714,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
 
     You are observing a situation where the local state available on a given worker node does not allow it to resume from the log's trim point - either because it is brand new, or because its applied partition state is behind the trim point of the partition log. If you are attempting to migrate from a single-node Restate to a cluster deployment, you can also refer to the [migration guide](/guides/local-to-replicated).
 
-    To recover from this situation, you need to make available a snapshot of the partition state from another worker, which is up to date with the log. This situation can arise if you have manually trimmed the log, the node is missing a snapshot repository configuration, or the snapshot repository is otherwise inaccessible. See [Log trimming and Snapshots](/server/snapshots#log-trimming-and-snapshots) for more context about how logs, partitions, and snapshots are related.
+    To recover from this situation, you need to make available a snapshot of the partition state from another worker, which is up to date with the log. This situation can arise if you have manually trimmed the log, the node is missing a snapshot repository configuration, or the snapshot repository is otherwise inaccessible. See [Log Trimming and Durability](/server/snapshots#log-trimming-and-durability) for more context about how logs, partitions, and snapshots are related.
 
     #### Recovery procedure
 

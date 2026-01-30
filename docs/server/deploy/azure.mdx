@@ -4,10 +4,6 @@ sidebarTitle: "Azure"
 description: "Deploy the Restate Server on Microsoft Azure using AKS and persistent storage."
 ---
 
-<Info>
-For snapshots, we are actively working on native Azure Blob Storage support and are looking to test it together with you. Contact us on [Discord](https://discord.com/invite/skW3AZ6uGd) or [Slack](https://join.slack.com/t/restatecommunity/shared_invite/zt-2v9gl005c-WBpr167o5XJZI1l7HWKImA) if you're interested!
-</Info>
-
 ## Compute
 
 The easiest way to manage Restate is via the [Kubernetes operator](/server/deploy/kubernetes).
@@ -23,12 +19,15 @@ For clusters, using persistent volumes is still recommended to speed up failover
 
 Running a cluster without object storage snapshots is not safe. Partition processors scheduled to move between nodes might take excessively long to catch up to the log, and trimming the log might result in errors that prevent them from starting up altogether.
 
-We do not yet support Azure Blob Storage as a snapshot repository.
+Restate supports Azure Blob Storage natively as a snapshot repository. Configure your snapshot destination using the `az://` URL scheme:
 
-Since there is no S3-compatible store on Azure, you need to run MinIO in AKS to store your snapshots.
+```toml
+[worker.snapshots]
+destination = "az://container/prefix"
+```
 
-<Warning>
-Only use MinIO for snapshots, not for metadata. MinIO's consistency model might lead to corrupt metadata, breaking your Restate cluster.
+Credentials are discovered automatically via the [Azure credential chain](https://docs.rs/object_store/latest/object_store/azure/index.html). You can also set `AZURE_STORAGE_ACCOUNT_NAME` and `AZURE_STORAGE_ACCESS_KEY` for explicit credentials.
 
-More information on setting up MinIO can be found in the [Kubernetes deployment docs](/server/deploy/kubernetes#minio-object-storage).
-</Warning>
+For local development, you can use [Azurite](https://github.com/Azure/Azurite) as an emulator.
+
+See the [Snapshots documentation](/server/snapshots) for more details on configuring snapshot intervals, retention, and log trimming.
