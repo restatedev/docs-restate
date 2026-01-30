@@ -22,9 +22,6 @@ pushd $RESTATE_PATH
 
 echo "Generate config schema"
 cargo xtask generate-config-schema > $DOCS_DIR/docs/schemas/restate-server-configuration-schema.json
-# temporary fixes
-sed -i 's/(<5)/(less than 5 nodes)/g' $DOCS_DIR/docs/schemas/restate-server-configuration-schema.json
-sed -i 's/<region>/region/g' $DOCS_DIR/docs/schemas/restate-server-configuration-schema.json
 
 echo "Generate default config"
 cargo xtask generate-default-config > $DOCS_DIR/docs/schemas/restate.toml
