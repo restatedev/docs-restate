@@ -31,13 +31,13 @@ npm install @restatedev/restate-sdk-clients
 
 [Export the type definition](/develop/ts/service-communication#advanced:-sharing-service-type-definitions) of your agent:
 
-```typescript {"CODE_LOAD::ts/src/ai/guides/my_agent.ts#export"} 
+```typescript {"CODE_LOAD::ts/src/ai/guides/chat-ui/my_agent.ts#export"} 
 export type MyAgent = typeof myAgent;
 ```
 
 Create a client connection to the Restate ingress, then use the client for your service type to send a request:
 
-```typescript {"CODE_LOAD::ts/src/ai/guides/ui_sdk_clients.ts#here"} 
+```typescript {"CODE_LOAD::ts/src/ai/guides/chat-ui/ui_sdk_clients.ts#here"} 
 // import * as clients from "@restatedev/restate-sdk-clients";
 // import {MyAgent} from "./my_agent";
 
@@ -57,10 +57,10 @@ You can use the SDK clients to send requests from your NextJS app to Restate ser
 
 Here's an example of an API route that calls a Restate service:
 
-```typescript app/agent/[topic]/api/route.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/nextjs-example-app/app/agent/%5Btopic%5D/api/route.ts"}
+```typescript app/agent/[topic]/api/route.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/nextjs-example-app/app/agent/%5Btopic%5D/api/route.ts"} 
 import { NextRequest } from "next/server";
 import * as clients from "@restatedev/restate-sdk-clients";
-import { MultiToolAgent } from "@/restate/services/multi_tool";
+import { Agent } from "@/restate/services/agent";
 
 export async function POST(
   request: NextRequest,
@@ -70,13 +70,11 @@ export async function POST(
   const { message } = await request.json();
   const ingressUrl = process.env.INGRESS_URL || "http://localhost:8080";
 
-  const ingress = clients.connect({
-    url: ingressUrl,
-  });
+  const ingress = clients.connect({ url: ingressUrl });
 
   await ingress
-    .serviceSendClient<MultiToolAgent>({ name: "tools" })
-    .message({ prompt: message, topic });
+    .serviceSendClient<Agent>({ name: "agent" })
+    .chat({ prompt: message, topic });
 
   return Response.json({ ok: true });
 }
@@ -90,7 +88,7 @@ export async function POST(
 You can also call Restate services using plain HTTP requests without the SDK.
 
 For example, in JavaScript:
-```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#here"} 
+```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#here"} 
 // Request-response
 const response = await fetch("http://localhost:8080/my-agent/run", {
   method: "POST",
@@ -113,7 +111,7 @@ await fetch("http://localhost:8080/my-agent/run/send", {
 
 You can let Restate deduplicate requests by adding an idempotency key to the header of your request.
 
-```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#idempotency"} 
+```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#idempotency"} 
 await fetch("http://localhost:8080/my-agent/run/send", {
   method: "POST",
   headers: {
@@ -135,7 +133,7 @@ There are three ways to do this:
 
 2. If you have the invocation ID, then you can use that to attach to it:
 
-```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#attach"} 
+```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#attach"} 
 // start the invocation
 const handle = await fetch("http://localhost:8080/agent/run/send", {
   method: "POST",
@@ -156,7 +154,7 @@ await result.json();
 
 3. If you started the invocation with an idempotency key, then you can use that to attach to it. This does not start the invocation as opposed to point 1:
 
-```javascript {"CODE_LOAD::ts/src/ai/guides/http_requests.js#attach_idem"} 
+```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#attach_idem"} 
 // start the invocation with idempotency key
 const idempotencyKey = "abc-123";
 const result = await fetch(
