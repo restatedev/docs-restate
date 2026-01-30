@@ -1,0 +1,245 @@
+---
+title: "Migrating Snapshot Storage Backend"
+description: "Move a multi-node Restate cluster from one snapshot destination to another."
+tags: ["deployment", "snapshots", "migration"]
+---
+
+This guide describes how to migrate a multi-node Restate cluster from one snapshot storage backend to another (for example, between different buckets/prefixes, or from MinIO to GCS).
+
+The migration temporarily increases partition replication to ensure every node hosts every partition before snapshots are disabled. This prevents trim-gap failures during rolling restarts. The migration leverages Restate's `worker.durability-mode` configuration option to prevent any log trimming during the transition, ensuring no data loss even if the old snapshots become unavailable before new ones are created.
+
+**Prerequisites:**
+- Restate server version **1.6 or later** (required for `worker.durability-mode` configuration)
+- Rolling restart capability for your cluster
+- Access to both old and new snapshot storage backends during migration
+- Capacity to temporarily run each partition on every worker node (partition replication = cluster size)
+- [`restatectl`](/server/clusters#controlling-clusters-with-restatectl) CLI configured to communicate with your cluster
+
+<Steps>
+<Step title="Record current replication settings">
+
+Capture the current cluster replication settings so you can restore them later:
+
+```shell
+restatectl config get
+```
+
+Note the current **Partition replication** value (for example `{node: 2}`).
+
+</Step>
+<Step title="Temporarily increase partition replication to all nodes">
+
+Set partition replication to your cluster size `N` (the number of worker nodes). This ensures every node has a local copy of every partition before you disable snapshots.
+
+```shell
+restatectl config set --partition-replication N
+```
+
+Do **not** use `--replication` here unless you also want to increase log replication.
+
+:::note[Why increase partition replication?]
+Without this step, when the cluster controller reconfigures partition replica sets during rolling restarts, some nodes may be unable to serve a given partition depending on their prior local partition store state, the log trim point, and available snapshots. With partition replication matching cluster size, every node will maintain a warm replica of every partition and is able to resume without the need for a new snapshot on restart, provided the log was not trimmed during its downtime.
+:::
+
+</Step>
+<Step title="Wait for replicas to catch up">
+
+Wait until every partition has a replica on every node and followers have no lag:
+
+```shell
+restatectl partitions list
+```
+
+Verify that:
+- Each partition ID appears `N` times (once per node)
+- All rows show `LSN-LAG` of `0` (or consistently near `0`)
+
+For example, with 8 partitions and 3 nodes, you should see 24 rows total.
+
+</Step>
+<Step title="Disable automatic log trimming">
+
+Roll out a configuration update to disable automatic snapshots and switch to conservative durability mode:
+
+```toml restate.toml
+[worker.snapshots]
+# Disable automatic snapshots by removing/commenting destination
+# destination = "s3://old-bucket/prefix"
+
+[worker]
+# Use the strictest mode - requires BOTH replicas AND snapshots for trim
+# When snapshot destination is not set, this halts all log trimming
+durability-mode = "snapshot-and-replica-set"
+```
+
+This effectively disables both snapshotting and log trimming. The system will log a warning every 60 seconds: *"Detected cluster environment with no snapshot repository configured. Automatic log trimming is disabled..."* - this is expected during the migration.
+
+Perform a rolling restart of all cluster nodes with the new configuration. Restart one node at a time, waiting for it to rejoin and partitions to become active before proceeding to the next node.
+
+:::tip[Live traffic during migration]
+With partition replication matching cluster size, rolling restarts have minimal impact on live traffic. Requests in-flight on a restarting node may fail—use [idempotency keys](/develop/ts/service-communication#idempotent-invocations) to make retries safe.
+:::
+
+</Step>
+<Step title="Verify that log trimming has stopped">
+
+Check the cluster status to confirm all partitions are active:
+
+```shell
+restatectl partitions list
+```
+
+You should see all partitions with the `ARCHIVED` column empty or unchanged:
+
+```
+ID  NODE     MODE    STATUS  EPOCH  APPLIED  DURABLE  ARCHIVED  LSN-LAG  UPDATED
+0   N1:1     Leader  Active  5      1234     1234     -         0        2s ago
+1   N2:1     Leader  Active  5      5678     5678     -         0        1s ago
+...
+```
+
+The `ARCHIVED` column shows `-` (due to no known snapshot). This is expected.
+
+The applied LSN should increase over time if there is cluster activity but the archived LSN should remain `-`:
+
+</Step>
+<Step title="Configure new snapshot repository">
+
+Roll out a configuration update with the new snapshot destination:
+
+```toml restate.toml
+[worker.snapshots]
+destination = "s3://new-bucket/prefix"   # New repository
+
+[worker]
+# Use conservative settings
+durability-mode = "snapshot-and-replica-set"
+trim-delay-interval = "24h"
+```
+
+Perform a rolling restart of all cluster nodes (one at a time, verifying health between each).
+
+</Step>
+<Step title="Create snapshots in the new repository">
+
+Trigger manual snapshots for all partitions to populate the new repository immediately:
+
+```shell
+restatectl snapshot create
+```
+
+You should see output confirming each partition was snapshotted:
+
+```
+Snapshot created for partition 0: snap_15GSJBOfxk3x8k1CfPwfxrb (log 0 @ LSN >= 49622035)
+Snapshot created for partition 1: snap_2xHJKLMnop4y9z2DgQwgAbc (log 1 @ LSN >= 49622040)
+...
+```
+
+</Step>
+<Step title="Verify snapshots in the new storage backend">
+
+Check that snapshots exist in the new storage backend. For S3:
+
+```shell
+aws s3 ls s3://new-bucket/prefix/ --recursive | head -20
+```
+
+Each partition should have a `latest.json` file and a snapshot directory:
+
+```
+prefix/0/latest.json
+prefix/0/lsn_00000000000000860864-snap_13yBpep1H1jKGAzHhqkmCyt/...
+prefix/1/latest.json
+prefix/1/lsn_00000000000000860870-snap_2xHJKLMnop4y9z2DgQwgAbc/...
+...
+```
+
+Confirm the archived LSN column now shows the snapshot LSN values:
+
+```shell
+restatectl partitions list
+```
+
+Expected output:
+
+```
+ID  NODE     MODE    STATUS  EPOCH  APPLIED  DURABLE  ARCHIVED  LSN-LAG  UPDATED
+0   N1:1     Leader  Active  5      1250     1250     1234      0        2s ago
+1   N2:1     Leader  Active  5      5700     5700     5678      0        1s ago
+```
+
+</Step>
+<Step title="Restore partition replication">
+
+After the new snapshot repository is verified, restore the original partition replication value you recorded earlier:
+
+```shell
+restatectl config set --partition-replication <previous-value>
+```
+
+</Step>
+<Step title="Restore normal operations">
+
+Roll out a configuration update with production settings:
+
+```toml restate.toml
+[worker]
+# Return to balanced mode (recommended for production)
+durability-mode = "balanced"
+```
+
+Perform a rolling restart of all cluster nodes (one at a time, verifying health between each).
+
+</Step>
+<Step title="Verify normal operations">
+
+Check that the cluster status is healthy:
+
+```shell
+restatectl status --extra
+```
+
+All nodes should be healthy and all partitions active with no warnings.
+
+Confirm log trimming has resumed:
+
+```shell
+restatectl log list
+```
+
+The trim point should gradually increase as durability conditions are met.
+
+</Step>
+<Step title="Clean up old snapshots">
+
+After confirming the cluster is migrated to the new snapshot backend:
+
+1. Remove old snapshots
+2. Revoke access to the old storage backend
+
+</Step>
+</Steps>
+
+## Durability mode reference
+
+| Mode | Description | Use case |
+|------|-------------|----------|
+| `balanced` | Requires snapshot AND at least one replica flushed | Production default (when snapshots configured) |
+| `snapshot-and-replica-set` | Requires snapshot AND all replicas flushed | Migration phase (strictest) |
+| `snapshot-only` | Requires only snapshot, ignores replicas | Special cases |
+| `replica-set-only` | Requires all replicas flushed, ignores snapshots | Default without snapshots |
+| `none` | Disables automatic durability tracking | Testing only |
+
+## Rollback plan
+
+If you encounter issues during migration:
+
+- **Before snapshots exist in the new repository**: Restore the original configuration pointing to the old snapshot repository, perform a rolling restart, and resume normal operations.
+
+- **After snapshots exist in the new repository**: If no log trimming has occurred since the original repository was disabled, you can safely discard the new repository and revert the original configuration. If logs have been trimmed based on snapshot LSNs published to the new repository, follow the same process from the start to migrate to the original destination: 1) disable log trimming; 2) update snapshot destination; 3) create and verify snapshots; 4) re-enable log trimming.
+
+## See also
+
+- [Configuring automatic snapshotting](/server/snapshots#configuring-automatic-snapshotting)
+- [Controlling clusters with restatectl](/server/clusters#controlling-clusters-with-restatectl)
