@@ -233,11 +233,31 @@ After confirming the cluster is migrated to the new snapshot backend:
 
 ## Rollback plan
 
-If you encounter issues during migration:
+If you encounter issues during migration, the rollback procedure depends on how far you've progressed:
 
-- **Before snapshots exist in the new repository**: Restore the original configuration pointing to the old snapshot repository, perform a rolling restart, and resume normal operations.
+**During steps 1-3** (before log trimming is disabled):
 
-- **After snapshots exist in the new repository**: If no log trimming has occurred since the original repository was disabled, you can safely discard the new repository and revert the original configuration. If logs have been trimmed based on snapshot LSNs published to the new repository, follow the same process from the start to migrate to the original destination: 1) disable log trimming; 2) update snapshot destination; 3) create and verify snapshots; 4) re-enable log trimming.
+No destructive changes have been made. Simply restore partition replication to the original value:
+
+```shell
+restatectl config set --partition-replication <original-value>
+```
+
+**During steps 4-5** (log trimming disabled, no new snapshots yet):
+
+Restore the original configuration pointing to the old snapshot repository, perform a rolling restart, then restore partition replication:
+
+```shell
+restatectl config set --partition-replication <original-value>
+```
+
+**During steps 6-8** (configuring new repository, creating snapshots):
+
+If no log trimming has occurred since the original repository was disabled, you can safely discard the new repository and revert to the original configuration. Restore partition replication after the rollback.
+
+**After step 9** (partition replication restored, normal operations):
+
+If logs have been trimmed based on snapshot LSNs published to the new repository, you must follow the same migration process to return to the original destination: disable log trimming, update snapshot destination, create and verify snapshots, then re-enable log trimming.
 
 ## See also
 
