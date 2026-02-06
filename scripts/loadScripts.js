@@ -7,6 +7,10 @@ const MDX_DIR = path.resolve("./docs"); // Folder with your .mdx files
 const SNIPPET_DIR = path.resolve("./snippets"); // Folder with code to load
 
 const LANGUAGE_SYMBOLS = {
+    tsx: {
+        commentSymbol: "//",
+        serviceSymbol: ["restate.service", "restate.object", "restate.workflow"],
+    },
     ts: {
         commentSymbol: "//",
         serviceSymbol: ["restate.service", "restate.object", "restate.workflow"],
@@ -53,6 +57,7 @@ function extractLanguageSymbol(filePath) {
     if (filePath.endsWith(".java")) return LANGUAGE_SYMBOLS.java;
     if (filePath.endsWith(".kt")) return LANGUAGE_SYMBOLS.kotlin;
     if (filePath.endsWith(".ts")) return LANGUAGE_SYMBOLS.ts;
+    if (filePath.endsWith(".tsx")) return LANGUAGE_SYMBOLS.tsx;
     if (filePath.endsWith(".js")) return LANGUAGE_SYMBOLS.js;
     if (filePath.endsWith(".py")) return LANGUAGE_SYMBOLS.python;
     if (filePath.endsWith(".go")) return LANGUAGE_SYMBOLS.go;
