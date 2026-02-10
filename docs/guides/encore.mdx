@@ -1,0 +1,166 @@
+---
+title: "Restate + Encore"
+description: "Learn how to run Restate service handlers inside an Encore TypeScript backend."
+tags: ["integration"]
+---
+
+[Encore](https://encore.dev) is an open-source backend framework for TypeScript (and Go) with type-safe APIs,
+declarative infrastructure, and built-in observability.
+You can run Restate service handlers inside an Encore app by exposing them via
+[raw endpoints](https://encore.dev/docs/ts/primitives/raw-endpoints), which give you direct access to the
+Node.js request/response objects.
+
+This lets you use Encore for your API layer, databases, and infrastructure while Restate handles durable execution.
+
+:::note[Prerequisites]
+- [The prerequisites for running Restate TS services](/get_started/quickstart)
+- [Encore CLI installed](https://encore.dev/docs/ts/install)
+- An Encore app (`encore app create`)
+:::
+
+<Steps>
+<Step title="Install the Restate SDK">
+
+    Add the Restate TypeScript SDK to your Encore project:
+
+    ```shell
+    npm install @restatedev/restate-sdk
+    ```
+</Step>
+
+<Step title="Define your Restate service handlers">
+
+    Create a Restate service with your handler logic. This is standard Restate code:
+
+    ```ts order-processor/restate.ts
+    import * as restate from "@restatedev/restate-sdk";
+
+    export const orderProcessor = restate.service({
+      name: "OrderProcessor",
+      handlers: {
+        process: async (ctx: restate.Context, order: { id: string; item: string }) => {
+          const confirmation = await ctx.run(() => chargePayment(order));
+          await ctx.run(() => reserveInventory(order));
+          await ctx.run(() => sendConfirmation(order, confirmation));
+          return { status: "completed", orderId: order.id };
+        },
+      },
+    });
+
+    async function chargePayment(order: { id: string; item: string }) {
+      console.log(`Charging payment for order ${order.id}`);
+      return `conf-${order.id}`;
+    }
+
+    async function reserveInventory(order: { id: string; item: string }) {
+      console.log(`Reserving inventory for ${order.item}`);
+    }
+
+    async function sendConfirmation(order: { id: string; item: string }, confirmation: string) {
+      console.log(`Sending confirmation ${confirmation} for order ${order.id}`);
+    }
+    ```
+
+    Each `ctx.run()` call is journaled by Restate. If the process crashes mid-execution, Restate replays completed
+    steps and resumes where it left off.
+</Step>
+
+<Step title="Expose the handler via an Encore raw endpoint">
+
+    Create the Encore service and wire the Restate endpoint handler to a raw endpoint:
+
+    ```ts order-processor/encore.service.ts
+    import { Service } from "encore.dev/service";
+    export default new Service("order-processor");
+    ```
+
+    ```ts order-processor/api.ts
+    import { api } from "encore.dev/api";
+    import * as restate from "@restatedev/restate-sdk";
+    import { orderProcessor } from "./restate";
+
+    const restateHandler = restate
+      .endpoint()
+      .bind(orderProcessor)
+      .handler();
+
+    // Catch-all raw endpoint that Restate Server calls into
+    export const restateEndpoint = api.raw(
+      { expose: true, path: "/restate/!rest", method: "*" },
+      restateHandler,
+    );
+    ```
+
+    Encore now serves the Restate handler at `/restate/*`. The Restate Server will call this
+    endpoint to discover and invoke your handlers.
+</Step>
+
+<Step title="Start Restate Server and Encore">
+
+    In one terminal, start the Restate Server:
+
+    ```shell
+    restate-server
+    ```
+
+    In another terminal, start your Encore app:
+
+    ```shell
+    encore run
+    ```
+</Step>
+
+<Step title="Register your service with Restate">
+
+    Tell the Restate Server where to find your handlers:
+
+    ```shell
+    restate deployments register --use-http1.1 http://localhost:4000/restate
+    ```
+
+    You should see the discovered `OrderProcessor` service printed out.
+
+    :::info
+    The `--use-http1.1` flag is needed because Encore's raw endpoints serve HTTP/1.1.
+    :::
+</Step>
+
+<Step title="Invoke your handler">
+
+    Send a request to Restate Server's ingress (port 8080), which routes it to your Encore-hosted handler:
+
+    ```shell
+    curl localhost:8080/OrderProcessor/process \
+      --json '{"id": "order-123", "item": "widget"}'
+    ```
+
+    You can also invoke the handler from other Encore API endpoints using the Restate client:
+
+    ```ts order-processor/orders.ts
+    import { api } from "encore.dev/api";
+    import * as restate from "@restatedev/restate-sdk-clients";
+
+    const restateClient = restate.connect({ url: "http://localhost:8080" });
+
+    export const createOrder = api(
+      { method: "POST", path: "/orders", expose: true },
+      async (req: { item: string }): Promise<{ orderId: string }> => {
+        const orderId = `order-${Date.now()}`;
+        await restateClient
+          .serviceSendClient({ name: "OrderProcessor" })
+          .process({ id: orderId, item: req.item });
+        return { orderId };
+      },
+    );
+    ```
+</Step>
+
+<Step stepLabel="🎉" title="You're running Restate handlers inside Encore!"/>
+</Steps>
+
+## Related resources
+- [Encore documentation](https://encore.dev/docs/ts)
+- [Encore raw endpoints](https://encore.dev/docs/ts/primitives/raw-endpoints)
+- [`encore-restate-gen`](https://github.com/sebastianhindhede/encore-restate-gen): a CLI tool that auto-generates Restate service definitions and typed clients from your Encore project
+- [Durable execution use cases](/use-cases/durable-execution)
+- [Sagas guide](/guides/sagas)
