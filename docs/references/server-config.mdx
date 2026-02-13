@@ -2707,6 +2707,66 @@ Examples:
 
         </ResponseField>
 
+        <ResponseField name="durability-mode" type="oneOf | null" post={[]}>
+            Durability mode: Every partition store is backed up by a durable log that is used to recover the state of
+the partition on restart or failover. The durability mode defines the criteria used
+to determine whether a partition is considered fully durable or not at a given point in the
+log history. Once a partition is fully durable, its backing log is allowed to be trimmed to
+the durability point.
+
+This helps keeping the log's disk usage under control but it forces nodes that need to restore
+the state of the partition to fetch a snapshot of that partition that covers the changes up to
+and including the \"durability point\".
+
+Since v1.4.2 (not compatible with earlier versions)
+
+            
+            - `"none"` : This disables durability tracking and trimming completely.
+
+Trims and snapshots are still possible if performed manually or by an external
+component.
+            - `"snapshot-and-replica-set"` : In this mode, a partition is considered durable when its state can be restored from
+any of members of the replica-set as well as the latest snapshot.
+
+In other words, do not trim unless **all** replicas cover this Lsn, **and** the snapshot.
+
+[requires snapshot repository]
+DurabilityPoint = Min(Min(ReplicaSetDurablePoints), SnapshotDurablePoint)
+            - `"balanced"` : In this mode, a partition is considered durable when its state can be restored from
+the snapshot and at least a single replica.
+
+Do not trim unless the Lsn is covered (durably) by _any_ of the replicas **and** by
+the snapshot. Gives weight to snapshots over the durability of the replica-set but
+without ignoring the replica-set completely.
+
+In practice, this means that after a snapshot has been created on the leader, the
+system will wait for the nearest memtable flush that cover this Lsn before considering
+this Lsn for trimming. If the leader crashes before the memtable flush, we are confident
+that the leader will be able to replay the log without any trim-gaps. This is under the
+condition that the leader didn't move to another node. In the latter case, the system will
+fetch the snapshot as usual.
+
+[requires snapshot repository]
+[default] if snapshot repository configured
+DurabilityPoint = Min(Max(ReplicaSetDurablePoints), SnapshotDurablePoint)
+            - `"replica-set-only"` : A partition is considered durable once all nodes in the replica-set are durable, regardless
+of the state of snapshots.
+
+Do not trim unless all replicas durably include this Lsn.
+
+default in standalone-mode with no snapshot repository configured
+
+[default] if snapshot repository is not configured
+DurabilityPoint = Min(ReplicaSetDurablePoints)
+            - `"snapshot-only"` : A partition is durable ONLY after a snapshot has been created.
+[requires snapshot repository]
+
+Do not trim unless the Lsn is covered by the snapshot with no regard to the
+state of durability of the replica-set members.
+
+DurabilityPoint = SnapshotDurablePoint
+        </ResponseField>
+
         <ResponseField name="internal-queue-length" type="integer" post={['default=1000','format: uint','minimum: 1']}>
             Internal queue for partition processor communication: 
 
@@ -3249,6 +3309,14 @@ reduce scalability to more threads, especially for writes.
                 </ResponseField>
 
             </Expandable>
+        </ResponseField>
+
+        <ResponseField name="trim-delay-interval" type="string" post={['minLength: 1']}>
+            Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+
         </ResponseField>
 
     </Expandable>
