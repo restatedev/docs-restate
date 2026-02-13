@@ -839,7 +839,8 @@
           "rocksdb-log-level": null,
           "rocksdb-log-max-file-size": null,
           "rocksdb-memory-ratio": 0.49000000953674316
-        }
+        },
+        "trim-delay-interval": "10m"
       }
     }
   },
@@ -1146,6 +1147,35 @@
       "examples": [
         "0.0.0.0:6669",
         "127.0.0.1:6669"
+      ]
+    },
+    "DurabilityMode": {
+      "oneOf": [
+        {
+          "description": "This disables durability tracking and trimming completely.\n\nTrims and snapshots are still possible if performed manually or by an external\ncomponent.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "In this mode, a partition is considered durable when its state can be restored from\nany of members of the replica-set as well as the latest snapshot.\n\nIn other words, do not trim unless **all** replicas cover this Lsn, **and** the snapshot.\n\n[requires snapshot repository]\nDurabilityPoint = Min(Min(ReplicaSetDurablePoints), SnapshotDurablePoint)",
+          "type": "string",
+          "const": "snapshot-and-replica-set"
+        },
+        {
+          "description": "In this mode, a partition is considered durable when its state can be restored from\nthe snapshot and at least a single replica.\n\nDo not trim unless the Lsn is covered (durably) by _any_ of the replicas **and** by\nthe snapshot. Gives weight to snapshots over the durability of the replica-set but\nwithout ignoring the replica-set completely.\n\nIn practice, this means that after a snapshot has been created on the leader, the\nsystem will wait for the nearest memtable flush that cover this Lsn before considering\nthis Lsn for trimming. If the leader crashes before the memtable flush, we are confident\nthat the leader will be able to replay the log without any trim-gaps. This is under the\ncondition that the leader didn't move to another node. In the latter case, the system will\nfetch the snapshot as usual.\n\n[requires snapshot repository]\n[default] if snapshot repository configured\nDurabilityPoint = Min(Max(ReplicaSetDurablePoints), SnapshotDurablePoint)",
+          "type": "string",
+          "const": "balanced"
+        },
+        {
+          "description": "A partition is considered durable once all nodes in the replica-set are durable, regardless\nof the state of snapshots.\n\nDo not trim unless all replicas durably include this Lsn.\n\ndefault in standalone-mode with no snapshot repository configured\n\n[default] if snapshot repository is not configured\nDurabilityPoint = Min(ReplicaSetDurablePoints)",
+          "type": "string",
+          "const": "replica-set-only"
+        },
+        {
+          "description": "A partition is durable ONLY after a snapshot has been created.\n[requires snapshot repository]\n\nDo not trim unless the Lsn is covered by the snapshot with no regard to the\nstate of durability of the replica-set members.\n\nDurabilityPoint = SnapshotDurablePoint",
+          "type": "string",
+          "const": "snapshot-only"
+        }
       ]
     },
     "FriendlyDuration": {
@@ -2843,6 +2873,18 @@
           "$ref": "#/$defs/NonZeroFriendlyDuration",
           "default": "1h"
         },
+        "durability-mode": {
+          "title": "Durability mode",
+          "description": "Every partition store is backed up by a durable log that is used to recover the state of\nthe partition on restart or failover. The durability mode defines the criteria used\nto determine whether a partition is considered fully durable or not at a given point in the\nlog history. Once a partition is fully durable, its backing log is allowed to be trimmed to\nthe durability point.\n\nThis helps keeping the log's disk usage under control but it forces nodes that need to restore\nthe state of the partition to fetch a snapshot of that partition that covers the changes up to\nand including the \"durability point\".\n\nSince v1.4.2 (not compatible with earlier versions)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DurabilityMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "internal-queue-length": {
           "title": "Internal queue for partition processor communication",
           "type": "integer",
@@ -2924,6 +2966,11 @@
             "rocksdb-log-max-file-size": null,
             "rocksdb-memory-ratio": 0.49000000953674316
           }
+        },
+        "trim-delay-interval": {
+          "title": "Delayed log trimming",
+          "description": "Log trimming normally happens immediately after the partition becomes fully durable. A\npartition is considered fully durable when one of the following conditions is met:\n\n1. The partition has been fully replicated and flushed to all nodes in its replica-set.\n2. The partition has been snapshotted into the snapshot repository.\n\nThe delay interval is the time that Restate will wait before trimming the log _after_ the\ndurability condition is met. It's useful to set this to a non-zero duration if you want to\ncover the time needed for the snapshot repository (i.e. S3) to replicate the snapshot\nacross regions (typically a few seconds, but can be longer. Check S3's guidelines and\ncross-region replication SLA for more information).",
+          "$ref": "#/$defs/FriendlyDuration"
         }
       }
     }
