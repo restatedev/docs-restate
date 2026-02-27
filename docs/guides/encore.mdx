@@ -42,34 +42,36 @@ This lets you use Encore for your API layer, databases, and infrastructure while
 
     Create a Restate service with your handler logic. This is standard Restate code:
 
-    ```ts order-processor/restate.ts
-    import * as restate from "@restatedev/restate-sdk";
+```ts order-processor/restate.ts {"CODE_LOAD::ts/src/guides/encore/restate.ts"}
+import * as restate from "@restatedev/restate-sdk";
 
-    export const orderProcessor = restate.service({
-      name: "OrderProcessor",
-      handlers: {
+export const orderProcessor = restate.service({
+    name: "OrderProcessor",
+    handlers: {
         process: async (ctx: restate.Context, order: { id: string; item: string }) => {
-          const confirmation = await ctx.run(() => chargePayment(order));
-          await ctx.run(() => reserveInventory(order));
-          await ctx.run(() => sendConfirmation(order, confirmation));
-          return { status: "completed", orderId: order.id };
+            const confirmation = await ctx.run(() => chargePayment(order));
+            await ctx.run(() => reserveInventory(order));
+            await ctx.run(() => sendConfirmation(order, confirmation));
+            return { status: "completed", orderId: order.id };
         },
-      },
-    });
+    },
+});
 
-    async function chargePayment(order: { id: string; item: string }) {
-      console.log(`Charging payment for order ${order.id}`);
-      return `conf-${order.id}`;
-    }
+export type OrderProcessor = typeof orderProcessor;
 
-    async function reserveInventory(order: { id: string; item: string }) {
-      console.log(`Reserving inventory for ${order.item}`);
-    }
+async function chargePayment(order: { id: string; item: string }) {
+    console.log(`Charging payment for order ${order.id}`);
+    return `conf-${order.id}`;
+}
 
-    async function sendConfirmation(order: { id: string; item: string }, confirmation: string) {
-      console.log(`Sending confirmation ${confirmation} for order ${order.id}`);
-    }
-    ```
+async function reserveInventory(order: { id: string; item: string }) {
+    console.log(`Reserving inventory for ${order.item}`);
+}
+
+async function sendConfirmation(order: { id: string; item: string }, confirmation: string) {
+    console.log(`Sending confirmation ${confirmation} for order ${order.id}`);
+}
+```
 
     Each `ctx.run()` call is journaled by Restate. If the process crashes mid-execution, Restate replays completed
     steps and resumes where it left off.
@@ -82,52 +84,52 @@ This lets you use Encore for your API layer, databases, and infrastructure while
     Since Encore's raw endpoints use Node.js HTTP types while the Restate SDK provides a Fetch API handler,
     we need a small adapter to bridge between the two:
 
-    ```ts order-processor/encore.service.ts
-    import { Service } from "encore.dev/service";
-    export default new Service("order-processor");
-    ```
+```ts order-processor/encore.restate.ts {"CODE_LOAD::ts/src/guides/encore/encore.restate.ts"}
+import { Service } from "encore.dev/service";
+export default new Service("order-processor");
+```
 
-    ```ts order-processor/api.ts
-    import { api } from "encore.dev/api";
-    import { createEndpointHandler } from "@restatedev/restate-sdk/fetch";
-    import { orderProcessor } from "./restate";
+```ts order-processor/api.ts {"CODE_LOAD::ts/src/guides/encore/api.ts"}
+import { api } from "encore.dev/api";
+import { createEndpointHandler } from "@restatedev/restate-sdk/fetch";
+import { orderProcessor } from "./restate";
 
-    const handler = createEndpointHandler({
-      services: [orderProcessor],
-    });
+const handler = createEndpointHandler({
+    services: [orderProcessor],
+});
 
-    // Catch-all raw endpoint that Restate Server calls into
-    export const restateEndpoint = api.raw(
-      { expose: true, path: "/restate/!rest", method: "*" },
-      async (req, resp) => {
+// Catch-all raw endpoint that Restate Server calls into
+export const restateEndpoint = api.raw(
+    { expose: true, path: "/restate/!rest", method: "*" },
+    async (req, resp) => {
         const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
         const body =
-          req.method !== "GET" && req.method !== "HEAD"
-            ? await new Promise<Buffer>((resolve, reject) => {
-                const chunks: Buffer[] = [];
-                req.on("data", (chunk: Buffer) => chunks.push(chunk));
-                req.on("end", () => resolve(Buffer.concat(chunks)));
-                req.on("error", reject);
-              })
-            : undefined;
+            req.method !== "GET" && req.method !== "HEAD"
+                ? await new Promise<Buffer>((resolve, reject) => {
+                    const chunks: Buffer[] = [];
+                    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+                    req.on("end", () => resolve(Buffer.concat(chunks)));
+                    req.on("error", reject);
+                })
+                : undefined;
 
         const webReq = new Request(url.toString(), {
-          method: req.method,
-          headers: req.headers as Record<string, string>,
-          body,
+            method: req.method,
+            headers: req.headers as Record<string, string>,
+            body,
         });
 
         const webResp = await handler(webReq);
 
         resp.writeHead(
-          webResp.status,
-          Object.fromEntries(webResp.headers.entries()),
+            webResp.status,
+            Object.fromEntries(webResp.headers.entries()),
         );
         const buf = await webResp.arrayBuffer();
         resp.end(Buffer.from(buf));
-      },
-    );
-    ```
+    },
+);
+```
 
     Encore now serves the Restate handler at `/restate/*`. The Restate Server will call this
     endpoint to discover and invoke your handlers.
@@ -174,23 +176,24 @@ This lets you use Encore for your API layer, databases, and infrastructure while
 
     You can also invoke the handler from other Encore API endpoints using the Restate client:
 
-    ```ts order-processor/orders.ts
-    import { api } from "encore.dev/api";
-    import * as restate from "@restatedev/restate-sdk-clients";
+```ts order-processor/orders.ts {"CODE_LOAD::ts/src/guides/encore/orders.ts"}
+import { api } from "encore.dev/api";
+import * as restate from "@restatedev/restate-sdk-clients";
+import { OrderProcessor } from "./restate";
 
-    const restateClient = restate.connect({ url: "http://localhost:8080" });
+const restateClient = restate.connect({ url: "http://localhost:8080" });
 
-    export const createOrder = api(
-      { method: "POST", path: "/orders", expose: true },
-      async (req: { item: string }): Promise<{ orderId: string }> => {
+export const createOrder = api(
+    { method: "POST", path: "/orders", expose: true },
+    async (req: { item: string }): Promise<{ orderId: string }> => {
         const orderId = `order-${Date.now()}`;
         await restateClient
-          .serviceSendClient({ name: "OrderProcessor" })
-          .process({ id: orderId, item: req.item });
+            .serviceSendClient<OrderProcessor>({ name: "OrderProcessor" })
+            .process({ id: orderId, item: req.item });
         return { orderId };
-      },
-    );
-    ```
+    },
+);
+```
 </Step>
 
 <Step stepLabel="🎉" title="You're running Restate handlers inside Encore!"/>
