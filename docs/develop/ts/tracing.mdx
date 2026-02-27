@@ -1,0 +1,87 @@
+---
+title: "Tracing"
+description: "Propagate OpenTelemetry trace context through Restate handlers."
+icon: "chart-line"
+---
+
+Restate propagates [W3C TraceContext](https://www.w3.org/TR/trace-context/) headers (e.g. `traceparent`) through every service invocation, so your handlers can join the distributed trace started by the calling client.
+
+See the [server tracing docs](/server/monitoring/tracing) for how to configure Restate's OTLP exporter.
+
+## Extracting trace context in a handler
+
+When a handler is invoked, Restate forwards the trace context via attempt headers. Extract it from `ctx.request().attemptHeaders` and pass it to your OpenTelemetry propagator:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { context, propagation, trace, SpanKind, type Context } from "@opentelemetry/api";
+
+function extractTraceContext(ctx: restate.Context): Context {
+  const headers = ctx.request().attemptHeaders;
+  // Using a TextMapGetter means any propagator format (W3C, B3, Jaeger…) works
+  // without hardcoding header names
+  return propagation.extract(context.active(), headers, {
+    get: (carrier, key) => {
+      const val = carrier.get(key);
+      return Array.isArray(val) ? val[0] : (val ?? undefined);
+    },
+    keys: (carrier) => [...carrier.keys()],
+  });
+}
+
+const tracer = trace.getTracer("my-service");
+
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, name: string) => {
+      const traceCtx = extractTraceContext(ctx);
+
+      const span = tracer.startSpan(
+        "MyService.myHandler",
+        { kind: SpanKind.INTERNAL },
+        traceCtx,
+      );
+
+      return context.with(trace.setSpan(traceCtx, span), async () => {
+        try {
+          // handler logic — spans created here are children of Restate's span
+          span.addEvent("processing_started");
+          return `Hello, ${name}!`;
+        } finally {
+          span.end();
+        }
+      });
+    },
+  },
+});
+```
+
+## Why not use Node.js auto-instrumentation?
+
+Unlike Java and Go, Node.js does have OTEL auto-instrumentation packages (e.g. `@opentelemetry/auto-instrumentations-node`). However, they can't replace this pattern for two reasons:
+
+1. **Restate wraps the HTTP transport.** Auto-instrumentation intercepts at the raw HTTP layer, which Restate manages internally. It can't see the logical handler invocation.
+
+2. **Durable execution means handlers replay.** When Restate retries a handler, the auto-instrumentation would create a new span for each HTTP-level attempt. Extracting from `ctx.request().attemptHeaders` gives you exactly one span per logical invocation, correctly positioned in the trace hierarchy regardless of retries.
+
+## Propagating context to outbound calls
+
+When making HTTP calls inside `ctx.run()`, inject the current context into the outgoing headers so downstream services can continue the trace:
+
+```typescript
+await ctx.run("call-downstream", () => {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  propagation.inject(context.active(), headers);
+
+  return fetch("https://downstream-service/api", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name }),
+  }).then((r) => r.json());
+});
+```
+
+<Tip>
+For a complete end-to-end example — including a client that starts the root span, a Restate handler that extracts and continues it, and a downstream service that receives the propagated context — see the [OTEL tracing example](https://github.com/restatedev/examples/tree/main/typescript/tracing/otel) in the examples repository.
+</Tip>
