@@ -10,6 +10,8 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
+import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 A Restate AI application has two main components:
 - **Restate Server**: Sits in front of your agents and takes care of orchestration and resiliency
@@ -21,12 +23,14 @@ Your agent is a regular function, a handler, that makes LLM calls, executes tool
 
 You can use the Restate SDK alone or in combination with an Agent SDK.
 
-Select your Agent SDK:
+Select your SDK:
 
 <GlobalTabs>
 <GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate TS SDK" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="Restate Py SDK" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
 
 ## Creating a durable agent
@@ -208,6 +212,134 @@ curl localhost:8080/WeatherAgent/run \
 </Accordion>
 
 </GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+You can use the Restate SDK directly with any LLM client library. You manage the agentic loop yourself: call the LLM, check for tool calls, execute them, and loop until the LLM returns a final answer. Every LLM call and tool execution is wrapped in `ctx.run()` for durability.
+
+Here's a weather agent using the Restate SDK with any LLM client:
+
+```typescript weather-agent.ts
+export default restate.service({
+  name: "WeatherAgent",
+  handlers: {
+    run: async (ctx: restate.Context, req: { prompt: string }) => {
+      const tools = {
+        getWeather: tool({
+          description: "Get the current weather for a given city.",
+          inputSchema: z.object({ city: z.string() }),
+        }),
+      };
+
+      const messages: ModelMessage[] = [
+        { role: "system", content: "You are a helpful agent that provides weather updates." },
+        { role: "user", content: req.prompt },
+      ];
+
+      while (true) {
+        // LLM call - use your preferred LLM SDK here
+        const result = await ctx.run(
+          "LLM call",
+          async () => llmCall(messages, tools),
+          { maxRetryAttempts: 3 },
+        );
+        messages.push(...result.messages);
+
+        if (result.finishReason !== "tool-calls") return result.text;
+
+        for (const { toolName, toolCallId, input } of result.toolCalls) {
+          const { city } = input as { city: string };
+          // Tool execution wrapped in ctx.run for durability
+          const output = await ctx.run(`Get weather ${city}`, () =>
+            fetchWeather(city),
+          );
+          messages.push(toolResult(toolCallId, toolName, output));
+        }
+      }
+    },
+  },
+});
+```
+
+The key pattern:
+1. **LLM calls in `ctx.run()`**: Every LLM response is persisted. On recovery, the result is replayed from the journal.
+2. **Tool executions in `ctx.run()`**: Side effects are executed exactly once. On recovery, the result is replayed.
+3. **The agentic loop**: You control the loop. Call the LLM, process tool calls, repeat until done.
+
+This approach works with any LLM client (OpenAI, Anthropic, Cohere, local models, etc.) and gives you full control over the agent behavior.
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+
+Invoke the weather agent:
+```bash
+curl localhost:8080/WeatherAgent/run \
+  --json '{"prompt": "What is the weather like in San Francisco?"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+You can use the Restate SDK directly with any LLM client library. You manage the agentic loop yourself: call the LLM, check for tool calls, execute them, and loop until the LLM returns a final answer. Every LLM call and tool execution is wrapped in `ctx.run()` for durability.
+
+Here's a weather agent using the Restate SDK with any LLM client:
+
+```python weather_agent.py
+weather_agent = restate.Service("WeatherAgent")
+
+TOOLS = [
+    tool("get_weather", "Get the current weather for a given city.",
+         {"type": "object", "properties": {"city": {"type": "string"}}}),
+]
+
+
+@weather_agent.handler()
+async def run(ctx: restate.Context, req: WeatherPrompt) -> str | None:
+    messages = [
+        {"role": "system", "content": "You are a helpful agent that provides weather updates."},
+        {"role": "user", "content": req.message},
+    ]
+
+    while True:
+        # LLM call - use your preferred LLM SDK here
+        response = await ctx.run_typed(
+            "LLM call",
+            llm_call,
+            RunOptions(max_attempts=3, type_hint=Message),
+            messages=messages, tools=TOOLS,
+        )
+        messages.append(response.dict())
+
+        if not response.tool_calls:
+            return response.content
+
+        for tool_call in response.tool_calls:
+            city = json.loads(tool_call.function.arguments)["city"]
+            # Tool execution wrapped in ctx.run for durability
+            result = await ctx.run_typed(
+                f"Get weather {city}", fetch_weather, city=city,
+            )
+            messages.append(tool_result(tool_call.id, tool_call.function.name, result))
+```
+
+The key pattern:
+1. **LLM calls in `ctx.run()`**: Every LLM response is persisted. On recovery, the result is replayed from the journal.
+2. **Tool executions in `ctx.run()`**: Side effects are executed exactly once. On recovery, the result is replayed.
+3. **The agentic loop**: You control the loop. Call the LLM, process tool calls, repeat until done.
+
+This approach works with any LLM client (OpenAI, Anthropic, Cohere, local models, etc.) and gives you full control over the agent behavior.
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+
+Invoke the weather agent:
+```bash
+curl localhost:8080/WeatherAgent/run \
+  --json '{"message": "What is the weather like in San Francisco?"}'
+```
+</Accordion>
+
+</GlobalTab>
 </GlobalTabs>
 
 
@@ -229,6 +361,16 @@ The Restate UI shows the step-by-step execution trace of your agent, with detail
     <GlobalTab title="Google ADK">
         <Frame>
             <img src="/img/tour/agents/adk/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+    <GlobalTab title="Restate TS SDK">
+        <Frame>
+            <img src="/img/tour/agents/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+    <GlobalTab title="Restate Py SDK">
+        <Frame>
+            <img src="/img/tour/agents/weather-agent.png" alt="Agent execution trace in Restate UI" />
         </Frame>
     </GlobalTab>
 </GlobalTabs>
@@ -336,5 +478,15 @@ async def call_weather_api(city: str) -> WeatherResponse:
 Once you restart the service, the workflow finishes successfully.
 
 </Accordion>
+</GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+The Restate SDK examples use the same weather agent pattern as the other tabs. You can try durable execution with any of the tour examples above.
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+The Restate SDK examples use the same weather agent pattern as the other tabs. You can try durable execution with any of the tour examples above.
+
 </GlobalTab>
 </GlobalTabs>

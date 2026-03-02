@@ -10,6 +10,8 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
+import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 Real-world workflows often mix LLM-powered steps (parsing documents, analyzing data) with traditional steps (API calls, database writes, payments). Restate lets you chain these together in a single durable pipeline where each step is checkpointed. If the process crashes after step 2 of 4, recovery skips the completed steps and resumes from step 3.
 
@@ -17,6 +19,8 @@ Real-world workflows often mix LLM-powered steps (parsing documents, analyzing d
 <GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate TS SDK" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="Restate Py SDK" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
 
 ## Sequential pipeline
@@ -168,6 +172,106 @@ async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
 
     return {"analysis": analysis, "amount_usd": amount_usd, "confirmation": confirmation}
 ```
+
+</GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
+
+```typescript chaining.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/chaining.ts#here"}
+async function process(ctx: Context, report: { message: string }) {
+  // Step 1: Extract metrics
+  const extract = await ctx.run(
+    "Extract metrics",
+    // Use your preferred LLM SDK here
+    async () =>
+      llmCall(`Extract numerical values and their metrics from the text.
+            Format as 'Metric Name: Value' per line. Input: ${report.message}`),
+    { maxRetryAttempts: 3 },
+  );
+
+  // Step 2: Process the result from Step 1
+  const sortedMetrics = await ctx.run(
+    "Sort metrics",
+    async () =>
+      llmCall(`Sort lines in descending order by value: ${extract.text}`),
+    { maxRetryAttempts: 3 },
+  );
+
+  // Step 3: Format as table
+  const table = await ctx.run(
+    "Format as table",
+    async () =>
+      llmCall(`Format the data as a markdown table: ${sortedMetrics.text}`),
+    { maxRetryAttempts: 3 },
+  );
+
+  return table.text;
+}
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-patterns/src/chaining.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+
+Send a request:
+```bash
+curl localhost:8080/CallChainingService/process \
+  --json '{"message": "Revenue: $5.2M, Employees: 142, Growth: 28%, Satisfaction: 94%"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
+
+```python chaining.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/chaining.py?collapse_prequel"}
+call_chaining_svc = restate.Service("CallChainingService")
+
+
+@call_chaining_svc.handler()
+async def process(ctx: restate.Context, report: Report) -> str | None:
+    """Sequentially chains multiple LLM calls, each transforming the prior output."""
+
+    # Step 1: Extract metrics
+    extract = await ctx.run_typed(
+        "Extract metrics",
+        llm_call,  # Use your preferred LLM SDK here
+        RunOptions(max_attempts=3),  # Avoid infinite retries
+        messages=f"""Extract numerical values and their metrics from the text.
+        Format as 'Metric Name: Value' per line. Input: {report.message}""",
+    )
+
+    # Step 2: Sort by value
+    sorted_metrics = await ctx.run_typed(
+        "Sort metrics",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"Sort lines in descending order by value: {extract}",
+    )
+
+    # Step 3: Format as table
+    table = await ctx.run_typed(
+        "Format as table",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"Format the data as a markdown table:{sorted_metrics}",
+    )
+
+    return table.content
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/chaining.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+
+Send a request:
+```bash
+curl localhost:8080/CallChainingService/process \
+  --json '{"message": "Revenue: $5.2M, Employees: 142, Growth: 28%, Satisfaction: 94%"}'
+```
+</Accordion>
 
 </GlobalTab>
 </GlobalTabs>
@@ -360,6 +464,103 @@ Once all sub-agents return, the main agent makes a decision.
 </Accordion>
 
 </GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+This example runs three independent analysis tasks (sentiment, key points, summary) in parallel using `RestatePromise.all()`.
+
+```typescript parallel-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/parallel-agents.ts#here"}
+async function analyze(ctx: Context, { message }: { message: string }) {
+  // Create parallel tasks - each runs independently
+  const tasks = [
+    ctx.run(
+      "Analyze sentiment",
+      // Use your preferred LLM SDK here
+      async () => llmCall(`Analyze sentiment: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Extract key points",
+      async () => llmCall(`Extract 3 key points as bullets: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+    ctx.run(
+      "Summarize",
+      async () => llmCall(`Summarize in one sentence: ${message}`),
+      { maxRetryAttempts: 3 },
+    ),
+  ];
+
+  // Wait for all tasks to complete and return the results
+  const results = await RestatePromise.all(tasks);
+  return results.map((res) => res.text);
+}
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-patterns/src/parallel-agents.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+
+Send a request:
+```bash
+curl localhost:8080/ParallelAgentsService/analyze \
+  --json '{"message": "Restate provides durable execution for distributed applications."}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+This example runs three independent analysis tasks (sentiment, key points, summary) in parallel using `restate.gather()`.
+
+```python parallel_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/parallel_agents.py?collapse_prequel"}
+parallelization_svc = restate.Service("ParallelAgentsService")
+
+
+@parallelization_svc.handler()
+async def analyze(ctx: restate.Context, text: Text) -> list[str | None]:
+    """Analyzes multiple aspects of the text in parallel."""
+
+    # Create parallel tasks - each runs independently
+    tasks = [
+        ctx.run_typed(
+            "Analyze sentiment",
+            llm_call,  # Use your preferred LLM SDK here
+            RunOptions(max_attempts=3),
+            messages=f"Analyze sentiment (positive/negative/neutral): {text}",
+        ),
+        ctx.run_typed(
+            "Extract key points",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=f"Extract 3 key points as bullets: {text}",
+        ),
+        ctx.run_typed(
+            "Summarize",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=f"Summarize in one sentence: {text}",
+        ),
+    ]
+
+    # Wait for all tasks to complete
+    await restate.gather(*tasks)
+
+    # Gather and collect results
+    return [(await task).content for task in tasks]
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/parallel_agents.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+
+Send a request:
+```bash
+curl localhost:8080/ParallelAgentsService/analyze \
+  --json '{"message": "Restate provides durable execution for distributed applications."}'
+```
+</Accordion>
+
+</GlobalTab>
 </GlobalTabs>
 
 
@@ -525,6 +726,121 @@ async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
 
     return {"code": "Max iterations reached", "iterations": max_iterations}
 ```
+
+</GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+```typescript eval-loop.ts
+export default restate.service({
+  name: "CodeGenerator",
+  handlers: {
+    generate: async (ctx: restate.Context, req: { task: string }) => {
+      let feedback = "";
+      const maxIterations = 3;
+
+      for (let i = 0; i < maxIterations; i++) {
+        // Step 1: Generate code
+        const code = await ctx.run(
+          `Generate code (attempt ${i + 1})`,
+          async () =>
+            llmCall(
+              feedback
+                ? `Task: ${req.task}\n\nPrevious attempt was rejected:\n${feedback}\n\nPlease fix the issues.`
+                : `Task: ${req.task}`,
+              "You are a code generator. Write clean, correct code.",
+            ),
+          { maxRetryAttempts: 3 },
+        );
+
+        // Step 2: Evaluate the code
+        const evaluation = await ctx.run(
+          `Evaluate code (attempt ${i + 1})`,
+          async () =>
+            llmCall(
+              `Task: ${req.task}\n\nCode:\n${code}`,
+              `You are a code reviewer. Evaluate the code for correctness,
+              readability, and edge cases. Respond with PASS if acceptable,
+              or FAIL: <feedback> with specific issues to fix.`,
+            ),
+          { maxRetryAttempts: 3 },
+        );
+
+        if (evaluation.startsWith("PASS")) {
+          return { code, iterations: i + 1 };
+        }
+
+        feedback = evaluation;
+      }
+
+      return { code: "Max iterations reached", iterations: maxIterations };
+    },
+  },
+});
+```
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+```python eval_loop.py
+code_service = restate.Service("CodeGenerator")
+
+
+@code_service.handler()
+async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
+    feedback = ""
+    max_iterations = 3
+
+    for i in range(max_iterations):
+        # Step 1: Generate code
+        prompt = (
+            f"Task: {req.task}\n\nPrevious attempt was rejected:\n{feedback}\n\nPlease fix the issues."
+            if feedback
+            else f"Task: {req.task}"
+        )
+        code = await ctx.run_typed(
+            f"Generate code (attempt {i + 1})", llm_call,
+            RunOptions(max_attempts=3),
+            messages=prompt,
+            system="You are a code generator. Write clean, correct code.",
+        )
+
+        # Step 2: Evaluate the code
+        evaluation = await ctx.run_typed(
+            f"Evaluate code (attempt {i + 1})", llm_call,
+            RunOptions(max_attempts=3),
+            messages=f"Task: {req.task}\n\nCode:\n{code.content}",
+            system="""You are a code reviewer. Evaluate the code for correctness,
+            readability, and edge cases. Respond with PASS if acceptable,
+            or FAIL: <feedback> with specific issues to fix.""",
+        )
+
+        if evaluation.content.startswith("PASS"):
+            return {"code": code.content, "iterations": i + 1}
+
+        feedback = evaluation.content
+
+    return {"code": "Max iterations reached", "iterations": max_iterations}
+```
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
+```
+</Accordion>
 
 </GlobalTab>
 </GlobalTabs>
@@ -721,6 +1037,135 @@ async def run_researcher(ctx: restate.Context, task: ResearchTask) -> str:
     res_runner = Runner(app=res_app, session_service=InMemorySessionService())
     return await run_agent(res_runner, "user", task.session_id, task.question)
 ```
+
+</GlobalTab>
+<GlobalTab title="Restate TS SDK">
+
+```typescript orchestrator-worker.ts
+const researchWorker = restate.service({
+  name: "ResearchWorker",
+  handlers: {
+    research: async (ctx: restate.Context, req: { question: string }) => {
+      const answer = await ctx.run("Research", async () =>
+        llmCall(req.question, "You are a research assistant. Provide a concise, factual answer."),
+        { maxRetryAttempts: 3 },
+      );
+      return { question: req.question, answer };
+    },
+  },
+});
+
+export default restate.service({
+  name: "ResearchReport",
+  handlers: {
+    generate: async (ctx: restate.Context, req: { topic: string }) => {
+      // Step 1: Orchestrator creates a research plan
+      const planJson = await ctx.run("Create research plan", async () =>
+        llmCall(
+          req.topic,
+          `You are a research planner. Break the topic into 2-4 research
+          sub-tasks. Respond with a JSON array of strings, each a specific
+          research question. Example: ["question 1", "question 2"]`,
+        ),
+        { maxRetryAttempts: 3 },
+      );
+      const tasks: string[] = JSON.parse(planJson);
+
+      // Step 2: Dispatch workers in parallel
+      const workerResults = await RestatePromise.all(
+        tasks.map((question) =>
+          ctx.serviceClient(researchWorker).research({ question }),
+        ),
+      );
+
+      // Step 3: Combine results into a report
+      const report = await ctx.run("Write report", async () =>
+        llmCall(
+          `Topic: ${req.topic}\n\nResearch findings:\n${JSON.stringify(workerResults, null, 2)}`,
+          "You are a report writer. Combine the research findings into a cohesive report.",
+        ),
+        { maxRetryAttempts: 3 },
+      );
+
+      return { report, taskCount: tasks.length };
+    },
+  },
+});
+```
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+
+Send a request:
+```bash
+curl localhost:8080/ResearchReport/generate \
+  --json '{"topic": "The impact of renewable energy on global economies"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py SDK">
+
+```python orchestrator_worker.py
+researcher_service = restate.Service("ResearchWorker")
+
+
+@researcher_service.handler()
+async def research(ctx: restate.Context, req: ResearchTask) -> dict:
+    answer = await ctx.run_typed(
+        "Research", llm_call,
+        RunOptions(max_attempts=3),
+        messages=req.question,
+        system="You are a research assistant. Provide a concise, factual answer.",
+    )
+    return {"question": req.question, "answer": answer.content}
+
+
+report_service = restate.Service("ResearchReport")
+
+
+@report_service.handler()
+async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
+    # Step 1: Orchestrator creates a research plan
+    plan_result = await ctx.run_typed(
+        "Create research plan", llm_call,
+        RunOptions(max_attempts=3),
+        messages=req.topic,
+        system="""You are a research planner. Break the topic into 2-4 research
+        sub-tasks. Respond with a JSON array of strings, each a specific
+        research question. Example: ["question 1", "question 2"]""",
+    )
+    tasks = json.loads(plan_result.content)
+
+    # Step 2: Dispatch workers in parallel
+    worker_promises = []
+    for task in tasks:
+        promise = ctx.service_call(research, ResearchTask(question=task))
+        worker_promises.append(promise)
+
+    await restate.gather(*worker_promises)
+    findings = [await p for p in worker_promises]
+
+    # Step 3: Combine results into a report
+    report = await ctx.run_typed(
+        "Write report", llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings, indent=2)}",
+        system="You are a report writer. Combine the research findings into a cohesive report.",
+    )
+
+    return {"report": report.content, "task_count": len(tasks)}
+```
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+
+Send a request:
+```bash
+curl localhost:8080/ResearchReport/generate \
+  --json '{"topic": "The impact of renewable energy on global economies"}'
+```
+</Accordion>
 
 </GlobalTab>
 </GlobalTabs>
