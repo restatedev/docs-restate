@@ -5,7 +5,11 @@ icon: "user-check"
 description: "Agents that pause for human approval and resume when it arrives, even across restarts and infrastructure changes."
 ---
 
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
+import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
+import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 
 Some agent actions need human approval before proceeding: deploying code, sending money, modifying user accounts. With Restate, your agent can **pause** execution, wait for an external signal, and **resume** exactly where it left off, even if the process restarts in the meantime.
 
@@ -21,8 +25,16 @@ Restate provides **durable promises** (awakeables) that survive crashes and rest
 
 ## Example: approval tool for an agent
 
-<CodeGroup>
-```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent.ts#here"}
+<GlobalTabs>
+<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI SDK">
+
+```typescript humanintheloop/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent.ts#here"}
 const { text } = await generateText({
   model,
   system:
@@ -47,8 +59,40 @@ const { text } = await generateText({
   providerOptions: { openai: { parallelToolCalls: false } },
 });
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/humanintheloop/agent.ts" />
 
-```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent.py#here"}
+<Accordion title="Try out human approval" icon="laptop">
+<SetupVercel />
+
+Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
+```bash
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+
+You can restart the service to see how Restate continues waiting for the approval.
+
+If you wait for more than a minute, the invocation will get suspended.
+<Frame>
+<img src="/img/tour/agents/suspensions.png" alt="Invocation overview" />
+</Frame>
+
+Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
+
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+
+See in the UI how the workflow resumes and finishes after the approval.
+<Frame>
+<img src="/img/tour/agents/human-approval.png" alt="Invocation overview" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="OpenAI Agents SDK">
+
+```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent.py#here"}
 @durable_function_tool
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
@@ -64,8 +108,40 @@ async def human_approval(claim: InsuranceClaim) -> str:
     # Wait for human approval
     return await approval_promise
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/human_approval_agent.py" />
 
-```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent.py#here"}
+<Accordion title="Try out human approval" icon="laptop">
+<SetupOpenAI />
+
+Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
+```bash
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+
+You can restart the service to see how Restate continues waiting for the approval.
+
+If you wait for more than a minute, the invocation will get suspended.
+<Frame>
+<img src="/img/tour/agents/openai/suspensions.png" alt="Invocation overview" />
+</Frame>
+
+Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
+
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+
+See in the UI how the workflow resumes and finishes after the approval.
+<Frame>
+<img src="/img/tour/agents/openai/human-approval.png" alt="Invocation overview" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent.py#here"}
 async def human_approval(claim: InsuranceClaim) -> str:
     """Ask for human approval for high-value claims."""
     # Create an awakeable for human approval
@@ -82,12 +158,38 @@ async def human_approval(claim: InsuranceClaim) -> str:
     # Wait for human approval
     return await approval_promise
 ```
-</CodeGroup>
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/human_approval_agent.py" />
 
-The approver resolves the promise via a simple HTTP call:
-```shell
-curl localhost:8080/restate/awakeables/<awakeable-id>/resolve --json '"approved"'
+<Accordion title="Try out human approval" icon="laptop">
+<SetupGoogleADK />
+
+Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
+```bash
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
 ```
+
+You can restart the service to see how Restate continues waiting for the approval.
+
+If you wait for more than a minute, the invocation will get suspended.
+<Frame>
+<img src="/img/tour/agents/adk/suspensions.png" alt="Invocation overview" />
+</Frame>
+
+Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
+
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+
+See in the UI how the workflow resumes and finishes after the approval.
+<Frame>
+<img src="/img/tour/agents/adk/human-approval.png" alt="Invocation overview" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+</GlobalTabs>
 
 ## Why this matters for agents
 
@@ -99,10 +201,12 @@ curl localhost:8080/restate/awakeables/<awakeable-id>/resolve --json '"approved"
 
 ## Adding timeouts
 
-Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the approval promise:
+Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time.
 
-<CodeGroup>
-```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent-with-timeout.ts#here"}
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI SDK">
+
+```typescript humanintheloop/agent-with-timeout.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent-with-timeout.ts#here"}
 try {
   // At most 3 hours, to reach our SLA
   const approved = await approval.promise.orTimeout({ hours: 3 });
@@ -117,8 +221,23 @@ try {
   throw e;
 }
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/humanintheloop/agent-with-timeout.ts" />
 
-```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
+<Accordion title="Try out timeouts" icon="laptop">
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="OpenAI Agents SDK">
+
+```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
@@ -129,8 +248,23 @@ match await restate.select(
     case _:
         return "Approval timed out - Evaluate with AI"
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
-```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
+<Accordion title="Try out timeouts" icon="laptop">
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
 # Wait for human approval for at most 3 hours to reach our SLA
 match await restate.select(
     approval=approval_promise,
@@ -141,18 +275,18 @@ match await restate.select(
     case _:
         return "Approval timed out - Evaluate with AI"
 ```
-</CodeGroup>
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
-## Go deeper
+<Accordion title="Try out timeouts" icon="laptop">
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
 
-<CardGroup cols={2}>
-    <Card title="Human approvals" href="/ai/patterns/human-in-the-loop" icon="user-check">
-        Full implementation guide with content moderation example and Restate UI walkthrough.
-    </Card>
-    <Card title="Notify when ready" href="/ai/patterns/notify-when-ready" icon="bell">
-        Async notification patterns for long-running agent tasks.
-    </Card>
-    <Card title="Timeouts & Escalation" href="/ai/patterns/timeouts-escalation" icon="clock">
-        Time-box approval waits and escalate when deadlines pass.
-    </Card>
-</CardGroup>
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+</Accordion>
+
+</GlobalTab>
+</GlobalTabs>

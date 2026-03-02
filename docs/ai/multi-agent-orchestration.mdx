@@ -5,7 +5,11 @@ icon: "users"
 description: "Route tasks between specialized agents with durable decisions. Coordinate agents within the same process using handoffs and tools."
 ---
 
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
+import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
+import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 
 Many agent systems need a **router** that decides which specialist agent should handle a request. Restate makes these routing decisions durable: if the process crashes after the LLM picks an agent but before that agent responds, recovery skips the routing step and resumes the agent call.
 
@@ -22,8 +26,18 @@ Routing decisions, agent calls, and results are all recorded in the journal.
 
 Define specialist agents within the same process. The LLM picks the right one, and Restate ensures the decision sticks.
 
-<CodeGroup>
-```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts#here"}
+<GlobalTabs>
+<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI SDK">
+
+With the Vercel AI SDK, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision and the agent call via `ctx.serviceClient()`.
+
+```typescript orchestration/multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts#here"}
 const { text } = await generateText({
   model,
   prompt: `Claim: ${JSON.stringify(claim)}`,
@@ -47,8 +61,40 @@ const { text } = await generateText({
   providerOptions: { openai: { parallelToolCalls: false } },
 });
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts" />
 
-```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"}
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupVercel />
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
+You can see the trace of the sub-agents in the timeline.
+
+Once all sub-agents return, the main agent continues and makes a decision.
+
+<Frame>
+<img src="/img/tour/agents/multi-agent.png" alt="Multi-agent execution trace" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="OpenAI Agents SDK">
+
+With the OpenAI Agents SDK, you use `handoffs` for in-process agent delegation with automatic context sharing. The intake agent routes to the right specialist based on the claim type.
+
+You can use Virtual Object state to remember the last agent that handled a request, so the user can reconnect seamlessly on the next interaction.
+
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"}
 medical_agent = Agent(
     name="MedicalSpecialist",
     handoff_description="I handle medical insurance claims from intake to final decision.",
@@ -90,8 +136,42 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
     ctx.set("last_agent_name", result.last_agent.name)
     return result.final_output
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/multi_agent.py" />
 
-```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"}
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupOpenAI />
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/session123/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
+
+Once all sub-agents return, the main agent continues and makes a decision.
+
+<Frame>
+<img src="/img/tour/agents/openai/multi-agent.png" alt="Multi-agent execution trace" />
+</Frame>
+
+The state now contains the last agent that was called, so you can continue the conversation directly with the same agent:
+<Frame>
+<img src="/img/tour/agents/openai/multi-agent-state.png" alt="Multi-agent state" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+With the Google ADK, you use `sub_agents` for agent routing within the same app. The intake agent delegates to the right specialist based on the claim type.
+
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"}
 APP_NAME = "agents"
 
 # AGENTS
@@ -142,33 +222,37 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-</CodeGroup>
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/multi_agent.py" />
 
-Each SDK uses its native orchestration pattern:
-- **Vercel AI SDK**: Specialist agents exposed as tools, the LLM decides which to call
-- **OpenAI Agents SDK**: `handoffs` for in-process agent delegation with automatic context sharing
-- **Google ADK**: `sub_agents` for agent routing within the same app
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupGoogleADK />
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/user123/run --json '{
+    "amount": 3000,
+    "category": "orthopedic",
+    "date": "2024-10-01",
+    "placeOfService": "General Hospital",
+    "reason": "hospital bill for a broken leg",
+    "sessionId": "session-123"
+}'
+```
+
+In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
+
+Once all sub-agents return, the main agent continues and makes a decision.
 
 <Frame>
-    <img src="/img/tour/agents/multi-agent.png" alt="Multi-agent execution trace" />
+<img src="/img/tour/agents/adk/multi-agent.png" alt="Multi-agent execution trace" />
 </Frame>
+</Accordion>
+
+</GlobalTab>
+</GlobalTabs>
 
 ## Handing off to remote agents
 
 When agents need to scale independently, run on different platforms, or be developed by different teams, you can deploy them as separate Restate services. Restate makes cross-service calls look like local function calls while providing end-to-end durability and failure recovery.
 
 See the [Multi-agent systems](/ai/patterns/multi-agent) implementation guide for full examples of remote agent routing.
-
-## Go deeper
-
-<CardGroup cols={2}>
-    <Card title="Multi-agent systems" href="/ai/patterns/multi-agent" icon="users">
-        Full implementation guide with local routing, remote routing, and execution traces.
-    </Card>
-    <Card title="Competitive racing" href="/ai/patterns/competitive-racing" icon="flag-checkered">
-        Race multiple agents in parallel and return the fastest result.
-    </Card>
-    <Card title="Parallelization" href="/ai/patterns/parallelization" icon="bolt">
-        Execute multiple agent calls concurrently with durable coordination.
-    </Card>
-</CardGroup>
