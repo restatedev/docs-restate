@@ -1,0 +1,123 @@
+---
+title: "Durable Sessions"
+sidebarTitle: "Durable Sessions"
+icon: "comments"
+description: "Persistent, isolated agent sessions keyed by ID. Conversation state survives crashes and restarts with built-in concurrency control."
+---
+
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+Restate **Virtual Objects** give your agents persistent, isolated sessions. Each session is identified by a unique key (like a user ID or conversation ID), maintains its own state, and has built-in concurrency control, so concurrent requests to the same session are automatically queued.
+
+## How it works
+
+A Virtual Object is a Restate service type where each instance is identified by a key. State stored in a Virtual Object:
+- **Survives crashes and restarts**: No external database needed
+- **Is isolated per key**: Each session has its own state, separate from all others
+- **Has concurrency control**: Only one write handler runs at a time per key, preventing race conditions
+
+<img src="/img/tour/agents/chat_objects.png" alt="Virtual Objects as sessions"/>
+
+## Example: a chat session
+
+This Virtual Object stores conversation history and responds to messages. Each session key gets its own isolated conversation.
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/chat/agent.ts?collapse_prequel"}
+export default restate.object({
+  name: "Chat",
+  handlers: {
+    message: async (ctx: restate.ObjectContext, req: { message: string }) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+
+      const messages =
+        (await ctx.get<ModelMessage[]>("messages", superJson)) ?? [];
+      messages.push({ role: "user", content: req.message });
+
+      const res = await generateText({
+        model,
+        system: "You are a helpful assistant.",
+        messages,
+      });
+
+      ctx.set("messages", [...messages, ...res.response.messages], superJson);
+      return { answer: res.text };
+    },
+    getHistory: shared(async (ctx: restate.ObjectSharedContext) =>
+      ctx.get<ModelMessage[]>("messages", superJson),
+    ),
+  },
+});
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/chat.py?collapse_imports"}
+chat = VirtualObject("Chat")
+
+
+@chat.handler()
+async def message(_ctx: ObjectContext, req: ChatMessage) -> dict:
+    # Set use_restate_session=True to store the session in Restate's key-value store
+    # Make sure you use a VirtualObject to enable this feature
+    result = await DurableRunner.run(
+        Agent(name="Assistant", instructions="You are a helpful assistant."),
+        req.message,
+        use_restate_session=True,
+    )
+    return result.final_output
+```
+
+```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/chat.py?collapse_imports"}
+APP_NAME = "agents"
+
+agent = Agent(
+    model="gemini-2.5-flash",
+    name="assistant",
+    instruction="You are a helpful assistant. Be concise and helpful.",
+)
+
+# Enables retries and recovery for model calls and tool executions
+app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
+runner = Runner(app=app, session_service=RestateSessionService())
+
+chat = restate.VirtualObject("Chat")
+
+
+@chat.handler()
+async def message(ctx: restate.ObjectContext, req: ChatMessage) -> str | None:
+    events = runner.run_async(
+        user_id=ctx.key(),
+        session_id=req.session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
+    )
+    final_response = None
+    async for event in events:
+        if event.is_final_response() and event.content and event.content.parts:
+            if event.content.parts[0].text:
+                final_response = event.content.parts[0].text
+    return final_response
+```
+</CodeGroup>
+
+Send messages to a session by including the key in the URL:
+```shell
+curl localhost:8080/Chat/session-123/message --json '{"message": "Hello!"}'
+curl localhost:8080/Chat/session-456/message --json '{"message": "Different conversation"}'
+```
+
+Sessions `session-123` and `session-456` maintain completely separate conversation histories.
+
+The Restate UI lets you query the state of each session:
+<Frame>
+<img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
+</Frame>
+
+## Built-in concurrency control
+
+Restate queues concurrent requests to the same session key. If two messages arrive at the same time for `session-123`, they are processed sequentially, preventing race conditions on shared state.
+
+<img src="/img/tour/agents/chat_queue.png" alt="Concurrency control"/>
+
+Different session keys run in parallel with no interference.

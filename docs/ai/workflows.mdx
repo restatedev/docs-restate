@@ -1,0 +1,178 @@
+---
+title: "Workflows"
+sidebarTitle: "Workflows"
+icon: "diagram-project"
+description: "Build multi-step pipelines that mix LLM-powered steps with traditional logic. Each step is checkpointed for automatic recovery."
+---
+
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+Real-world workflows often mix LLM-powered steps (parsing documents, analyzing data) with traditional steps (API calls, database writes, payments). Restate lets you chain these together in a single durable pipeline where each step is checkpointed. If the process crashes after step 2 of 4, recovery skips the completed steps and resumes from step 3.
+
+## How it works
+
+Wrap each step in a durable action. Restate records the result, so on recovery:
+- Completed steps are replayed instantly from the journal
+- LLM calls are not repeated (saving cost and time)
+- Regular steps (API calls, payments) are not duplicated
+- Execution continues from the first incomplete step
+
+```
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Parse doc   │ => │ Analyze claim │ => │  Convert     │ => │  Reimburse   │
+│  (LLM)       │    │  (LLM)       │    │  currency    │    │  payment     │
+└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+     ✅                   ✅               💥 crash           ▶ resumes here
+```
+
+## Example: insurance claim reimbursement
+
+This workflow processes an insurance claim through four steps: two agentic steps that use an LLM to understand unstructured data, and two traditional steps that call external APIs.
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg"
+export default restate.service({
+  name: "ClaimReimbursement",
+  handlers: {
+    process: async (ctx: restate.Context, req: { document: string; claimId: string }) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+
+      // Step 1: Parse the claim document (LLM step)
+      const { text: parsed } = await generateText({
+        model,
+        system: "Extract the claim amount, currency, category, and description from this document.",
+        prompt: req.document,
+      });
+      const claim = JSON.parse(parsed);
+
+      // Step 2: Analyze the claim (LLM step)
+      const { text: analysis } = await generateText({
+        model,
+        system: "You are a claims analyst. Assess whether this claim is valid and determine the approved amount.",
+        prompt: `Claim: ${parsed}`,
+      });
+
+      // Step 3: Convert currency (regular step)
+      const amountUsd = await ctx.run("Convert currency", async () =>
+        convertCurrency(claim.amount, claim.currency, "USD")
+      );
+
+      // Step 4: Process reimbursement (regular step)
+      const confirmation = await ctx.run("Process payment", async () =>
+        processPayment(req.claimId, amountUsd)
+      );
+
+      return { analysis, amountUsd, confirmation };
+    },
+  },
+});
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg"
+claim_service = restate.Service("ClaimReimbursement")
+
+
+@claim_service.handler()
+async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
+    # Step 1: Parse the claim document (LLM step)
+    parse_agent = Agent(
+        name="DocumentParser",
+        instructions="Extract the claim amount, currency, category, and description.",
+    )
+    parsed = await DurableRunner.run(parse_agent, req.document)
+    claim = json.loads(parsed.final_output)
+
+    # Step 2: Analyze the claim (LLM step)
+    analysis_agent = Agent(
+        name="ClaimsAnalyst",
+        instructions="Assess whether this claim is valid and determine the approved amount.",
+    )
+    analysis = await DurableRunner.run(analysis_agent, f"Claim: {parsed.final_output}")
+
+    # Step 3: Convert currency (regular step)
+    amount_usd = await ctx.run_typed(
+        "Convert currency", convert_currency,
+        amount=claim["amount"], source=claim["currency"], target="USD",
+    )
+
+    # Step 4: Process reimbursement (regular step)
+    confirmation = await ctx.run_typed(
+        "Process payment", process_payment,
+        claim_id=req.claim_id, amount=amount_usd,
+    )
+
+    return {"analysis": analysis.final_output, "amount_usd": amount_usd, "confirmation": confirmation}
+```
+
+```python Google ADK icon="/img/languages/python.svg"
+claim_service = restate.Service("ClaimReimbursement")
+
+
+@claim_service.handler()
+async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
+    # Step 1: Parse the claim document (LLM step)
+    parse_agent = Agent(
+        model="gemini-2.5-flash",
+        name="document_parser",
+        instruction="Extract the claim amount, currency, category, and description.",
+    )
+    app = App(name="claims", root_agent=parse_agent, plugins=[RestatePlugin()])
+    runner = Runner(app=app, session_service=InMemorySessionService())
+
+    parsed = await run_agent(runner, req.user_id, "parse", req.document)
+    claim = json.loads(parsed)
+
+    # Step 2: Analyze the claim (LLM step)
+    analysis_agent = Agent(
+        model="gemini-2.5-flash",
+        name="claims_analyst",
+        instruction="Assess whether this claim is valid and determine the approved amount.",
+    )
+    app = App(name="claims", root_agent=analysis_agent, plugins=[RestatePlugin()])
+    runner = Runner(app=app, session_service=InMemorySessionService())
+
+    analysis = await run_agent(runner, req.user_id, "analyze", f"Claim: {parsed}")
+
+    # Step 3: Convert currency (regular step)
+    amount_usd = await ctx.run_typed(
+        "Convert currency", convert_currency,
+        amount=claim["amount"], source=claim["currency"], target="USD",
+    )
+
+    # Step 4: Process reimbursement (regular step)
+    confirmation = await ctx.run_typed(
+        "Process payment", process_payment,
+        claim_id=req.claim_id, amount=amount_usd,
+    )
+
+    return {"analysis": analysis, "amount_usd": amount_usd, "confirmation": confirmation}
+```
+</CodeGroup>
+
+If the process crashes after the LLM analysis but before the payment, Restate recovers both LLM results from the journal and continues with the currency conversion. No LLM calls are repeated, no payments are duplicated.
+
+## Why this matters
+
+- **Mix and match**: Use LLMs where you need intelligence (parsing, analysis, decisions) and regular code for everything else (APIs, payments, database writes)
+- **Cost control**: LLM calls are expensive. Durable execution means you never pay for the same call twice after a failure.
+- **Composable steps**: Each step can be as simple or complex as needed. An agentic step could itself be a full agent loop with tools.
+
+## Go deeper
+
+<CardGroup cols={2}>
+    <Card title="Multi-step tools" href="/ai/patterns/tools" icon="wrench">
+        Local vs. remote tools, durable routing, and multi-step tool chains.
+    </Card>
+    <Card title="Parallelization" href="/ai/patterns/parallelization" icon="bolt">
+        Execute multiple steps or tools concurrently with durable coordination.
+    </Card>
+    <Card title="Error handling" href="/ai/patterns/error-handling" icon="triangle-exclamation">
+        Retry strategies and graceful degradation for multi-step workflows.
+    </Card>
+    <Card title="Rollback on failures" href="/ai/patterns/rollback" icon="arrow-rotate-left">
+        Undo completed steps when later steps fail.
+    </Card>
+</CardGroup>

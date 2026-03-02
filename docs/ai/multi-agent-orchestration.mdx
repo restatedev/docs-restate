@@ -1,0 +1,174 @@
+---
+title: "Multi-Agent Orchestration"
+sidebarTitle: "Multi-Agent Orchestration"
+icon: "users"
+description: "Route tasks between specialized agents with durable decisions. Coordinate agents within the same process using handoffs and tools."
+---
+
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+Many agent systems need a **router** that decides which specialist agent should handle a request. Restate makes these routing decisions durable: if the process crashes after the LLM picks an agent but before that agent responds, recovery skips the routing step and resumes the agent call.
+
+## How it works
+
+1. A router agent receives the request
+2. An LLM decides which specialist to delegate to (persisted as a durable step)
+3. The specialist agent processes the request
+4. The router returns the result
+
+Routing decisions, agent calls, and results are all recorded in the journal.
+
+## Example: routing to specialist agents
+
+Define specialist agents within the same process. The LLM picks the right one, and Restate ensures the decision sticks.
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts#here"}
+const { text } = await generateText({
+  model,
+  prompt: `Claim: ${JSON.stringify(claim)}`,
+  system:
+    "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
+  tools: {
+    analyzeEligibility: tool({
+      description: "Analyze claim eligibility.",
+      inputSchema: InsuranceClaimSchema,
+      execute: async (claim: InsuranceClaim) =>
+        ctx.serviceClient(eligibilityAgent).run(claim),
+    }),
+    analyzeFraud: tool({
+      description: "Analyze probability of fraud.",
+      inputSchema: InsuranceClaimSchema,
+      execute: async (claim: InsuranceClaim) =>
+        ctx.serviceClient(fraudCheckAgent).run(claim),
+    }),
+  },
+  stopWhen: [stepCountIs(10)],
+  providerOptions: { openai: { parallelToolCalls: false } },
+});
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"}
+medical_agent = Agent(
+    name="MedicalSpecialist",
+    handoff_description="I handle medical insurance claims from intake to final decision.",
+    instructions="Review medical claims for coverage and necessity. Approve/deny up to $50,000.",
+)
+
+car_agent = Agent(
+    name="CarSpecialist",
+    handoff_description="I handle car insurance claims from intake to final decision.",
+    instructions="Assess car claims for liability and damage. Approve/deny up to $25,000.",
+)
+
+
+intake_agent = Agent(
+    name="IntakeAgent",
+    instructions="Route insurance claims to the appropriate specialist",
+    handoffs=[medical_agent, car_agent],
+)
+
+agent_dict = {
+    "IntakeAgent": intake_agent,
+    "MedicalSpecialist": medical_agent,
+    "AutoSpecialist": car_agent,
+}
+
+agent_service = restate.VirtualObject("MultiAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
+    # Store context in Restate's key-value store
+    last_agent_name = await ctx.get("last_agent_name", type_hint=str) or "IntakeAgent"
+    last_agent = agent_dict.get(last_agent_name, intake_agent)
+
+    result = await DurableRunner.run(
+        last_agent, f"Claim: {claim.model_dump_json()}", session=RestateSession()
+    )
+
+    ctx.set("last_agent_name", result.last_agent.name)
+    return result.final_output
+```
+
+```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"}
+APP_NAME = "agents"
+
+# AGENTS
+# Determine which specialist to use based on claim type
+medical_agent = Agent(
+    model="gemini-2.5-flash",
+    name="medical_specialist",
+    description="Reviews medical insurance claims for coverage and necessity.",
+    instruction="Review medical claims for coverage and necessity. Approve/deny up to $50,000.",
+)
+
+car_agent = Agent(
+    model="gemini-2.5-flash",
+    name="car_specialist",
+    description="Assesses car insurance claims for liability and damage.",
+    instruction="Assess car claims for liability and damage. Approve/deny up to $25,000.",
+)
+
+agent = Agent(
+    model="gemini-2.5-flash",
+    name="intake_agent",
+    instruction="Route insurance claims to the appropriate specialist",
+    sub_agents=[car_agent, medical_agent],
+)
+
+# Enables retries and recovery for model calls and tool executions
+app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
+runner = Runner(app=app, session_service=RestateSessionService())
+
+agent_service = restate.VirtualObject("MultiAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
+    events = runner.run_async(
+        user_id=ctx.key(),
+        session_id=claim.session_id,
+        new_message=Content(
+            role="user",
+            parts=[Part.from_text(text=f"Claim: {claim.model_dump_json()}")],
+        ),
+    )
+
+    final_response = None
+    async for event in events:
+        if event.is_final_response() and event.content and event.content.parts:
+            if event.content.parts[0].text:
+                final_response = event.content.parts[0].text
+    return final_response
+```
+</CodeGroup>
+
+Each SDK uses its native orchestration pattern:
+- **Vercel AI SDK**: Specialist agents exposed as tools, the LLM decides which to call
+- **OpenAI Agents SDK**: `handoffs` for in-process agent delegation with automatic context sharing
+- **Google ADK**: `sub_agents` for agent routing within the same app
+
+<Frame>
+    <img src="/img/tour/agents/multi-agent.png" alt="Multi-agent execution trace" />
+</Frame>
+
+## Handing off to remote agents
+
+When agents need to scale independently, run on different platforms, or be developed by different teams, you can deploy them as separate Restate services. Restate makes cross-service calls look like local function calls while providing end-to-end durability and failure recovery.
+
+See the [Multi-agent systems](/ai/patterns/multi-agent) implementation guide for full examples of remote agent routing.
+
+## Go deeper
+
+<CardGroup cols={2}>
+    <Card title="Multi-agent systems" href="/ai/patterns/multi-agent" icon="users">
+        Full implementation guide with local routing, remote routing, and execution traces.
+    </Card>
+    <Card title="Competitive racing" href="/ai/patterns/competitive-racing" icon="flag-checkered">
+        Race multiple agents in parallel and return the fastest result.
+    </Card>
+    <Card title="Parallelization" href="/ai/patterns/parallelization" icon="bolt">
+        Execute multiple agent calls concurrently with durable coordination.
+    </Card>
+</CardGroup>

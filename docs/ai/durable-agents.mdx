@@ -1,0 +1,399 @@
+---
+title: "Durable Agents"
+sidebarTitle: "Durable Agents"
+icon: "shield-halved"
+description: "Build AI agents that survive crashes and recover automatically. Every LLM call, tool execution, and routing decision is durably persisted."
+---
+
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+A Restate AI application has two main components:
+- **Restate Server**: Sits in front of your agents and takes care of orchestration and resiliency
+- **Agent Services**: Your agent logic using the Restate SDK for durability
+
+<img src="/img/tour/agents/ai-app-layout.png" alt="Application Structure"/>
+
+Your agent is a regular function, a handler, that makes LLM calls, executes tools, and coordinates work. Restate wraps this handler in **durable execution**: every step is recorded in a journal, so if the process crashes, the agent picks up exactly where it left off.
+
+You can use the Restate SDK alone or in combination with an Agent SDK.
+
+Select your Agent SDK:
+
+<GlobalTabs>
+<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
+## Creating a durable agent
+
+A Restate agent has three building blocks:
+
+1. **The handler**: Your agent logic, registered as a Restate service handler
+2. **LLM calls**: Persisted so responses are not re-fetched on recovery
+3. **Tool executions**: Wrapped in durable steps so side effects are not duplicated
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI SDK">
+
+To implement a durable agent, you use the Restate SDK in combination with the [Vercel AI SDK](https://ai-sdk.dev/).
+
+Here's a weather agent that looks up the weather for a city:
+
+```typescript durableexecution/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/durableexecution/agent.ts?collapse_prequel"}
+export default restate.service({
+  name: "WeatherAgent",
+  handlers: {
+    run: async (ctx: restate.Context, { prompt }: { prompt: string }) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+
+      const { text } = await generateText({
+        model,
+        system: "You are a helpful agent that provides weather updates.",
+        prompt,
+        tools: {
+          getWeather: tool({
+            description: "Get the current weather for a given city.",
+            inputSchema: z.object({ city: z.string() }),
+            execute: async ({ city }) =>
+              ctx.run("get weather", () => fetchWeather(city)),
+          }),
+        },
+        stopWhen: [stepCountIs(5)],
+        providerOptions: { openai: { parallelToolCalls: false } },
+      });
+
+      return text;
+    },
+  },
+});
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/durableexecution/agent.ts" />
+
+The agent logic lives in a handler of a Restate service (here the `run` handler).
+
+The main difference compared to a standard Vercel AI agent is the use of the **Restate Context** at key points:
+1. **Persisting LLM responses**: Wrap the model with `durableCalls(ctx)` middleware so every LLM response is saved in the Restate Server and replayed during recovery. The middleware is provided via [`@restatedev/vercel-ai-middleware`](https://github.com/restatedev/vercel-ai-middleware).
+2. **Resilient tool execution**: Tools use `ctx.run()` to make steps durable. The result is persisted and retried until it succeeds.
+
+<Accordion title="Run this example" icon="laptop">
+[Install Restate](/installation) and launch it:
+```bash
+npm install --global @restatedev/restate-server@latest @restatedev/restate@latest
+restate-server
+```
+
+Get the example:
+```bash
+restate example typescript-vercel-ai-tour-of-agents && cd typescript-vercel-ai-tour-of-agents
+npm install
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents" />
+
+Export your [OpenAI API key](https://platform.openai.com/api-keys) and run the agent:
+```bash
+export OPENAI_API_KEY=sk-...
+npm run dev
+```
+
+Register the agent with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
+
+Invoke the weather agent:
+```bash
+curl localhost:8080/WeatherAgent/run \
+  --json '{"prompt": "What is the weather like in San Francisco?"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="OpenAI Agents SDK">
+
+To implement a durable agent, you use the Restate SDK in combination with the [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/).
+
+Here's a weather agent that looks up the weather for a city:
+
+```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/durable_agent.py?collapse_imports"}
+@durable_function_tool
+async def get_weather(city: WeatherRequest) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    return await restate_context().run_typed("get weather", fetch_weather, req=city)
+
+
+agent = Agent(
+    name="WeatherAgent",
+    instructions="You are a helpful agent that provides weather updates.",
+    tools=[get_weather],
+)
+
+agent_service = restate.Service("WeatherAgent")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    result = await DurableRunner.run(agent, req.message)
+    return result.final_output
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/durable_agent.py" />
+
+You define your agent and tools as you normally would with the OpenAI Agents SDK.
+
+The main difference is the use of the **Restate Context** at key points:
+1. **Persisting LLM responses**: Use `DurableRunner` so every LLM response is saved in the Restate Server and replayed during recovery. The `DurableRunner` is provided via the OpenAI extensions in the Restate SDK.
+2. **Resilient tool execution**: Annotate tools with `@durable_function_tool` and use `restate_context().run_typed()` to make steps durable. The result is persisted and retried until it succeeds.
+
+<Accordion title="Run this example" icon="laptop">
+[Install Restate](/installation) and launch it:
+```bash
+restate-server
+```
+
+Get the example:
+```bash
+restate example python-openai-agents-tour-of-agents & cd python-openai-agents-tour-of-agents
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/openai-agents/tour-of-agents" />
+
+Export your [OpenAI API key](https://platform.openai.com/api-keys) and run the agent:
+```bash
+export OPENAI_API_KEY=sk-...
+uv run .
+```
+
+Register the agent with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
+
+Invoke the weather agent:
+```bash
+curl localhost:8080/WeatherAgent/run \
+  --json '{"message": "What is the weather like in San Francisco?"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+To implement a durable agent, you use the Restate SDK in combination with the [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/).
+
+Here's a weather agent that looks up the weather for a city:
+
+```python durable_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/durable_agent.py?collapse_imports"}
+APP_NAME = "agents"
+
+
+async def get_weather(city: str) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    #  Do one or more durable steps using the Restate context
+    return await restate_context().run_typed(
+        f"Get weather {city}", call_weather_api, city=city
+    )
+
+
+# Specify your agent in the default ADK way
+agent = Agent(
+    model="gemini-2.5-flash",
+    name="weather_agent",
+    instruction="You are a helpful agent that provides weather updates.",
+    tools=[get_weather],
+)
+
+app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
+session_service = InMemorySessionService()
+
+agent_service = restate.Service("WeatherAgent")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str | None:
+    await get_or_create_session(session_service, APP_NAME, req.user_id, req.session_id)
+    runner = Runner(app=app, session_service=session_service)
+    events = runner.run_async(
+        user_id=req.user_id,
+        session_id=req.session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
+    )
+
+    final_response = None
+    async for event in events:
+        if event.is_final_response() and event.content and event.content.parts:
+            if event.content.parts[0].text:
+                final_response = event.content.parts[0].text
+    return final_response
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/durable_agent.py" />
+
+You define your agent and tools as you normally would with the Google ADK.
+
+To make the agent durable, you add:
+1. **Restate Plugin**: Add `RestatePlugin()` to your Google ADK `App`. This enables durability for model calls and tool executions.
+2. **Resilient tool execution**: Wrap tool logic in durable steps using `restate_context().run_typed()`. The result is persisted and retried until it succeeds.
+
+<Accordion title="Run this example" icon="laptop">
+[Install Restate](/installation) and launch it:
+```bash
+restate-server
+```
+
+Get the example:
+```bash
+restate example python-google-adk-tour-of-agents && cd python-google-adk-tour-of-agents
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/google-adk/tour-of-agents" />
+
+Export your [Google API key](https://aistudio.google.com/app/apikey) and run the agent:
+```bash
+export GOOGLE_API_KEY=your-api-key
+uv run .
+```
+
+Register the agent with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
+
+Invoke the weather agent:
+```bash
+curl localhost:8080/WeatherAgent/run \
+  --json '{"message": "What is the weather like in San Francisco?", "user_id": "user-123", "session_id": "session-123"}'
+```
+</Accordion>
+
+</GlobalTab>
+</GlobalTabs>
+
+
+## Observing your agent
+
+The Restate UI shows the step-by-step execution trace of your agent, with detailed traces of every LLM call, tool execution, and state change:
+
+<GlobalTabs className={"hidden-tabs"}>
+    <GlobalTab title="Vercel AI SDK">
+        <Frame>
+            <img src="/img/tour/agents/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+    <GlobalTab title="OpenAI Agents SDK">
+        <Frame>
+            <img src="/img/tour/agents/openai/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+    <GlobalTab title="Google ADK">
+        <Frame>
+            <img src="/img/tour/agents/adk/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+</GlobalTabs>
+
+Restate also supports [OpenTelemetry](/server/monitoring/tracing) for exporting traces to external systems like Langfuse, DataDog, or Jaeger.
+
+
+## How durable execution works
+
+When your agent runs, Restate records each step's result in a **journal**. If the process crashes mid-execution:
+
+1. Restate detects the failure and restarts the handler
+2. Completed steps are replayed from the journal (no re-execution)
+3. Execution resumes from the first incomplete step
+
+This means:
+- LLM calls are not repeated (saving cost and time)
+- Tool side effects are not duplicated (no double bookings, no duplicate emails)
+- Multi-step workflows recover their full progress automatically
+
+<img src="/img/tour/agents/durable-execution-animation-agents.gif" alt="Durable AI Agent Execution" />
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI SDK">
+<Accordion title="Try out durable execution" icon="laptop">
+Ask for the weather in Denver:
+```bash
+curl localhost:8080/WeatherAgent/run \
+--json '{"prompt": "What is the weather like in Denver?"}'
+```
+
+On the invocation page in the UI, click on the invocation ID of the failing invocation.
+You can see that your request is retrying because the weather API is down:
+
+<Frame>
+<img src="/img/tour/agents/weather-agent-stuck.png" alt="Invocation overview" />
+</Frame>
+
+To fix the problem, remove the line `failOnDenver` from the `fetchWeather` function in the `utils.ts` file:
+
+```ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/utils.ts#weather"}
+export async function fetchWeather(city: string) {
+  failOnDenver(city);
+  const output = await fetchWeatherFromAPI(city);
+  return parseWeatherResponse(output);
+}
+```
+
+Once you restart the service, the workflow finishes successfully.
+
+</Accordion>
+</GlobalTab>
+<GlobalTab title="OpenAI Agents SDK">
+<Accordion title="Try out durable execution" icon="laptop">
+Ask for the weather in Denver:
+```bash
+curl localhost:8080/WeatherAgent/run \
+--json '{"message": "What is the weather like in Denver?"}'
+```
+
+On the invocation page in the UI, click on the invocation ID of the failing invocation.
+You can see that your request is retrying because the weather API is down:
+
+<Frame>
+<img src="/img/tour/agents/openai/weather-agent-stuck.png" alt="Invocation overview" />
+</Frame>
+
+To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `app/utils/utils.py` file:
+
+```python utils/utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/utils/utils.py#weather"}
+async def fetch_weather(req: WeatherRequest) -> WeatherResponse:
+    fail_on_denver(req.city)
+    weather_data = await call_weather_api(req.city)
+    return parse_weather_data(weather_data)
+```
+
+Once you restart the service, the workflow finishes successfully.
+
+</Accordion>
+</GlobalTab>
+<GlobalTab title="Google ADK">
+<Accordion title="Try out durable execution" icon="laptop">
+Ask for the weather in Denver:
+```bash
+curl localhost:8080/WeatherAgent/run \
+--json '{"message": "What is the weather like in Denver?", "user_id": "user-123", "session_id": "session-234"}'
+```
+
+On the invocation page in the UI, click on the invocation ID of the failing invocation.
+You can see that your request is retrying because the weather API is down:
+
+<Frame>
+<img src="/img/tour/agents/adk/weather-agent-stuck.png" alt="Invocation overview" />
+</Frame>
+
+To fix the problem, remove the line `fail_on_denver` from the `fetch_weather` function in the `app/utils/utils.py` file:
+
+```python utils/utils.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/utils/utils.py#weather"}
+async def call_weather_api(city: str) -> WeatherResponse:
+    fail_on_denver(city)
+    weather_data = await fetch_weather(city)
+    return parse_weather_data(weather_data)
+```
+
+Once you restart the service, the workflow finishes successfully.
+
+</Accordion>
+</GlobalTab>
+</GlobalTabs>

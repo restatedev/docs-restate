@@ -1,0 +1,171 @@
+---
+title: "Timeouts & Escalation"
+sidebarTitle: "Timeouts & Escalation"
+icon: "clock"
+description: "Time-box agent steps, approval waits, and long-running tasks. Escalate automatically when deadlines pass."
+tags: ["recipe"]
+---
+
+Agents and approval workflows can get stuck: an approver forgets, an external API never responds, or an agent loops longer than expected. Use Restate's durable timers to set deadlines and escalate automatically.
+
+## How does Restate help?
+
+Restate provides durable timers and promise combinators that work correctly across crashes and restarts:
+
+- **Durable timeouts**: Timers survive process restarts; they fire exactly when expected
+- **Promise racing**: Combine an approval promise with a timeout to implement deadline patterns
+- **Automatic escalation**: When a timeout fires, run escalation logic (notify a manager, cancel the task, take a fallback action)
+- Works with **any LLM SDK** and **any programming language** supported by Restate
+
+## Timeout on approval waits
+
+Combine `ctx.awakeable()` with a sleep timer to time-box a human approval. If the approver does not respond in time, the agent can escalate or take a fallback action.
+
+<CodeGroup>
+
+```ts TypeScript
+async function executeWithApproval(ctx: restate.Context, req: { action: string }) {
+  const approval = ctx.awakeable<string>();
+
+  await ctx.run("Notify approver", async () =>
+    sendSlackMessage(`Approve "${req.action}"?`, approval.id)
+  );
+
+  // Race the approval against a 1-hour deadline
+  const result = await CombineablePromise.race([
+    approval.promise.then((v) => ({ type: "approved" as const, value: v })),
+    ctx.sleep("approval-timeout", 60 * 60 * 1000).then(() => ({ type: "timeout" as const })),
+  ]);
+
+  if (result.type === "timeout") {
+    // Escalate: notify manager, take fallback action, or reject
+    await ctx.run("Escalate", async () =>
+      notifyManager(`Approval timed out for "${req.action}"`)
+    );
+    return "Escalated to manager due to timeout.";
+  }
+
+  return await ctx.run("Execute action", async () => performAction(req.action));
+}
+```
+
+```python Python
+@agent.handler()
+async def execute_with_approval(ctx: restate.Context, req: Request) -> str:
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    await ctx.run(
+        "Notify approver",
+        lambda: send_slack_message(f'Approve "{req.action}"?', approval_id),
+    )
+
+    # Race the approval against a 1-hour deadline
+    timeout = ctx.sleep(timedelta(hours=1))
+
+    result = await restate.race(approval_promise, timeout)
+
+    if result == timeout:
+        # Escalate: notify manager, take fallback action, or reject
+        await ctx.run(
+            "Escalate",
+            lambda: notify_manager(f"Approval timed out for '{req.action}'"),
+        )
+        return "Escalated to manager due to timeout."
+
+    return await ctx.run("Execute action", lambda: perform_action(req.action))
+```
+
+</CodeGroup>
+
+## Time-boxing agent execution
+
+Set a maximum execution time for an entire agent run. If the agent does not finish in time, cancel it and return a fallback response.
+
+<CodeGroup>
+
+```ts TypeScript
+async function run(ctx: restate.Context, req: { prompt: string }) {
+  // Set up the agent task as a separate call so we can cancel it
+  const agentCall = ctx.serviceClient(agentService).run(req.prompt);
+  const agentCallHandle = await agentCall.invocationHandle();
+
+  // Race agent execution against a 5-minute deadline
+  const result = await CombineablePromise.race([
+    agentCall.then((v) => ({ type: "done" as const, value: v })),
+    ctx.sleep("execution-timeout", 5 * 60 * 1000).then(() => ({ type: "timeout" as const })),
+  ]);
+
+  if (result.type === "timeout") {
+    // Cancel the agent and return a fallback
+    await agentCallHandle.cancel();
+    return "Agent timed out. Please try a simpler request.";
+  }
+
+  return result.value;
+}
+```
+
+```python Python
+@orchestrator.handler()
+async def run(ctx: restate.Context, req: Request) -> str:
+    # Set up the agent task as a separate call so we can cancel it
+    agent_call = ctx.service_call(agent_run, arg=req.prompt)
+
+    # Race agent execution against a 5-minute deadline
+    timeout = ctx.sleep(timedelta(minutes=5))
+    result = await restate.race(agent_call, timeout)
+
+    if result == timeout:
+        return "Agent timed out. Please try a simpler request."
+
+    return result
+```
+
+</CodeGroup>
+
+## Escalation chains
+
+Chain multiple escalation levels with increasing timeouts:
+
+```ts TypeScript
+async function approveWithEscalation(ctx: restate.Context, req: { action: string }) {
+  const approval = ctx.awakeable<string>();
+
+  // Level 1: Direct approver (30 minutes)
+  await ctx.run("Notify approver", () => notifyApprover(req.action, approval.id));
+
+  const level1 = await CombineablePromise.race([
+    approval.promise.then((v) => ({ type: "resolved" as const, value: v })),
+    ctx.sleep("level-1-timeout", 30 * 60 * 1000).then(() => ({ type: "timeout" as const })),
+  ]);
+
+  if (level1.type === "resolved") return level1.value;
+
+  // Level 2: Manager (1 hour)
+  await ctx.run("Escalate to manager", () => notifyManager(req.action, approval.id));
+
+  const level2 = await CombineablePromise.race([
+    approval.promise.then((v) => ({ type: "resolved" as const, value: v })),
+    ctx.sleep("level-2-timeout", 60 * 60 * 1000).then(() => ({ type: "timeout" as const })),
+  ]);
+
+  if (level2.type === "resolved") return level2.value;
+
+  // Level 3: Auto-reject after all escalation levels
+  return "Auto-rejected: no approval received within escalation window.";
+}
+```
+
+## Related patterns
+
+<CardGroup cols={2}>
+    <Card title="Approvals with Pause & Resume" href="/ai/approvals-pause-resume" icon="user-check">
+        Core concept: durable promises for human approvals.
+    </Card>
+    <Card title="Human approvals" href="/ai/patterns/human-in-the-loop" icon="user-check">
+        Full implementation guide for human-in-the-loop steps.
+    </Card>
+    <Card title="Notify when ready" href="/ai/patterns/notify-when-ready" icon="bell">
+        Async notification patterns for long-running tasks.
+    </Card>
+</CardGroup>

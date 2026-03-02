@@ -1,0 +1,158 @@
+---
+title: "Approvals with Pause & Resume"
+sidebarTitle: "Approvals with Pause & Resume"
+icon: "user-check"
+description: "Agents that pause for human approval and resume when it arrives, even across restarts and infrastructure changes."
+---
+
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+Some agent actions need human approval before proceeding: deploying code, sending money, modifying user accounts. With Restate, your agent can **pause** execution, wait for an external signal, and **resume** exactly where it left off, even if the process restarts in the meantime.
+
+## How it works
+
+Restate provides **durable promises** (awakeables) that survive crashes and restarts:
+
+1. The agent creates a durable promise and gets a unique ID
+2. The agent sends this ID to whoever needs to approve (Slack, email, dashboard)
+3. The agent **suspends**, freeing compute resources (no idle billing on serverless)
+4. When the approver responds, they resolve the promise via HTTP
+5. The agent **resumes** from the exact point it paused
+
+## Example: approval tool for an agent
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent.ts#here"}
+const { text } = await generateText({
+  model,
+  system:
+    "You are an insurance claim evaluation agent. Use these rules: " +
+    "* if the amount is more than 1000, ask for human approval, " +
+    "* if the amount is less than 1000, decide by yourself",
+  prompt,
+  tools: {
+    humanApproval: tool({
+      description: "Ask for human approval for high-value claims.",
+      inputSchema: InsuranceClaimSchema,
+      execute: async (claim: InsuranceClaim): Promise<boolean> => {
+        const approval = ctx.awakeable<boolean>();
+        await ctx.run("request-review", () =>
+          requestHumanReview(claim, approval.id),
+        );
+        return approval.promise;
+      },
+    }),
+  },
+  stopWhen: [stepCountIs(5)],
+  providerOptions: { openai: { parallelToolCalls: false } },
+});
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent.py#here"}
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+
+```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent.py#here"}
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review",
+        request_human_review,
+        claim=claim,
+        awakeable_id=approval_id,
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+</CodeGroup>
+
+The approver resolves the promise via a simple HTTP call:
+```shell
+curl localhost:8080/restate/awakeables/<awakeable-id>/resolve --json '"approved"'
+```
+
+## Why this matters for agents
+
+- **No idle resources**: The agent suspends while waiting. On serverless infrastructure, you pay nothing during the wait.
+- **Survives restarts**: Even if the process or infrastructure changes, the agent resumes when the approval arrives.
+- **Composable**: Combine with tool calls, multi-step workflows, and other patterns. The approval is just another durable step.
+
+<img src="/img/ai/patterns/human_approval_typescript.gif"/>
+
+## Adding timeouts
+
+Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the approval promise:
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/humanintheloop/agent-with-timeout.ts#here"}
+try {
+  // At most 3 hours, to reach our SLA
+  const approved = await approval.promise.orTimeout({ hours: 3 });
+  return { approved };
+} catch (e) {
+  if (e instanceof TimeoutError) {
+    return {
+      approved: false,
+      reason: "Approval timed out - Evaluate with AI",
+    };
+  }
+  throw e;
+}
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
+# Wait for human approval for at most 3 hours to reach our SLA
+match await restate.select(
+    approval=approval_promise,
+    timeout=restate_context().sleep(timedelta(hours=3)),
+):
+    case ["approval", approved]:
+        return "Approved" if approved else "Rejected"
+    case _:
+        return "Approval timed out - Evaluate with AI"
+```
+
+```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"}
+# Wait for human approval for at most 3 hours to reach our SLA
+match await restate.select(
+    approval=approval_promise,
+    timeout=restate_context().sleep(timedelta(hours=3)),
+):
+    case ["approval", approved]:
+        return "Approved" if approved else "Rejected"
+    case _:
+        return "Approval timed out - Evaluate with AI"
+```
+</CodeGroup>
+
+## Go deeper
+
+<CardGroup cols={2}>
+    <Card title="Human approvals" href="/ai/patterns/human-in-the-loop" icon="user-check">
+        Full implementation guide with content moderation example and Restate UI walkthrough.
+    </Card>
+    <Card title="Notify when ready" href="/ai/patterns/notify-when-ready" icon="bell">
+        Async notification patterns for long-running agent tasks.
+    </Card>
+    <Card title="Timeouts & Escalation" href="/ai/patterns/timeouts-escalation" icon="clock">
+        Time-box approval waits and escalate when deadlines pass.
+    </Card>
+</CardGroup>

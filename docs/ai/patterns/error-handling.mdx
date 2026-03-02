@@ -1,17 +1,116 @@
 ---
 title: "Retries & Error Handling"
 sidebarTitle: "Retries & Error Handling"
+icon: "triangle-exclamation"
 description: "Implement robust error handling and retry strategies for reliable agents."
 tags: ["recipe"]
 ---
 
+Error handling for agents involves two distinct concerns: **retrying transient failures** (network errors, rate limits, API timeouts) and **handling terminal failures** (invalid input, business logic errors) that should stop execution.
 
-Error handling for agents and tools is critical to building reliable AI systems.
+## How does Restate help?
 
-## Retries of LLM calls
+Restate provides built-in retry and error handling mechanisms:
 
-## Tool
+- **Automatic retries**: `ctx.run()` retries transient failures with exponential backoff by default
+- **Configurable retry limits**: Set `maxRetryAttempts` to avoid infinite retries on persistent failures
+- **Terminal errors**: Throw a `TerminalError` to stop retries immediately and fail the invocation
+- **Compensation**: Combine with [rollback patterns](/ai/patterns/rollback) to undo partial work on failure
+- Works with **any LLM SDK** and **any programming language** supported by Restate
 
-set max retry attempts for llm calls to avoid infinite retries
+## Retrying LLM calls
 
-tools can either throw
+LLM API calls fail transiently (rate limits, network issues, provider outages). Wrap them in `ctx.run()` with a retry limit to handle this automatically.
+
+<CodeGroup>
+
+```ts TypeScript
+// Retries up to 3 times with exponential backoff
+const result = await ctx.run(
+  "LLM call",
+  async () => llmCall(messages, tools),
+  { maxRetryAttempts: 3 }
+);
+```
+
+```python Python
+# Retries up to 3 times with exponential backoff
+result = await ctx.run_typed(
+    "LLM call",
+    llm_call,
+    RunOptions(max_attempts=3),
+    messages=messages,
+    tools=tools,
+)
+```
+
+</CodeGroup>
+
+Without `maxRetryAttempts`, Restate retries indefinitely with exponential backoff. For LLM calls, setting a limit prevents runaway costs from persistent failures.
+
+## Terminal errors in tools
+
+When a tool encounters an unrecoverable error (e.g., resource not found, invalid input, business rule violation), throw a `TerminalError` to stop retries immediately.
+
+<CodeGroup>
+
+```ts TypeScript
+const output = await ctx.run("Book hotel", async () => {
+  const result = await bookHotel(request);
+  if (result.status === "sold_out") {
+    // Stop retrying — this error won't resolve on retry
+    throw new restate.TerminalError("Hotel is sold out");
+  }
+  return result;
+});
+```
+
+```python Python
+async def book_hotel_step(request):
+    result = await book_hotel(request)
+    if result.status == "sold_out":
+        # Stop retrying — this error won't resolve on retry
+        raise restate.TerminalError("Hotel is sold out")
+    return result
+
+output = await ctx.run("Book hotel", lambda: book_hotel_step(request))
+```
+
+</CodeGroup>
+
+## Feeding errors back to the agent
+
+Instead of failing the entire invocation, you can catch tool errors and feed them back to the LLM so it can adjust its approach.
+
+```ts TypeScript
+for (const { toolName, toolCallId, input } of result.toolCalls) {
+  let output: string;
+  try {
+    output = await ctx.run(toolName, async () => executeTool(toolName, input));
+  } catch (e) {
+    if (e instanceof restate.TerminalError) throw e; // Propagate terminal errors
+    output = `Tool "${toolName}" failed: ${e.message}. Try a different approach.`;
+  }
+  messages.push(toolResult(toolCallId, toolName, output));
+}
+```
+
+The LLM receives the error message and can try a different tool or strategy on the next iteration.
+
+## Combining with rollback
+
+For multi-step agent workflows where steps have side effects (bookings, payments, emails), combine error handling with [compensation/rollback patterns](/ai/patterns/rollback) to undo completed work when later steps fail.
+
+## Related patterns
+
+<CardGroup cols={2}>
+    <Card title="Rollback on failures" href="/ai/patterns/rollback" icon="arrow-rotate-left">
+        Undo completed steps when an agent fails partway through a workflow.
+    </Card>
+    <Card title="Timeouts & Escalation" href="/ai/patterns/timeouts-escalation" icon="clock">
+        Time-box agent execution and escalate on deadline.
+    </Card>
+    <Card title="Durable Agents" href="/ai/durable-agents" icon="shield-halved">
+        How durable execution and the journal work under the hood.
+    </Card>
+</CardGroup>

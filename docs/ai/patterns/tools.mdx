@@ -1,7 +1,8 @@
 ---
-title: "Tools and Workflows"
-sidebarTitle: "Tools and Workflows"
-description: "Implement recoverable routing of tasks to tools and agents with Restate."
+title: "Multi-step Tools"
+sidebarTitle: "Multi-step Tools"
+icon: "wrench"
+description: "Implement durable tool execution with local and remote tools, multi-step routing, and automatic recovery."
 tags: ["recipe"]
 ---
 
@@ -200,3 +201,82 @@ When you run the example below, you can see how the LLM decides to forward the r
 
     </Steps>
 </Accordion>
+
+## Tools as sub-workflows
+
+As your agents grow more complex, you can extract tool logic into separate Restate services. These sub-workflows can be developed, deployed, and scaled independently, while the agent calls them durably via Restate's service client.
+
+All calls are proxied via Restate, which persists the call and handles retries and recovery. The sub-workflow has access to all Restate SDK features, including durable execution, state management, awakeables, and observability.
+
+### Define the sub-workflow
+
+Extract the tool logic into a separate Restate service. For example, a human approval workflow:
+
+<CodeGroup>
+```typescript TypeScript icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/sub-workflow-agent.ts#wf"}
+export const humanApprovalWorfklow = restate.service({
+  name: "HumanApprovalWorkflow",
+  handlers: {
+    requestApproval: async (ctx: restate.Context, claim: InsuranceClaim) => {
+      const approval = ctx.awakeable<boolean>();
+      await ctx.run("request-review", () =>
+        requestHumanReview(claim, approval.id),
+      );
+      return approval.promise;
+    },
+  },
+});
+```
+
+```python Python icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#wf"}
+# Sub-workflow service for human approval
+human_approval_workflow = restate.Service("HumanApprovalWorkflow")
+
+
+@human_approval_workflow.handler()
+async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    """Request human approval for a claim and wait for response."""
+    # Create an awakeable that can be resolved via HTTP
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    # Request human review
+    await ctx.run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+</CodeGroup>
+
+### Call it from the agent
+
+The agent calls the sub-workflow via a service client. Restate ensures the call is durable and the result is persisted:
+
+<CodeGroup>
+```typescript Vercel AI SDK icon="/img/languages/typescript.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/sub-workflow-agent.ts#here"}
+humanApproval: tool({
+  description: "Ask for human approval for high-value claims.",
+  inputSchema: InsuranceClaimSchema,
+  execute: async (claim: InsuranceClaim) =>
+    ctx.serviceClient(humanApprovalWorfklow).requestApproval(claim),
+}),
+```
+
+```python OpenAI Agents SDK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"}
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
+```
+
+```python Google ADK icon="/img/languages/python.svg" {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"}
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
+```
+</CodeGroup>
+
+<Frame>
+    <img src="/img/tour/agents/sub-workflow.png" alt="Sub-workflow execution trace" />
+</Frame>
