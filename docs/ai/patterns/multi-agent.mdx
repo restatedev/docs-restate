@@ -41,7 +41,7 @@ Define specialist agents within the same process. The LLM picks the right one, a
 
 With the Vercel AI SDK, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision and the agent call via `ctx.serviceClient()`.
 
-```typescript orchestration/multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts#here"}
+```typescript multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/multi-agent.ts#here"} 
 const { text } = await generateText({
   model,
   prompt: `Claim: ${JSON.stringify(claim)}`,
@@ -65,10 +65,18 @@ const { text } = await generateText({
   providerOptions: { openai: { parallelToolCalls: false } },
 });
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/orchestration/multi-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/multi-agent.ts" />
 
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupVercel />
+```bash
+npx tsx ./src/multi-agent.ts
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
@@ -98,7 +106,7 @@ With the OpenAI Agents SDK, you use `handoffs` for in-process agent delegation w
 
 You can use Virtual Object state to remember the last agent that handled a request, so the user can reconnect seamlessly on the next interaction.
 
-```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"}
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"} 
 medical_agent = Agent(
     name="MedicalSpecialist",
     handoff_description="I handle medical insurance claims from intake to final decision.",
@@ -140,10 +148,18 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
     ctx.set("last_agent_name", result.last_agent.name)
     return result.final_output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/multi_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/multi_agent.py" />
 
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupOpenAI />
+```bash
+uv run app/multi_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
@@ -175,7 +191,7 @@ The state now contains the last agent that was called, so you can continue the c
 
 With the Google ADK, you use `sub_agents` for agent routing within the same app. The intake agent delegates to the right specialist based on the claim type.
 
-```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"}
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"} 
 APP_NAME = "agents"
 
 # AGENTS
@@ -226,10 +242,18 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
                 final_response = event.content.parts[0].text
     return final_response
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/multi_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/multi_agent.py" />
 
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupGoogleADK />
+```bash
+uv run app/multi_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080
+```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
@@ -257,7 +281,7 @@ Once all sub-agents return, the main agent continues and makes a decision.
 
 With the Restate SDK, you implement routing by having the LLM pick a specialist (exposed as tools), then calling the LLM again with the specialist's prompt. Both the routing decision and the specialist call are durable steps.
 
-```typescript routing-to-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-agent.ts#here"}
+```typescript routing-to-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-agent.ts#here"} 
 const SPECIALISTS = {
   billingAgent: {
     description: "Expert in payments, charges, and refunds",
@@ -326,7 +350,7 @@ curl localhost:8080/AgentRouter/answer \
 
 With the Restate SDK, you implement routing by having the LLM pick a specialist (exposed as tools), then calling the LLM again with the specialist's prompt. Both the routing decision and the specialist call are durable steps.
 
-```python routing_to_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_agent.py?collapse_prequel"}
+```python routing_to_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_agent.py?collapse_prequel"} 
 router = restate.Service("AgentRouter")
 
 # Our team of AI specialists
@@ -346,8 +370,8 @@ async def answer(ctx: restate.Context, question: Question) -> str | None:
         "Pick specialist",
         llm_call,  # Use your preferred LLM SDK here
         RunOptions(max_attempts=3),
-        messages=f"""You are a customer service routing system.
-        Choose the appropriate specialist, or respond directly if no specialist is needed.
+        messages=f"""You are a customer service routing system. 
+        Choose the appropriate specialist, or respond directly if no specialist is needed. 
         {question.message}""",
         tools=[tool(name=name, description=desc) for name, desc in SPECIALISTS.items()],
     )
