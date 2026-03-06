@@ -15,6 +15,14 @@ import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 Many agent systems need a **router** that decides which specialist agent should handle a request. Restate makes these routing decisions durable: if the process crashes after the LLM picks an agent but before that agent responds, recovery skips the routing step and resumes the agent call.
 
+<GlobalTabs>
+<GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
 ## How it works
 
 1. A router agent receives the request
@@ -28,42 +36,59 @@ Routing decisions, agent calls, and results are all recorded in the journal.
 
 Define specialist agents within the same process. The LLM picks the right one, and Restate ensures the decision sticks.
 
-<GlobalTabs>
-<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Restate TS SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="Restate Py SDK" icon={"/img/languages/python.svg"}/>
-</GlobalTabs>
-
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
-With the Vercel AI SDK, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision and the agent call via `ctx.serviceClient()`.
+With the Vercel AI, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision and the agent call via `ctx.serviceClient()`.
 
 ```typescript multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/multi-agent.ts#here"} 
-const { text } = await generateText({
-  model,
-  prompt: `Claim: ${JSON.stringify(claim)}`,
-  system:
-    "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
-  tools: {
-    analyzeEligibility: tool({
-      description: "Analyze claim eligibility.",
-      inputSchema: InsuranceClaimSchema,
-      execute: async (claim: InsuranceClaim) =>
-        ctx.serviceClient(eligibilityAgent).run(claim),
-    }),
-    analyzeFraud: tool({
-      description: "Analyze probability of fraud.",
-      inputSchema: InsuranceClaimSchema,
-      execute: async (claim: InsuranceClaim) =>
-        ctx.serviceClient(fraudCheckAgent).run(claim),
-    }),
-  },
-  stopWhen: [stepCountIs(10)],
-  providerOptions: { openai: { parallelToolCalls: false } },
-});
+const run = async (ctx: restate.Context, claim: ClaimInput) => {
+  const model = wrapLanguageModel({
+    model: openai("gpt-4o"),
+    middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+  });
+
+  const { text } = await generateText({
+    model,
+    prompt: `Claim: ${JSON.stringify(claim)}`,
+    system:
+      "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
+    tools: {
+      analyzeEligibility: tool({
+        description: "Analyze claim eligibility.",
+        inputSchema: InsuranceClaimSchema,
+        execute: async (claim: InsuranceClaim) => {
+          const { text } = await generateText({
+            model,
+            system:
+              "Decide whether the following claim is eligible for reimbursement." +
+              "Respond with eligible if it's a medical claim, and not eligible otherwise.",
+            prompt: JSON.stringify(claim),
+          });
+          return text;
+        },
+      }),
+      analyzeFraud: tool({
+        description: "Analyze probability of fraud.",
+        inputSchema: InsuranceClaimSchema,
+        execute: async (claim: InsuranceClaim) => {
+          const { text } = await generateText({
+            model,
+            system:
+              "Decide whether the claim is fraudulent." +
+              "Always respond with low risk, medium risk, or high risk.",
+            prompt: JSON.stringify(claim),
+          });
+          return text;
+        },
+      }),
+    },
+    stopWhen: [stepCountIs(10)],
+    providerOptions: { openai: { parallelToolCalls: false } },
+  });
+
+  return text;
+};
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/multi-agent.ts" />
 
@@ -75,7 +100,7 @@ npx tsx ./src/multi-agent.ts
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
@@ -100,13 +125,13 @@ Once all sub-agents return, the main agent continues and makes a decision.
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
-With the OpenAI Agents SDK, you use `handoffs` for in-process agent delegation with automatic context sharing. The intake agent routes to the right specialist based on the claim type.
+With the OpenAI Agents, you use `handoffs` for in-process agent delegation with automatic context sharing. The intake agent routes to the right specialist based on the claim type.
 
 You can use Virtual Object state to remember the last agent that handled a request, so the user can reconnect seamlessly on the next interaction.
 
-```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/multi_agent.py?collapse_imports"} 
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/multi_agent.py#here"} 
 medical_agent = Agent(
     name="MedicalSpecialist",
     handoff_description="I handle medical insurance claims from intake to final decision.",
@@ -158,7 +183,7 @@ uv run app/multi_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
@@ -191,9 +216,7 @@ The state now contains the last agent that was called, so you can continue the c
 
 With the Google ADK, you use `sub_agents` for agent routing within the same app. The intake agent delegates to the right specialist based on the claim type.
 
-```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/multi_agent.py?collapse_imports"} 
-APP_NAME = "agents"
-
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/multi_agent.py#here"} 
 # AGENTS
 # Determine which specialist to use based on claim type
 medical_agent = Agent(
@@ -252,7 +275,7 @@ uv run app/multi_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request for a claim that needs to be analyzed by multiple agents:
@@ -277,11 +300,11 @@ Once all sub-agents return, the main agent continues and makes a decision.
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 
 With the Restate SDK, you implement routing by having the LLM pick a specialist (exposed as tools), then calling the LLM again with the specialist's prompt. Both the routing decision and the specialist call are durable steps.
 
-```typescript routing-to-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-agent.ts#here"} 
+```typescript multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/multi-agent.ts#here"} 
 const SPECIALISTS = {
   billingAgent: {
     description: "Expert in payments, charges, and refunds",
@@ -333,10 +356,18 @@ async function answer(ctx: Context, { message }: { message: string }) {
   return text;
 }
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-patterns/src/routing-to-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/multi-agent.ts" />
 
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupRestateTS />
+```bash
+npx tsx ./src/multi-agent.ts
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
 Send a request:
 ```bash
@@ -346,11 +377,12 @@ curl localhost:8080/AgentRouter/answer \
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 
 With the Restate SDK, you implement routing by having the LLM pick a specialist (exposed as tools), then calling the LLM again with the specialist's prompt. Both the routing decision and the specialist call are durable steps.
 
-```python routing_to_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_agent.py?collapse_prequel"} 
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/multi_agent.py#here"} 
+# Create the routing service
 router = restate.Service("AgentRouter")
 
 # Our team of AI specialists
@@ -394,10 +426,18 @@ async def answer(ctx: restate.Context, question: Question) -> str | None:
 
     return response.content
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/multi_agent.py" />
 
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupRestatePy />
+```bash
+uv run app/multi_agent.py
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
 Send a request:
 ```bash
@@ -413,4 +453,4 @@ curl localhost:8080/AgentRouter/answer \
 
 When agents need to scale independently, run on different platforms, or be developed by different teams, you can deploy them as separate Restate services. Restate makes cross-service calls look like local function calls while providing end-to-end durability and failure recovery.
 
-See the [Multi-agent systems](/ai/patterns/multi-agent) implementation guide for full examples of remote agent routing.
+See the [guide on calling remote agents](/ai/patterns/remote-agents) implementation guide for full examples of remote agent routing.

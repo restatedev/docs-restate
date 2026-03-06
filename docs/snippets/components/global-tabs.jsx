@@ -58,7 +58,7 @@ export const GlobalTabs = ({ children, className = '' }) => {
                             onClick={() => handleTabClick(index)}
                         >
                             {tab.props.icon && (
-                                <img src={tab.props.icon} alt="" className="h-4 w-4 not-prose" />
+                                <img src={tab.props.icon} alt="" className="h-4 w-4 not-prose" noZoom/>
                             )}
                             {tab.props.title}
                         </button>

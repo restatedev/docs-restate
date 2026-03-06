@@ -16,6 +16,12 @@ Agent tools come in two flavors: **local tools** that run inside the agent handl
 
 For local tools (wrapping tool logic in `ctx.run()` within the agent handler), see [Durable Agents](/ai/durable-agents).
 
+<GlobalTabs>
+<GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
 ## Why expose workflows as tools?
 
 As your agent tools grow more complex, you can extract them into separate Restate services and expose them as tools:
@@ -26,12 +32,6 @@ As your agent tools grow more complex, you can extract them into separate Restat
 
 All calls between the agent and its tool services are proxied via Restate, which persists the call and handles retries and recovery.
 
-<GlobalTabs>
-<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
-</GlobalTabs>
-
 ## Example: human approval workflow as a tool
 
 This example shows a human approval workflow exposed as an agent tool. The workflow creates an awakeable, sends a review request, and suspends until a human responds. The agent treats this like any other tool call.
@@ -41,69 +41,36 @@ This example shows a human approval workflow exposed as an agent tool. The workf
 Extract the tool logic into a separate Restate service:
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
-```typescript sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts#wf"} 
-export const humanApprovalWorfklow = restate.service({
-  name: "HumanApprovalWorkflow",
-  handlers: {
-    requestApproval: async (ctx: restate.Context, claim: InsuranceClaim) => {
-      const approval = ctx.awakeable<boolean>();
-      await ctx.run("request-review", () =>
-        requestHumanReview(claim, approval.id),
-      );
-      return approval.promise;
-    },
-  },
-});
+```typescript sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts#here"} 
+humanApproval: tool({
+  description: "Ask for human approval for high-value claims.",
+  inputSchema: InsuranceClaimSchema,
+  execute: async (claim: InsuranceClaim) =>
+    ctx.serviceClient(humanApprovalWorfklow).requestApproval(claim),
+}),
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
-```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/sub_workflow_agent.py#wf"} 
-# Sub-workflow service for human approval
-human_approval_workflow = restate.Service("HumanApprovalWorkflow")
-
-
-@human_approval_workflow.handler()
-async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
-    """Request human approval for a claim and wait for response."""
-    # Create an awakeable that can be resolved via HTTP
-    approval_id, approval_promise = ctx.awakeable(type_hint=str)
-
-    # Request human review
-    await ctx.run_typed(
-        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
-    )
-
-    # Wait for human approval
-    return await approval_promise
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/sub_workflow_agent.py" />
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
-```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/sub_workflow_agent.py#wf"} 
-# Sub-workflow service for human approval
-human_approval_workflow = restate.Service("HumanApprovalWorkflow")
-
-
-@human_approval_workflow.handler()
-async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
-    """Request human approval for a claim and wait for response."""
-    # Create an awakeable that can be resolved via HTTP
-    approval_id, approval_promise = ctx.awakeable(type_hint=str)
-
-    # Request human review
-    await ctx.run_typed(
-        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
-    )
-
-    # Wait for human approval
-    return await approval_promise
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"} 
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
 
@@ -117,7 +84,7 @@ The sub-workflow uses `ctx.awakeable()` to create a durable promise that can be 
 The agent exposes the sub-workflow as a tool. When the LLM picks it, the agent calls the remote service via Restate's service client:
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
 ```typescript sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts#here"} 
 humanApproval: tool({
@@ -137,7 +104,7 @@ npx tsx ./src/sub-workflow-agent.ts
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request that triggers the human approval sub-workflow:
@@ -159,7 +126,7 @@ curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json '
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
 ```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
 @durable_function_tool
@@ -177,7 +144,7 @@ uv run app/sub_workflow_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request that triggers the human approval sub-workflow:
@@ -212,7 +179,7 @@ uv run app/sub_workflow_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Start a request that triggers the human approval sub-workflow:

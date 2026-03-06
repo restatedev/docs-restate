@@ -15,6 +15,14 @@ import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 Some agent actions need human approval before proceeding: deploying code, sending money, modifying user accounts. With Restate, your agent can **pause** execution, wait for an external signal, and **resume** exactly where it left off, even if the process restarts in the meantime.
 
+<GlobalTabs>
+<GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
 ## How it works
 
 Restate provides **durable promises** (awakeables) that survive crashes and restarts:
@@ -27,41 +35,41 @@ Restate provides **durable promises** (awakeables) that survive crashes and rest
 
 ## Example: approval tool for an agent
 
-<GlobalTabs>
-<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Restate TS SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="Restate Py SDK" icon={"/img/languages/python.svg"}/>
-</GlobalTabs>
-
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
 ```typescript human-approval-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/human-approval-agent.ts#here"} 
-const { text } = await generateText({
-  model,
-  system:
-    "You are an insurance claim evaluation agent. Use these rules: " +
-    "* if the amount is more than 1000, ask for human approval, " +
-    "* if the amount is less than 1000, decide by yourself",
-  prompt,
-  tools: {
-    humanApproval: tool({
-      description: "Ask for human approval for high-value claims.",
-      inputSchema: InsuranceClaimSchema,
-      execute: async (claim: InsuranceClaim): Promise<boolean> => {
-        const approval = ctx.awakeable<boolean>();
-        await ctx.run("request-review", () =>
-          requestHumanReview(claim, approval.id),
-        );
-        return approval.promise;
-      },
-    }),
-  },
-  stopWhen: [stepCountIs(5)],
-  providerOptions: { openai: { parallelToolCalls: false } },
-});
+const run = async (ctx: restate.Context, { prompt }: ClaimPrompt) => {
+  const model = wrapLanguageModel({
+    model: openai("gpt-4o"),
+    middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+  });
+
+  const { text } = await generateText({
+    model,
+    system:
+      "You are an insurance claim evaluation agent. Use these rules: " +
+      "* if the amount is more than 1000, ask for human approval, " +
+      "* if the amount is less than 1000, decide by yourself",
+    prompt,
+    tools: {
+      humanApproval: tool({
+        description: "Ask for human approval for high-value claims.",
+        inputSchema: InsuranceClaimSchema,
+        execute: async (claim: InsuranceClaim): Promise<boolean> => {
+          const approval = ctx.awakeable<boolean>();
+          await ctx.run("request-review", () =>
+            requestHumanReview(claim, approval.id),
+          );
+          return approval.promise;
+        },
+      }),
+    },
+    stopWhen: [stepCountIs(5)],
+    providerOptions: { openai: { parallelToolCalls: false } },
+  });
+  return text;
+};
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/human-approval-agent.ts" />
 
@@ -73,7 +81,7 @@ npx tsx ./src/human-approval-agent.ts
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
@@ -102,7 +110,7 @@ See in the UI how the workflow resumes and finishes after the approval.
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/human_approval_agent.py#here"} 
 @durable_function_tool
@@ -130,7 +138,7 @@ uv run app/human_approval_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
@@ -188,7 +196,7 @@ uv run app/human_approval_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
@@ -217,16 +225,9 @@ See in the UI how the workflow resumes and finishes after the approval.
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 
-```typescript human-in-the-loop.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/human-in-the-loop.ts#here"} 
-const tools = {
-  getHumanReview: tool({
-    description: "Request human review if policy violation is uncertain.",
-    inputSchema: z.object({}),
-  }),
-};
-
+```typescript human-approval-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/human-approval-agent.ts#here"} 
 async function moderate(ctx: Context, { message }: { message: string }) {
   const prompt = `You are a content moderation agent. Decide if the content violates policy: ${message}`;
   const { text, toolCalls } = await ctx.run(
@@ -250,15 +251,23 @@ async function moderate(ctx: Context, { message }: { message: string }) {
   return text;
 }
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-patterns/src/human-in-the-loop.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/human-approval-agent.ts" />
 
 <Accordion title="Try out human approval" icon="laptop">
 <SetupRestateTS />
+```bash
+npx tsx ./src/human-approval-agent.ts
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
 Use `curl` with `/send` to start the moderation asynchronously:
 ```bash
-curl localhost:8080/HumanInTheLoopService/moderate/send \
---json '{"message": "Very explicit content that might violate the policy."}'
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
 ```
 
 If you wait for more than a minute, the invocation will get suspended.
@@ -272,55 +281,80 @@ See in the UI how the workflow resumes and finishes after the approval.
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 
-```python human_in_the_loop.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/human_in_the_loop.py?collapse_prequel"} 
-content_moderator = restate.Service("HumanInTheLoopService")
+```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/human_approval_agent.py#here"} 
+# TOOL IMPLEMENTATION
+async def request_human_approval(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    # Create a recoverable approval promise
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
 
-
-@content_moderator.handler()
-async def moderate(ctx: restate.Context, content: Content) -> str | None:
-    """Moderate content with optional human review."""
-
-    # Run LLM moderation
-    result = await ctx.run_typed(
-        "moderate",
-        llm_call,  # Use your preferred LLM SDK here
-        RunOptions(max_attempts=3),
-        messages=f"""You are a content moderation agent.
-        Decide if the content violates policy: {content.message}
-        Request human review via tools if policy violation is uncertain.""",
-        tools=[tool("get_human_review", "Request human review")],
+    await ctx.run_typed(
+        "Request review", request_review, claim=claim, approval_id=approval_id
     )
 
-    # Handle human review request
-    if result.tool_calls and result.tool_calls[0].function.name == "get_human_review":
-        # Create a recoverable approval promise
-        approval_id, approval_promise = ctx.awakeable(type_hint=str)
+    # Suspend until human resolves the approval
+    # Check the service logs to see how to resolve it over HTTP, e.g.:
+    # curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
+    return await approval_promise
 
-        await ctx.run_typed(
-            "notify moderator",
-            notify_moderator,
-            content=content,
-            approval_id=approval_id,
+
+# AGENT SERVICE
+claim_approval_agent = restate.Service("HumanClaimApprovalAgent")
+
+
+@claim_approval_agent.handler()
+async def run(ctx: restate.Context, req: ClaimPrompt) -> str | None:
+    """Evaluate an insurance claim with optional human approval for high-value claims."""
+
+    # LLM evaluates the claim and decides if human approval is needed
+    result = await ctx.run_typed(
+        "Evaluate claim",
+        llm_call,  # Use your preferred LLM SDK here
+        RunOptions(max_attempts=3),
+        messages=f"""You are an insurance claim evaluation agent. Use these rules:
+        - if the amount is more than 1000, ask for human approval using tools;
+        - if the amount is less than 1000, decide by yourself.
+
+        Claim: {req.message}""",
+        tools=[
+            tool(
+                "request_human_approval",
+                "Ask for human approval for high-value claims",
+                InsuranceClaim.model_json_schema(),
+            )
+        ],
+    )
+
+    # If the LLM requests human approval, suspend until a human resolves it
+    if (
+        result.tool_calls
+        and result.tool_calls[0].function.name == "request_human_approval"
+    ):
+        claim = InsuranceClaim.model_validate_json(
+            result.tool_calls[0].function.arguments
         )
-
-        # Suspend until moderator resolves the approval
-        # Check the service logs to see how to resolve it over HTTP, e.g.:
-        # curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
-        return await approval_promise
+        return await request_human_approval(ctx, claim)
 
     return result.content
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/human_in_the_loop.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/human_approval_agent.py" />
 
 <Accordion title="Try out human approval" icon="laptop">
 <SetupRestatePy />
-
-Use `curl` with `/send` to start the moderation asynchronously:
 ```bash
-curl localhost:8080/HumanInTheLoopService/moderate/send \
---json '{"message": "Very explicit content that might violate the policy."}'
+uv run app/human_approval_agent.py
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
+```bash
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
 ```
 
 If you wait for more than a minute, the invocation will get suspended.
@@ -349,9 +383,13 @@ See in the UI how the workflow resumes and finishes after the approval.
 Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time.
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
 ```typescript human-approval-agent-with-timeout.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/human-approval-agent-with-timeout.ts#here"} 
+const approval = ctx.awakeable<boolean>();
+await ctx.run("request-review", () =>
+  requestHumanReview(claim, approval.id),
+);
 try {
   // At most 3 hours, to reach our SLA
   const approved = await approval.promise.orTimeout({ hours: 3 });
@@ -369,6 +407,16 @@ try {
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/human-approval-agent-with-timeout.ts" />
 
 <Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+npx tsx ./src/human-approval-agent-with-timeout.ts
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
 Send a request to the service:
 ```bash
 curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
@@ -380,22 +428,43 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
 ```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
-# Wait for human approval for at most 3 hours to reach our SLA
-match await restate.select(
-    approval=approval_promise,
-    timeout=restate_context().sleep(timedelta(hours=3)),
-):
-    case ["approval", approved]:
-        return "Approved" if approved else "Rejected"
-    case _:
-        return "Approval timed out - Evaluate with AI"
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=bool)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval for at most 3 hours to reach our SLA
+    match await restate.select(
+        approval=approval_promise,
+        timeout=restate_context().sleep(timedelta(hours=3)),
+    ):
+        case ["approval", approved]:
+            return "Approved" if approved else "Rejected"
+        case _:
+            return "Approval timed out - Evaluate with AI"
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
 <Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+uv run app/human_approval_agent_with_timeout.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
 Send a request to the service:
 ```bash
 curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
@@ -410,19 +479,42 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 <GlobalTab title="Google ADK">
 
 ```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
-# Wait for human approval for at most 3 hours to reach our SLA
-match await restate.select(
-    approval=approval_promise,
-    timeout=restate_context().sleep(timedelta(hours=3)),
-):
-    case ["approval", approved]:
-        return "Approved" if approved else "Rejected"
-    case _:
-        return "Approval timed out - Evaluate with AI"
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review",
+        request_human_review,
+        claim=claim,
+        awakeable_id=approval_id,
+    )
+
+    # Wait for human approval for at most 3 hours to reach our SLA
+    match await restate.select(
+        approval=approval_promise,
+        timeout=restate_context().sleep(timedelta(hours=3)),
+    ):
+        case ["approval", approved]:
+            return "Approved" if approved else "Rejected"
+        case _:
+            return "Approval timed out - Evaluate with AI"
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/human_approval_agent_with_timeout.py" />
 
 <Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+uv run app/human_approval_agent_with_timeout.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
 Send a request to the service:
 ```bash
 curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
@@ -434,9 +526,9 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 
-With the Restate TS SDK, use `orTimeout` on the awakeable promise:
+Use `orTimeout` on the awakeable promise:
 
 ```typescript
 const approval = ctx.awakeable<string>();
@@ -454,25 +546,75 @@ try {
 }
 ```
 
-</GlobalTab>
-<GlobalTab title="Restate Py SDK">
 
-With the Restate Py SDK, use `restate.select` to race the approval against a sleep timer:
-
-```python
-approval_id, approval_promise = ctx.awakeable(type_hint=str)
-await ctx.run_typed("notify moderator", notify_moderator, content=content, approval_id=approval_id)
-
-# Wait for human approval for at most 3 hours to reach our SLA
-match await restate.select(
-    approval=approval_promise,
-    timeout=ctx.sleep(timedelta(hours=3)),
-):
-    case ["approval", approved]:
-        return "Approved" if approved else "Rejected"
-    case _:
-        return "Approval timed out - Evaluate with AI"
+<Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+npx tsx ./src/human-approval-agent-with-timeout.ts
 ```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py">
+
+```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
+async def request_human_approval(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    # Create a recoverable approval promise
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    await ctx.run_typed(
+        "Request review", request_review, claim=claim, approval_id=approval_id
+    )
+
+    # Suspend until human resolves the approval or until the timeout hits
+    # Check the service logs to see how to resolve it over HTTP, e.g.:
+    # curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
+    match await restate.select(
+        approval=approval_promise,
+        timeout=ctx.sleep(timedelta(hours=3)),
+    ):
+        case ["approval", approved]:
+            return approved
+        case _:
+            return "Approval timed out - Evaluate with AI"
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/human_approval_agent_with_timeout.py" />
+
+<Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+uv run app/human_approval_agent_with_timeout.py
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+</Accordion>
 
 </GlobalTab>
 </GlobalTabs>

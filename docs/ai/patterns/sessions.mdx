@@ -15,6 +15,14 @@ import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 Restate **Virtual Objects** give your agents persistent, isolated sessions. Each session is identified by a unique key (like a user ID or conversation ID), maintains its own state, and has built-in concurrency control, so concurrent requests to the same session are automatically queued.
 
+<GlobalTabs>
+<GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
 ## How it works
 
 A Virtual Object is a Restate service type where each instance is identified by a key. State stored in a Virtual Object:
@@ -28,44 +36,42 @@ A Virtual Object is a Restate service type where each instance is identified by 
 
 This Virtual Object stores conversation history and responds to messages. Each session key gets its own isolated conversation.
 
-<GlobalTabs>
-<GlobalTab title="Vercel AI SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="OpenAI Agents SDK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
-<GlobalTab title="Restate TS SDK" icon={"/img/languages/typescript.svg"}/>
-<GlobalTab title="Restate Py SDK" icon={"/img/languages/python.svg"}/>
-</GlobalTabs>
-
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
 To turn your agent into a stateful session, you need two changes compared to a regular [durable agent](/ai/durable-agents):
 1. **Define a Virtual Object** instead of a Service: use `restate.object()` instead of `restate.service()`. This gives each session key its own isolated state.
 2. **Manage conversation history** using the object's K/V store: use `ctx.get()` and `ctx.set()` to read and write the message history.
 
-```typescript chat-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/chat-agent.ts?collapse_prequel"} 
-export default restate.object({
+```typescript chat-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/chat-agent.ts#here"} 
+const chatAgent = restate.object({
   name: "Chat",
   handlers: {
-    message: async (ctx: restate.ObjectContext, req: { message: string }) => {
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
+    message: restate.createObjectHandler(
+      { input: schema(ChatMessageSchema) },
+      async (ctx: restate.ObjectContext, { message }: { message: string }) => {
+        const model = wrapLanguageModel({
+          model: openai("gpt-4o"),
+          middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+        });
 
-      const messages =
-        (await ctx.get<ModelMessage[]>("messages", superJson)) ?? [];
-      messages.push({ role: "user", content: req.message });
+        // Retrieve the state
+        const messages =
+          (await ctx.get<ModelMessage[]>("messages", superJson)) ?? [];
+        messages.push({ role: "user", content: message });
 
-      const res = await generateText({
-        model,
-        system: "You are a helpful assistant.",
-        messages,
-      });
+        const res = await generateText({
+          model,
+          system: "You are a helpful assistant.",
+          messages,
+        });
 
-      ctx.set("messages", [...messages, ...res.response.messages], superJson);
-      return { answer: res.text };
-    },
+        // Update the state
+        ctx.set("messages", [...messages, ...res.response.messages], superJson);
+        return { answer: res.text };
+      },
+    ),
+    // Shared handler to retrieve the history
     getHistory: shared(async (ctx: restate.ObjectSharedContext) =>
       ctx.get<ModelMessage[]>("messages", superJson),
     ),
@@ -82,7 +88,7 @@ npx tsx ./src/chat-agent.ts
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Ask the agent to do some task:
@@ -105,13 +111,13 @@ curl localhost:8080/Chat/session456/message \
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
 To turn your agent into a stateful session, you need two changes compared to a regular [durable agent](/ai/durable-agents):
 1. **Define a Virtual Object** instead of a Service: use `VirtualObject()` instead of `restate.Service()`. This gives each session key its own isolated state.
 2. **Enable `use_restate_session`** on `DurableRunner.run()`: set `use_restate_session=True` so the conversation history is automatically persisted in Restate's K/V store.
 
-```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/chat_agent.py?collapse_imports"} 
+```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/chat_agent.py#here"} 
 chat = VirtualObject("Chat")
 
 
@@ -125,6 +131,11 @@ async def message(_ctx: ObjectContext, req: ChatMessage) -> dict:
         use_restate_session=True,
     )
     return result.final_output
+
+
+@chat.handler(kind="shared")
+async def get_history(ctx: restate.ObjectSharedContext):
+    return await ctx.get("messages", type_hint=list[dict]) or []
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/chat_agent.py" />
 
@@ -136,7 +147,7 @@ uv run app/chat_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Ask the agent to do some task and provide a session ID as the object key:
@@ -167,9 +178,7 @@ To turn your agent into a stateful session, you need two changes compared to a r
 1. **Define a Virtual Object** instead of a Service: use `restate.VirtualObject()` instead of `restate.Service()`. This gives each session key its own isolated state.
 2. **Use `RestateSessionService`** as the session service for the Runner: this stores the ADK session data (conversation history, agent state) in Restate's K/V store. The object key (via `ctx.key()`) is used as the user identifier.
 
-```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/chat_agent.py?collapse_imports"} 
-APP_NAME = "agents"
-
+```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/chat_agent.py#here"} 
 agent = Agent(
     model="gemini-2.5-flash",
     name="assistant",
@@ -196,6 +205,11 @@ async def message(ctx: restate.ObjectContext, req: ChatMessage) -> str | None:
             if event.content.parts[0].text:
                 final_response = event.content.parts[0].text
     return final_response
+
+
+@chat.handler(kind="shared")
+async def get_history(ctx: restate.ObjectSharedContext, session_id: str):
+    return await ctx.get(f"session_store::{session_id}", type_hint=list[dict]) or []
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/chat_agent.py" />
 
@@ -207,7 +221,7 @@ uv run app/chat_agent.py
 
 Register the agents with Restate:
 ```bash
-restate deployments register http://localhost:9080
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
 Ask the agent to do some task and provide a user ID as the object key:
@@ -232,18 +246,30 @@ curl localhost:8080/Chat/user456/message \
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 
 To turn your agent into a stateful session, you need two changes compared to a regular [durable agent](/ai/durable-agents):
 1. **Define a Virtual Object** instead of a Service: use `restate.object()` instead of `restate.service()`. This gives each session key its own isolated state.
 2. **Manage conversation history** using the object's K/V store: use `ctx.get()` and `ctx.set()` to read and write the message history.
 
-```typescript chat.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/chat.ts#here"} 
-export default restate.object({
+```typescript chat-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/chat-agent.ts#here"} 
+/**
+ * Long-lived, Stateful Chat Sessions
+ *
+ * Maintains conversation state across multiple requests using Restate's persistent memory.
+ * Sessions survive failures and can be resumed at any time.
+ */
+import * as restate from "@restatedev/restate-sdk";
+import { ObjectContext } from "@restatedev/restate-sdk";
+import llmCall from "./utils/llm";
+import { zodPrompt } from "./utils/utils";
+import { ModelMessage } from "@ai-sdk/provider-utils";
+
+const chatAgent = restate.object({
   name: "Chat",
   handlers: {
     message: restate.createObjectHandler(
-      { input: zodPrompt(examplePrompt) },
+      { input: zodPrompt("Write a poem about Durable Execution") },
       async (ctx: ObjectContext, { message }: { message: string }) => {
         const messages = (await ctx.get<Array<ModelMessage>>("memory")) ?? [];
         messages.push({ role: "user", content: message });
@@ -263,11 +289,21 @@ export default restate.object({
     ),
   },
 });
+
+restate.serve({ services: [chatAgent], port: 9080 });
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-patterns/src/chat.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/chat-agent.ts" />
 
 <Accordion title="Try out Virtual Objects" icon="laptop">
 <SetupRestateTS />
+```bash
+npx tsx ./src/chat-agent.ts
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
 Ask the agent to do some task:
 ```bash
@@ -289,13 +325,13 @@ curl localhost:8080/Chat/session456/message \
 </Accordion>
 
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 
 To turn your agent into a stateful session, you need two changes compared to a regular [durable agent](/ai/durable-agents):
 1. **Define a Virtual Object** instead of a Service: use `restate.VirtualObject()` instead of `restate.Service()`. This gives each session key its own isolated state.
 2. **Manage conversation history** using the object's K/V store: use `ctx.get()` and `ctx.set()` to read and write the message history.
 
-```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/chat_agent.py?collapse_prequel"} 
+```python chat_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/chat_agent.py#here"} 
 chat = restate.VirtualObject("Chat")
 
 
@@ -325,10 +361,18 @@ async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> str | None:
 async def get_history(ctx: restate.ObjectSharedContext):
     return await ctx.get("memory", type_hint=list[dict]) or []
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/chat_agent.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/chat_agent.py" />
 
 <Accordion title="Try out Virtual Objects" icon="laptop">
 <SetupRestatePy />
+```bash
+uv run app/chat_agent.py
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
 Ask the agent to do some task:
 ```bash
@@ -355,12 +399,12 @@ curl localhost:8080/Chat/session456/message \
 The Restate UI lets you query the state of each session:
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 <Frame>
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 <Frame>
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
@@ -370,12 +414,12 @@ The Restate UI lets you query the state of each session:
 <img src="/img/tour/agents/adk/conversations.png" alt="Conversation State Management" />
 </Frame>
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 <Frame>
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 <Frame>
 <img src="/img/tour/agents/conversations.png" alt="Conversation State Management" />
 </Frame>
@@ -400,7 +444,7 @@ Restate queues concurrent requests to the same session key. They are processed s
 Different session keys run in parallel with no interference.
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 <Accordion title="Try out queuing" icon="laptop">
 Send several messages concurrently to different chat sessions:
 ```bash
@@ -420,7 +464,7 @@ The UI shows how Restate queues the requests per session to ensure consistency:
 </Frame>
 </Accordion>
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 <Accordion title="Try out queuing" icon="laptop">
 Send several messages concurrently to different chat sessions:
 ```bash
@@ -460,7 +504,7 @@ The UI shows how Restate queues the requests per session to ensure consistency:
 </Frame>
 </Accordion>
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 <Accordion title="Try out queuing" icon="laptop">
 Send several messages concurrently to different chat sessions:
 ```bash
@@ -480,7 +524,7 @@ The UI shows how Restate queues the requests per session to ensure consistency:
 </Frame>
 </Accordion>
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 <Accordion title="Try out queuing" icon="laptop">
 Send several messages concurrently to different chat sessions:
 ```bash
@@ -507,9 +551,9 @@ The UI shows how Restate queues the requests per session to ensure consistency:
 The state you store in Virtual Objects lives forever. To resume a session, simply send a new message to the same Virtual Object key.
 
 <GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI SDK">
+<GlobalTab title="Vercel AI">
 
-To retrieve state, add a shared handler that reads it. Have a look at the `getHistory` handler in the example above.
+To retrieve state, view the UI's state tab or add a shared handler that reads it. Have a look at the `getHistory` handler in the example above.
 
 Call the handler to get the conversation history:
 
@@ -518,19 +562,30 @@ curl localhost:8080/Chat/session123/getHistory
 ```
 
 </GlobalTab>
-<GlobalTab title="OpenAI Agents SDK">
+<GlobalTab title="OpenAI Agents">
 
-The OpenAI Agents SDK stores session state internally. View it in the Restate UI's state tab.
+To retrieve state, view the UI's state tab or add a shared handler that reads it. Have a look at the `get_history` handler in the example above.
+
+Call the handler to get the conversation history:
+
+```bash
+curl localhost:8080/Chat/session123/get_history
+```
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
+To retrieve state, view the UI's state tab or add a shared handler that reads it. Have a look at the `get_history` handler in the example above.
 
-The Google ADK stores session state internally. View it in the Restate UI's state tab.
+Call the handler to get the conversation history:
+
+```bash
+curl localhost:8080/Chat/user123/get_history --json '"session-123"'
+```
 
 </GlobalTab>
-<GlobalTab title="Restate TS SDK">
+<GlobalTab title="Restate TS">
 
-To retrieve state, add a shared handler that reads it. Have a look at the `getHistory` handler in the example above.
+To retrieve state, view the UI's state tab or add a shared handler that reads it. Have a look at the `getHistory` handler in the example above.
 
 Call the handler to get the conversation history:
 
@@ -539,9 +594,9 @@ curl localhost:8080/Chat/session123/getHistory
 ```
 
 </GlobalTab>
-<GlobalTab title="Restate Py SDK">
+<GlobalTab title="Restate Py">
 
-To retrieve state, add a shared handler that reads it. Have a look at the `get_history` handler in the example above.
+To retrieve state, view the UI's state tab or add a shared handler that reads it. Have a look at the `get_history` handler in the example above.
 
 Call the handler to get the conversation history:
 
