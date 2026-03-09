@@ -716,17 +716,20 @@ async def analyze(ctx: restate.Context, claim: ClaimData) -> list[str | None]:
     )
 
     # Wait for all tasks to complete
-    await restate.gather([eligibility, fraud, rate])
+    await restate.gather(eligibility, fraud, rate)
 
     # Make final decision
-    return ctx.run_typed(
-        "Rate comparison agent",
+    decision = await ctx.run_typed(
+        "Decision agent",
         llm_call,
         RunOptions(max_attempts=3),
         messages=f"Decide about claim: {claim.model_dump_json()}. "
         "Base your decision on the following analyses:"
-        f"Eligibility: {await eligibility} Cost {await rate} Fraud: {await fraud}",
+        f"Eligibility: {(await eligibility).content} "
+        f"Cost: {(await rate).content} "
+        f"Fraud: {(await fraud).content}",
     )
+    return decision.content
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/workflow_parallel.py" />
 
@@ -771,7 +774,7 @@ A generator agent writes code, then an evaluator agent checks it. If the evaluat
 <GlobalTab title="Vercel AI">
 
 ```typescript workflow-evaluator-optimizer.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/workflow-evaluator-optimizer.ts#here"} 
-const generate = async (ctx: restate.Context, req: CodeGenRequest) => {
+const generate = async (ctx: restate.Context, {task}: { task: string }) => {
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
@@ -786,8 +789,8 @@ const generate = async (ctx: restate.Context, req: CodeGenRequest) => {
       model,
       system: "You are a code generator. Write clean, correct code.",
       prompt: feedback
-        ? `Task: ${req.task}\n\nPrevious attempt was rejected:\n${feedback}\n\nPlease fix the issues.`
-        : `Task: ${req.task}`,
+        ? `Task: ${task}\n\nPrevious attempt was rejected:\n${feedback}\n\nPlease fix the issues.`
+        : `Task: ${task}`,
     });
 
     // Step 2: Evaluate the code
@@ -796,7 +799,7 @@ const generate = async (ctx: restate.Context, req: CodeGenRequest) => {
       system: `You are a code reviewer. Evaluate the code for correctness,
             readability, and edge cases. Respond with PASS if acceptable,
             or FAIL: <feedback> with specific issues to fix.`,
-      prompt: `Task: ${req.task}\n\nCode:\n${code}`,
+      prompt: `Task: ${task}\n\nCode:\n${code}`,
     });
 
     if (evaluation.startsWith("PASS")) {
@@ -991,47 +994,52 @@ curl localhost:8080/CodeGenerator/user123/generate \
 <GlobalTab title="Restate TS">
 
 ```typescript workflow-evaluator-optimizer.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-evaluator-optimizer.ts#here"} 
-const workflowEvaluatorOptimizer = restate.service({
-  name: "CodeGenerator",
-  handlers: {
-    generate: async (ctx: restate.Context, req: { task: string }) => {
-      let feedback = "";
-      const maxIterations = 3;
+const generate = async (ctx: restate.Context, {task}: { task: string }) => {
+    let feedback = "";
+    const maxIterations = 3;
 
-      for (let i = 0; i < maxIterations; i++) {
-        // Step 1: Generate code
-        const code = await ctx.run(
-          `Generate code (attempt ${i + 1})`,
-          async () =>
-            llmCall(
-              feedback
-                ? `You are a code generator. Write clean, correct code.\n\nTask: ${req.task}\n\nPrevious attempt was rejected:\n${feedback}\n\nPlease fix the issues.`
-                : `You are a code generator. Write clean, correct code.\n\nTask: ${req.task}`,
-            ),
-          { maxRetryAttempts: 3 },
-        );
+    for (let i = 0; i < maxIterations; i++) {
+      // Step 1: Generate code
+      const code = await ctx.run(
+        `Generate code (attempt ${i + 1})`,
+        async () =>
+          llmCall(
+            feedback
+              ? `You are a code generator. Write clean, correct code.\n\nTask: ${task}\n\nPrevious attempt was rejected:\n${feedback}\n\nPlease fix the issues.`
+              : `You are a code generator. Write clean, correct code.\n\nTask: ${task}`,
+          ),
+        { maxRetryAttempts: 3 },
+      );
 
-        // Step 2: Evaluate the code
-        const evaluation = await ctx.run(
-          `Evaluate code (attempt ${i + 1})`,
-          async () =>
-            llmCall(
-              `You are a code reviewer. Evaluate the code for correctness,
-              readability, and edge cases. Respond with PASS if acceptable,
-              or FAIL: <feedback> with specific issues to fix.\n\nTask: ${req.task}\n\nCode:\n${code.text}`,
-            ),
-          { maxRetryAttempts: 3 },
-        );
+      // Step 2: Evaluate the code
+      const evaluation = await ctx.run(
+        `Evaluate code (attempt ${i + 1})`,
+        async () =>
+          llmCall(
+            `You are a code reviewer. Evaluate the code for correctness,
+            readability, and edge cases. Respond with PASS if acceptable,
+            or FAIL: <feedback> with specific issues to fix.\n\nTask: ${task}\n\nCode:\n${code.text}`,
+          ),
+        { maxRetryAttempts: 3 },
+      );
 
-        if (evaluation.text.startsWith("PASS")) {
-          return { code: code.text, iterations: i + 1 };
-        }
-
-        feedback = evaluation.text;
+      if (evaluation.text.startsWith("PASS")) {
+        return { code: code.text, iterations: i + 1 };
       }
 
-      return { code: "Max iterations reached", iterations: maxIterations };
-    },
+      feedback = evaluation.text;
+    }
+
+    return { code: "Max iterations reached", iterations: maxIterations };
+};
+
+const agent = restate.service({
+  name: "CodeGenerator",
+  handlers: {
+    generate: restate.createServiceHandler(
+        { input: schema(CodeGenRequestSchema) },
+        generate,
+    ),
   },
 });
 ```
@@ -1079,8 +1087,7 @@ async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
             f"Generate code (attempt {i + 1})",
             llm_call,
             RunOptions(max_attempts=3),
-            messages=prompt,
-            system="You are a code generator. Write clean, correct code.",
+            messages=f"You are a code generator. Write clean, correct code. {prompt}",
         )
 
         # Step 2: Evaluate the code
@@ -1088,10 +1095,10 @@ async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
             f"Evaluate code (attempt {i + 1})",
             llm_call,
             RunOptions(max_attempts=3),
-            messages=f"Task: {req.task}\n\nCode:\n{code.content}",
-            system="""You are a code reviewer. Evaluate the code for correctness,
-            readability, and edge cases. Respond with PASS if acceptable,
-            or FAIL: <feedback> with specific issues to fix.""",
+            messages=f"""You are a code reviewer. Evaluate the code for correctness,
+            messages, and edge cases. Respond with PASS if acceptable,
+            or FAIL: <feedback> with specific issues to fix.
+            Task: {req.task}\n\nCode:\n{code.content}""",
         )
 
         if evaluation.content.startswith("PASS"):
@@ -1171,7 +1178,7 @@ const orchestrator = restate.service({
   handlers: {
     generate: restate.createServiceHandler(
       { input: schema(ResearchRequestSchema) },
-      async (ctx: restate.Context, req: ResearchRequest) => {
+      async (ctx: restate.Context, {topic}: { topic: string }) => {
         const model = wrapLanguageModel({
           model: openai("gpt-4o"),
           middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
@@ -1183,7 +1190,7 @@ const orchestrator = restate.service({
           system: `You are a research planner. Break the topic into 2-4 research
           sub-tasks. Respond with a JSON array of strings, each a specific
           research question. Example: ["question 1", "question 2"]`,
-          prompt: req.topic,
+          prompt: topic,
           output: Output.array({element: z.string()})
         });
 
@@ -1199,7 +1206,7 @@ const orchestrator = restate.service({
           model,
           system:
             "You are a report writer. Combine the research findings into a cohesive report.",
-          prompt: `Topic: ${req.topic}\n\nResearch findings:\n${JSON.stringify(workerResults)}`,
+          prompt: `Topic: ${topic}\n\nResearch findings:\n${JSON.stringify(workerResults)}`,
         });
 
         return { report, taskCount: tasks.length };
@@ -1323,7 +1330,7 @@ async def generate(ctx: restate.ObjectContext, req: ReportRequest) -> dict:
         new_message=Content(role="user", parts=[Part.from_text(text=req.topic)]),
     )
     plan_output =  await parse_agent_response(plan_events)
-    tasks = json.loads(plan_output)
+    tasks = TaskList.model_validate_json(plan_output).tasks
 
     # Step 2: Dispatch workers in parallel
     worker_promises = []
@@ -1335,7 +1342,7 @@ async def generate(ctx: restate.ObjectContext, req: ReportRequest) -> dict:
     findings = [await p for p in worker_promises]
 
     # Step 3: Combine results into a report
-    results = f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings, indent=2)}"
+    results = f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings)}"
     events = writer_runner.run_async(
         user_id=ctx.key(),
         session_id=session_id,
@@ -1405,7 +1412,9 @@ export const researchWorker = restate.service({
 const orchestrator = restate.service({
   name: "ResearchReport",
   handlers: {
-    generate: async (ctx: restate.Context, req: { topic: string }) => {
+    generate: restate.createServiceHandler(
+        { input: schema(ResearchRequestSchema) },
+        async (ctx: restate.Context, {topic}: { topic: string }) => {
       // Step 1: Orchestrator creates a research plan
       const planJson = await ctx.run(
         "Create research plan",
@@ -1413,7 +1422,7 @@ const orchestrator = restate.service({
           llmCall(
             `You are a research planner. Break the topic into 2-4 research
           sub-tasks. Respond with a JSON array of strings, each a specific
-          research question. Example: ["question 1", "question 2"]\n\nTopic: ${req.topic}`,
+          research question. Example: ["question 1", "question 2"]\n\nTopic: ${topic}`,
           ),
         { maxRetryAttempts: 3 },
       );
@@ -1431,13 +1440,15 @@ const orchestrator = restate.service({
         "Write report",
         async () =>
           llmCall(
-            `You are a report writer. Combine the research findings into a cohesive report.\n\nTopic: ${req.topic}\n\nResearch findings:\n${JSON.stringify(workerResults, null, 2)}`,
+            `You are a report writer. Combine the research findings into a cohesive report.\n\n
+            Topic: ${topic}\n\nResearch findings:\n${JSON.stringify(workerResults)}`,
           ),
         { maxRetryAttempts: 3 },
       );
 
       return { report: report.text, taskCount: tasks.length };
-    },
+        },
+    ),
   },
 });
 ```
@@ -1475,8 +1486,7 @@ async def research(ctx: restate.Context, req: ResearchTask) -> dict:
         "Research",
         llm_call,
         RunOptions(max_attempts=3),
-        messages=req.question,
-        system="You are a research assistant. Provide a concise, factual answer.",
+        messages="You are a research assistant. Provide a concise, factual answer. {req.question}",
     )
     return {"question": req.question, "answer": answer.content}
 
@@ -1491,12 +1501,10 @@ async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
         "Create research plan",
         llm_call,
         RunOptions(max_attempts=3),
-        messages=req.topic,
-        system="""You are a research planner. Break the topic into 2-4 research
-        sub-tasks. Respond with a JSON array of strings, each a specific
-        research question. Example: ["question 1", "question 2"]""",
+        messages=f"You are a research planner. Break the topic into 2-4 research sub-tasks. {req.topic}",
+        response_format=TaskList,
     )
-    tasks = json.loads(plan_result.content)
+    tasks = TaskList.model_validate_json(plan_result.content).tasks
 
     # Step 2: Dispatch workers in parallel
     worker_promises = []
@@ -1512,8 +1520,8 @@ async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
         "Write report",
         llm_call,
         RunOptions(max_attempts=3),
-        messages=f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings, indent=2)}",
-        system="You are a report writer. Combine the research findings into a cohesive report.",
+        messages=f"You are a report writer. Combine the research findings into a cohesive report."
+               f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings)}",
     )
 
     return {"report": report.content, "task_count": len(tasks)}

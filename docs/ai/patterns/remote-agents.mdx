@@ -33,7 +33,10 @@ There are two ways to coordinate specialist agents:
 | **How routing works** | Handoffs, sub-agents, or tool calls within one handler | Durable RPC calls between Restate services |
 | **Example** | LLM picks a specialist prompt, calls LLM again in the same handler | LLM picks a specialist service, router calls it over HTTP |
 
-Agent SDKs like OpenAI and Google ADK have built-in mechanisms for local routing (handoffs, sub-agents). For remote routing, or when using the Restate SDK directly, you deploy each specialist as its own Restate service and call it via `ctx.serviceClient()` or `ctx.generic_call()`.
+Agent SDKs like OpenAI and Google ADK have built-in mechanisms for local routing (handoffs, sub-agents).
+For remote routing, or when using the Restate SDK directly, you deploy each specialist as its own Restate service and call it via Restate's service clients.
+
+You can either use typed service clients or call a remote service by string name (generic calls). Learn more about calling services in the [TS](/develop/ts/service-communication)/[Py SDK](/develop/python/service-communication) documentation.
 
 ## Example: routing to specialist agents
 
@@ -77,6 +80,34 @@ const run = async (ctx: restate.Context, claim: ClaimInput) => {
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/remote-agents.ts" />
 
+Each specialist agent runs as its own Restate service:
+
+<Accordion title="Eligibility Agent implementation">
+
+```typescript eligibility-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/utils/utils.ts#eligibility"} 
+export const eligibilityAgent = restate.service({
+  name: "EligibilityAgent",
+  handlers: {
+    run: async (ctx: restate.Context, claim: InsuranceClaim) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+      const { text } = await generateText({
+        model,
+        system:
+          "Decide whether the following claim is eligible for reimbursement." +
+          "Respond with eligible if it's a medical claim, and not eligible otherwise.",
+        prompt: JSON.stringify(claim),
+      });
+      return text;
+    },
+  },
+});
+```
+
+</Accordion>
+
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupVercel />
 ```bash
@@ -91,11 +122,11 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
 curl localhost:8080/MultiAgentClaimApproval/run --json '{
-"date":"2024-10-01",
-"category":"orthopedic",
-"reason":"hospital bill for a broken leg",
-"amount":3000,
-"placeOfService":"General Hospital"
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
 }'
 ```
 
@@ -140,6 +171,29 @@ async def run(_ctx: restate.Context, claim: InsuranceClaim) -> str:
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/remote_agents.py" />
 
+Each specialist agent runs as its own Restate service:
+
+<Accordion title="Eligibility Agent implementation">
+
+```python eligibility_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/utils/utils.py#eligibility"} 
+eligibility_agent_service = restate.Service("EligibilityAgent")
+
+
+@eligibility_agent_service.handler()
+async def run_eligibility_agent(_ctx: restate.Context, claim: InsuranceClaim) -> str:
+    result = await DurableRunner.run(
+        Agent(
+            name="EligibilityAgent",
+            instructions="Decide whether the following claim is eligible for reimbursement."
+            "Respond with eligible if it's a medical claim, and not eligible otherwise.",
+        ),
+        input=claim.model_dump_json(),
+    )
+    return result.final_output
+```
+
+</Accordion>
+
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupOpenAI />
 ```bash
@@ -154,11 +208,11 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
 curl localhost:8080/MultiAgentClaimApproval/session123/run --json '{
-"date":"2024-10-01",
-"category":"orthopedic",
-"reason":"hospital bill for a broken leg",
-"amount":3000,
-"placeOfService":"General Hospital"
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
 }'
 ```
 
@@ -167,13 +221,9 @@ In the UI, you can see that the agent called the sub-agents and is waiting for t
 Once all sub-agents return, the main agent continues and makes a decision.
 
 <Frame>
-<img src="/img/tour/agents/openai/multi-agent.png" alt="Multi-agent execution trace" />
+<img src="/img/ai/patterns/openai-remote-agents.png" alt="Multi-agent execution trace" />
 </Frame>
 
-The state now contains the last agent that was called, so you can continue the conversation directly with the same agent:
-<Frame>
-<img src="/img/tour/agents/openai/multi-agent-state.png" alt="Multi-agent state" />
-</Frame>
 </Accordion>
 
 </GlobalTab>
@@ -198,7 +248,7 @@ agent = Agent(
 app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
 runner = Runner(app=app, session_service=RestateSessionService())
 
-agent_service = restate.VirtualObject("RemoteMultiAgentClaimApproval")
+agent_service = restate.VirtualObject("MultiAgentClaimApproval")
 
 
 @agent_service.handler()
@@ -215,6 +265,31 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/remote_agents.py" />
 
+
+Each specialist agent runs as its own Restate service:
+
+<Accordion title="Eligibility Agent implementation">
+
+```python eligibility_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/utils/utils.py#eligibility"} 
+eligibility_agent_service = restate.VirtualObject("EligibilityAgent")
+
+
+@eligibility_agent_service.handler()
+async def run_eligibility_agent(
+    ctx: restate.ObjectContext, claim: InsuranceClaim
+) -> str:
+    prompt = f"Claim: {claim.model_dump_json()}"
+    events = eligibility_runner.run_async(
+        user_id=ctx.key(),
+        session_id=claim.session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
+    )
+
+    return await parse_agent_response(events)
+```
+
+</Accordion>
+
 <Accordion title="Try out multi-agent systems" icon="laptop">
 <SetupGoogleADK />
 ```bash
@@ -229,12 +304,12 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 Start a request for a claim that needs to be analyzed by multiple agents:
 ```bash
 curl localhost:8080/MultiAgentClaimApproval/user123/run --json '{
-"amount": 3000,
-"category": "orthopedic",
-"date": "2024-10-01",
-"placeOfService": "General Hospital",
-"reason": "hospital bill for a broken leg",
-"sessionId": "session-123"
+    "amount": 3000,
+    "category": "orthopedic",
+    "date": "2024-10-01",
+    "placeOfService": "General Hospital",
+    "reason": "hospital bill for a broken leg",
+    "sessionId": "session-123"
 }'
 ```
 
@@ -243,14 +318,14 @@ In the UI, you can see that the agent called the sub-agents and is waiting for t
 Once all sub-agents return, the main agent continues and makes a decision.
 
 <Frame>
-<img src="/img/tour/agents/adk/multi-agent.png" alt="Multi-agent execution trace" />
+<img src="/img/ai/patterns/google-adk-remote-agents.png" alt="Multi-agent execution trace" />
 </Frame>
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
-With the Restate SDK, you deploy each specialist as its own service and use `ctx.genericCall()` for dynamic routing. The LLM picks the specialist (exposed as tools), and the router calls the selected service over HTTP. Restate durably persists both the routing decision and the remote call.
+Deploy each specialist as its own service and use [`ctx.genericCall()` or typed clients](https://docs.restate.dev/develop/ts/service-communication) for dynamic routing. The LLM picks the specialist (exposed as tools), and the router calls the selected service over HTTP. Restate durably persists both the routing decision and the remote call.
 
 ```typescript remote-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/remote-agents.ts#here"} 
 // Define your agents as tools as your AI SDK requires (here Vercel AI SDK)
@@ -344,32 +419,9 @@ curl localhost:8080/RemoteAgentRouter/answer \
 </GlobalTab>
 <GlobalTab title="Restate Py">
 
-With the Restate SDK, you deploy each specialist as its own service and use `ctx.generic_call()` for dynamic routing. The LLM picks the specialist (exposed as tools), and the router calls the selected service over HTTP. Restate durably persists both the routing decision and the remote call.
+Ddeploy each specialist as its own service and use `ctx.generic_call()` or typed clients. The LLM picks the specialist (exposed as tools), and the router calls the selected service over HTTP. Restate durably persists both the routing decision and the remote call.
 
 ```python remote_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/remote_agents.py#here"} 
-"""
-Agent Routing
-
-Route customer questions to specialized AI agents based on their content.
-Each routing decision is durable and can be retried if it fails.
-
-Flow: Customer Question → Classifier → Specialized Agent → Response
-"""
-
-import restate
-
-from pydantic import BaseModel
-from restate import RunOptions
-
-from util.util import tool, billing_agent_svc, account_agent_svc, product_agent_svc
-from util.litellm_call import llm_call
-
-
-# Customer's question
-class Question(BaseModel):
-    message: str = "I can't log into my account. Keep getting invalid password errors."
-
-
 remote_agent_router = restate.Service("RemoteAgentRouter")
 
 # Classify the request
@@ -409,28 +461,10 @@ async def answer(ctx: restate.Context, question: Question) -> str | None:
         arg=question.model_dump_json().encode(),
     )
     return response.decode("utf-8")
-
-
-if __name__ == "__main__":
-    import asyncio
-    import hypercorn
-
-    app = restate.app(
-        services=[
-            remote_agent_router,
-            billing_agent_svc,
-            account_agent_svc,
-            product_agent_svc,
-        ]
-    )
-
-    conf = hypercorn.Config()
-    conf.bind = ["0.0.0.0:9080"]
-    asyncio.run(hypercorn.asyncio.serve(app, conf))
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/remote_agents.py" />
 
-Each specialist agent runs as its own Restate service with a `run` handler:
+Each specialist agent runs as its own Restate service:
 
 <Accordion title="Billing Agent implementation">
 
@@ -475,4 +509,6 @@ curl localhost:8080/RemoteAgentRouter/answer \
 </GlobalTabs>
 
 
-For more details on service communication, see: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
+<Tip>
+For more details on resilient service-to-service calls, see the SDK documentation: [TypeScript](/develop/ts/service-communication) / [Python](/develop/python/service-communication).
+</Tip>

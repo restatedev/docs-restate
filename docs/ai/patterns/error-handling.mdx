@@ -35,50 +35,11 @@ Restate then retries the invocation with exponential backoff to handle longer ou
 
 You can limit Restate's retries with the `maxRetryAttempts` option in `durableCalls` middleware:
 
-```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#here"} 
-import * as restate from "@restatedev/restate-sdk";
-import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
-import { z } from "zod";
-import { fetchWeather } from "../utils/utils";
-import {
-  durableCalls,
-  rethrowTerminalToolError,
-} from "@restatedev/vercel-ai-middleware";
-
-const agent = restate.service({
-  name: "FailOnTerminalErrorAgent",
-  handlers: {
-    run: async (ctx: restate.Context, prompt: string) => {
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
-
-      // Rethrow terminal tool errors as exceptions to fail the workflow
-      const { text } = await generateText({
-        model,
-        tools: {
-          getWeather: tool({
-            description: "Get the current weather for a given city.",
-            inputSchema: z.object({ city: z.string() }),
-            execute: async ({ city }) => {
-              return await ctx.run("get weather", () => fetchWeather(city));
-            },
-          }),
-        },
-        stopWhen: [stepCountIs(5)],
-        onStepFinish: rethrowTerminalToolError,
-        system: "You are a helpful agent that provides weather updates.",
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      return text;
-    },
-  },
+```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#max_attempts_example"} 
+const model = wrapLanguageModel({
+  model: openai("gpt-4o"),
+  middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
 });
-
-restate.serve({ services: [agent] });
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 
@@ -91,11 +52,18 @@ Once Restate's retries are exhausted, the invocation fails with a `TerminalError
 
 Restate's `DurableRunner` lets you specify the retry behavior for LLM calls:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/error_handling.py#here"} 
-@durable_function_tool
-async def get_weather(city: WeatherRequest) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    return await restate_context().run_typed("get weather", fetch_weather, req=city)
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
+try:
+    result = await DurableRunner.run(
+        agent,
+        req.message,
+        llm_retry_opts=LlmRetryOpts(
+            max_attempts=3, initial_retry_interval=timedelta(seconds=2)
+        ),
+    )
+except restate.TerminalError as e:
+    # Handle terminal errors gracefully
+    return f"The agent couldn't complete the request: {e.message}"
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/error_handling.py" />
 
@@ -106,71 +74,10 @@ By default, the runner retries ten times with an initial interval of one second.
 
 Configure the number of retries for LLM calls when activating the Restate plugin for your ADK App:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/error_handling.py#here"} 
-import restate
-
-from google.adk import Runner
-from google.adk.apps import App
-from google.genai.types import Content, Part
-from google.adk.agents.llm_agent import Agent
-from restate import TerminalError
-from restate.ext.adk import RestatePlugin, restate_context, RestateSessionService
-
-from utils.models import WeatherResponse, WeatherPrompt
-from utils.utils import fetch_weather, parse_agent_response
-
-APP_NAME = "agents"
-
-
-async def get_weather(city: str) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    #  Do one or more durable steps using the Restate context
-    return await restate_context().run_typed(
-        f"Get weather {city}", fetch_weather, city=city
-    )
-
-
-# Specify your agent in the default ADK way
-agent = Agent(
-    model="gemini-2.5-flash",
-    name="weather_agent",
-    instruction="You are a helpful agent that provides weather updates.",
-    tools=[get_weather],
-)
-
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/error_handling.py#retries"} 
 app = App(
     name=APP_NAME, root_agent=agent, plugins=[RestatePlugin(max_model_call_retries=3)]
 )
-runner = Runner(app=app, session_service=RestateSessionService())
-
-agent_service = restate.VirtualObject("ErrorHandlingAgent")
-
-
-@agent_service.handler()
-async def run(ctx: restate.ObjectContext, req: WeatherPrompt) -> str | None:
-    try:
-        events = runner.run_async(
-            user_id=ctx.key(),
-            session_id=req.session_id,
-            new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
-        )
-        return await parse_agent_response(events)
-    except TerminalError as e:
-        # Handle the error appropriately, e.g., log it or return a default response
-        print(f"An error occurred: {e}")
-        return "Sorry, I'm unable to process your request at the moment."
-
-
-
-
-if __name__ == "__main__":
-    import hypercorn
-    import asyncio
-
-    restate_app = restate.app(services=[agent_service])
-    conf = hypercorn.Config()
-    conf.bind = ["0.0.0.0:9080"]
-    asyncio.run(hypercorn.asyncio.serve(restate_app, conf))
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/error_handling.py" />
 
@@ -219,12 +126,12 @@ You can set [custom retry policies](/guides/error-handling#at-the-run-block-leve
 
 ## Tool execution errors
 
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI">
+
 When agent tools use Restate Context actions like `ctx.run`, Restate automatically retries transient errors in these operations. This makes your tools resilient to network failures, database hiccups, and other temporary issues. For all operations that might suffer from transient errors, use Context actions.
 
 For errors that should not be retried, throw a terminal error:
-
-<GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Vercel AI">
 
 ```typescript {"CODE_LOAD::ts/src/tour/agents/terminal_error.ts#terminal_error"} 
 throw new TerminalError("This tool is not allowed to run for this input.");
@@ -260,50 +167,23 @@ The Restate middleware provides two utilities to help with this:
 <Accordion title="Fail the agent on terminal tool errors">
 **To fail the agent on terminal tool errors**, rethrow the error in `onStepFinish`:
 
-```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#here"} 
-import * as restate from "@restatedev/restate-sdk";
-import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
-import { z } from "zod";
-import { fetchWeather } from "../utils/utils";
-import {
-  durableCalls,
-  rethrowTerminalToolError,
-} from "@restatedev/vercel-ai-middleware";
-
-const agent = restate.service({
-  name: "FailOnTerminalErrorAgent",
-  handlers: {
-    run: async (ctx: restate.Context, prompt: string) => {
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
-
-      // Rethrow terminal tool errors as exceptions to fail the workflow
-      const { text } = await generateText({
-        model,
-        tools: {
-          getWeather: tool({
-            description: "Get the current weather for a given city.",
-            inputSchema: z.object({ city: z.string() }),
-            execute: async ({ city }) => {
-              return await ctx.run("get weather", () => fetchWeather(city));
-            },
-          }),
-        },
-        stopWhen: [stepCountIs(5)],
-        onStepFinish: rethrowTerminalToolError,
-        system: "You are a helpful agent that provides weather updates.",
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      return text;
-    },
+```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#option2"} 
+const { text } = await generateText({
+  model,
+  tools: {
+    getWeather: tool({
+      description: "Get the current weather for a given city.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: async ({ city }) => {
+        return await ctx.run("get weather", () => fetchWeather(city));
+      },
+    }),
   },
+  stopWhen: [stepCountIs(5)],
+  onStepFinish: rethrowTerminalToolError,
+  system: "You are a helpful agent that provides weather updates.",
+  messages: [{ role: "user", content: prompt }],
 });
-
-restate.serve({ services: [agent] });
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 </Accordion>
@@ -311,55 +191,27 @@ restate.serve({ services: [agent] });
 
 To stop the agent on terminal tool errors and handle it after the agent finishes, you can use `hasTerminalToolError` in `stopWhen` and then inspect the steps for errors:
 
-```typescript errorhandling/stop-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts#here"} 
-import * as restate from "@restatedev/restate-sdk";
-import { openai } from "@ai-sdk/openai";
-import { generateText, stepCountIs, tool, wrapLanguageModel } from "ai";
-import { z } from "zod";
-import { fetchWeather } from "../utils/utils";
-import {
-  durableCalls,
-  getTerminalToolSteps,
-  hasTerminalToolError,
-} from "@restatedev/vercel-ai-middleware";
-
-const agent = restate.service({
-  name: "StopOnTerminalErrorAgent",
-  handlers: {
-    run: async (ctx: restate.Context, prompt: string) => {
-      const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
-        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-      });
-
-      // Stop the agent when a terminal tool error occurs and handle it manually
-      const { steps, text } = await generateText({
-        model,
-        tools: {
-          getWeather: tool({
-            description: "Get the current weather for a given city.",
-            inputSchema: z.object({ city: z.string() }),
-            execute: async ({ city }) => {
-              return await ctx.run("get weather", () => fetchWeather(city));
-            },
-          }),
-        },
-        stopWhen: [stepCountIs(5), hasTerminalToolError],
-        system: "You are a helpful agent that provides weather updates.",
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      const terminalSteps = getTerminalToolSteps(steps);
-      if (terminalSteps.length > 0) {
-        // Do something with the terminal tool error steps
-      }
-
-      return text;
-    },
+```typescript errorhandling/stop-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts#option3"} 
+const { steps, text } = await generateText({
+  model,
+  tools: {
+    getWeather: tool({
+      description: "Get the current weather for a given city.",
+      inputSchema: z.object({ city: z.string() }),
+      execute: async ({ city }) => {
+        return await ctx.run("get weather", () => fetchWeather(city));
+      },
+    }),
   },
+  stopWhen: [stepCountIs(5), hasTerminalToolError],
+  system: "You are a helpful agent that provides weather updates.",
+  messages: [{ role: "user", content: prompt }],
 });
 
-restate.serve({ services: [agent] });
+const terminalSteps = getTerminalToolSteps(steps);
+if (terminalSteps.length > 0) {
+  // Do something with the terminal tool error steps
+}
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts" />
 </Accordion>
@@ -368,24 +220,17 @@ restate.serve({ services: [agent] });
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
 
+When agent tools use Restate Context actions like `ctx.run`, Restate automatically retries transient errors in these operations. This makes your tools resilient to network failures, database hiccups, and other temporary issues. For all operations that might suffer from transient errors, use Context actions.
+
+For errors that should not be retried, throw a terminal error:
+
 ```python
 from restate import TerminalError
 
 raise TerminalError("This tool is not allowed to run for this input.")
 ```
 
-By default, the Restate OpenAI integration will raise any terminal errors in tool executions and will let you handle them in your handler:
-
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/openai-agents/tour-of-agents/app/error_handling.py#here"} 
-@durable_function_tool
-async def get_weather(city: WeatherRequest) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    return await restate_context().run_typed("get weather", fetch_weather, req=city)
-```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/openai-agents/tour-of-agents/app/error_handling.py" />
-
-If you use Restate Context actions in your tool execution, Restate retries any transient errors in these actions until they succeed.
-So for all operations that might suffer from transient errors (like network calls, database interactions, etc.), you should use Context actions to make them resilient.
+By default, the Restate OpenAI integration will raise any terminal errors in tool executions and will let you handle them in your handler.
 
 <Warning>
     The OpenAI Agent SDK also allows setting `failure_error_function` to `None`, which will rethrow any error in the agent execution as-is.
@@ -399,6 +244,10 @@ So for all operations that might suffer from transient errors (like network call
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
+When agent tools use Restate Context actions like `ctx.run`, Restate automatically retries transient errors in these operations. This makes your tools resilient to network failures, database hiccups, and other temporary issues. For all operations that might suffer from transient errors, use Context actions.
+
+For errors that should not be retried, throw a terminal error:
+
 ```python
 from restate import TerminalError
 
@@ -408,130 +257,42 @@ raise TerminalError("This tool is not allowed to run for this input.")
 Restate retries tool executions by default until they succeed.
 For errors which should not be retried, raise terminal errors from within your tool implementations.
 
-You can catch these terminal errors in your handler and handle them accordingly:
-
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/error_handling.py#here"} 
-import restate
-
-from google.adk import Runner
-from google.adk.apps import App
-from google.genai.types import Content, Part
-from google.adk.agents.llm_agent import Agent
-from restate import TerminalError
-from restate.ext.adk import RestatePlugin, restate_context, RestateSessionService
-
-from utils.models import WeatherResponse, WeatherPrompt
-from utils.utils import fetch_weather, parse_agent_response
-
-APP_NAME = "agents"
-
-
-async def get_weather(city: str) -> WeatherResponse:
-    """Get the current weather for a given city."""
-    #  Do one or more durable steps using the Restate context
-    return await restate_context().run_typed(
-        f"Get weather {city}", fetch_weather, city=city
-    )
-
-
-# Specify your agent in the default ADK way
-agent = Agent(
-    model="gemini-2.5-flash",
-    name="weather_agent",
-    instruction="You are a helpful agent that provides weather updates.",
-    tools=[get_weather],
-)
-
-app = App(
-    name=APP_NAME, root_agent=agent, plugins=[RestatePlugin(max_model_call_retries=3)]
-)
-runner = Runner(app=app, session_service=RestateSessionService())
-
-agent_service = restate.VirtualObject("ErrorHandlingAgent")
-
-
-@agent_service.handler()
-async def run(ctx: restate.ObjectContext, req: WeatherPrompt) -> str | None:
-    try:
-        events = runner.run_async(
-            user_id=ctx.key(),
-            session_id=req.session_id,
-            new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
-        )
-        return await parse_agent_response(events)
-    except TerminalError as e:
-        # Handle the error appropriately, e.g., log it or return a default response
-        print(f"An error occurred: {e}")
-        return "Sorry, I'm unable to process your request at the moment."
-
-
-
-
-if __name__ == "__main__":
-    import hypercorn
-    import asyncio
-
-    restate_app = restate.app(services=[agent_service])
-    conf = hypercorn.Config()
-    conf.bind = ["0.0.0.0:9080"]
-    asyncio.run(hypercorn.asyncio.serve(restate_app, conf))
-```
+You can catch these terminal errors in your handler and handle them accordingly.
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
+Restate automatically retries transient errors. This makes your tools resilient to network failures, database hiccups, and other temporary issues.
+
 When a tool encounters an unrecoverable error (e.g., resource not found, invalid input, business rule violation), throw a `TerminalError` to stop retries immediately:
 
-```typescript
-const output = await ctx.run("Book hotel", async () => {
-  const result = await bookHotel(request);
-  if (result.status === "sold_out") {
-    // Stop retrying — this error won't resolve on retry
-    throw new restate.TerminalError("Hotel is sold out");
-  }
-  return result;
-});
+```typescript {"CODE_LOAD::ts/src/tour/agents/terminal_error.ts#terminal_error"} 
+throw new TerminalError("This tool is not allowed to run for this input.");
 ```
 
-Instead of failing the entire invocation, you can catch tool errors and feed them back to the LLM so it can adjust its approach:
-
-```typescript
-for (const { toolName, toolCallId, input } of result.toolCalls) {
-  let output: string;
-  try {
-    output = await ctx.run(toolName, async () => executeTool(toolName, input));
-  } catch (e) {
-    if (e instanceof restate.TerminalError) throw e; // Propagate terminal errors
-    output = `Tool "${toolName}" failed: ${e.message}. Try a different approach.`;
-  }
-  messages.push(toolResult(toolCallId, toolName, output));
-}
-```
-
-The LLM receives the error message and can try a different tool or strategy on the next iteration.
+You can catch and handle terminal errors in your agent logic if needed.
 
 </GlobalTab>
 <GlobalTab title="Restate Py">
+
+Restate automatically retries transient errors. This makes your tools resilient to network failures, database hiccups, and other temporary issues.
 
 When a tool encounters an unrecoverable error (e.g., resource not found, invalid input, business rule violation), raise a `TerminalError` to stop retries immediately:
 
 ```python
 from restate import TerminalError
 
-async def book_hotel_step(request):
-    result = await book_hotel(request)
-    if result.status == "sold_out":
-        # Stop retrying — this error won't resolve on retry
-        raise TerminalError("Hotel is sold out")
-    return result
-
-output = await ctx.run("Book hotel", lambda: book_hotel_step(request))
+raise TerminalError("This tool is not allowed to run for this input.")
 ```
 
 You can catch and handle terminal errors in your agent logic if needed.
 
 </GlobalTab>
 </GlobalTabs>
+
+<Tip>
+    To learn more about error handling with Restate, consult the [error handling guide](https://docs.restate.dev/guides/error-handling).
+</Tip>
 
 ## Combining with rollback
 
