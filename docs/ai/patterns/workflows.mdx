@@ -47,42 +47,64 @@ This workflow processes an insurance claim through four steps: two agentic steps
 <GlobalTab title="Vercel AI">
 
 ```typescript workflow-sequential.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/workflow-sequential.ts#here"} 
-const process = async (ctx: restate.Context, req: SequentialClaimRequest) => {
+const process = async (ctx: Context, {prompt}: {prompt: string}) => {
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
 
   // Step 1: Parse the claim document (LLM step)
-  const { text: parsed } = await generateText({
+  const { output } = await generateText({
     model,
     system:
-      "Extract the claim amount, currency, category, and description from this document.",
-    prompt: req.document,
+      "Extract the claim amount, currency, category, and description.",
+    prompt,
+    output: Output.object({schema: ClaimData})
   });
-  const claim = JSON.parse(parsed);
 
   // Step 2: Analyze the claim (LLM step)
   const { text: analysis } = await generateText({
     model,
     system:
       "You are a claims analyst. Assess whether this claim is valid and determine the approved amount.",
-    prompt: `Claim: ${parsed}`,
+    prompt: `Claim: ${output}`,
   });
 
   // Step 3: Convert currency (regular step)
   const amountUsd = await ctx.run("Convert currency", async () =>
-    convertCurrency(claim.amount, claim.currency, "USD"),
+    convertCurrency(output.amount, output.currency, "USD"),
   );
 
   // Step 4: Process reimbursement (regular step)
   const confirmation = await ctx.run("Process payment", async () =>
-    processPayment(req.claimId, amountUsd),
+    processPayment(ctx.rand.uuidv4(), amountUsd),
   );
 
   return { analysis, amountUsd, confirmation };
 };
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/vercel-ai/tour-of-agents/src/workflow-sequential.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupVercel />
+```bash
+npx tsx ./src/workflow-sequential.ts
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request to the agent:
+```shell
+curl localhost:8080/ClaimReimbursement/process \
+--json '{
+    "claimId": "claim_123",
+    "document": "Hospital bill for a broken leg. Amount: 3000 EUR. Date: 2024-10-01. Hospital: General Hospital."
+}'
+```
+</Accordion>
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
@@ -92,28 +114,29 @@ claim_service = restate.Service("ClaimReimbursement")
 
 
 @claim_service.handler()
-async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
+async def process(ctx: restate.Context, req: ClaimPrompt) -> dict:
     # Step 1: Parse the claim document (LLM step)
     parse_agent = Agent(
         name="DocumentParser",
         instructions="Extract the claim amount, currency, category, and description.",
+        output_type=ClaimData
     )
-    parsed = await DurableRunner.run(parse_agent, req.document)
-    claim = json.loads(parsed.final_output)
+    parsed = await DurableRunner.run(parse_agent, req.message)
+    claim = parsed.final_output
 
     # Step 2: Analyze the claim (LLM step)
     analysis_agent = Agent(
         name="ClaimsAnalyst",
         instructions="Assess whether this claim is valid and determine the approved amount.",
     )
-    analysis = await DurableRunner.run(analysis_agent, f"Claim: {parsed.final_output}")
+    analysis = await DurableRunner.run(analysis_agent, f"Claim: {parsed.final_output.model_dump_json()}")
 
     # Step 3: Convert currency (regular step)
     amount_usd = await ctx.run_typed(
         "Convert currency",
         convert_currency,
-        amount=claim["amount"],
-        source=claim["currency"],
+        amount=claim.amount,
+        source=claim.currency,
         target="USD",
     )
 
@@ -121,7 +144,7 @@ async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
     confirmation = await ctx.run_typed(
         "Process payment",
         process_payment,
-        claim_id=req.claim_id,
+        claim_id=str(ctx.uuid()),
         amount=amount_usd,
     )
 
@@ -143,50 +166,69 @@ Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
+
+Send a request:
+```bash
+curl localhost:8080/ClaimReimbursement/process \
+--json '{
+"message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+}'
+```
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
 ```python workflow_sequential.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/workflow_sequential.py#here"} 
-claim_service = restate.Service("ClaimReimbursement")
+parse_agent = Agent(
+    model="gemini-2.5-flash",
+    name="document_parser",
+    instruction="Extract the claim amount, currency, category, and description.",
+    output_schema=ClaimData
+)
+parse_app = App(name="claims", root_agent=parse_agent, plugins=[RestatePlugin()])
+parse_runner = Runner(app=parse_app, session_service=RestateSessionService())
+
+analysis_agent = Agent(
+    model="gemini-2.5-flash",
+    name="claims_analyst",
+    instruction="Assess whether this claim is valid and determine the approved amount.",
+)
+analysis_app = App(name="claims", root_agent=analysis_agent, plugins=[RestatePlugin()])
+analysis_runner = Runner(app=analysis_app, session_service=RestateSessionService())
+
+claim_service = restate.VirtualObject("ClaimReimbursement")
 
 
 @claim_service.handler()
-async def process(ctx: restate.Context, req: ClaimRequest) -> dict:
+async def process(ctx: restate.ObjectContext, req: ClaimPrompt) -> dict:
     # Step 1: Parse the claim document (LLM step)
-    parse_agent = Agent(
-        model="gemini-2.5-flash",
-        name="document_parser",
-        instruction="Extract the claim amount, currency, category, and description.",
+    parsing_events = parse_runner.run_async(
+        user_id=ctx.key(),
+        session_id=req.session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
     )
-    app = App(name="claims", root_agent=parse_agent, plugins=[RestatePlugin()])
-    runner = Runner(app=app, session_service=InMemorySessionService())
-
-    parsed = await run_agent(runner, req.user_id, "parse", req.document)
-    claim = json.loads(parsed)
+    parsed = await parse_agent_response(parsing_events)
+    claim = ClaimData.model_validate_json(parsed)
 
     # Step 2: Analyze the claim (LLM step)
-    analysis_agent = Agent(
-        model="gemini-2.5-flash",
-        name="claims_analyst",
-        instruction="Assess whether this claim is valid and determine the approved amount.",
+    analysis_events = analysis_runner.run_async(
+        user_id=ctx.key(),
+        session_id=req.session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=parsed)]),
     )
-    app = App(name="claims", root_agent=analysis_agent, plugins=[RestatePlugin()])
-    runner = Runner(app=app, session_service=InMemorySessionService())
-
-    analysis = await run_agent(runner, req.user_id, "analyze", f"Claim: {parsed}")
+    analysis = await parse_agent_response(analysis_events)
 
     # Step 3: Convert currency (regular step)
     amount_usd = await ctx.run_typed(
         "Convert currency", convert_currency,
-        amount=claim["amount"], source=claim["currency"], target="USD",
+        amount=claim.amount, source=claim.currency, target="USD",
     )
 
     # Step 4: Process reimbursement (regular step)
     confirmation = await ctx.run_typed(
         "Process payment", process_payment,
-        claim_id=req.claim_id, amount=amount_usd,
+        claim_id=str(ctx.uuid()), amount=amount_usd,
     )
 
     return {"analysis": analysis, "amount_usd": amount_usd, "confirmation": confirmation}
@@ -203,6 +245,15 @@ Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
+
+Send a request:
+```bash
+curl localhost:8080/ClaimReimbursement/user123/process \
+  --json '{
+    "sessionId": "session-123",
+    "message": "Hospital bill for a broken leg. Amount: 3000 EUR. Date: 2024-10-01. Hospital: General Hospital."
+  }'
+```
 </Accordion>
 
 </GlobalTab>
@@ -211,34 +262,45 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
 
 ```typescript workflow-sequential.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-sequential.ts#here"} 
-async function process(ctx: Context, report: { message: string }) {
-  // Step 1: Extract metrics
-  const extract = await ctx.run(
+async function process(ctx: Context, { message }: { message: string }) {
+  // Step 1: Parse the claim document (LLM step)
+  const { output } = await ctx.run(
     "Extract metrics",
-    // Use your preferred LLM SDK here
-    async () =>
-      llmCall(`Extract numerical values and their metrics from the text. 
-            Format as 'Metric Name: Value' per line. Input: ${report.message}`),
+    async () => {
+      const { output } = await generateText({
+        model: openai("gpt-4"),
+        prompt: `Extract the claim amount, currency, category, and description. Input: ${message}`,
+        output: Output.object({ schema: ClaimData }),
+      });
+      return { output };
+    },
     { maxRetryAttempts: 3 },
   );
 
-  // Step 2: Process the result from Step 1
-  const sortedMetrics = await ctx.run(
+  // Step 2: Analyze the claim (LLM step)
+  const { text: analysis } = await ctx.run(
     "Sort metrics",
-    async () =>
-      llmCall(`Sort lines in descending order by value: ${extract.text}`),
+    async () => {
+      const { text } = await generateText({
+        model: openai("gpt-4"),
+        prompt: `Assess whether this claim is valid and determine the approved amount: ${output}`,
+      });
+      return { text };
+    },
     { maxRetryAttempts: 3 },
   );
 
-  // Step 3: Format as table
-  const table = await ctx.run(
-    "Format as table",
-    async () =>
-      llmCall(`Format the data as a markdown table: ${sortedMetrics.text}`),
-    { maxRetryAttempts: 3 },
+  // Step 3: Convert currency (regular step)
+  const amountUsd = await ctx.run("Convert currency", async () =>
+    convertCurrency(output.amount, output.currency, "USD"),
   );
 
-  return table.text;
+  // Step 4: Process reimbursement (regular step)
+  const confirmation = await ctx.run("Process payment", async () =>
+    processPayment(ctx.rand.uuidv4(), amountUsd),
+  );
+
+  return { analysis, amountUsd, confirmation };
 }
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-sequential.ts" />
@@ -257,8 +319,10 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/CallChainingService/process \
-  --json '{"message": "Revenue: $5.2M, Employees: 142, Growth: 28%, Satisfaction: 94%"}'
+curl localhost:8080/ClaimReimbursement/process \
+--json '{
+"message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+}'
 ```
 </Accordion>
 
@@ -268,39 +332,55 @@ curl localhost:8080/CallChainingService/process \
 This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
 
 ```python workflow_sequential.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/workflow_sequential.py#here"} 
-call_chaining_svc = restate.Service("CallChainingService")
+claim_service = restate.Service("ClaimReimbursement")
 
 
-@call_chaining_svc.handler()
-async def process(ctx: restate.Context, report: Report) -> str | None:
-    """Sequentially chains multiple LLM calls, each transforming the prior output."""
+@claim_service.handler()
+async def process(ctx: restate.Context, req: ClaimPrompt) -> dict:
+    """Sequentially chains LLM calls with regular function calls to process a claim."""
 
-    # Step 1: Extract metrics
-    extract = await ctx.run_typed(
-        "Extract metrics",
-        llm_call,  # Use your preferred LLM SDK here
-        RunOptions(max_attempts=3),  # Avoid infinite retries
-        messages=f"""Extract numerical values and their metrics from the text. 
-        Format as 'Metric Name: Value' per line. Input: {report.message}""",
-    )
-
-    # Step 2: Sort by value
-    sorted_metrics = await ctx.run_typed(
-        "Sort metrics",
+    # Step 1: Parse the claim document (LLM step)
+    parsed = await ctx.run_typed(
+        "Parse claim document",
         llm_call,
         RunOptions(max_attempts=3),
-        messages=f"Sort lines in descending order by value: {extract}",
+        messages=f"""Extract the claim amount, currency, category, and description.
+        Document: {req.message}""",
+        response_format=ClaimData,
     )
+    claim = ClaimData.model_validate_json(parsed.content)
 
-    # Step 3: Format as table
-    table = await ctx.run_typed(
-        "Format as table",
+    # Step 2: Analyze the claim (LLM step)
+    analysis = await ctx.run_typed(
+        "Analyze claim",
         llm_call,
         RunOptions(max_attempts=3),
-        messages=f"Format the data as a markdown table:{sorted_metrics}",
+        messages=f"""Assess whether this claim is valid and determine the approved amount.
+        Claim: {parsed.content}""",
     )
 
-    return table.content
+    # Step 3: Convert currency (regular step)
+    amount_usd = await ctx.run_typed(
+        "Convert currency",
+        convert_currency,
+        amount=claim.amount,
+        source=claim.currency,
+        target="USD",
+    )
+
+    # Step 4: Process reimbursement (regular step)
+    confirmation = await ctx.run_typed(
+        "Process payment",
+        process_payment,
+        claim_id=str(ctx.uuid()),
+        amount=amount_usd,
+    )
+
+    return {
+        "analysis": analysis.content,
+        "amount_usd": amount_usd,
+        "confirmation": confirmation,
+    }
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/workflow_sequential.py" />
 
@@ -489,13 +569,7 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
         session_id=claim.session_id,
         new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
     )
-
-    final_response = None
-    async for event in events:
-        if event.is_final_response() and event.content and event.content.parts:
-            if event.content.parts[0].text:
-                final_response = event.content.parts[0].text
-    return final_response
+    return await parse_agent_response(events)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/workflow_parallel.py" />
 
@@ -536,30 +610,48 @@ Once all sub-agents return, the main agent makes a decision.
 This example runs three independent analysis tasks (sentiment, key points, summary) in parallel using `RestatePromise.all()`.
 
 ```typescript workflow-parallel.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-parallel.ts#here"} 
-async function analyze(ctx: Context, { message }: { message: string }) {
+async function analyze(ctx: Context, claim: ClaimInput) {
   // Create parallel tasks - each runs independently
-  const tasks = [
-    ctx.run(
-      "Analyze sentiment",
-      // Use your preferred LLM SDK here
-      async () => llmCall(`Analyze sentiment: ${message}`),
-      { maxRetryAttempts: 3 },
+  const claimJson = JSON.stringify(claim);
+  const eligibility = ctx.run(
+    "Eligibility agent",
+    async () => llmCall(
+        "Decide whether the following claim is eligible for reimbursement." +
+        "Respond with eligible if it's a medical claim, and not eligible otherwise." +
+        "\n\nClaim: " + claimJson,
     ),
-    ctx.run(
-      "Extract key points",
-      async () => llmCall(`Extract 3 key points as bullets: ${message}`),
-      { maxRetryAttempts: 3 },
+    { maxRetryAttempts: 3 },
+  )
+  const fraud = ctx.run(
+    "Fraud agent",
+    async () => llmCall(
+        "Decide whether the cost of the claim is reasonable given the treatment." +
+        "Respond with reasonable or not reasonable." +
+        "\n\nClaim: " + claimJson,
     ),
-    ctx.run(
-      "Summarize",
-      async () => llmCall(`Summarize in one sentence: ${message}`),
-      { maxRetryAttempts: 3 },
+    { maxRetryAttempts: 3 },
+  )
+  const cost = ctx.run(
+    "Rate comparison agent",
+    async () => llmCall(
+        "Decide whether the claim is fraudulent." +
+        "Always respond with low risk, medium risk, or high risk." +
+        "\n\nClaim: " + claimJson,
     ),
-  ];
+    { maxRetryAttempts: 3 },
+  )
 
   // Wait for all tasks to complete and return the results
-  const results = await RestatePromise.all(tasks);
-  return results.map((res) => res.text);
+  await RestatePromise.all([eligibility, cost, fraud]);
+
+  // Make final decision
+  const { text } = await ctx.run(
+      "Decision agent",
+      async () => llmCall( `Decide about claim ${JSON.stringify(claim)}.
+        Base your decision on the following analyses:
+        Eligibility: ${eligibility}, Cost: ${cost} Fraud: ${fraud}`)
+  );
+  return text
 }
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-parallel.ts" />
@@ -593,36 +685,48 @@ parallelization_svc = restate.Service("ParallelAgentsService")
 
 
 @parallelization_svc.handler()
-async def analyze(ctx: restate.Context, text: Text) -> list[str | None]:
-    """Analyzes multiple aspects of the text in parallel."""
+async def analyze(ctx: restate.Context, claim: ClaimData) -> list[str | None]:
+    """Analyzes a claim in parallel with specialized agents."""
 
     # Create parallel tasks - each runs independently
-    tasks = [
-        ctx.run_typed(
-            "Analyze sentiment",
-            llm_call,  # Use your preferred LLM SDK here
-            RunOptions(max_attempts=3),
-            messages=f"Analyze sentiment (positive/negative/neutral): {text}",
-        ),
-        ctx.run_typed(
-            "Extract key points",
-            llm_call,
-            RunOptions(max_attempts=3),
-            messages=f"Extract 3 key points as bullets: {text}",
-        ),
-        ctx.run_typed(
-            "Summarize",
-            llm_call,
-            RunOptions(max_attempts=3),
-            messages=f"Summarize in one sentence: {text}",
-        ),
-    ]
+    claim_json = json.dumps(claim.model_dump())
+    eligibility = ctx.run_typed(
+        "Eligibility agent",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages="Decide whether the following claim is eligible for reimbursement."
+        " Respond with eligible if it's a medical claim, and not eligible otherwise."
+        f"\n\nClaim: {claim_json}",
+    )
+    fraud = ctx.run_typed(
+        "Fraud agent",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages="Decide whether the cost of the claim is reasonable given the treatment."
+        " Respond with reasonable or not reasonable."
+        f"\n\nClaim: {claim_json}",
+    )
+    rate = ctx.run_typed(
+        "Rate comparison agent",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages="Decide whether the claim is fraudulent."
+        " Always respond with low risk, medium risk, or high risk."
+        f"\n\nClaim: {claim_json}",
+    )
 
     # Wait for all tasks to complete
-    await restate.gather(*tasks)
+    await restate.gather([eligibility, fraud, rate])
 
-    # Gather and collect results
-    return [(await task).content for task in tasks]
+    # Make final decision
+    return ctx.run_typed(
+        "Rate comparison agent",
+        llm_call,
+        RunOptions(max_attempts=3),
+        messages=f"Decide about claim: {claim.model_dump_json()}. "
+        "Base your decision on the following analyses:"
+        f"Eligibility: {await eligibility} Cost {await rate} Fraud: {await fraud}",
+    )
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/python-restate-only/tour-of-agents/app/workflow_parallel.py" />
 
@@ -715,6 +819,27 @@ const agent = restate.service({
   },
 });
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/vercel-ai/tour-of-agents/src/workflow-evaluator-optimizer.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupVercel />
+```bash
+npx tsx ./src/workflow-evaluator-optimizer.ts
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Sends a request to the agent:
+```shell
+curl localhost:8080/CodeGenerator/generate \
+--json '{
+    "task": "Write a TypeScript function that implements a retry mechanism with exponential backoff"
+}'
+```
+</Accordion>
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
@@ -775,19 +900,26 @@ Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
+```
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
 ```python workflow_evaluator_optimizer.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/workflow_evaluator_optimizer.py#here"} 
-APP_NAME = "codegen"
-
+# AGENTS
 generator = Agent(
     model="gemini-2.5-flash",
     name="code_generator",
     instruction="You are a code generator. Write clean, correct code.",
 )
+gen_app = App(name=APP_NAME, root_agent=generator, plugins=[RestatePlugin()])
+gen_runner = Runner(app=gen_app, session_service=RestateSessionService())
 
 evaluator = Agent(
     model="gemini-2.5-flash",
@@ -796,12 +928,15 @@ evaluator = Agent(
     readability, and edge cases. Respond with PASS if acceptable,
     or FAIL: <feedback> with specific issues to fix.""",
 )
+eval_app = App(name=APP_NAME, root_agent=evaluator, plugins=[RestatePlugin()])
+eval_runner = Runner(app=eval_app, session_service=RestateSessionService())
 
-code_service = restate.Service("CodeGenerator")
+# AGENT SERVICE
+code_service = restate.VirtualObject("CodeGenerator")
 
 
 @code_service.handler()
-async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
+async def generate(ctx: restate.ObjectContext, req: CodeRequest) -> dict:
     feedback = ""
     max_iterations = 3
 
@@ -812,18 +947,22 @@ async def generate(ctx: restate.Context, req: CodeRequest) -> dict:
             if feedback
             else f"Task: {req.task}"
         )
-        gen_app = App(name=APP_NAME, root_agent=generator, plugins=[RestatePlugin()])
-        gen_runner = Runner(app=gen_app, session_service=InMemorySessionService())
-        code = await run_agent(gen_runner, "user", f"gen-{i}", prompt)
+        events = gen_runner.run_async(
+            user_id=ctx.key(),
+            session_id=str(ctx.uuid()),
+            new_message=Content(role="user", parts=[Part.from_text(text=prompt)]),
+        )
+        code = await parse_agent_response(events)
 
         # Step 2: Evaluate the code
-        eval_app = App(name=APP_NAME, root_agent=evaluator, plugins=[RestatePlugin()])
-        eval_runner = Runner(app=eval_app, session_service=InMemorySessionService())
-        evaluation = await run_agent(eval_runner, "user", f"eval-{i}", f"Task: {req.task}\n\nCode:\n{code}")
-
+        events = eval_runner.run_async(
+            user_id=ctx.key(),
+            session_id=str(ctx.uuid()),
+            new_message=Content(role="user", parts=[Part.from_text(text=f"Task: {req.task}\n\nCode:\n{code}")]),
+        )
+        evaluation = await parse_agent_response(events)
         if evaluation.startswith("PASS"):
             return {"code": code, "iterations": i + 1}
-
         feedback = evaluation
 
     return {"code": "Max iterations reached", "iterations": max_iterations}
@@ -839,6 +978,12 @@ uv run app/workflow_evaluator_optimizer.py
 Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/user123/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
 ```
 </Accordion>
 
@@ -1002,48 +1147,88 @@ An orchestrator agent breaks a research topic into sub-tasks, dispatches them to
 <GlobalTab title="Vercel AI">
 
 ```typescript workflow-orchestrator.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/workflow-orchestrator.ts#here"} 
-const generate = async (ctx: restate.Context, req: ResearchRequest) => {
-  const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
-    middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
-  });
+export const researchWorker = restate.service({
+  name: "ResearchWorker",
+  handlers: {
+    research: async (ctx: restate.Context, {question}: { question: string }) => {
+      const model = wrapLanguageModel({
+        model: openai("gpt-4o"),
+        middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+      });
+      const { text: answer } = await generateText({
+        model,
+        system:
+          "You are a research assistant. Provide a concise, factual answer.",
+        prompt: question,
+      });
+      return { question, answer };
+    },
+  },
+});
 
-  // Step 1: Orchestrator creates a research plan
-  const { text: planJson } = await generateText({
-    model,
-    system: `You are a research planner. Break the topic into 2-4 research
+const orchestrator = restate.service({
+  name: "ResearchReport",
+  handlers: {
+    generate: restate.createServiceHandler(
+      { input: schema(ResearchRequestSchema) },
+      async (ctx: restate.Context, req: ResearchRequest) => {
+        const model = wrapLanguageModel({
+          model: openai("gpt-4o"),
+          middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
+        });
+
+        // Step 1: Orchestrator creates a research plan
+        const { output: tasks } = await generateText({
+          model,
+          system: `You are a research planner. Break the topic into 2-4 research
           sub-tasks. Respond with a JSON array of strings, each a specific
           research question. Example: ["question 1", "question 2"]`,
-    prompt: req.topic,
-  });
-  const tasks: string[] = JSON.parse(planJson);
+          prompt: req.topic,
+          output: Output.array({element: z.string()})
+        });
 
-  // Step 2: Dispatch workers in parallel
-  const workerResults = await RestatePromise.all(
-    tasks.map((task, i) =>
-      ctx.run(`research-${i}`, async () => {
-        const { text } = await generateText({
+        // Step 2: Dispatch workers in parallel
+        const workerResults = await RestatePromise.all(
+          tasks.map((question) =>
+            ctx.serviceClient(researchWorker).research({ question }),
+          ),
+        );
+
+        // Step 3: Combine results into a report
+        const { text: report } = await generateText({
           model,
           system:
-            "You are a research assistant. Provide a concise, factual answer.",
-          prompt: task,
+            "You are a report writer. Combine the research findings into a cohesive report.",
+          prompt: `Topic: ${req.topic}\n\nResearch findings:\n${JSON.stringify(workerResults)}`,
         });
-        return { question: task, answer: text };
-      }),
+
+        return { report, taskCount: tasks.length };
+      },
     ),
-  );
-
-  // Step 3: Combine results into a report
-  const { text: report } = await generateText({
-    model,
-    system:
-      "You are a report writer. Combine the research findings into a cohesive report.",
-    prompt: `Topic: ${req.topic}\n\nResearch findings:\n${JSON.stringify(workerResults, null, 2)}`,
-  });
-
-  return { report, taskCount: tasks.length };
-};
+  },
+});
 ```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/vercel-ai/tour-of-agents/src/workflow-orchestrator.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupVercel />
+```bash
+npx tsx ./src/workflow-orchestrator.ts
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request to the agent:
+```shell
+curl localhost:8080/ResearchReport/generate \
+--json '{
+"topic": "Benefits of durable execution in distributed systems"
+}'
+```
+</Accordion>
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
@@ -1058,7 +1243,7 @@ planner = Agent(
 
 researcher = Agent(
     name="Researcher",
-    instructions="You are a research assistant. Provide a concise, factual answer.",
+    instructions="You are a research assistant. Provide a concise, factual answer."
 )
 
 writer = Agent(
@@ -1113,43 +1298,31 @@ Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
+
+Send a request:
+```bash
+curl localhost:8080/ResearchReport/generate \
+  --json '{"topic": "The impact of renewable energy on global economies"}'
+```
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
 ```python workflow_orchestrator.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/google-adk/tour-of-agents/app/workflow_orchestrator.py#here"} 
-APP_NAME = "research"
-
-planner = Agent(
-    model="gemini-2.5-flash",
-    name="research_planner",
-    instruction="""You are a research planner. Break the topic into 2-4 research
-    sub-tasks. Respond with a JSON array of strings, each a specific
-    research question. Example: ["question 1", "question 2"]""",
-)
-
-researcher = Agent(
-    model="gemini-2.5-flash",
-    name="researcher",
-    instruction="You are a research assistant. Provide a concise, factual answer.",
-)
-
-writer = Agent(
-    model="gemini-2.5-flash",
-    name="report_writer",
-    instruction="You are a report writer. Combine the research findings into a cohesive report.",
-)
-
-report_service = restate.Service("ResearchReport")
+report_service = restate.VirtualObject("ResearchReport")
 
 
 @report_service.handler()
-async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
+async def generate(ctx: restate.ObjectContext, req: ReportRequest) -> dict:
+    session_id = str(ctx.uuid())
     # Step 1: Orchestrator creates a research plan
-    plan_app = App(name=APP_NAME, root_agent=planner, plugins=[RestatePlugin()])
-    plan_runner = Runner(app=plan_app, session_service=InMemorySessionService())
-    plan_output = await run_agent(plan_runner, "user", "plan", req.topic)
+    plan_events = plan_runner.run_async(
+        user_id=ctx.key(),
+        session_id=session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=req.topic)]),
+    )
+    plan_output =  await parse_agent_response(plan_events)
     tasks = json.loads(plan_output)
 
     # Step 2: Dispatch workers in parallel
@@ -1162,24 +1335,28 @@ async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
     findings = [await p for p in worker_promises]
 
     # Step 3: Combine results into a report
-    writer_app = App(name=APP_NAME, root_agent=writer, plugins=[RestatePlugin()])
-    writer_runner = Runner(app=writer_app, session_service=InMemorySessionService())
-    report = await run_agent(
-        writer_runner, "user", "report",
-        f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings, indent=2)}",
+    results = f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings, indent=2)}"
+    events = writer_runner.run_async(
+        user_id=ctx.key(),
+        session_id=session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=results)]),
     )
+    report = await parse_agent_response(events)
 
     return {"report": report, "task_count": len(tasks)}
 
 
-researcher_service = restate.Service("Researcher")
+researcher_service = restate.VirtualObject("Researcher")
 
 
 @researcher_service.handler()
-async def run_researcher(ctx: restate.Context, task: ResearchTask) -> str:
-    res_app = App(name=APP_NAME, root_agent=researcher, plugins=[RestatePlugin()])
-    res_runner = Runner(app=res_app, session_service=InMemorySessionService())
-    return await run_agent(res_runner, "user", task.session_id, task.question)
+async def run_researcher(ctx: restate.ObjectContext, task: ResearchTask) -> str:
+    events = research_runner.run_async(
+        user_id=ctx.key(),
+        session_id=str(ctx.uuid()),
+        new_message=Content(role="user", parts=[Part.from_text(text=task.question)]),
+    )
+    return await parse_agent_response(events)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/workflow_orchestrator.py" />
 
@@ -1192,6 +1369,15 @@ uv run app/workflow_orchestrator.py
 Register the agents with Restate:
 ```bash
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/ResearchReport/user123/generate \
+  --json '{
+    "sessionId": "session-123",
+    "topic": "The impact of renewable energy on global economies"
+  }'
 ```
 </Accordion>
 

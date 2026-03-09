@@ -39,9 +39,31 @@ Define specialist agents within the same process. The LLM picks the right one, a
 <GlobalTabs className={"hidden-tabs"}>
 <GlobalTab title="Vercel AI">
 
-With the Vercel AI, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision and the agent call via `ctx.serviceClient()`.
+With the Vercel AI, specialist agents are exposed as tools. The LLM decides which tool to call, and Restate durably persists the routing decision.
 
 ```typescript multi-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/vercel-ai/tour-of-agents/src/multi-agent.ts#here"} 
+async function runEligibilityAgent(model: LanguageModel, claim: InsuranceClaim){
+  const { text } = await generateText({
+    model,
+    system:
+        "Decide whether the following claim is eligible for reimbursement." +
+        "Respond with eligible if it's a medical claim, and not eligible otherwise.",
+    prompt: JSON.stringify(claim),
+  });
+  return text;
+}
+
+async function runFraudAgent(model: LanguageModel, claim: InsuranceClaim){
+  const { text } = await generateText({
+    model,
+    system:
+        "Decide whether the claim is fraudulent." +
+        "Always respond with low risk, medium risk, or high risk.",
+    prompt: JSON.stringify(claim),
+  });
+  return text;
+}
+
 const run = async (ctx: restate.Context, claim: ClaimInput) => {
   const model = wrapLanguageModel({
     model: openai("gpt-4o"),
@@ -52,35 +74,17 @@ const run = async (ctx: restate.Context, claim: ClaimInput) => {
     model,
     prompt: `Claim: ${JSON.stringify(claim)}`,
     system:
-      "You are a claim approval engine. Analyze the claim and use your tools to decide whether to approve.",
+      "Analyze the insurance claim and use your tools to decide whether to approve.",
     tools: {
       analyzeEligibility: tool({
         description: "Analyze claim eligibility.",
         inputSchema: InsuranceClaimSchema,
-        execute: async (claim: InsuranceClaim) => {
-          const { text } = await generateText({
-            model,
-            system:
-              "Decide whether the following claim is eligible for reimbursement." +
-              "Respond with eligible if it's a medical claim, and not eligible otherwise.",
-            prompt: JSON.stringify(claim),
-          });
-          return text;
-        },
+        execute: async (claim: InsuranceClaim) => runEligibilityAgent(model, claim),
       }),
       analyzeFraud: tool({
         description: "Analyze probability of fraud.",
         inputSchema: InsuranceClaimSchema,
-        execute: async (claim: InsuranceClaim) => {
-          const { text } = await generateText({
-            model,
-            system:
-              "Decide whether the claim is fraudulent." +
-              "Always respond with low risk, medium risk, or high risk.",
-            prompt: JSON.stringify(claim),
-          });
-          return text;
-        },
+        execute: async (claim: InsuranceClaim) => runFraudAgent(model, claim),
       }),
     },
     stopWhen: [stepCountIs(10)],
@@ -114,14 +118,8 @@ curl localhost:8080/MultiAgentClaimApproval/run --json '{
 }'
 ```
 
-In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
-You can see the trace of the sub-agents in the timeline.
+In the UI, in the LLM responses, you can see that the agent called the sub-agents via tools.
 
-Once all sub-agents return, the main agent continues and makes a decision.
-
-<Frame>
-<img src="/img/tour/agents/multi-agent.png" alt="Multi-agent execution trace" />
-</Frame>
 </Accordion>
 
 </GlobalTab>
@@ -257,13 +255,7 @@ async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str | None:
             parts=[Part.from_text(text=f"Claim: {claim.model_dump_json()}")],
         ),
     )
-
-    final_response = None
-    async for event in events:
-        if event.is_final_response() and event.content and event.content.parts:
-            if event.content.parts[0].text:
-                final_response = event.content.parts[0].text
-    return final_response
+    return await parse_agent_response(events)
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/google-adk/tour-of-agents/app/multi_agent.py" />
 

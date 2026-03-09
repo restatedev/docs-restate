@@ -178,7 +178,7 @@ async def human_approval(claim: InsuranceClaim) -> str:
     # Request human review
     await restate_context().run_typed(
         "Request review",
-        request_human_review,
+        request_review,
         claim=claim,
         awakeable_id=approval_id,
     )
@@ -201,8 +201,8 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
 ```bash
-curl localhost:8080/HumanClaimApprovalAgent/run/send \
---json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
+curl localhost:8080/HumanClaimApprovalAgent/user-123/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
 ```
 
 You can restart the service to see how Restate continues waiting for the approval.
@@ -228,8 +228,12 @@ See in the UI how the workflow resumes and finishes after the approval.
 <GlobalTab title="Restate TS">
 
 ```typescript human-approval-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/human-approval-agent.ts#here"} 
-async function moderate(ctx: Context, { message }: { message: string }) {
-  const prompt = `You are a content moderation agent. Decide if the content violates policy: ${message}`;
+async function run(ctx: Context, { message }: { message: string }) {
+  const prompt =
+    "You are an insurance claim evaluation agent. Use these rules: " +
+    "* if the amount is more than 1000, ask for human approval, " +
+    "* if the amount is less than 1000, decide by yourself. " +
+    `Evaluate this claim: ${message}`;
   const { text, toolCalls } = await ctx.run(
     "LLM call",
     // Use your preferred LLM SDK here
@@ -237,14 +241,16 @@ async function moderate(ctx: Context, { message }: { message: string }) {
     { maxRetryAttempts: 3 },
   );
 
-  if (toolCalls?.[0]?.toolName === "getHumanReview") {
+  if (toolCalls?.[0]?.toolName === "humanApproval") {
     // Create a recoverable approval promise
-    const approval = ctx.awakeable<string>();
-    await ctx.run("Ask review", () => notifyModerator(message, approval.id));
+    const approval = ctx.awakeable<boolean>();
+    await ctx.run("request-review", () =>
+      requestClaimReview(message, approval.id),
+    );
 
-    // Suspend until moderator resolves the approval
+    // Suspend until reviewer resolves the approval
     // Check the service logs to see how to resolve it over HTTP, e.g.:
-    // curl http://localhost:8080/restate/awakeables/sign_.../resolve --json '"approved"'
+    // curl http://localhost:8080/restate/awakeables/sign_.../resolve --json 'true'
     return approval.promise;
   }
 
@@ -354,7 +360,7 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
 ```bash
 curl localhost:8080/HumanClaimApprovalAgent/run/send \
---json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
 ```
 
 If you wait for more than a minute, the invocation will get suspended.
@@ -487,7 +493,7 @@ async def human_approval(claim: InsuranceClaim) -> str:
     # Request human review
     await restate_context().run_typed(
         "Request review",
-        request_human_review,
+        request_review,
         claim=claim,
         awakeable_id=approval_id,
     )
@@ -517,8 +523,8 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request to the service:
 ```bash
-curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
---json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "user_id": "user-123", "session_id": "session-123"}'
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/user-123/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
 ```
 Restart the service and check in the UI how the process will block for the remaining time without starting over.
 
