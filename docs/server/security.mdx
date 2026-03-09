@@ -1,0 +1,108 @@
+---
+title: "Security"
+description: "Securing your self-hosted Restate Server deployment"
+icon: "shield"
+---
+
+This page covers the security model for self-hosted Restate Server deployments and the operational measures you should take to protect your infrastructure.
+
+For securing communication between Restate and your service deployments, see [Service Security](/services/security).
+
+<Info>
+[Restate Cloud](/cloud/getting-started) provides built-in authentication, access control, and header filtering out of the box. The guidance on this page applies to self-hosted deployments where you manage these layers yourself.
+</Info>
+
+## Security model
+
+Restate Server exposes three network services, each with different security considerations:
+
+| Service | Default Port | Audience | Security posture |
+|---------|-------------|----------|-----------------|
+| **Ingress** | 8080 | External callers invoking services | Should sit behind a reverse proxy that handles authentication |
+| **Admin** | 9070 | Operators managing deployments and inspecting state | Must be restricted to trusted operators via network controls |
+| **Fabric** | 5122 | Cluster-internal node-to-node communication | Must not be exposed outside the cluster |
+
+Restate Server is an infrastructure component — like etcd, Consul, or a database. It does not include application-level authentication on its management interfaces, by design. You are expected to secure access to these ports using the network and proxy layers available in your deployment environment.
+
+## Securing the ingress port
+
+The ingress port (default 8080) is the entry point for service invocations. In production, place a reverse proxy or API gateway in front of it to handle:
+
+- **Authentication** — validate caller identity (bearer tokens, API keys, mTLS)
+- **Header filtering** — strip infrastructure auth headers before forwarding to Restate
+
+<Warning>
+HTTP headers that reach the ingress port are persisted in Restate's invocation journal for the configured retention period. This is by design — Restate needs the complete original request to replay invocations after failures. Headers that pass through your proxy will be stored and forwarded to the target service deployment.
+
+Strip sensitive infrastructure headers (e.g., proxy auth tokens) at your reverse proxy **before** they reach Restate. Only headers intended for the downstream service should be allowed through.
+</Warning>
+
+### Example: nginx reverse proxy
+
+```nginx nginx.conf
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+
+    location / {
+        # Authenticate the caller
+        auth_request /auth;
+
+        # Strip infrastructure auth headers before forwarding to Restate
+        proxy_set_header Authorization "";
+        proxy_set_header X-Internal-Token "";
+
+        proxy_pass http://restate:8080;
+    }
+}
+```
+
+## Securing the admin port
+
+The admin port (default 9070) provides full control over the Restate instance: registering deployments, managing invocations, and querying internal state via the [SQL introspection API](/references/sql-introspection).
+
+**Do not expose the admin port to untrusted networks.** Restrict access using:
+
+- **Network policies** — in Kubernetes, use NetworkPolicy resources to limit which pods can reach port 9070
+- **Security groups** — in cloud environments, restrict ingress rules to management IPs or bastion hosts
+- **Bind address** — bind the admin port to a private interface rather than `0.0.0.0`
+
+```toml restate.toml
+[admin]
+# Bind admin API to localhost only — accessible via SSH tunnel or sidecar
+bind-address = "127.0.0.1:9070"
+```
+
+Or use Unix domain sockets for local-only admin access:
+
+```toml restate.toml
+[admin]
+listen-mode = "unix"
+```
+
+See [Networking](/server/networking) for more configuration options.
+
+## Securing the fabric port
+
+The fabric port (default 5122) carries cluster-internal replication and coordination traffic. Do not expose it outside the cluster — restrict access to cluster members and monitoring infrastructure only.
+
+## Deployment registration
+
+When you register an HTTP service deployment via the admin API, Restate makes an outbound HTTP connection to the provided URI for service discovery. Ensure that:
+
+- Only trusted operators can access the admin API (see [above](#securing-the-admin-port))
+- Network-level controls prevent the Restate process from reaching unintended internal endpoints if your environment requires it (e.g., cloud metadata services)
+
+## Request identity
+
+Restate can cryptographically sign requests to your service deployments, allowing your services to verify that requests originate from your Restate instance. This is important when your services are reachable from networks beyond just Restate.
+
+See [Service Security — Locking down service access](/services/security#locking-down-service-access) for setup instructions.
+
+## Summary checklist
+
+- Place a reverse proxy in front of the ingress port that authenticates callers and strips infrastructure auth headers
+- Restrict admin port access to trusted operators via network controls or bind to localhost
+- Do not expose the fabric port outside the cluster
+- Configure [request identity](/services/security#locking-down-service-access) to sign requests to service deployments
+- Consider [client-side journal encryption](/services/security#client-side-journal-encryption) for sensitive workloads
