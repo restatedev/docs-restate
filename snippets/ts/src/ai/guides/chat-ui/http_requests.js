@@ -23,7 +23,7 @@ async function main() {
       "Content-Type": "application/json",
       "idempotency-key": "abc-123",
     },
-    body: JSON.stringify("How are you?"),
+    body: JSON.stringify({ message: "How are you?" }),
   });
   // <end_idempotency>
 }

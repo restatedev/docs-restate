@@ -63,12 +63,17 @@ const process = async (ctx: Context, {prompt}: {prompt: string}) => {
   });
 
   // Step 2: Analyze the claim (LLM step)
-  const { text: analysis } = await generateText({
+  const { output: valid } = await generateText({
     model,
     system:
       "You are a claims analyst. Assess whether this claim is valid and determine the approved amount.",
-    prompt: `Claim: ${output}`,
+    prompt: `Claim: ${JSON.stringify(output)}`,
+    output: Output.object({schema: z.object({valid: z.boolean()})}),
   });
+
+  if (!valid) {
+    return { analysis: "Claim is invalid", amountUsd: 0, confirmation: false };
+  }
 
   // Step 3: Convert currency (regular step)
   const amountUsd = await ctx.run("Convert currency", async () =>
@@ -80,7 +85,7 @@ const process = async (ctx: Context, {prompt}: {prompt: string}) => {
     processPayment(ctx.rand.uuidv4(), amountUsd),
   );
 
-  return { analysis, amountUsd, confirmation };
+  return { analysis: "Claim is valid", amountUsd, confirmation };
 };
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/vercel-ai/tour-of-agents/src/workflow-sequential.ts" />
@@ -98,10 +103,8 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request to the agent:
 ```shell
-curl localhost:8080/ClaimReimbursement/process \
---json '{
-    "claimId": "claim_123",
-    "document": "Hospital bill for a broken leg. Amount: 3000 EUR. Date: 2024-10-01. Hospital: General Hospital."
+curl localhost:8080/ClaimReimbursement/process --json '{
+    "prompt": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
 }'
 ```
 </Accordion>
@@ -169,9 +172,8 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/ClaimReimbursement/process \
---json '{
-"message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+curl localhost:8080/ClaimReimbursement/process --json '{
+    "message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
 }'
 ```
 </Accordion>
@@ -259,16 +261,14 @@ curl localhost:8080/ClaimReimbursement/user123/process \
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
-This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
-
 ```typescript workflow-sequential.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-sequential.ts#here"} 
 async function process(ctx: Context, { message }: { message: string }) {
   // Step 1: Parse the claim document (LLM step)
   const { output } = await ctx.run(
-    "Extract metrics",
+    "Parse claim",
     async () => {
       const { output } = await generateText({
-        model: openai("gpt-4"),
+        model: openai("gpt-4o"),
         prompt: `Extract the claim amount, currency, category, and description. Input: ${message}`,
         output: Output.object({ schema: ClaimData }),
       });
@@ -277,18 +277,25 @@ async function process(ctx: Context, { message }: { message: string }) {
     { maxRetryAttempts: 3 },
   );
 
-  // Step 2: Analyze the claim (LLM step)
-  const { text: analysis } = await ctx.run(
-    "Sort metrics",
+  // Step 2: Evaluate the claim (LLM step)
+  const { valid } = await ctx.run(
+    "Evaluate claim",
     async () => {
-      const { text } = await generateText({
-        model: openai("gpt-4"),
-        prompt: `Assess whether this claim is valid and determine the approved amount: ${output}`,
+      const { output: valid } = await generateText({
+        model: openai("gpt-4o"),
+        system:
+          "You are a claims analyst. Assess whether this claim is valid and determine the approved amount.",
+        prompt: `Claim: ${JSON.stringify(output)}`,
+        output: Output.object({schema: z.object({valid: z.boolean()})}),
       });
-      return { text };
+      return valid;
     },
     { maxRetryAttempts: 3 },
   );
+
+  if (!valid) {
+    return { analysis: "Claim is invalid", amountUsd: 0, confirmation: false };
+  }
 
   // Step 3: Convert currency (regular step)
   const amountUsd = await ctx.run("Convert currency", async () =>
@@ -300,7 +307,7 @@ async function process(ctx: Context, { message }: { message: string }) {
     processPayment(ctx.rand.uuidv4(), amountUsd),
   );
 
-  return { analysis, amountUsd, confirmation };
+  return { analysis: "Claim is valid", amountUsd, confirmation };
 }
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-sequential.ts" />
@@ -319,17 +326,14 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/ClaimReimbursement/process \
---json '{
-"message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+curl localhost:8080/ClaimReimbursement/process --json '{
+    "message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
 }'
 ```
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Restate Py">
-
-This example chains three LLM calls: extract metrics from a report, sort them, and format as a table. Each step is wrapped in `ctx.run()` for durability.
 
 ```python workflow_sequential.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/workflow_sequential.py#here"} 
 claim_service = restate.Service("ClaimReimbursement")
@@ -351,13 +355,18 @@ async def process(ctx: restate.Context, req: ClaimPrompt) -> dict:
     claim = ClaimData.model_validate_json(parsed.content)
 
     # Step 2: Analyze the claim (LLM step)
-    analysis = await ctx.run_typed(
-        "Analyze claim",
+    response = await ctx.run_typed(
+        "Evaluate claim",
         llm_call,
         RunOptions(max_attempts=3),
         messages=f"""Assess whether this claim is valid and determine the approved amount.
         Claim: {parsed.content}""",
+        response_format=ClaimEvaluation,
     )
+    evaluation = ClaimEvaluation.model_validate_json(response.content)
+    if not evaluation.valid:
+        return {"analysis": "Claim is invalid."}
+
 
     # Step 3: Convert currency (regular step)
     amount_usd = await ctx.run_typed(
@@ -377,7 +386,7 @@ async def process(ctx: restate.Context, req: ClaimPrompt) -> dict:
     )
 
     return {
-        "analysis": analysis.content,
+        "analysis": "Claim is valid.",
         "amount_usd": amount_usd,
         "confirmation": confirmation,
     }
@@ -397,8 +406,9 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/CallChainingService/process \
-  --json '{"message": "Revenue: $5.2M, Employees: 142, Growth: 28%, Satisfaction: 94%"}'
+curl localhost:8080/ClaimReimbursement/process --json '{
+    "message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+}'
 ```
 </Accordion>
 
@@ -607,10 +617,8 @@ Once all sub-agents return, the main agent makes a decision.
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
-This example runs three independent analysis tasks (sentiment, key points, summary) in parallel using `RestatePromise.all()`.
-
 ```typescript workflow-parallel.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/typescript-restate-only/tour-of-agents/src/workflow-parallel.ts#here"} 
-async function analyze(ctx: Context, claim: ClaimInput) {
+async function run(ctx: Context, claim: ClaimInput) {
   // Create parallel tasks - each runs independently
   const claimJson = JSON.stringify(claim);
   const eligibility = ctx.run(
@@ -649,7 +657,9 @@ async function analyze(ctx: Context, claim: ClaimInput) {
       "Decision agent",
       async () => llmCall( `Decide about claim ${JSON.stringify(claim)}.
         Base your decision on the following analyses:
-        Eligibility: ${eligibility}, Cost: ${cost} Fraud: ${fraud}`)
+        - Eligibility: ${(await eligibility).text}, 
+        - Cost: ${(await cost).text},
+        - Fraud: ${(await fraud).text}`)
   );
   return text
 }
@@ -670,22 +680,25 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/ParallelAgentsService/analyze \
-  --json '{"message": "Restate provides durable execution for distributed applications."}'
+curl localhost:8080/ParallelAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
 ```
 </Accordion>
 
 </GlobalTab>
 <GlobalTab title="Restate Py">
 
-This example runs three independent analysis tasks (sentiment, key points, summary) in parallel using `restate.gather()`.
-
 ```python workflow_parallel.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/ai-structure/python-restate-only/tour-of-agents/app/workflow_parallel.py#here"} 
-parallelization_svc = restate.Service("ParallelAgentsService")
+parallelization_svc = restate.Service("ParallelAgentClaimApproval")
 
 
 @parallelization_svc.handler()
-async def analyze(ctx: restate.Context, claim: ClaimData) -> list[str | None]:
+async def run(ctx: restate.Context, claim: ClaimData) -> list[str | None]:
     """Analyzes a claim in parallel with specialized agents."""
 
     # Create parallel tasks - each runs independently
@@ -746,8 +759,13 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 
 Send a request:
 ```bash
-curl localhost:8080/ParallelAgentsService/analyze \
-  --json '{"message": "Restate provides durable execution for distributed applications."}'
+curl localhost:8080/ParallelAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
 ```
 </Accordion>
 
@@ -1232,7 +1250,7 @@ Send a request to the agent:
 ```shell
 curl localhost:8080/ResearchReport/generate \
 --json '{
-"topic": "Benefits of durable execution in distributed systems"
+    "topic": "Benefits of durable execution in distributed systems"
 }'
 ```
 </Accordion>
