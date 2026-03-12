@@ -1,13 +1,20 @@
 ---
 title: "Notify when ready"
+icon: "bell"
 description: "Build async notification systems for your agents with just a few lines of code."
 tags: ["recipe"]
 ---
 
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import StartExample from "/snippets/ai-guides/start-example.mdx";
 
 Let users subscribe to notifications for long-running agent tasks instead of waiting.
 With Restate's durable promises, you can coordinate between agent execution and notification handlers, no extra infrastructure needed.
+
+<GlobalTabs>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
 
 ## How does Restate help?
 
@@ -27,7 +34,18 @@ The pattern works in two steps:
 
 **Step 2:** The notification handler awaits that promise and sends the notification when it resolves.
 
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/examples/notify_when_ready/agent.py?collapse_imports"} 
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="OpenAI Agents">
+
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/examples/notify_when_ready/agent.py#here"} 
+import restate
+from agents import Agent
+from restate.ext.openai import DurableRunner
+
+# Let users request to be alerted when long-running agent tasks complete.
+# For example, when a user click on a "Notify" button in the UI, the agent
+# response is send via an email when it's ready.
+
 agent_service = restate.Workflow("AsyncNotificationsAgent")
 
 agent = Agent(
@@ -54,10 +72,15 @@ async def on_notify(ctx: restate.WorkflowContext, email: str):
     response = await ctx.promise("agent_response", type_hint=str).value()
 
     # Send the email
+    async def send_email(email: str, body: str) -> None:
+        print(f"Agent done. Sending email to {email}: {body}")
     await ctx.run_typed("Email", send_email, email=email, body=response)
 ```
 
-View on GitHub: [Python](https://github.com/restatedev/ai-examples/blob/main/openai-agents/examples/notify_when_ready/agent.py)
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/examples/notify_when_ready/agent.py" />
+
+</GlobalTab>
+</GlobalTabs>
 
 Check out the SDK documentation for more details on the durable promises API ([TS](/develop/ts/external-events) / [Python](/develop/python/external-events)).
 
@@ -100,7 +123,7 @@ If you need help with a specific SDK, please reach out to us via [Discord](https
         </Tab>
         <Tab title="CLI">
             ```shell
-            restate deployments register localhost:9080
+            restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
             ```
         </Tab>
     </Tabs>
@@ -113,14 +136,14 @@ If you need help with a specific SDK, please reach out to us via [Discord](https
 
     First, start the agent asynchronously by adding `/send` to the end of the URL:
 
-    ```json
+    ```shell
     curl localhost:8080/AsyncNotificationsAgent/msg-123/run/send \
       --json '"Write a 1000-word description of Durable Execution"'
     ```
 
     Then, asynchronously call the `on_notify` handler to send the agent response via email once it's ready:
 
-    ```json
+    ```shell
     curl localhost:8080/AsyncNotificationsAgent/msg-123/on_notify/send \
       --json '"me@mail.com"'
     ```

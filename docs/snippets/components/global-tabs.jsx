@@ -57,6 +57,9 @@ export const GlobalTabs = ({ children, className = '' }) => {
                             data-active={index === activeTab}
                             onClick={() => handleTabClick(index)}
                         >
+                            {tab.props.icon && (
+                                <img src={tab.props.icon} alt="" className="h-4 w-4 not-prose" noZoom/>
+                            )}
                             {tab.props.title}
                         </button>
                     </li>
@@ -69,7 +72,7 @@ export const GlobalTabs = ({ children, className = '' }) => {
     )
 }
 
-export const GlobalTab = ({ title, children }) => {
+export const GlobalTab = ({ title, icon, children }) => {
     return <div>{children}</div>
 }
 

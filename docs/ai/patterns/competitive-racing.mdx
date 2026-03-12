@@ -1,11 +1,14 @@
 ---
-title: "Competitive Racing"
-sidebarTitle: "Competitive Racing"
+title: "Racing agents"
+icon: "flag-checkered"
 description: "Run agents in parallel, return the fastest response and cancel the others."
 tags: ["recipe"]
 ---
 
-import StartExample from "/snippets/ai-guides/start-example.mdx";
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
+import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
 Execute multiple AI approaches or strategies simultaneously and return the result from whichever completes first successfully. This pattern is ideal when you have multiple ways to solve the same problem and want to minimize latency by racing them against each other.
 
@@ -22,11 +25,18 @@ The benefits of using Restate for competitive racing patterns are:
 - Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
 
 ## Example
+Select your preferred SDK:
+<GlobalTabs>
+    <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
+    <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
+
 
 When you need a quick response and have access to multiple AI models, race them against each other to get the fastest result:
 
-<CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/racing-agents.ts#here"} 
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Restate TS">
+```ts racing-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/tour-of-agents/src/racing-agents.ts#here"} 
 async function run(
   ctx: Context,
   { message }: { message: string },
@@ -56,7 +66,31 @@ async function run(
   return res ?? "LLM gave no response";
 }
 ```
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/racing_agents.py?collapse_prequel"} 
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-restate-only/tour-of-agents/src/racing-agents.ts" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupRestateTS />
+```bash
+npx tsx ./src/racing-agents.ts
+```
+
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/RacingAgent/run \
+--json '{
+    "message": "What is the best approach to learn machine learning?"
+}'
+```
+</Accordion>
+</GlobalTab>
+<GlobalTab title="Restate Py">
+
+```python racing_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/tour-of-agents/app/racing_agents.py#here"} 
 racing_agent = Service("RacingAgent")
 
 
@@ -76,54 +110,34 @@ async def run(ctx: Context, query: Question) -> str | None:
 
     # return the fastest result
     return await done[0]
-
-
-
-
-@racing_agent.handler()
-async def think_longer(ctx: Context, req: Question) -> str | None:
-    output = await ctx.run_typed(
-        "Deep analysis",
-        llm_call,
-        RunOptions(max_attempts=3),
-        messages=f"Analyze this thoroughly: {req}",
-    )
-    return output.content
-
-
-@racing_agent.handler()
-async def respond_quickly(ctx: Context, req: Question) -> str | None:
-    output = await ctx.run_typed(
-        "Quick response",
-        llm_call,
-        RunOptions(max_attempts=3),
-        messages=f"Quick answer: {req}",
-    )
-    return output.content
 ```
-</CodeGroup>
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-restate-only/tour-of-agents/app/racing_agents.py" />
 
-View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/racing-agents.ts) /
-[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/racing_agents.py)
+<Accordion title="Run this example" icon="laptop">
+<SetupRestatePy />
+```bash
+uv run app/racing_agents.py
+```
 
-In the Restate UI, you can see how multiple approaches are started simultaneously, with the first successful result being returned while other tasks are automatically cancelled:
+Register the services with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
 
-<img src="/img/ai/patterns/racing.png" alt="Competitive racing execution - UI"/>
-
-<Accordion title="Run the example">
-    <Steps>
-        <StartExample/>
-
-        <Step title="Send a request">
-        In the UI (`http://localhost:9070`), click on the `run` handler of the `RacingAgent` service to open the playground and send a prompt to race multiple models:
-        <img src="/img/ai/patterns/racing_playground.png" alt="Agent racing - UI"/>
-        </Step>
-
-        <Step title="Check the Restate UI">
-        In the UI, you can see how multiple models are queried simultaneously, with the fastest response winning the race:
-
-        <img src="/img/ai/patterns/racing.png" alt="Competitive racing execution - UI"/>
-        </Step>
-
-    </Steps>
+Send a request:
+```bash
+curl localhost:8080/RacingAgent/run \
+--json '{
+    "message": "What is the best approach to learn machine learning?"
+}'
+```
 </Accordion>
+
+</GlobalTab>
+</GlobalTabs>
+
+
+<Tip>
+    This pattern is implementable with any of our SDKs and any AI SDK.
+    If you need help with a specific SDK, please reach out to us via [Discord](https://discord.restate.dev) or [Slack](https://slack.restate.dev).
+</Tip>

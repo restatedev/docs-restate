@@ -1,202 +1,238 @@
 ---
-title: "Tools and Workflows"
-sidebarTitle: "Tools and Workflows"
-description: "Implement recoverable routing of tasks to tools and agents with Restate."
+title: "Workflows as Tools"
+sidebarTitle: "Workflows as Tools"
+icon: "wrench"
+description: "Deploy complex tool logic as separate durable services. Scale tools independently, use any language, and get end-to-end durability."
 tags: ["recipe"]
 ---
 
-import StartExample from "/snippets/ai-guides/start-example.mdx";
+import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
+import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
+import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 
-Build resilient AI agents that route requests to appropriate tools and workflows. Restate ensures all routing decisions, tool calls, and interactions are durably logged with automatic retries and recovery.
+Agent tools come in two flavors: **local tools** that run inside the agent handler, and **workflows exposed as tools** that run as separate services. This page focuses on deploying workflows as agent tools.
 
-## How does Restate help?
+For local tools (wrapping tool logic in `ctx.run()` within the agent handler), see [Durable Agents](/ai/patterns/durable-agents).
 
-Restate provides **durable execution** for tool routing and execution:
+<GlobalTabs>
+<GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
+<GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+</GlobalTabs>
 
-- **Durable routing decisions**: LLM routing choices are persisted and recovered after failures
-- **Resilient tool execution**: Tool calls are wrapped with retries and failure recovery
-- **Distributed tool communication**: Call remote tools as regular functions with end-to-end durability
-- **Workflow orchestration**: Implement complex multi-step processes with state management and scheduling
-- Works with **any LLM SDK** (Vercel AI, LangChain, LiteLLM, etc.) and **any programming language** supported by Restate (TypeScript, Python, Go, etc.).
+## Why expose workflows as tools?
 
-Tools can either be executed **locally** within the same service/process or as **remote services**. Restate supports both options, allowing you to choose the best fit for your architecture and use case.
+As your agent tools grow more complex, you can extract them into separate Restate services and expose them as tools:
 
-### Option 1: Local tools with durable execution
+- **Scale independently**: Tools can run on different infrastructure, scale separately from the agent
+- **Any language**: Write tools in a different language than the agent (e.g., Python tool called from TypeScript agent)
+- **Long-running and async**: Remote workflows can be started asynchronously without blocking the agent execution and can take minutes or hours (human approval, external processing)
 
-**What it provides:**
-- Execute tools within the same service/process
-- Automatic retries and failure recovery for each tool call
+All calls between the agent and its tool services are proxied via Restate, which persists the call and handles retries and recovery.
 
-**Best for:** Tools with few steps, built-in SDK tools (e.g. search, database queries)
+## Example: human approval workflow as a tool
 
-**What it looks like:** Tools defined as local functions. You can either:
-1. Wrap the entire tool execution in `ctx.run()` for durability.
-2. Do multiple Restate Context actions within the tool for finer-grained durability and retries.
+This example shows a human approval workflow exposed as an agent tool. The workflow creates an awakeable, sends a review request, and suspends until a human responds. The agent treats this like any other tool call.
 
-### Option 2: Remote tools as separate services
+### 1. Define the sub-workflow
 
-**What it provides:**
-- Tools can scale independently
-- Tools can run on different infrastructure (e.g. serverless or Kubernetes) or languages
-- Tools can run asynchronously: agent can kick off work and return early
-- Durable communication between services
+Extract the tool logic into a separate Restate service:
 
-**Best for:** Complex tools, multi-step workflows, asynchronous or long-running tasks
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI">
 
-**What it looks like:** Tools deployed as separate Restate services, called durably over HTTP from the main agent service.
-
-## Example
-
-This example implements an example of a local tool (querying the user database) and a remote workflow (creating a support ticket) for a technical support agent.
-
-1. **Define tools** according to your AI SDK requirements
-2. **Wrap LLM calls** in `ctx.run()` for persistence
-3. **Process tool calls** in a loop until the LLM returns a final answer
-    - Local tools get wrapped in `ctx.run()` for durability and retries (see tool call to query user database)
-    - Remote tools get called with the SDK client (see tool call to create support ticket)
-
-The following examples show how to implement local tool routing with popular AI SDKs:
-
-<CodeGroup>
-```ts TypeScript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-patterns/src/routing-to-tools.ts#here"} 
-// Define your tools as your AI SDK requires (here Vercel AI SDK)
-const tools = {
-  queryUserDatabase: tool({
-    description: "Get user account and billing info",
-    inputSchema: z.object({}),
-  }),
-  createSupportTicket: tool({
-    description: "Create support tickets",
-    inputSchema: z.object({
-      description: z.string().describe("Detailed description of the issue"),
-    }),
-  }),
-};
-
-async function route(ctx: Context, req: { message: string; userId: string }) {
-  const messages: ModelMessage[] = [
-    {
-      role: "system",
-      content:
-        "You are a support agent. Use the available tools to answer the user's question. " +
-        "If you don't know the answer, create a support ticket",
+```typescript sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts#wf"} 
+export const humanApprovalWorkflow = restate.service({
+  name: "HumanApprovalWorkflow",
+  handlers: {
+    requestApproval: async (ctx: restate.Context, claim: InsuranceClaim) => {
+      const approval = ctx.awakeable<boolean>();
+      await ctx.run("request-review", () =>
+        requestHumanReview(claim, approval.id),
+      );
+      return approval.promise;
     },
-    { role: "user", content: req.message },
-  ];
+  },
+});
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
 
-  while (true) {
-    // Call the LLM using your favorite AI SDK
-    const result = await ctx.run(
-      "LLM call",
-      // Use your preferred LLM SDK here
-      async () => llmCall(messages, tools),
-      { maxRetryAttempts: 3 },
-    );
-    messages.push(...result.messages);
+</GlobalTab>
+<GlobalTab title="OpenAI Agents">
 
-    if (result.finishReason !== "tool-calls") return result.text;
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#wf"} 
+# Sub-workflow service for human approval
+human_approval_workflow = restate.Service("HumanApprovalWorkflow")
 
-    for (const { toolName, toolCallId, input } of result.toolCalls) {
-      let output: string;
-      // Use ctx.run to ensure durable execution of tool calls
-      switch (toolName) {
-        case "queryUserDatabase":
-          // Example of a local tool
-          output = await ctx.run("Query DB", () => queryUserDb(req.userId));
-          break;
-        case "createSupportTicket":
-          // Example of a remote tool/workflow
-          output = await ctx
-            .serviceClient(crmService)
-            .createSupportTicket(input as SupportTicket);
-          break;
-        default:
-          output = `Tool not found: ${toolName}`;
-      }
-      messages.push(toolResult(toolCallId, toolName, output));
-    }
-  }
-}
+
+@human_approval_workflow.handler()
+async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    """Request human approval for a claim and wait for response."""
+    # Create an awakeable that can be resolved via HTTP
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    # Request human review
+    await ctx.run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py" />
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/sub_workflow_agent.py#wf"} 
+# Sub-workflow service for human approval
+human_approval_workflow = restate.VirtualObject("HumanApprovalWorkflow")
+
+
+@human_approval_workflow.handler()
+async def review(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
+    """Request human approval for a claim and wait for response."""
+    # Create an awakeable that can be resolved via HTTP
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    # Request human review
+    await ctx.run_typed(
+        "Request review", request_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
+
+</GlobalTab>
+</GlobalTabs>
+
+The sub-workflow uses `ctx.awakeable()` to create a durable promise that can be resolved externally via HTTP. The agent suspends while waiting, freeing compute resources.
+
+### 2. Call it from the agent
+
+The agent exposes the sub-workflow as a tool. When the LLM picks it, the agent calls the remote service via Restate's service client:
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Vercel AI">
+
+```typescript sub-workflow-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts#here"} 
+humanApproval: tool({
+  description: "Ask for human approval for high-value claims.",
+  inputSchema: InsuranceClaimSchema,
+  execute: async (claim: InsuranceClaim) =>
+    ctx.serviceClient(humanApprovalWorkflow).requestApproval(claim),
+}),
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
+
+<Accordion title="Try out workflows as tools" icon="laptop">
+<SetupVercel />
+```bash
+npx tsx ./src/sub-workflow-agent.ts
 ```
 
-```python Python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-patterns/app/routing_to_tool.py?collapse_prequel"} 
-tool_router = restate.Service("ToolRouter")
-
-# Define tools as required by your LLM SDK
-TOOLS = [
-    tool("query_user_database", "Get user account and billing info"),
-    tool(
-        "create_support_ticket",
-        "Create support tickets",
-        SupportTicket.model_json_schema(),
-    ),
-]
-
-
-@tool_router.handler()
-async def route(ctx: restate.Context, question: Question) -> str | None:
-    """Route to appropriate tool and execute until final answer"""
-    messages = [{"role": "user", "content": question.message}]
-
-    while True:
-        response = await ctx.run_typed(
-            "LLM call",
-            llm_call,  # Use your preferred LLM SDK here
-            RunOptions(max_attempts=3, type_hint=Message),
-            messages=messages,
-            tools=TOOLS,
-        )
-        messages.append(response.dict())
-
-        if not response.tool_calls:
-            return response.content
-
-        for tool_call in response.tool_calls:
-            fn = tool_call.function
-            tool_name = fn.name or "unknown"
-            result = ""
-            match tool_name:
-                case "query_user_database":
-                    # Example of a local tool
-                    result = await ctx.run_typed(
-                        "Query DB", query_user_db, user_id=question.user_id
-                    )
-                case "create_support_ticket":
-                    # Example of a remote tool/workflow
-                    ticket = SupportTicket.model_validate_json(fn.arguments)
-                    result = await ctx.service_call(create_support_ticket, arg=ticket)
-                case _:
-                    result = f"Tool not found: {tool_name}"
-
-            messages.append(tool_result(tool_call.id, tool_name, result))
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
-</CodeGroup>
+Start a request that triggers the human approval sub-workflow:
+```bash
+curl localhost:8080/SubWorkflowClaimAgent/run/send \
+  --json '{"prompt": "Process my hospital bill of 3000USD for a broken leg."}'
+```
 
-View on GitHub: [TS](https://github.com/restatedev/ai-examples/blob/typescript_patterns/typescript-patterns/src/routing-to-tools.ts) /
-[Python](https://github.com/restatedev/ai-examples/blob/main/python-patterns/app/routing_to_tool.py)
+In the UI, you can see the agent calling the sub-workflow and suspending while waiting for approval:
 
+<Frame>
+<img src="/img/tour/agents/sub-workflow.png" alt="Sub-workflow execution trace" />
+</Frame>
 
-When you run the example below, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:
-
-<img src="/img/ai/patterns/routing_local_tools.png" alt="Dynamic routing based on LLM output - UI"/>
-
-<Accordion title="Run the example">
-    <Steps>
-        <StartExample/>
-
-        <Step title="Send a request">
-        In the UI (`http://localhost:9070`), click on the `route` handler of the `ToolRouter` service to open the playground and send a default request:
-        <img src="/img/ai/patterns/routing_local_tools_playground.png" alt="Dynamic routing LLM calls - UI"/>
-
-        Or send other requests to test different tool routing scenarios.
-        </Step>
-
-        <Step title="Check the Restate UI">
-        In the UI, you can see how the LLM decides to forward the request to the technical support tools, and how the response is processed:
-
-        <img src="/img/ai/patterns/routing_local_tools.png" alt="Dynamic routing based on LLM output - UI"/>
-        </Step>
-
-    </Steps>
+Resolve the approval by executing the **curl request printed in the service logs**, similar to:
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
 </Accordion>
+
+</GlobalTab>
+<GlobalTab title="OpenAI Agents">
+
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py#here"} 
+@durable_function_tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/sub_workflow_agent.py" />
+
+<Accordion title="Try out workflows as tools" icon="laptop">
+<SetupOpenAI />
+```bash
+uv run app/sub_workflow_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request that triggers the human approval sub-workflow:
+```bash
+curl localhost:8080/SubWorkflowClaimAgent/run/send \
+  --json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+
+In the UI, you can see the agent calling the sub-workflow and suspending while waiting for approval.
+
+Resolve the approval by executing the **curl request printed in the service logs**, similar to:
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Google ADK">
+
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/sub_workflow_agent.py#here"} 
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/sub_workflow_agent.py" />
+
+<Accordion title="Try out workflows as tools" icon="laptop">
+<SetupGoogleADK />
+```bash
+uv run app/sub_workflow_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request that triggers the human approval sub-workflow:
+```bash
+curl localhost:8080/SubWorkflowClaimAgent/user-123/run/send \
+  --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
+```
+
+In the UI, you can see the agent calling the sub-workflow and suspending while waiting for approval.
+
+Resolve the approval by executing the **curl request printed in the service logs**, similar to:
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+</Accordion>
+
+</GlobalTab>
+</GlobalTabs>
+
+<Frame>
+<img src="/img/tour/agents/sub-workflow.png" alt="Sub-workflow execution trace" />
+</Frame>
+
