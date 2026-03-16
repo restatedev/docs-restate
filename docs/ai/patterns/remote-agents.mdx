@@ -9,6 +9,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -18,6 +19,7 @@ When agents need to scale independently, run on different infrastructure, or be 
 <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -318,6 +320,86 @@ Once all sub-agents return, the main agent continues and makes a decision.
 <Frame>
 <img src="/img/ai/patterns/google-adk-remote-agents.png" alt="Multi-agent execution trace" />
 </Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+With Pydantic AI, you expose each specialist as a separate Restate service and call it via `restate_context().service_call()`. The LLM response that picks the specialist is durably persisted, so on recovery the routing decision is replayed without re-calling the LLM.
+
+```python remote_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/remote_agents.py#here"} 
+# Durable service call to the fraud agent; persisted and retried by Restate
+@agent.tool
+async def check_fraud(_run_ctx: RunContext[None], claim: InsuranceClaim) -> str:
+    """Analyze the probability of fraud."""
+    return await restate_context().service_call(run_fraud_agent, claim)
+
+
+restate_agent = RestateAgent(agent)
+
+agent_service = restate.Service("MultiAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, claim: InsuranceClaim) -> str:
+    result = await restate_agent.run(f"Claim: {claim.model_dump_json()}")
+    return result.output
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/remote_agents.py" />
+
+Each specialist agent runs as its own Restate service:
+
+<Accordion title="Eligibility Agent implementation">
+
+```python eligibility_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/utils/utils.py#eligibility"} 
+eligibility_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="Decide whether the following claim is eligible for reimbursement."
+    "Respond with eligible if it's a medical claim, and not eligible otherwise.",
+)
+restate_eligibility_agent = RestateAgent(eligibility_agent)
+
+eligibility_agent_service = restate.Service("EligibilityAgent")
+
+
+@eligibility_agent_service.handler()
+async def run_eligibility_agent(_ctx: restate.Context, claim: InsuranceClaim) -> str:
+    result = await restate_eligibility_agent.run(claim.model_dump_json())
+    return result.output
+```
+
+</Accordion>
+
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/remote_agents.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
+
+Once all sub-agents return, the main agent continues and makes a decision.
+
+<Frame>
+<img src="/img/tour/agents/pydantic/remote-agents.png" alt="Multi-agent execution trace" />
+</Frame>
+
 </Accordion>
 
 </GlobalTab>

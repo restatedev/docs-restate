@@ -10,6 +10,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -38,6 +39,7 @@ Select your SDK:
     <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -256,6 +258,79 @@ curl localhost:8080/ClaimReimbursement/user123/process \
     "sessionId": "session-123",
     "message": "Hospital bill for a broken leg. Amount: 3000 EUR. Date: 2024-10-01. Hospital: General Hospital."
   }'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+```python workflow_sequential.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/workflow_sequential.py#here"} 
+parse_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="Extract the claim amount, currency, category, and description.",
+    output_type=ClaimData,
+)
+restate_parse_agent = RestateAgent(parse_agent)
+
+analysis_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="Assess whether this claim is valid and determine the approved amount.",
+)
+restate_analysis_agent = RestateAgent(analysis_agent)
+
+claim_service = restate.Service("ClaimReimbursement")
+
+
+@claim_service.handler()
+async def process(ctx: restate.Context, req: ClaimPrompt) -> dict:
+    # Step 1: Parse the claim document (LLM step)
+    parsed = await restate_parse_agent.run(req.message)
+    claim = parsed.output
+
+    # Step 2: Analyze the claim (LLM step)
+    analysis = await restate_analysis_agent.run(f"Claim: {claim.model_dump_json()}")
+
+    # Step 3: Convert currency (regular step)
+    amount_usd = await ctx.run_typed(
+        "Convert currency",
+        convert_currency,
+        amount=claim.amount,
+        source=claim.currency,
+        target="USD",
+    )
+
+    # Step 4: Process reimbursement (regular step)
+    confirmation = await ctx.run_typed(
+        "Process payment",
+        process_payment,
+        claim_id=str(ctx.uuid()),
+        amount=amount_usd,
+    )
+
+    return {
+        "analysis": analysis.output,
+        "amount_usd": amount_usd,
+        "confirmation": confirmation,
+    }
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/workflow_sequential.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/workflow_sequential.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/ClaimReimbursement/process --json '{
+    "message": "Process my hospital bill of 2024-10-01 for 3000USD for a broken leg at General Hospital."
+}'
 ```
 </Accordion>
 

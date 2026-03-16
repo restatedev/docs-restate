@@ -11,6 +11,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -34,6 +35,7 @@ Instead, you use Restate's durable execution primitives (`RestatePromise.all()` 
     <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
 <GlobalTabs className={"hidden-tabs"}>
 <GlobalTab title="Vercel AI">
@@ -211,6 +213,62 @@ In the UI, you can see the tool steps running in parallel:
 
 <Frame>
 <img src="/img/tour/agents/adk/parallel-tools.png" alt="Parallel tool execution trace" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+**⚠️ To ensure deterministic replay when using Pydantic AI with Restate, tool calls are forced to be executed sequentially.
+This is forced by the integration itself.**
+
+To use parallel tool calls with Pydantic AI, create a tool that runs multiple analyses in parallel. The LLM calls one tool, and that tool fans out work internally using `restate.gather()` to run durable execution steps concurrently.
+
+Restate makes sure that all parallel tasks are retried and recovered until they succeed. If one step fails, only that step is retried while the successful results are preserved.
+
+```python parallel_tools_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/parallel_tools_agent.py#here"} 
+@agent.tool
+async def calculate_metrics(
+    _run_ctx: RunContext[None], claim: InsuranceClaim
+) -> list[str]:
+    """Calculate claim metrics."""
+    ctx = restate_context()
+
+    # Run tools/steps in parallel with durable execution
+    results_done = await restate.gather(
+        ctx.run_typed("eligibility", check_eligibility, claim=claim),
+        ctx.run_typed("cost", compare_to_standard_rates, claim=claim),
+        ctx.run_typed("fraud", check_fraud, claim=claim),
+    )
+    return [await result for result in results_done]
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/parallel_tools_agent.py" />
+
+<Accordion title="Try out parallel tool calls" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/parallel_tools_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request:
+```bash
+curl localhost:8080/ParallelToolClaimAgent/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see the tool steps running in parallel:
+
+<Frame>
+<img src="/img/tour/agents/pydantic/parallel-tools.png" alt="Parallel tool execution trace" />
 </Frame>
 </Accordion>
 

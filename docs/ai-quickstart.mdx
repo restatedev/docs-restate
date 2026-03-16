@@ -505,6 +505,150 @@ Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate m
 </Step>
 </Steps>
 </GlobalTab>
+<GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}>
+
+<Info>
+**Prerequisites**:
+- Python >= v3.12
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
+</Info>
+
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template for [Pydantic AI](https://ai.pydantic.dev/) and Restate:
+```shell
+restate example python-pydantic-ai-template && cd python-pydantic-ai-template
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/pydantic-ai/pydantic-ai/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your OpenAI key and run the agent:
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+uv run .
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the agent service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`):
+
+<Frame>
+    <img src={"/img/ai/registration.png"} alt="Restate UI Playground"/>
+</Frame>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/openai-playground.png"} alt="Restate UI Playground"/>
+</Frame>
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/agent/run --json '{"message": "What is the weather in San Francisco?"}'
+```
+Output: `The weather in San Francisco is sunny and 23°C.`
+
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by using Restate's `RestateAgent` wrapper to persist LLM responses, and by using [Restate Context actions](/foundations/actions) (e.g. `restate_context().run_typed`) to make the tool executions resilient:
+
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/template/agent.py"} 
+import restate
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext
+from restate.ext.pydantic import RestateAgent, restate_context
+
+
+class WeatherPrompt(BaseModel):
+    message: str = "What is the weather in San Francisco?"
+
+# AGENT
+weather_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a helpful agent that provides weather updates.",
+)
+
+@weather_agent.tool()
+async def get_weather(_run_ctx: RunContext[None], city: str) -> dict:
+    """Get the current weather for a given city."""
+
+    # Do durable steps using the Restate context
+    async def call_weather_api(city: str) -> dict:
+        return {"temperature": 23, "description": "Sunny and warm."}
+
+    return await restate_context().run_typed(
+        f"Get weather {city}", call_weather_api, city=city
+    )
+
+# AGENT SERVICE
+restate_agent = RestateAgent(weather_agent)
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    result = await restate_agent.run(req.message)
+    return result.output
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/openai-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+<Accordion title="See how a failing tool call is retried">
+Let the weather tool raise an exception by adding the following line to the `get_weather` function:
+```python
+raise Exception("[👻 SIMULATED] Fetching weather failed: Weather API down...")
+```
+
+You can see in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/openai-agent-stuck.png"} alt="Restate UI Durable Execution"/>
+</Frame>
+
+Fix the problem, by removing the exception again.
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/openai-agent-fixed.png"} alt="Restate UI Durable Execution"/>
+</Frame>
+
+
+</Accordion>
+
+**Next step:**
+Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate makes your AI agents resilient to failures.
+
+</Step>
+</Steps>
+</GlobalTab>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}>
 
 <Info>

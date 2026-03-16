@@ -7,6 +7,7 @@ description: "Implement robust error handling and retry strategies for reliable 
 
 import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
 import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 
 LLM calls are costly, so you want to configure retry behavior to avoid infinite loops and high costs while still recovering from transient failures.
 
@@ -18,6 +19,7 @@ Restate distinguishes between two types of errors:
 <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -80,6 +82,21 @@ app = App(
 )
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/error_handling.py" />
+
+By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+Restate's `RestateAgent` lets you specify the retry behavior for LLM calls via `RunOptions`:
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py#retries"} 
+restate_agent = RestateAgent(
+    agent,
+    run_options=RunOptions(max_attempts=3, initial_retry_interval=timedelta(seconds=2)),
+)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py" />
 
 By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
 
@@ -258,6 +275,45 @@ Restate retries tool executions by default until they succeed.
 For errors which should not be retried, raise terminal errors from within your tool implementations.
 
 You can catch these terminal errors in your handler and handle them accordingly.
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+When agent tools use Restate Context actions like `ctx.run`, Restate automatically retries transient errors in these operations. This makes your tools resilient to network failures, database hiccups, and other temporary issues. For all operations that might suffer from transient errors, use Context actions.
+
+For example, wrapping a tool call in `restate_context().run_typed()` makes it durable with automatic retries:
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py#here"} 
+async def get_weather(city: WeatherRequest) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    return await restate_context().run_typed(f"Get weather {city}", fetch_weather, req=city)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py" />
+
+For errors that should not be retried, raise a terminal error:
+
+```python
+from restate import TerminalError
+
+raise TerminalError("This tool is not allowed to run for this input.")
+```
+
+Restate retries tool executions by default until they succeed.
+For errors which should not be retried, raise terminal errors from within your tool implementations.
+
+You can catch these terminal errors in your handler and handle them accordingly:
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py#handle"} 
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    try:
+        result = await restate_agent.run(req.message)
+    except TerminalError as e:
+        # Handle terminal errors gracefully
+        return f"The agent couldn't complete the request: {e.message}"
+    return result.output
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/pydantic-ai/pydantic-ai/tour-of-agents/app/error_handling.py" />
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
