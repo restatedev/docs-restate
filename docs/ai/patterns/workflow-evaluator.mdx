@@ -10,6 +10,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -30,6 +31,7 @@ Select your SDK:
     <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -252,6 +254,73 @@ restate deployments register http://localhost:9080 --force --yes # dev only: ove
 Send a request:
 ```bash
 curl localhost:8080/CodeGenerator/user123/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+```python workflow_evaluator_optimizer.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/workflow_evaluator_optimizer.py#here"} 
+generator = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a code generator. Write clean, correct code.",
+)
+restate_generator = RestateAgent(generator)
+
+evaluator = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="""You are a code reviewer. Evaluate the code for correctness,
+    readability, and edge cases. Respond with PASS if acceptable,
+    or FAIL: <feedback> with specific issues to fix.""",
+)
+restate_evaluator = RestateAgent(evaluator)
+
+code_service = restate.Service("CodeGenerator")
+
+
+@code_service.handler()
+async def generate(_ctx: restate.Context, req: CodeRequest) -> dict:
+    feedback = ""
+    max_iterations = 3
+
+    for i in range(max_iterations):
+        # Step 1: Generate code
+        prompt = (
+            f"Task: {req.task}\n\nPrevious attempt was rejected:\n{feedback}\n\nPlease fix the issues."
+            if feedback
+            else f"Task: {req.task}"
+        )
+        gen_result = await restate_generator.run(prompt)
+        code = gen_result.output
+
+        # Step 2: Evaluate the code
+        eval_result = await restate_evaluator.run(f"Task: {req.task}\n\nCode:\n{code}")
+        evaluation = eval_result.output
+
+        if evaluation.startswith("PASS"):
+            return {"code": code, "iterations": i + 1}
+
+        feedback = evaluation
+
+    return {"code": "Max iterations reached", "iterations": max_iterations}
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/workflow_evaluator_optimizer.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/workflow_evaluator_optimizer.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/generate \
   --json '{"task": "Write a function that checks if a string is a palindrome"}'
 ```
 </Accordion>

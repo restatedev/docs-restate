@@ -10,6 +10,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -19,6 +20,7 @@ Some agent actions need human approvals for dangerous actions: deploying code, s
 <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -221,6 +223,63 @@ curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json '
 See in the UI how the workflow resumes and finishes after the approval.
 <Frame>
 <img src="/img/tour/agents/adk/human-approval.png" alt="Invocation overview" />
+</Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/human_approval_agent.py#here"} 
+@agent.tool
+async def human_approval(_run_ctx: RunContext[None], claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=str)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval
+    return await approval_promise
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/human_approval_agent.py" />
+
+<Accordion title="Try out human approval" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/human_approval_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Use `curl` with `/send` to start the claim asynchronously, without waiting for the result:
+```bash
+curl localhost:8080/HumanClaimApprovalAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+
+You can restart the service to see how Restate continues waiting for the approval.
+
+If you wait for more than a minute, the invocation will get suspended.
+<Frame>
+<img src="/img/tour/agents/openai/suspensions.png" alt="Invocation overview" />
+</Frame>
+
+Simulate approving the claim by executing the **curl request that was printed in the service logs**, similar to:
+
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+
+See in the UI how the workflow resumes and finishes after the approval.
+<Frame>
+<img src="/img/tour/agents/openai/human-approval.png" alt="Invocation overview" />
 </Frame>
 </Accordion>
 
@@ -525,6 +584,58 @@ Send a request to the service:
 ```bash
 curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/user-123/run/send \
 --json '{"message": "Process my hospital bill of 3000USD for a broken leg.", "session_id": "session-123"}'
+```
+Restart the service and check in the UI how the process will block for the remaining time without starting over.
+
+You can also lower the timeout to a few seconds to see how the timeout path is taken.
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+Use `restate.select` to race the approval promise against a sleep timer:
+
+```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
+@agent.tool
+async def human_approval(_run_ctx: RunContext[None], claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+
+    # Create an awakeable for human approval
+    approval_id, approval_promise = restate_context().awakeable(type_hint=bool)
+
+    # Request human review
+    await restate_context().run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    # Wait for human approval for at most 3 hours to reach our SLA
+    match await restate.select(
+        approval=approval_promise,
+        timeout=restate_context().sleep(timedelta(hours=3)),
+    ):
+        case ["approval", approved]:
+            return "Approved" if approved else "Rejected"
+        case _:
+            return "Approval timed out - Evaluate with AI"
+```
+
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/human_approval_agent_with_timeout.py" />
+
+<Accordion title="Try out timeouts" icon="laptop">
+Start the timeout agent (stop any previously running agent first):
+```bash
+uv run app/human_approval_agent_with_timeout.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request to the service:
+```bash
+curl localhost:8080/HumanClaimApprovalWithTimeoutsAgent/run/send \
+--json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
 ```
 Restart the service and check in the UI how the process will block for the remaining time without starting over.
 

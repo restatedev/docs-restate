@@ -10,6 +10,7 @@ import { GitHubLink } from '/snippets/blocks/github-link.mdx';
 import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
+import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -32,6 +33,7 @@ Select your SDK:
     <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -131,9 +133,8 @@ curl localhost:8080/ResearchReport/generate \
 ```python workflow_orchestrator.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/workflow_orchestrator.py#here"} 
 planner = Agent(
     name="ResearchPlanner",
-    instructions="""You are a research planner. Break the topic into 2-4 research
-    sub-tasks. Respond with a JSON array of strings, each a specific
-    research question. Example: ["question 1", "question 2"]""",
+    instructions="You are a research planner. Break the topic into 2-4 research sub-tasks.",
+    output_type=TaskList
 )
 
 researcher = Agent(
@@ -153,12 +154,12 @@ report_service = restate.Service("ResearchReport")
 async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
     # Step 1: Orchestrator creates a research plan
     plan_result = await DurableRunner.run(planner, req.topic)
-    tasks = json.loads(plan_result.final_output)
+    tasks = plan_result.final_output.tasks
 
     # Step 2: Dispatch workers in parallel
     worker_promises = []
     for task in tasks:
-        promise = ctx.service_call(run_researcher, ResearchTask(question=task))
+        promise = ctx.service_call(run_researcher, task)
         worker_promises.append(promise)
 
     await restate.gather(*worker_promises)
@@ -217,13 +218,13 @@ async def generate(ctx: restate.ObjectContext, req: ReportRequest) -> dict:
         session_id=session_id,
         new_message=Content(role="user", parts=[Part.from_text(text=req.topic)]),
     )
-    plan_output =  await parse_agent_response(plan_events)
+    plan_output = await parse_agent_response(plan_events)
     tasks = TaskList.model_validate_json(plan_output).tasks
 
     # Step 2: Dispatch workers in parallel
     worker_promises = []
     for task in tasks:
-        promise = ctx.service_call(run_researcher, ResearchTask(question=task))
+        promise = ctx.object_call(run_researcher, key=str(ctx.uuid()), arg=task)
         worker_promises.append(promise)
 
     await restate.gather(*worker_promises)
@@ -273,6 +274,83 @@ curl localhost:8080/ResearchReport/user123/generate \
     "sessionId": "session-123",
     "topic": "The impact of renewable energy on global economies"
   }'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+```python workflow_orchestrator.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/workflow_orchestrator.py#here"} 
+planner = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a research planner. Break the topic into 2-4 research sub-tasks.",
+    output_type=TaskList,
+)
+restate_planner = RestateAgent(planner)
+
+researcher = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a research assistant. Provide a concise, factual answer.",
+)
+restate_researcher = RestateAgent(researcher)
+
+writer = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a report writer. Combine the research findings into a cohesive report.",
+)
+restate_writer = RestateAgent(writer)
+
+report_service = restate.Service("ResearchReport")
+
+
+@report_service.handler()
+async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
+    # Step 1: Orchestrator creates a research plan
+    plan_result = await restate_planner.run(req.topic)
+    tasks = plan_result.output.tasks
+
+    # Step 2: Dispatch workers in parallel
+    worker_promises = []
+    for task in tasks:
+        promise = ctx.service_call(run_researcher, task)
+        worker_promises.append(promise)
+
+    await restate.gather(*worker_promises)
+    findings = [await p for p in worker_promises]
+
+    # Step 3: Combine results into a report
+    report_result = await restate_writer.run(
+        f"Topic: {req.topic}\n\nResearch findings:\n{json.dumps(findings)}",
+    )
+
+    return {"report": report_result.output, "task_count": len(tasks)}
+
+
+researcher_service = restate.Service("Researcher")
+
+
+@researcher_service.handler()
+async def run_researcher(_ctx: restate.Context, task: ResearchTask) -> str:
+    result = await restate_researcher.run(task.question)
+    return result.output
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/workflow_orchestrator.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupPydanticAI />
+```bash
+uv run app/workflow_orchestrator.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/ResearchReport/generate \
+  --json '{"topic": "The impact of renewable energy on global economies"}'
 ```
 </Accordion>
 
@@ -399,7 +477,7 @@ async def generate(ctx: restate.Context, req: ReportRequest) -> dict:
     # Step 2: Dispatch workers in parallel
     worker_promises = []
     for task in tasks:
-        promise = ctx.service_call(research, ResearchTask(question=task))
+        promise = ctx.service_call(research, task)
         worker_promises.append(promise)
 
     await restate.gather(*worker_promises)
@@ -440,3 +518,7 @@ curl localhost:8080/ResearchReport/generate \
 </GlobalTabs>
 
 The orchestrator's plan is persisted as a durable step. If the process crashes after two of four workers have completed, recovery replays those two results from the journal and only runs the remaining two workers.
+
+<Frame>
+    <img src="/img/tour/agents/pydantic/workflow-orchestrator.png" alt="Invocation overview" />
+</Frame>

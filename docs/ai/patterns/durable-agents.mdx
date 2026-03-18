@@ -24,6 +24,7 @@ Select your SDK:
 <GlobalTab title="Vercel AI" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -258,6 +259,61 @@ To make the agent durable, you add:
 3. **Resilient tool execution**: Wrap tool logic in durable steps using `restate_context().run_typed()`. The result is persisted and retried until it succeeds.
 
 </GlobalTab>
+<GlobalTab title="Pydantic AI">
+
+To implement a durable agent, you use the Restate SDK in combination with [Pydantic AI](https://ai.pydantic.dev/).
+
+Here's a weather agent that looks up the weather for a city:
+
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/template/agent.py"} 
+import restate
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext
+from restate.ext.pydantic import RestateAgent, restate_context
+
+
+class WeatherPrompt(BaseModel):
+    message: str = "What is the weather in San Francisco?"
+
+# AGENT
+weather_agent = Agent(
+    "openai:gpt-4o-mini",
+    system_prompt="You are a helpful agent that provides weather updates.",
+)
+
+@weather_agent.tool()
+async def get_weather(_run_ctx: RunContext[None], city: str) -> dict:
+    """Get the current weather for a given city."""
+
+    # Do durable steps using the Restate context
+    async def call_weather_api(city: str) -> dict:
+        return {"temperature": 23, "description": "Sunny and warm."}
+
+    return await restate_context().run_typed(
+        f"Get weather {city}", call_weather_api, city=city
+    )
+
+# AGENT SERVICE
+restate_agent = RestateAgent(weather_agent)
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    result = await restate_agent.run(req.message)
+    return result.output
+```
+
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/template/agent.py"}/>
+
+You define your agent and tools as you normally would with Pydantic AI.
+
+The main difference is the use of the **Restate Context** at key points:
+1. **Restate service handler**: The agent runs inside a Restate service handler, giving it a durable execution context. Restate exposes the handler as an HTTP endpoint you can call via `curl`, the Restate UI, or any HTTP client.
+2. **Persisting LLM responses**: Wrap your agent with `RestateAgent` so every LLM response is saved in the Restate Server and replayed during recovery. The `RestateAgent` is provided via the Pydantic AI extensions in the Restate SDK.
+3. **Resilient tool execution**: Use `restate_context().run_typed()` inside tools to make steps durable. The result is persisted and retried until it succeeds.
+
+</GlobalTab>
 <GlobalTab title="Restate TS">
 
 You can use the Restate SDK directly with any LLM client library. You manage the agentic loop yourself: call the LLM, check for tool calls, execute them, and loop until the LLM returns a final answer. Every LLM call and tool execution is wrapped in `ctx.run()` for durability.
@@ -442,7 +498,7 @@ This approach works with any LLM client (OpenAI, Anthropic, Cohere, local models
 
 ## Observing your agent
 
-The Restate UI shows the step-by-step execution trace of your agent, with detailed traces of every LLM call, tool execution, and state change:
+The Restate UI (`http://localhost:9070`) shows the step-by-step execution trace of your agent, with detailed traces of every LLM call, tool execution, and state change:
 
 <GlobalTabs className={"hidden-tabs"}>
     <GlobalTab title="Vercel AI">
@@ -458,6 +514,11 @@ The Restate UI shows the step-by-step execution trace of your agent, with detail
     <GlobalTab title="Google ADK">
         <Frame>
             <img src="/img/tour/agents/adk/weather-agent.png" alt="Agent execution trace in Restate UI" />
+        </Frame>
+    </GlobalTab>
+    <GlobalTab title="Pydantic AI">
+        <Frame>
+            <img src="/img/tour/agents/pydantic/weather-agent.png" alt="Agent execution trace in Restate UI" />
         </Frame>
     </GlobalTab>
     <GlobalTab title="Restate TS">
