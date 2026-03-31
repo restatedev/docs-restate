@@ -1,0 +1,109 @@
+---
+title: "FAQ"
+sidebarTitle: "FAQ"
+description: "Frequently asked questions about Restate Cloud BYOC architecture, security, and operations."
+---
+
+## General
+
+<Accordion title="Does Restate have access to my AWS/Azure credentials?">
+  No. Restate never receives your cloud provider credentials. The deployment agent operates using an IAM role (AWS) or managed identity (Azure) within your account that you provision. Restate's control plane authenticates to your Kubernetes cluster using bearer tokens with limited RBAC permissions.
+</Accordion>
+
+<Accordion title="Can I run BYOC in an air-gapped environment?">
+  Not with the standard deployment model. The deployment agent requires outbound internet access to poll for jobs, and Restate's control plane requires access to your Kubernetes API. For environments with strict egress requirements, contact Restate to discuss private connectivity options (AWS PrivateLink, Azure Private Link).
+</Accordion>
+
+<Accordion title="What happens if I revoke Restate's access?">
+  Your Restate environments continue running — they are self-contained workloads. However, you will lose the ability to manage environments (create, update, delete, scale) through the Restate Cloud console. You can restore management by re-granting access.
+</Accordion>
+
+<Accordion title="What cloud providers and regions are supported?">
+  AWS and Azure are generally available. GCP is coming soon. Regions are deployed on demand based on customer requirements — the infrastructure can be deployed in any region supported by EKS (AWS) or AKS (Azure).
+</Accordion>
+
+<Accordion title="Can I bring my own Kubernetes cluster?">
+  Not currently. Restate's ability to offer SLAs on availability and patching relies on having complete control over the infrastructure configuration. An enterprise distribution for self-managed Kubernetes may come in the future.
+</Accordion>
+
+## Security
+
+<Accordion title="How do you prevent lateral movement if the control plane is compromised?">
+  Multiple layers of defense:
+
+  1. Kubernetes RBAC limits the control plane to RestateCluster CRD operations and namespace-scoped resources
+  2. Network policies prevent pods from communicating outside their namespace
+  3. No SSH access to nodes — all management is via the Kubernetes API
+  4. Pod security contexts enforce non-root execution and read-only filesystems
+  5. You retain full audit logs of all operations
+</Accordion>
+
+<Accordion title="How are secrets managed?">
+  Signing keys for request authentication are generated in-cluster and stored as Kubernetes Secrets within the environment's namespace. They never leave your cluster. For your own application secrets, use your existing secrets management solution (AWS Secrets Manager, Azure Key Vault, HashiCorp Vault, etc.).
+</Accordion>
+
+<Accordion title="What data does Restate collect from my environments?">
+  Only operational metadata required for management:
+
+  - Pod health status and resource utilization metrics
+  - Environment configuration (non-sensitive)
+  - Cluster-level metrics for monitoring and alerting
+
+  Restate does **not** collect: application payloads, invocation data, stored state, customer secrets, or application logs.
+</Accordion>
+
+<Accordion title="Can I use my own container registry?">
+  Yes. You can mirror Restate images to your private registry (ECR, ACR, Artifactory) and configure the deployment to pull from there. This enables vulnerability scanning and policy enforcement through your existing container security tooling.
+</Accordion>
+
+<Accordion title="Do you have SOC 2 certification?">
+  Restate is SOC 2 Type I certified, with a Type II audit underway.
+</Accordion>
+
+## Operations
+
+<Accordion title="What uptime can be achieved?">
+  The Restate control plane (management API) has a 99.9% uptime SLA. Customer workload availability depends on the deployment tier:
+
+  - **Single-node**: 99.9% (rolling updates require brief restart)
+  - **Multi-AZ HA**: 99.99% (survives single zone failure, zero-downtime updates)
+</Accordion>
+
+<Accordion title="How are Kubernetes version upgrades handled?">
+  Kubernetes upgrades are coordinated with you:
+
+  1. Restate notifies you 30 days before your cluster's Kubernetes version reaches end-of-life
+  2. Upgrades are scheduled during your preferred maintenance window
+  3. Control plane upgrades first, then rolling node upgrades
+  4. A rollback plan is documented before each upgrade
+</Accordion>
+
+<Accordion title="What monitoring is included?">
+  Operational metrics (containing no customer data) are sent to a metrics service managed by Restate, enabling proactive monitoring and alerting on cluster health.
+
+  Logs from Restate environments and other cluster components are stored inside the cluster. Environment logs are accessible to authenticated customers through the Restate Cloud console.
+</Accordion>
+
+## Disaster recovery
+
+<Accordion title="How is data backed up?">
+  Multi-AZ configurations use:
+
+  - Synchronous replication across nodes (replication factor configurable per environment)
+  - Periodic persistent volume snapshots
+  - Periodic snapshots to cloud object storage (S3, GCS, or Azure Blob)
+
+  Single-node configurations rely on volume snapshots to cloud object storage.
+</Accordion>
+
+<Accordion title="What is the RTO/RPO for disaster recovery?">
+  | Scenario | RTO | RPO |
+  | :--- | :--- | :--- |
+  | Pod failure (HA) | < 60 seconds | 0 (synchronous replication) |
+  | Zone failure (HA) | < 60 minutes | 0 (synchronous replication) |
+  | Full cluster loss | 1-4 hours | Last object store snapshot (configurable) |
+</Accordion>
+
+<Accordion title="Can I replicate across regions?">
+  Cross-region replication is not currently supported in BYOC. For multi-region requirements, deploy separate environments in each region with application-level coordination.
+</Accordion>
