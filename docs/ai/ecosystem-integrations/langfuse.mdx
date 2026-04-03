@@ -25,6 +25,7 @@ Select your Agent SDK:
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
 
 <GlobalTabs className={"hidden-tabs"}>
@@ -260,6 +261,83 @@ Send a request:
 ```bash
 curl localhost:8080/InsuranceClaimAgent/run \
   --json '{"text": "Customer ID: cus_123 - Hospital bill for broken leg treatment at General Hospital for 3000 euro on 24/04/26"}'
+```
+
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="Restate Py">
+
+Initialize the Langfuse client and configure LiteLLM with `RestateTracerProvider` to correlate AI spans with Restate's execution journal:
+
+```python __main__.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/langfuse-other-sdks/python-restate-only/examples/langfuse/__main__.py"}
+import hypercorn
+import asyncio
+import restate
+import litellm
+
+from langfuse import get_client
+from opentelemetry import trace as trace_api
+from restate.ext.tracing import RestateTracerProvider
+from litellm.integrations.langfuse.langfuse_otel import LangfuseOtelLogger
+
+from agent import agent_service
+
+# Initialize Langfuse (sets up the global OTEL tracer provider + exporter)
+langfuse = get_client()
+
+# Create Restate-aware Langfuse OTEL logger for LiteLLM
+litellm.callbacks = [LangfuseOtelLogger(tracer_provider=RestateTracerProvider(trace_api.get_tracer_provider()))]
+
+
+if __name__ == "__main__":
+    app = restate.app(services=[agent_service])
+
+    conf = hypercorn.Config()
+    conf.bind = ["0.0.0.0:9080"]
+    asyncio.run(hypercorn.asyncio.serve(app, conf))
+```
+
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/langfuse-other-sdks/python-restate-only/examples/langfuse"}/>
+
+<Accordion title="Run the example" icon="laptop">
+
+**Prerequisites**: [Langfuse account and API key](https://langfuse.com/), [OpenAI API key](https://platform.openai.com/api-keys), [Restate installed](/installation).
+
+Get the example:
+```bash
+restate example python-restate-only-examples && cd python-restate-only-examples/langfuse
+```
+
+Add your API keys to an `.env` file:
+```bash
+echo 'LANGFUSE_PUBLIC_KEY=pk-lf-...' > .env
+echo 'LANGFUSE_SECRET_KEY=sk-lf-...' >> .env
+echo 'LANGFUSE_HOST=https://cloud.langfuse.com' >> .env
+echo 'OPENAI_API_KEY=sk-proj-...' >> .env
+```
+
+Start the agent service:
+```bash
+uv run --env-file .env .
+```
+
+Start Restate with Langfuse tracing:
+```bash
+source .env
+export RESTATE_TRACING_HEADERS__AUTHORIZATION="Basic $(echo -n "${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}" | base64)"
+restate-server --tracing-endpoint otlp+https://cloud.langfuse.com/api/public/otel/v1/traces
+```
+
+Register the service:
+```bash
+restate deployments add localhost:9080
+```
+
+Send a request:
+```bash
+curl localhost:8080/agent/run \
+  --json '{"message": "What is the weather in San Francisco?"}'
 ```
 
 </Accordion>
