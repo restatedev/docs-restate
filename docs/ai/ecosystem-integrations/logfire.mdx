@@ -1,0 +1,93 @@
+---
+title: "Pydantic Logfire"
+sidebarTitle: "Pydantic Logfire"
+icon: "magnifying-glass"
+description: "Trace and monitor your Restate Pydantic AI agents with Logfire. Get full visibility into LLM calls, tool executions, and workflow steps."
+---
+
+import { GitHubLink } from '/snippets/blocks/github-link.mdx';
+
+Combine Restate and [Pydantic Logfire](https://pydantic.dev/logfire) to get full observability into your Pydantic AI agent executions.
+Logfire traces every LLM call, tool invocation, token usage, and cost.
+Restate traces every durable step, so you see agentic steps alongside regular workflow steps in a single trace.
+
+You don't need to change your agent code. You only add the Logfire instrumentation to your entry point.
+
+<Card title="Logfire Documentation" icon="link" href="https://logfire.pydantic.dev/docs/">
+  Learn more about Logfire's observability and Pydantic AI integration.
+</Card>
+
+## Instrumentation setup
+
+Initialize Logfire and instrument Pydantic AI with `RestateTracerProvider` to correlate AI spans with Restate's execution journal:
+
+```python __main__.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/examples/logfire/__main__.py#here"} 
+import logfire
+from opentelemetry import trace as trace_api
+from pydantic_ai.models.instrumented import InstrumentationSettings
+from pydantic_ai import Agent
+from restate.ext.tracing import RestateTracerProvider
+from agent import claim_service
+
+logfire.configure(service_name=claim_service.name)
+logfire.instrument_pydantic_ai()
+
+# Instrument Pydantic AI with Restate-aware tracing
+Agent.instrument_all(
+    InstrumentationSettings(
+        tracer_provider=RestateTracerProvider(trace_api.get_tracer_provider())
+    )
+)
+```
+
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/examples/logfire"}/>
+
+<Accordion title="Run the example" icon="laptop">
+
+**Prerequisites**: [Logfire account and token](https://logfire.pydantic.dev/), [OpenAI API key](https://platform.openai.com/api-keys), [Restate installed](/installation).
+
+Get the example:
+```bash
+restate example python-pydantic-ai-examples && cd python-pydantic-ai-examples/logfire
+```
+
+Add your API keys to an `.env` file:
+```bash
+echo 'LOGFIRE_WRITE_TOKEN=your-logfire-token' > .env
+echo 'OPENAI_API_KEY=sk-proj-...' >> .env
+```
+
+Start the agent service:
+```bash
+uv run --env-file .env .
+```
+
+Start Restate:
+```bash
+# Export LogFire write token (=! API key)
+source .env
+export RESTATE_TRACING_HEADERS__AUTHORIZATION="Bearer $LOGFIRE_WRITE_TOKEN"
+
+restate-server --tracing-endpoint otlp+https://logfire-eu.pydantic.dev/v1/traces
+```
+Or the US equivalent tracing endpoint.
+
+Go to the Restate UI at `http://localhost:9070`, register the service at `http://localhost:9080`, click on the handler to go to the playground, and send the default request.
+
+</Accordion>
+
+
+## What you see in Logfire
+
+Once you send a request, you can inspect the trace in Logfire. You see the agentic steps (LLM calls, tool invocations) alongside regular workflow steps (e.g. currency conversion, reimbursement), with inputs, outputs, model configuration, and token usage for each LLM call.
+
+Restate manages the execution, starts the parent span, and exports the full journal as OpenTelemetry traces. Pydantic AI attaches AI-specific spans and metadata under Restate's parent span.
+
+<Frame>
+    <img src="/img/ai/ecosystem-integrations/logfire.png" alt="Logfire trace" />
+</Frame>
+
+<Info>
+    Restate's Tracer Provider flattens the Logfire spans to make them appear consistently structured with the Restate spans in the UI.
+    We are working on a next iteration of the integration which will respect the Logfire span nesting and puts the Restate spans at the right depths inside them.
+</Info>
