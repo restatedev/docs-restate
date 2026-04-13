@@ -1,0 +1,47 @@
+name: Refresh changelog
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Regenerate docs/changelog.mdx from GitHub releases
+        run: node scripts/generate-changelog.js
+        env:
+          # Built-in token has read access to public restatedev repos — plenty
+          # for listing releases and avoids the 60/hr unauthenticated limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Always re-fetch in CI; the cache is a local-dev convenience.
+          CHANGELOG_CACHE_TTL_SECONDS: "0"
+
+      - name: Open or update changelog refresh PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: refresh changelog from GitHub releases"
+          title: "chore: refresh changelog"
+          body: |
+            Automated changelog refresh from GitHub releases across the
+            restatedev org. Review the rendered `docs/changelog.mdx` and merge
+            when the output looks right.
+          branch: chore/changelog-refresh
+          delete-branch: true
+          add-paths: docs/changelog.mdx
+          # requested" email on PR open. You can also list teammates here.
+          reviewers: gvdongen
+          labels: |
+            automated
+            changelog

@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const chokidar = require("chokidar");
 const { generateGuidesOverview } = require("./generate-guides-overview");
+const { generateChangelog } = require("./generate-changelog");
 
 const MDX_DIR = path.resolve("./docs"); // Folder with your .mdx files
 const SNIPPET_DIR = path.resolve("./snippets"); // Folder with code to load
@@ -408,6 +409,12 @@ function startWatcher() {
 // Generate guides overview on startup
 console.log("🏗️ Generating guides overview on startup...");
 generateGuidesOverview();
+
+// Generate changelog from GitHub releases on startup.
+// Runs async in the background; failures fall back to the existing changelog.mdx if any.
+generateChangelog().catch((e) => {
+    console.warn(`⚠️ Changelog generation failed: ${e.message}. Using existing changelog.mdx if present.`);
+});
 
 updateAllMdxFiles();
 // startWatcher();
