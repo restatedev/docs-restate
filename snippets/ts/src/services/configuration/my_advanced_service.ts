@@ -1,5 +1,4 @@
 import * as restate from "@restatedev/restate-sdk";
-import type { Duration } from "@restatedev/restate-sdk-core";
 
 // <start_options>
 // Add service options to the service definition
