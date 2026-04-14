@@ -28,6 +28,39 @@ jobs:
           # Always re-fetch in CI; the cache is a local-dev convenience.
           CHANGELOG_CACHE_TTL_SECONDS: "0"
 
+      - name: Detect per-file changelog changes
+        id: changelog_diff
+        run: |
+          CHANGED_FILES=""
+          for f in docs/changelog/*.mdx; do
+            [ ! -f "$f" ] && continue
+            BASENAME="$(basename "$f" .mdx)"
+            DIFF="$(git diff --no-color -- "$f" || true)"
+            IS_NEW=""
+            if git status --porcelain -- "$f" | grep -q '^??'; then
+              IS_NEW="true"
+            fi
+            if [ -n "$DIFF" ] || [ -n "$IS_NEW" ]; then
+              CHANGED_FILES="${CHANGED_FILES} ${BASENAME}"
+              if [ -n "$DIFF" ]; then
+                echo "$DIFF" > "/tmp/changelog-diff-${BASENAME}.txt"
+              else
+                {
+                  echo "--- /dev/null"
+                  echo "+++ b/$f"
+                  sed 's/^/+/' "$f"
+                } > "/tmp/changelog-diff-${BASENAME}.txt"
+              fi
+            fi
+          done
+          CHANGED_FILES="$(echo "$CHANGED_FILES" | xargs)"
+          echo "changed_files=${CHANGED_FILES}" >> "$GITHUB_OUTPUT"
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changelog changes detected."
+          else
+            echo "Changed changelog files: ${CHANGED_FILES}"
+          fi
+
       - name: Open or update changelog refresh PR
         uses: peter-evans/create-pull-request@v6
         with:
@@ -40,8 +73,72 @@ jobs:
           branch: chore/changelog-refresh
           delete-branch: true
           add-paths: docs/changelog
-          # requested" email on PR open. You can also list teammates here.
           reviewers: gvdongen
           labels: |
             automated
             changelog
+
+      - name: Trigger Mintlify agent per SDK
+        if: steps.changelog_diff.outputs.changed_files != ''
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          MINTLIFY_API_KEY: ${{ secrets.MINTLIFY_API_KEY }}
+          MINTLIFY_PROJECT_ID: ${{ secrets.MINTLIFY_PROJECT_ID }}
+        run: |
+          sdk_label() {
+            case "$1" in
+              server)           echo "Restate Server" ;;
+              typescript-sdk)   echo "TypeScript SDK" ;;
+              python-sdk)       echo "Python SDK" ;;
+              java-kotlin-sdk)  echo "Java/Kotlin SDK" ;;
+              go-sdk)           echo "Go SDK" ;;
+              rust-sdk)         echo "Rust SDK" ;;
+              operator)         echo "Restate Operator tools" ;;
+              *)                echo "$1" ;;
+            esac
+          }
+
+          for SDK in ${{ steps.changelog_diff.outputs.changed_files }}; do
+            LABEL="$(sdk_label "$SDK")"
+            DIFF_CONTENT="$(head -c 60000 "/tmp/changelog-diff-${SDK}.txt")"
+
+            PROMPT="$(cat <<PROMPT_EOF
+          Review the changelog diff below for the ${LABEL}. It shows new release entries from GitHub releases in the restatedev org.
+
+          Identify any new features, APIs, configuration options, CLI flags, or behavioral changes that require documentation updates. For each change:
+
+          1. Dig into the linked PRs and GitHub release pages from the release notes to fully understand the change, its motivation, and usage.
+          2. Draft or update documentation pages in the /docs directory that explain what the feature does, when to use it, and how to configure it.
+          3. Include code examples where relevant. All code snippets MUST be placed in the /snippets directory organized by language (ts, java, kotlin, python, go, rust) and referenced from MDX docs using the CODE_LOAD syntax. Use <start_tag>/<end_tag> markers in snippet files for section extraction. See CLAUDE.md for full CODE_LOAD details.
+          4. Create a PR with the updated documentation.
+
+          Success criteria: After reading any new or updated documentation, users understand what the feature is, whether it applies to their use case, and how to use it.
+
+          Important:
+          - Only document changes that affect end users. Skip internal refactors or dependency updates.
+          - Match the style and structure of existing docs pages.
+          - If no user-facing changes were introduced, do nothing.
+          - Do not include private repository file paths, directory structures, code snippets, or any other internal implementation details in PR titles, descriptions, or commit messages.
+          - Write a quick summary of the ${LABEL} features that shipped in the PR description.
+          PROMPT_EOF
+            )"
+
+            jq -n --arg prompt "$PROMPT" --arg diff "$DIFF_CONTENT" \
+              '{"prompt": ($prompt + "\n\nChangelog diff:\n\n```diff\n" + $diff + "\n```")}' \
+              > /tmp/mintlify-payload.json
+
+            HTTP_STATUS=$(curl -sS -o /tmp/mintlify-response.json -w "%{http_code}" \
+              -X POST "https://api.mintlify.com/v2/agent/${MINTLIFY_PROJECT_ID}/job" \
+              -H "Authorization: Bearer ${MINTLIFY_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d @/tmp/mintlify-payload.json)
+
+            echo "${LABEL}: Mintlify agent response (HTTP ${HTTP_STATUS}):"
+            cat /tmp/mintlify-response.json
+            echo ""
+
+            if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+              echo "::warning::Mintlify agent API returned HTTP ${HTTP_STATUS} for ${LABEL}"
+            fi
+          done
