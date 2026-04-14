@@ -1,0 +1,135 @@
+---
+title: "Observability"
+description: "Intercept handler execution for tracing, logging, and metrics."
+icon: "chart-line"
+---
+
+The TypeScript SDK provides a **hooks system** that lets you intercept handler execution and `ctx.run()` closures. Use hooks to integrate with observability libraries, propagate trace context, emit custom metrics, or log invocation lifecycle events.
+
+## Hooks
+
+A hook provider is a function called on every invocation attempt. It receives the current request and returns an object with an optional `interceptor`.
+
+An interceptor wraps handler execution and `ctx.run()` closures using normal `try/catch/finally` flow — you call `next()` to hand control to the handler, then handle the outcome.
+
+```typescript {"CODE_LOAD::ts/src/develop/observability.ts#log_hook"}
+const logHook: HooksProvider = (ctx) => {
+  const { service, handler } = ctx.request.target;
+  const tag = `${service}/${handler} [${ctx.request.id}]`;
+
+  return {
+    interceptor: {
+      handler: async (next) => {
+        console.log(`→ ${tag} attempt started`);
+        try {
+          await next();
+          console.log(`✓ ${tag}`);
+        } catch (e) {
+          console.log(`✗ ${tag}: ${e}`);
+          throw e;
+        }
+      },
+      run: async (name, next) => {
+        try {
+          await next();
+          console.log(`  ✓ run "${name}"`);
+        } catch (e) {
+          console.log(`  ✗ run "${name}": ${e}`);
+          throw e;
+        }
+      },
+    },
+  };
+};
+```
+
+Attach hooks to a service, virtual object, or workflow using the `hooks` option:
+
+```typescript {"CODE_LOAD::ts/src/develop/observability.ts#hook_service"}
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: Context, name: string) => {
+      return `Hello, ${name}!`;
+    },
+  },
+  options: {
+    hooks: [logHook],
+  },
+});
+```
+
+You can pass multiple hooks in the array. They are composed in order — each wraps the next.
+
+### How interceptors behave
+
+- **`handler` interceptor** — fires on every attempt. `next()` must be called exactly once.
+- **`run` interceptor** — fires only when the `ctx.run()` closure actually executes. If the result is already in the journal (replay), the closure and the interceptor are both skipped.
+- **Errors** — throwing a [`TerminalError`](/develop/ts/error-handling) fails the invocation immediately. Any other error causes Restate to retry. If the attempt is suspended, `next()` rejects with an internal error; rethrow it as-is to let the SDK handle it.
+- **Return values** — interceptors cannot alter the handler's return value. They can transform errors by catching and rethrowing a different error.
+
+## OpenTelemetry integration
+
+The `@restatedev/restate-sdk-opentelemetry` package provides a ready-made hook that integrates Restate invocations with OpenTelemetry tracing.
+
+### Setup
+
+Install the package alongside the OpenTelemetry API:
+
+```bash
+npm install @restatedev/restate-sdk-opentelemetry @opentelemetry/api
+```
+
+### Usage
+
+Pass `openTelemetryHook` in the `hooks` array of your service options:
+
+```typescript {"CODE_LOAD::ts/src/develop/observability.ts#otel_hook"}
+import { openTelemetryHook } from "@restatedev/restate-sdk-opentelemetry";
+import { trace } from "@opentelemetry/api";
+
+const greeter = restate.service({
+  name: "Greeter",
+  options: {
+    hooks: [openTelemetryHook({ tracer: trace.getTracer("greeter-service") })],
+  },
+  handlers: {
+    greet: async (ctx: Context, name: string) => {
+      // Span events added here are automatically associated with this invocation attempt
+      trace.getActiveSpan()?.addEvent("my.event", { name });
+
+      // ctx.run() closures get their own child span automatically
+      const greeting = await ctx.run("compute-greet", async () => {
+        return `Hello ${name}!`;
+      });
+
+      return greeting;
+    },
+  },
+});
+```
+
+### What the hook does
+
+For every invocation attempt, the hook:
+1. Extracts W3C trace context from the Restate attempt headers
+2. Creates an **attempt span** named `attempt <service>/<handler>` as a child of the extracted parent
+3. Attaches `restate.invocation.id` and `restate.invocation.target` as span attributes
+4. Makes the span the active span for the duration of the attempt, so `trace.getActiveSpan()` works inside handlers
+5. Ends the span when the attempt completes (or is suspended)
+
+When `runSpans` is enabled (the default), it also creates a child span for each `ctx.run()` closure that actually executes, with a `restate.run.name` attribute.
+
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tracer` | `Tracer \| (ctx) => Tracer` | required | Tracer used to create spans. Can be a fixed instance or a function resolved per request. |
+| `runSpans` | `boolean` | `true` | Create child spans for `ctx.run()` closures that execute. |
+| `suppressSpanEventsDuringReplay` | `boolean` | `true` | Suppress span events added during replay. Attributes are still recorded. |
+| `additionalAttemptAttributes` | `Attributes \| (ctx) => Attributes` | — | Extra attributes to attach to attempt spans. |
+| `additionalRunAttributes` | `Attributes \| (ctx, name) => Attributes` | — | Extra attributes to attach to `ctx.run()` spans. |
+
+<Tip>
+  For a full working example with Docker Compose and a Jaeger backend, see the [OpenTelemetry integration example](https://github.com/restatedev/examples/tree/main/typescript/integrations/opentelemetry).
+</Tip>

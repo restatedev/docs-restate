@@ -73,3 +73,23 @@ async function tryOut(ctx: restate.ObjectContext) {
   });
   // <end_actions>
 }
+
+// <start_content_type_if_empty>
+// Use setOutputContentTypeIfEmpty when your output serializer may produce
+// an empty byte array that is still a valid value (e.g., an empty Protobuf message).
+// Without this option, Restate does not send a Content-Type header on empty responses.
+const protobufService = restate.service({
+  name: "ProtobufService",
+  handlers: {
+    myHandler: restate.handlers.handler(
+      {
+        output: restate.serde.binary,
+        setOutputContentTypeIfEmpty: true,
+      },
+      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
+        return new Uint8Array(); // empty Protobuf message — Content-Type is still sent
+      }
+    ),
+  },
+});
+// <end_content_type_if_empty>

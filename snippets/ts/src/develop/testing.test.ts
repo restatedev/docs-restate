@@ -1,6 +1,7 @@
 import { RestateTestEnvironment } from "@restatedev/restate-sdk-testcontainers";
 import { router } from "./state.js";
 import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 
 // <start_setup>
@@ -61,3 +62,25 @@ describe("ExampleObject", () => {
   });
   // <end_typedstate>
 });
+
+// <start_always_replay>
+describe("Testing edge cases", () => {
+  let restateTestEnvironment: RestateTestEnvironment;
+
+  beforeAll(async () => {
+    restateTestEnvironment = await RestateTestEnvironment.start({
+      services: [router],
+      // Force replay after every suspension point — surfaces non-determinism bugs
+      alwaysReplay: true,
+      // Surface failures immediately instead of waiting through retry backoff
+      disableRetries: true,
+    });
+  }, 20_000);
+
+  afterAll(async () => {
+    if (restateTestEnvironment !== undefined) {
+      await restateTestEnvironment.stop();
+    }
+  });
+});
+// <end_always_replay>

@@ -80,3 +80,32 @@ it("Can operate on typed state", async () => {
   await state.set("count", 2);
 });
 ```
+
+## Testing edge cases
+
+`RestateTestEnvironment.start` accepts two options that help surface hard-to-find bugs:
+
+- **`alwaysReplay`** — forces the Restate server to replay after every suspension point. This surfaces non-determinism bugs where your handler produces different results on retry (for example, using `Math.random()` outside `ctx.run`).
+- **`disableRetries`** — disables retry backoff in the Restate invoker. Failures surface immediately instead of hanging through exponential backoff, making test runs faster.
+
+```typescript {"CODE_LOAD::ts/src/develop/testing.test.ts#always_replay"}
+describe("Testing edge cases", () => {
+  let restateTestEnvironment: RestateTestEnvironment;
+
+  beforeAll(async () => {
+    restateTestEnvironment = await RestateTestEnvironment.start({
+      services: [router],
+      // Force replay after every suspension point — surfaces non-determinism bugs
+      alwaysReplay: true,
+      // Surface failures immediately instead of waiting through retry backoff
+      disableRetries: true,
+    });
+  }, 20_000);
+
+  afterAll(async () => {
+    if (restateTestEnvironment !== undefined) {
+      await restateTestEnvironment.stop();
+    }
+  });
+});
+```

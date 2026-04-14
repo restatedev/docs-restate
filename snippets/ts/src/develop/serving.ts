@@ -30,6 +30,16 @@ const httpServer = http2.createServer(http2Handler);
 httpServer.listen();
 // <end_custom_endpoint>
 
+// <start_http1_endpoint>
+import * as http from "node:http";
+const restateHandler = restate.createEndpointHandler({
+  services: [myService, myVirtualObject, myWorkflow],
+});
+// The handler auto-detects HTTP version per request (HTTP/1.1 or HTTP/2)
+const http1Server = http.createServer(restateHandler);
+http1Server.listen(9080);
+// <end_http1_endpoint>
+
 // <start_identity>
 restate.serve({
   services: [myService],
