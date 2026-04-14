@@ -96,3 +96,32 @@ const allResults = await RestatePromise.allSettled([
   externalCallPromise2,
 ]);
 ```
+
+## Transforming results with `.map()`
+
+Use `.map()` to transform a `RestatePromise` result before awaiting it. The mapper function runs **exactly once**, only when the promise is first awaited:
+
+```typescript
+// Transform the result of a service call
+const upperCaseResult = ctx
+  .serviceClient(myService)
+  .myHandler("Hi")
+  .map((result) => result.toUpperCase());
+
+// The mapper runs once, when the promise is first awaited
+const result = await upperCaseResult;
+```
+
+You can also use `.map()` with already-resolved promises (created via `RestatePromise.resolve()` or `RestatePromise.reject()`):
+
+```typescript
+const resolved = RestatePromise.resolve("hello");
+const mapped = resolved.map((value) => value.toUpperCase());
+
+// Works correctly: mapper runs exactly once when awaited
+const result = await mapped; // "HELLO"
+```
+
+<Warning>
+The mapper closure must be a pure, side-effect-free transformation. Because Restate replays handler execution on retries and crashes, the mapper runs at the same point in the execution on every replay. Using `ctx` actions (like `ctx.run`, `ctx.sleep`) inside a `.map()` closure is not supported.
+</Warning>

@@ -128,3 +128,29 @@ await ctx.run("my-side-effect", () => new Uint8Array(), {
   serde: restate.serde.binary,
 });
 ```
+
+## Protobuf and empty output bodies
+
+By default, when a handler's serialized output is an empty byte array, Restate does not include a `Content-Type` header in the response. This is correct for JSON (where an empty body means no output), but not for Protobuf, where an empty byte array is a valid serialized message.
+
+To ensure the `Content-Type` declared by the output `Serde` is always set — even for empty bodies — use the `setOutputContentTypeIfEmpty` handler option:
+
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myProtobufHandler: restate.handlers.handler(
+      {
+        output: myProtobufSerde,
+        // Set Content-Type even when the serialized output is empty
+        setOutputContentTypeIfEmpty: true,
+      },
+      async (ctx: restate.Context, req: MyRequest): Promise<MyResponse> => {
+        return MyResponse.create({});
+      }
+    ),
+  },
+});
+```
+
+This option defaults to `false`. Set it to `true` when using serialization formats (such as Protobuf) where an empty output body is semantically meaningful and the `Content-Type` header must always be present.
