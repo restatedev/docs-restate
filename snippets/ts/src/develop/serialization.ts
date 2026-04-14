@@ -26,6 +26,25 @@ const greeter = restate.service({
 });
 // <end_zod>
 
+// <start_default_serde>
+const myService2 = restate.service({
+  name: "MyService",
+  handlers: {
+    // This handler inherits the service-level default serde
+    myHandler: async (ctx: restate.Context, data: Uint8Array) => { /* ... */ },
+    // This handler overrides the serde at the handler level
+    myOtherHandler: restate.handlers.handler(
+      { serde: restate.serde.binary },
+      async (ctx: restate.Context, data: Uint8Array) => { /* ... */ }
+    ),
+  },
+  options: {
+    // Set the default serde for all handlers in this service
+    defaultSerde: restate.serde.binary,
+  },
+});
+// <end_default_serde>
+
 // <start_service_definition>
 const myService = restate.service({
   name: "MyService",

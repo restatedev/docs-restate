@@ -25,6 +25,12 @@ const service = restate.service({
       // Complete with error
       ctx.rejectAwakeable(id, "This cannot be reviewed.");
       // <end_reject>
+
+      // <start_reject_terminal_error>
+      import { TerminalError } from "@restatedev/restate-sdk";
+
+      ctx.rejectAwakeable(id, new TerminalError("Review rejected", { errorCode: 403 }));
+      // <end_reject_terminal_error>
     },
   },
 });

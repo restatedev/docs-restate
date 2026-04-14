@@ -60,4 +60,18 @@ describe("ExampleObject", () => {
     await state.set("count", 2);
   });
   // <end_typedstate>
+
+  // <start_container_options>
+  import {
+    RestateTestEnvironment,
+    RestateContainer,
+  } from "@restatedev/restate-sdk-testcontainers";
+
+  restateTestEnvironment = await RestateTestEnvironment.start(
+    { services: [router] },
+    new RestateContainer()
+      .withAlwaysReplay()    // Always replay invocations, even on first attempt
+      .withDisableRetries()  // Disable automatic retries on failure
+  );
+  // <end_container_options>
 });

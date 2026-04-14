@@ -94,6 +94,28 @@ const service = restate.service({
       // <start_time>
       const now = await ctx.date.now();
       // <end_time>
+
+      // <start_resolve_reject>
+      import { RestatePromise } from "@restatedev/restate-sdk";
+
+      // Already resolved with a value
+      const resolved = RestatePromise.resolve("immediate result");
+
+      // Already rejected with a terminal error
+      const rejected = RestatePromise.reject(new restate.TerminalError("Access denied", { errorCode: 403 }));
+
+      // Use in combinators just like any other RestatePromise
+      const result = await RestatePromise.any([resolved, ctx.sleep({ seconds: 5 })]);
+      // <end_resolve_reject>
+
+      // <start_map>
+      const upperCased = ctx
+        .serviceClient(myService)
+        .myHandler("hello")
+        .map((result) => result.toUpperCase());
+
+      const value = await upperCased;
+      // <end_map>
     },
   },
 });

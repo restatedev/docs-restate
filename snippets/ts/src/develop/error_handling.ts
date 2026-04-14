@@ -35,3 +35,23 @@ const greeter = restate.service({
   },
 });
 // <end_as_terminal>
+
+// <start_as_terminal_handler>
+const greeter2 = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      {
+        asTerminalError: (err) => {
+          if (err instanceof MyValidationError) {
+            return new restate.TerminalError(err.message, { errorCode: 400 });
+          }
+        },
+      },
+      async (ctx: restate.Context, name: string) => {
+        return `Hello ${name}`;
+      }
+    ),
+  },
+});
+// <end_as_terminal_handler>
