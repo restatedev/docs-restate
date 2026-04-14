@@ -37,9 +37,9 @@ You can catch terminal errors, and build your control flow around it.
 
 If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.
 
-You can do this using the `asTerminalError` option in your [service configuration](/services/configuration).
+You can do this using the `asTerminalError` option at the service or handler level.
 
-For example, to fail with `TerminalError` for each `MyValidationError`, do the following:
+For example, to fail with `TerminalError` for each `MyValidationError`, do the following at the service level:
 
 ```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#as_terminal"} 
 class MyValidationError extends Error {}
@@ -64,3 +64,27 @@ const greeter = restate.service({
   },
 });
 ```
+
+You can also set `asTerminalError` at the handler level to override the service-level mapping for a specific handler:
+
+```typescript
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: restate.handlers.handler(
+      {
+        asTerminalError: (err) => {
+          if (err instanceof MyValidationError) {
+            return new restate.TerminalError(err.message, { errorCode: 400 });
+          }
+        },
+      },
+      async (ctx: restate.Context, name: string) => {
+        return `Hello ${name}`;
+      }
+    ),
+  },
+});
+```
+
+Handler-level options take precedence over service-level options.

@@ -96,3 +96,36 @@ const allResults = await RestatePromise.allSettled([
   externalCallPromise2,
 ]);
 ```
+
+## Creating already-completed promises
+
+Use `RestatePromise.resolve` and `RestatePromise.reject` to create `RestatePromise` instances that are already completed.
+This is useful when you need to return a `RestatePromise` from a helper function but the result is already known:
+
+```typescript
+import { RestatePromise } from "@restatedev/restate-sdk";
+
+// Already resolved with a value
+const resolved = RestatePromise.resolve("immediate result");
+
+// Already rejected with a terminal error
+const rejected = RestatePromise.reject(new restate.TerminalError("Access denied", { errorCode: 403 }));
+
+// Use in combinators just like any other RestatePromise
+const result = await RestatePromise.any([resolved, ctx.sleep({ seconds: 5 })]);
+```
+
+## Transforming promise results with `.map()`
+
+Use `.map()` to transform the result of a `RestatePromise` without awaiting it immediately:
+
+```typescript
+const upperCased = ctx
+  .serviceClient(myService)
+  .myHandler("hello")
+  .map((result) => result.toUpperCase());
+
+const value = await upperCased;
+```
+
+The mapper runs **exactly once**, regardless of how many times you await the resulting promise.

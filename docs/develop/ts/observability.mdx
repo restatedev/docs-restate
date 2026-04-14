@@ -1,0 +1,122 @@
+---
+title: "Observability"
+description: "Instrument your handlers with hooks and OpenTelemetry tracing."
+icon: "chart-line"
+---
+
+The TypeScript SDK provides a hooks system that lets you intercept handler execution and `ctx.run()` closures.
+You can use hooks to integrate with observability libraries such as [OpenTelemetry](https://opentelemetry.io/).
+
+## Hooks
+
+A hook provider is a function that receives the [request context](https://restatedev.github.io/sdk-typescript/interfaces/_restatedev_restate-sdk.Request.html) and returns an interceptor object with optional `handler` and `run` callbacks.
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+
+const myHookProvider: restate.HooksProvider = (ctx) => ({
+  interceptor: {
+    handler: async (next) => {
+      console.log(`before ${ctx.request.target}`);
+      try {
+        await next();
+      } finally {
+        console.log(`after ${ctx.request.target}`);
+      }
+    },
+    run: async (name, next) => {
+      console.log(`  run "${name}" executing`);
+      await next();
+    },
+  },
+});
+```
+
+Attach hooks to a service, virtual object, or workflow using the `hooks` option:
+
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: { /* ... */ },
+  options: {
+    hooks: [myHookProvider],
+  },
+});
+```
+
+You can also set hooks at the endpoint level to apply them to all services:
+
+```typescript
+restate.serve({
+  services: [myService, myVirtualObject, myWorkflow],
+  options: {
+    hooks: [myHookProvider],
+  },
+});
+```
+
+### How hooks work
+
+- The `handler` interceptor wraps each handler invocation attempt. Call `next()` to pass control to the handler.
+- The `run` interceptor wraps each `ctx.run()` closure execution. The `name` argument is the name you gave the run step.
+- Hooks are invoked in order, outermost first.
+- Each hook runs per invocation attempt. On replay, hooks are not called because `ctx.run()` closures are not re-executed.
+
+## OpenTelemetry integration
+
+The `@restatedev/restate-sdk-opentelemetry` package provides a ready-made OpenTelemetry integration built on top of the hooks system.
+
+### Installation
+
+```bash
+npm install @restatedev/restate-sdk-opentelemetry
+```
+
+### Usage
+
+Pass an OpenTelemetry tracer to `openTelemetryHook` and add it to your service's hooks:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { openTelemetryHook } from "@restatedev/restate-sdk-opentelemetry";
+import { trace } from "@opentelemetry/api";
+
+const greeter = restate.service({
+  name: "Greeter",
+  options: {
+    hooks: [openTelemetryHook({ tracer: trace.getTracer("greeter-service") })],
+  },
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Add events to the active span
+      trace.getActiveSpan()?.addEvent("my.event", { name });
+
+      // ctx.run closures automatically get a child span
+      const greeting = await ctx.run("compute-greet", async () => {
+        return `Hello ${name}!`;
+      });
+
+      return greeting;
+    },
+  },
+});
+
+restate.serve({ services: [greeter] });
+```
+
+### What the OpenTelemetry hook does
+
+- **Propagates trace context** from the incoming Restate request headers into the active span.
+- **Creates a handler span** for each invocation attempt, with standard attributes:
+  - `restate.invocation.id`
+  - `restate.invocation.target`
+- **Creates a child span** for each `ctx.run()` closure, named after the run step name.
+
+<Info>
+    Restate's server-side tracing is configured separately.
+    See the [server tracing docs](/server/monitoring/tracing) to export OTLP traces from the Restate server.
+</Info>
+
+### Complete example
+
+For a full working example including OpenTelemetry setup (SDK initialization, exporter configuration, and Jaeger integration), see the [OpenTelemetry TypeScript example](https://github.com/restatedev/examples/tree/main/typescript/integrations/opentelemetry).
