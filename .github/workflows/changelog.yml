@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   refresh:
@@ -22,44 +23,65 @@ jobs:
       - name: Regenerate docs/changelog from GitHub releases
         run: node scripts/generate-changelog.js
         env:
-          # Built-in token has read access to public restatedev repos — plenty
-          # for listing releases and avoids the 60/hr unauthenticated limit.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Always re-fetch in CI; the cache is a local-dev convenience.
           CHANGELOG_CACHE_TTL_SECONDS: "0"
+          CHANGELOG_CHANGES_FILE: /tmp/changelog-changes.json
 
-      - name: Detect per-file changelog changes
-        id: changelog_diff
+      - name: Read changelog changes
+        id: changes
         run: |
-          CHANGED_FILES=""
-          for f in docs/changelog/*.mdx; do
-            [ ! -f "$f" ] && continue
-            BASENAME="$(basename "$f" .mdx)"
-            DIFF="$(git diff --no-color -- "$f" || true)"
-            IS_NEW=""
-            if git status --porcelain -- "$f" | grep -q '^??'; then
-              IS_NEW="true"
-            fi
-            if [ -n "$DIFF" ] || [ -n "$IS_NEW" ]; then
-              CHANGED_FILES="${CHANGED_FILES} ${BASENAME}"
-              if [ -n "$DIFF" ]; then
-                echo "$DIFF" > "/tmp/changelog-diff-${BASENAME}.txt"
-              else
-                {
-                  echo "--- /dev/null"
-                  echo "+++ b/$f"
-                  sed 's/^/+/' "$f"
-                } > "/tmp/changelog-diff-${BASENAME}.txt"
-              fi
-            fi
-          done
-          CHANGED_FILES="$(echo "$CHANGED_FILES" | xargs)"
-          echo "changed_files=${CHANGED_FILES}" >> "$GITHUB_OUTPUT"
-          if [ -z "$CHANGED_FILES" ]; then
+          if [ ! -f /tmp/changelog-changes.json ] || [ "$(jq length /tmp/changelog-changes.json)" -eq 0 ]; then
             echo "No changelog changes detected."
-          else
-            echo "Changed changelog files: ${CHANGED_FILES}"
+            echo "pages=" >> "$GITHUB_OUTPUT"
+            echo "has_sdk_updates=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          jq -r '.[].page' /tmp/changelog-changes.json | tr '\n' ' ' | { read -r p; echo "pages=${p}" >> "$GITHUB_OUTPUT"; }
+
+          # Extract per-SDK versions for the pre-release workflow
+          for key in server:restate_version typescript-sdk:ts_version python-sdk:python_version \
+                     java-kotlin-sdk:java_version go-sdk:go_version rust-sdk:rust_version; do
+            PAGE="${key%%:*}"
+            OUTPUT="${key##*:}"
+            VER=$(jq -r --arg p "$PAGE" '.[] | select(.page==$p) | .latestVersion // empty' /tmp/changelog-changes.json)
+            echo "${OUTPUT}=${VER}" >> "$GITHUB_OUTPUT"
+          done
+
+          # Check if any SDK version was found (operator has no pre-release input)
+          HAS=$(jq -r '[.[] | select(.page != "operator") | .latestVersion // empty | select(. != "")] | if length > 0 then "true" else "false" end' /tmp/changelog-changes.json)
+          echo "has_sdk_updates=${HAS}" >> "$GITHUB_OUTPUT"
+
+          echo "Changes detected:"
+          jq -r '.[] | "  \(.label) \(.latestVersion) — \(.latestReleaseUrl)"' /tmp/changelog-changes.json
+
+      - name: Trigger pre-release workflow
+        if: steps.changes.outputs.has_sdk_updates == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS=""
+          RESTATE_V="${{ steps.changes.outputs.restate_version }}"
+          TS_V="${{ steps.changes.outputs.ts_version }}"
+          PYTHON_V="${{ steps.changes.outputs.python_version }}"
+          JAVA_V="${{ steps.changes.outputs.java_version }}"
+          GO_V="${{ steps.changes.outputs.go_version }}"
+          RUST_V="${{ steps.changes.outputs.rust_version }}"
+
+          [ -n "$RESTATE_V" ] && ARGS="$ARGS -f restateVersion=$RESTATE_V"
+          [ -n "$TS_V" ] && ARGS="$ARGS -f sdkTypescriptVersion=$TS_V"
+          [ -n "$PYTHON_V" ] && ARGS="$ARGS -f sdkPythonVersion=$PYTHON_V"
+          [ -n "$JAVA_V" ] && ARGS="$ARGS -f sdkJavaVersion=$JAVA_V"
+          [ -n "$GO_V" ] && ARGS="$ARGS -f sdkGoVersion=$GO_V"
+          [ -n "$RUST_V" ] && ARGS="$ARGS -f sdkRustVersion=$RUST_V"
+
+          echo "Dispatching pre-release workflow with:${ARGS}"
+          gh workflow run pre-release.yml $ARGS
+
+          sleep 5
+          RUN_URL=$(gh run list --workflow pre-release.yml --limit 1 --json url --jq '.[0].url')
+          echo "Pre-release workflow run: ${RUN_URL}"
 
       - name: Open or update changelog refresh PR
         uses: peter-evans/create-pull-request@v6
@@ -79,39 +101,29 @@ jobs:
             changelog
 
       - name: Trigger Mintlify agent per SDK
-        if: steps.changelog_diff.outputs.changed_files != ''
+        if: steps.changes.outputs.pages != ''
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 30
         env:
           MINTLIFY_API_KEY: ${{ secrets.MINTLIFY_API_KEY }}
           MINTLIFY_PROJECT_ID: ${{ secrets.MINTLIFY_PROJECT_ID }}
         run: |
-          sdk_label() {
-            case "$1" in
-              server)           echo "Restate Server" ;;
-              typescript-sdk)   echo "TypeScript SDK" ;;
-              python-sdk)       echo "Python SDK" ;;
-              java-kotlin-sdk)  echo "Java/Kotlin SDK" ;;
-              go-sdk)           echo "Go SDK" ;;
-              rust-sdk)         echo "Rust SDK" ;;
-              operator)         echo "Restate Operator tools" ;;
-              *)                echo "$1" ;;
-            esac
-          }
+          # Phase 1: Create agent jobs for each changed SDK
+          jq -c '.[]' /tmp/changelog-changes.json | while IFS= read -r entry; do
+            LABEL=$(echo "$entry" | jq -r '.label')
+            VERSION=$(echo "$entry" | jq -r '.latestVersion')
+            RELEASE_URL=$(echo "$entry" | jq -r '.latestReleaseUrl')
 
-          for SDK in ${{ steps.changelog_diff.outputs.changed_files }}; do
-            LABEL="$(sdk_label "$SDK")"
-            DIFF_CONTENT="$(head -c 60000 "/tmp/changelog-diff-${SDK}.txt")"
+            PROMPT="The ${LABEL} version ${VERSION} was released. Review the release notes and update the documentation.
 
-            PROMPT="$(cat <<PROMPT_EOF
-          Review the changelog diff below for the ${LABEL}. It shows new release entries from GitHub releases in the restatedev org.
+          Release notes: ${RELEASE_URL}
 
-          Identify any new features, APIs, configuration options, CLI flags, or behavioral changes that require documentation updates. For each change:
-
-          1. Dig into the linked PRs and GitHub release pages from the release notes to fully understand the change, its motivation, and usage.
+          For each user-facing change in the release:
+          1. Dig into the linked PRs from the release notes to fully understand the change, its motivation, and usage.
           2. Draft or update documentation pages in the /docs directory that explain what the feature does, when to use it, and how to configure it.
           3. Include code examples where relevant. All code snippets MUST be placed in the /snippets directory organized by language (ts, java, kotlin, python, go, rust) and referenced from MDX docs using the CODE_LOAD syntax. Use <start_tag>/<end_tag> markers in snippet files for section extraction. See CLAUDE.md for full CODE_LOAD details.
           4. Create a PR with the updated documentation.
+          
 
           Success criteria: After reading any new or updated documentation, users understand what the feature is, whether it applies to their use case, and how to use it.
 
@@ -120,25 +132,55 @@ jobs:
           - Match the style and structure of existing docs pages.
           - If no user-facing changes were introduced, do nothing.
           - Do not include private repository file paths, directory structures, code snippets, or any other internal implementation details in PR titles, descriptions, or commit messages.
-          - Write a quick summary of the ${LABEL} features that shipped in the PR description.
-          PROMPT_EOF
-            )"
+          - Write a quick summary of the ${LABEL} features that shipped in the PR description."
 
-            jq -n --arg prompt "$PROMPT" --arg diff "$DIFF_CONTENT" \
-              '{"prompt": ($prompt + "\n\nChangelog diff:\n\n```diff\n" + $diff + "\n```")}' \
-              > /tmp/mintlify-payload.json
+            HTTP_STATUS=$(jq -n --arg prompt "$PROMPT" '{prompt: $prompt}' | \
+              curl -sS -o /tmp/mintlify-response.json -w "%{http_code}" \
+                -X POST "https://api.mintlify.com/v2/agent/${MINTLIFY_PROJECT_ID}/job" \
+                -H "Authorization: Bearer ${MINTLIFY_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d @-)
 
-            HTTP_STATUS=$(curl -sS -o /tmp/mintlify-response.json -w "%{http_code}" \
-              -X POST "https://api.mintlify.com/v2/agent/${MINTLIFY_PROJECT_ID}/job" \
-              -H "Authorization: Bearer ${MINTLIFY_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d @/tmp/mintlify-payload.json)
-
-            echo "${LABEL}: Mintlify agent response (HTTP ${HTTP_STATUS}):"
-            cat /tmp/mintlify-response.json
-            echo ""
-
-            if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
-              echo "::warning::Mintlify agent API returned HTTP ${HTTP_STATUS} for ${LABEL}"
+            JOB_ID=$(jq -r '.id' /tmp/mintlify-response.json)
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ] && \
+               [ -n "$JOB_ID" ] && [ "$JOB_ID" != "null" ]; then
+              echo "${LABEL}: Created agent job ${JOB_ID}"
+              echo "${JOB_ID}|${LABEL}" >> /tmp/mintlify-jobs.txt
+            else
+              echo "::warning::Failed to create agent job for ${LABEL} (HTTP ${HTTP_STATUS})"
             fi
+          done
+
+          # Phase 2: Poll all jobs until each completes or fails
+          [ ! -f /tmp/mintlify-jobs.txt ] && exit 0
+          echo "Polling $(wc -l < /tmp/mintlify-jobs.txt) agent job(s)..."
+
+          while [ -s /tmp/mintlify-jobs.txt ]; do
+            sleep 30
+            > /tmp/mintlify-pending.txt
+            while IFS='|' read -r JOB_ID LABEL; do
+              POLL_RESPONSE=$(curl -sS \
+                "https://api.mintlify.com/v2/agent/${MINTLIFY_PROJECT_ID}/job/${JOB_ID}" \
+                -H "Authorization: Bearer ${MINTLIFY_API_KEY}")
+
+              JOB_STATUS=$(echo "$POLL_RESPONSE" | jq -r '.status')
+
+              case "$JOB_STATUS" in
+                completed)
+                  PR_LINK=$(echo "$POLL_RESPONSE" | jq -r '.prLink // empty')
+                  if [ -n "$PR_LINK" ]; then
+                    echo "${LABEL}: PR created -- ${PR_LINK}"
+                  else
+                    echo "${LABEL}: Completed (no changes needed)"
+                  fi ;;
+                failed|archived)
+                  echo "::warning::${LABEL} agent job ${JOB_STATUS}" ;;
+                active)
+                  echo "${LABEL}: Still running..."
+                  echo "${JOB_ID}|${LABEL}" >> /tmp/mintlify-pending.txt ;;
+                *)
+                  echo "::warning::${LABEL} unexpected status: ${JOB_STATUS}" ;;
+              esac
+            done < /tmp/mintlify-jobs.txt
+            mv /tmp/mintlify-pending.txt /tmp/mintlify-jobs.txt
           done

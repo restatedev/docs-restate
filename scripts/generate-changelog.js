@@ -293,6 +293,14 @@ async function generateChangelog() {
         pages.push({ slug: page, title: tag });
     }
 
+    // Map page slugs to their primary repo (first REPOS entry for that page).
+    const primaryRepo = {};
+    for (const { repo, page } of REPOS) {
+        if (!primaryRepo[page]) primaryRepo[page] = repo;
+    }
+
+    const changes = [];
+
     for (const { slug, title } of pages) {
         const productEntries = entries.filter((e) => e.page === slug);
         const file = path.join(CHANGELOG_DIR, `${slug}.mdx`);
@@ -302,8 +310,32 @@ async function generateChangelog() {
             sidebarTitle: title,
             entries: productEntries,
         });
+
+        // Detect whether this page actually changed.
+        const existing = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+        const changed = content !== existing;
+
         fs.writeFileSync(file, content, "utf8");
-        console.log(`   ↳ ${productEntries.length} entries → ${file}`);
+        console.log(`   ↳ ${productEntries.length} entries → ${file}${changed ? " (changed)" : ""}`);
+
+        if (changed && productEntries.length > 0) {
+            const primary = primaryRepo[slug];
+            const latestEntry = productEntries.find((e) => e.repo === primary) || productEntries[0];
+            changes.push({
+                page: slug,
+                label: title,
+                repo: primary,
+                latestVersion: (latestEntry.tagName || "").replace(/^v/, ""),
+                latestReleaseUrl: latestEntry.htmlUrl,
+            });
+        }
+    }
+
+    // Write change summary if output path is configured (CI sets this).
+    const changesFile = process.env.CHANGELOG_CHANGES_FILE;
+    if (changesFile) {
+        fs.writeFileSync(changesFile, JSON.stringify(changes, null, 2), "utf8");
+        console.log(`\n📋 ${changes.length} changed page(s) → ${changesFile}`);
     }
 }
 
