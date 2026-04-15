@@ -321,12 +321,26 @@ async function generateChangelog() {
         if (changed && productEntries.length > 0) {
             const primary = primaryRepo[slug];
             const latestEntry = productEntries.find((e) => e.repo === primary) || productEntries[0];
+
+            // Identify which releases are new by checking if their GitHub URL
+            // appears in the previous version of the page.  Every rendered entry
+            // contains [View on GitHub](<htmlUrl>), so an absent URL means new.
+            const newReleases = productEntries
+                .filter((e) => e.htmlUrl && !existing.includes(e.htmlUrl))
+                .map((e) => ({
+                    version: (e.tagName || "").replace(/^v/, ""),
+                    tagName: e.tagName,
+                    releaseUrl: e.htmlUrl,
+                    productTag: e.productTag,
+                }));
+
             changes.push({
                 page: slug,
                 label: title,
                 repo: primary,
                 latestVersion: (latestEntry.tagName || "").replace(/^v/, ""),
                 latestReleaseUrl: latestEntry.htmlUrl,
+                newReleases,
             });
         }
     }

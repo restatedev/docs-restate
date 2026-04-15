@@ -1,4 +1,4 @@
-name: Refresh changelog
+name: Auto-release updates
 
 on:
   schedule:
@@ -37,18 +37,21 @@ jobs:
             exit 0
           fi
 
-          jq -r '.[].page' /tmp/changelog-changes.json | tr '\n' ' ' | { read -r p; echo "pages=${p}" >> "$GITHUB_OUTPUT"; }
+          PAGES=$(jq -r '[.[].page] | join(" ")' /tmp/changelog-changes.json)
+          echo "pages=${PAGES}" >> "$GITHUB_OUTPUT"
 
-          # Extract per-SDK versions for the pre-release workflow
-          for key in server:restate_version typescript-sdk:ts_version python-sdk:python_version \
-                     java-kotlin-sdk:java_version go-sdk:go_version rust-sdk:rust_version; do
-            PAGE="${key%%:*}"
-            OUTPUT="${key##*:}"
-            VER=$(jq -r --arg p "$PAGE" '.[] | select(.page==$p) | .latestVersion // empty' /tmp/changelog-changes.json)
-            echo "${OUTPUT}=${VER}" >> "$GITHUB_OUTPUT"
-          done
+          # Read ALL latest versions from the cache file (updated by generate-changelog.js).
+          # This ensures the pre-release workflow always gets every SDK's current version,
+          # not just the ones whose changelog page happened to change in this run.
+          CACHE=scripts/.changelog-cache.json
+          echo "restate_version=$(jq -r '.repos.restate.releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "ts_version=$(jq -r '.repos["sdk-typescript"].releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "python_version=$(jq -r '.repos["sdk-python"].releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "java_version=$(jq -r '.repos["sdk-java"].releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "go_version=$(jq -r '.repos["sdk-go"].releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
+          echo "rust_version=$(jq -r '.repos["sdk-rust"].releases[0].tag_name // empty' "$CACHE" | sed 's/^v//')" >> "$GITHUB_OUTPUT"
 
-          # Check if any SDK version was found (operator has no pre-release input)
+          # Check if any non-operator SDK page changed
           HAS=$(jq -r '[.[] | select(.page != "operator") | .latestVersion // empty | select(. != "")] | if length > 0 then "true" else "false" end' /tmp/changelog-changes.json)
           echo "has_sdk_updates=${HAS}" >> "$GITHUB_OUTPUT"
 
@@ -111,19 +114,28 @@ jobs:
           # Phase 1: Create agent jobs for each changed SDK
           jq -c '.[]' /tmp/changelog-changes.json | while IFS= read -r entry; do
             LABEL=$(echo "$entry" | jq -r '.label')
-            VERSION=$(echo "$entry" | jq -r '.latestVersion')
-            RELEASE_URL=$(echo "$entry" | jq -r '.latestReleaseUrl')
 
-            PROMPT="The ${LABEL} version ${VERSION} was released. Review the release notes and update the documentation.
+            # Count new releases for this page
+            RELEASE_COUNT=$(echo "$entry" | jq '.newReleases | length')
+            if [ "$RELEASE_COUNT" -eq 0 ] 2>/dev/null; then
+              echo "${LABEL}: No new releases detected, skipping Mintlify agent."
+              continue
+            fi
 
-          Release notes: ${RELEASE_URL}
+            # Build a list of all new releases: "- ProductTag vX.Y.Z: <url>"
+            RELEASE_LIST=$(echo "$entry" | jq -r '.newReleases[] | "- \(.productTag) \(.tagName): \(.releaseUrl)"')
 
-          For each user-facing change in the release:
+            PROMPT="The following ${LABEL} releases were published:
+
+          ${RELEASE_LIST}
+
+          Review ALL of the above release notes and update the documentation accordingly.
+
+          For each user-facing change across these releases:
           1. Dig into the linked PRs from the release notes to fully understand the change, its motivation, and usage.
           2. Draft or update documentation pages in the /docs directory that explain what the feature does, when to use it, and how to configure it.
           3. Include code examples where relevant. All code snippets MUST be placed in the /snippets directory organized by language (ts, java, kotlin, python, go, rust) and referenced from MDX docs using the CODE_LOAD syntax. Use <start_tag>/<end_tag> markers in snippet files for section extraction. See CLAUDE.md for full CODE_LOAD details.
           4. Create a PR with the updated documentation.
-          
 
           Success criteria: After reading any new or updated documentation, users understand what the feature is, whether it applies to their use case, and how to use it.
 
@@ -144,7 +156,7 @@ jobs:
             JOB_ID=$(jq -r '.id' /tmp/mintlify-response.json)
             if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ] && \
                [ -n "$JOB_ID" ] && [ "$JOB_ID" != "null" ]; then
-              echo "${LABEL}: Created agent job ${JOB_ID}"
+              echo "${LABEL}: Created agent job ${JOB_ID} for ${RELEASE_COUNT} release(s)"
               echo "${JOB_ID}|${LABEL}" >> /tmp/mintlify-jobs.txt
             else
               echo "::warning::Failed to create agent job for ${LABEL} (HTTP ${HTTP_STATUS})"
