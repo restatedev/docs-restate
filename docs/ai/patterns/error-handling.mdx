@@ -31,11 +31,13 @@ LLM API calls fail transiently (rate limits, network issues, provider outages). 
 <GlobalTabs className={"hidden-tabs"}>
 <GlobalTab title="Vercel AI">
 
-In the Vercel AI SDK, set `maxRetries` on `generateText` (default: 2) to retry failed calls due to rate limits or transient errors.
-After retries are exhausted, the agent throws an error.
-Restate then retries the invocation with exponential backoff to handle longer outages or network issues.
+The Vercel AI SDK and the Restate middleware each have their own retry layer, and they compose.
 
-You can limit Restate's retries with the `maxRetryAttempts` option in `durableCalls` middleware:
+The Vercel AI SDK retries first, in-process: you set `maxRetries` on `generateText` (default: 2) to retry failed calls due to rate limits or transient errors. Once those are exhausted, the AI SDK throws an error.
+
+Restate then takes over and retries the invocation with exponential backoff. Each Restate retry replays the call, which goes through `maxRetries` Vercel AI SDK attempts again, so the two limits multiply (e.g. `maxRetryAttempts`: 3 × `maxRetries`: 2 = up to 6 attempts).
+
+You can configure Restate's retry behavior by passing [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html) to the `durableCalls` middleware (for example, to limit attempts via `maxRetryAttempts`):
 
 ```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#max_attempts_example"} 
 const model = wrapLanguageModel({
@@ -45,65 +47,63 @@ const model = wrapLanguageModel({
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 
-Each Restate retry triggers up to `maxRetries` SDK attempts.
-For example, with `maxRetryAttempts`: 3 and `maxRetries`: 2, a call may be attempted 6 times.
-Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+If you don't pass `RunOptions`, the call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults). Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
 
-Restate's `DurableRunner` lets you specify the retry behavior for LLM calls:
+Restate's `DurableRunner` lets you specify the retry behavior for LLM calls via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
 try:
-    result = await DurableRunner.run(
-        agent,
-        req.message,
-        llm_retry_opts=LlmRetryOpts(
-            max_attempts=3, initial_retry_interval=timedelta(seconds=2)
-        ),
+    run_opts = RunOptions(
+        max_attempts=3, initial_retry_interval=timedelta(seconds=2)
     )
+    result = await DurableRunner.run(agent, req.message, run_options=run_opts)
 except restate.TerminalError as e:
     # Handle terminal errors gracefully
     return f"The agent couldn't complete the request: {e.message}"
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/openai-agents/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/openai-agents/tour-of-agents/app/error_handling.py" />
 
-By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+If you don't pass `RunOptions`, the LLM call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults).
 
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
-Configure the number of retries for LLM calls when activating the Restate plugin for your ADK App:
+Configure the retry behavior for LLM calls via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37) when activating the Restate plugin for your ADK App:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/error_handling.py#retries"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/google-adk/tour-of-agents/app/error_handling.py#retries"} 
+run_options = RunOptions(max_attempts=3, initial_retry_interval=timedelta(seconds=1))
 app = App(
-    name=APP_NAME, root_agent=agent, plugins=[RestatePlugin(max_model_call_retries=3)]
+    name=APP_NAME,
+    root_agent=agent,
+    plugins=[RestatePlugin(run_options=run_options)],
 )
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/google-adk/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/google-adk/tour-of-agents/app/error_handling.py" />
 
-By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+If you don't pass `RunOptions`, the LLM call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults).
 
 </GlobalTab>
 <GlobalTab title="Pydantic AI">
 
-Restate's `RestateAgent` lets you specify the retry behavior for LLM calls via `RunOptions`:
+Restate's `RestateAgent` lets you specify the retry behavior for LLM calls via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/error_handling.py#retries"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#retries"} 
 restate_agent = RestateAgent(
     agent,
     run_options=RunOptions(max_attempts=3, initial_retry_interval=timedelta(seconds=2)),
 )
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py" />
 
-By default, the runner retries ten times with an initial interval of one second. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
+If you don't pass `RunOptions`, the LLM call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults).
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
-Wrap LLM calls in `ctx.run()` with a retry limit to handle transient failures automatically:
+Wrap LLM calls in `ctx.run()` and pass [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html) to control retry behavior:
 
 ```typescript
 // Retries up to 3 times with exponential backoff
@@ -114,14 +114,12 @@ const result = await ctx.run(
 );
 ```
 
-Without `maxRetryAttempts`, Restate retries indefinitely with exponential backoff. For LLM calls, setting a limit prevents runaway costs from persistent failures.
-
-You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `ctx.run` steps.
+If you don't pass `RunOptions`, the call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults). See also [custom retry policies](/guides/error-handling#at-the-run-block-level) for `ctx.run` steps.
 
 </GlobalTab>
 <GlobalTab title="Restate Py">
 
-Wrap LLM calls in `ctx.run_typed()` with a retry limit to handle transient failures automatically:
+Wrap LLM calls in `ctx.run_typed()` and pass [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37) to control retry behavior:
 
 ```python
 # Retries up to 3 times with exponential backoff
@@ -134,9 +132,7 @@ result = await ctx.run_typed(
 )
 ```
 
-Without `max_attempts`, Restate retries indefinitely with exponential backoff. For LLM calls, setting a limit prevents runaway costs from persistent failures.
-
-You can set [custom retry policies](/guides/error-handling#at-the-run-block-level) for `.run` actions.
+If you don't pass `RunOptions`, the call inherits the retry policy configured at the [service or handler level](/services/configuration#how-to-configure), or otherwise the [Restate server's default policy](/guides/error-handling#configure-restate-server-defaults). See also [custom retry policies](/guides/error-handling#at-the-run-block-level) for `.run` actions.
 
 </GlobalTab>
 </GlobalTabs>
@@ -157,7 +153,7 @@ throw new TerminalError("This tool is not allowed to run for this input.");
 By default, the Vercel AI will convert any errors in tool executions into a message to the LLM, and the agent will decide how to proceed.
 This is often desirable, as the LLM can decide to use a different tool or provide a fallback answer.
 
-However, if you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed.
+However, if you use Restate Context actions like `ctx.run` in your tool execution, Restate will retry any transient errors in these actions until they succeed. For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html).
 
 ```typescript {"CODE_LOAD::ts/src/tour/agents/inline-tool-errors.ts#here"} 
 // Without ctx.run - error goes straight to agent
@@ -247,6 +243,8 @@ from restate import TerminalError
 raise TerminalError("This tool is not allowed to run for this input.")
 ```
 
+For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37).
+
 By default, the Restate OpenAI integration will raise any terminal errors in tool executions and will let you handle them in your handler.
 
 <Warning>
@@ -271,10 +269,9 @@ from restate import TerminalError
 raise TerminalError("This tool is not allowed to run for this input.")
 ```
 
-Restate retries tool executions by default until they succeed.
-For errors which should not be retried, raise terminal errors from within your tool implementations.
+For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37).
 
-You can catch these terminal errors in your handler and handle them accordingly.
+For errors which should not be retried, raise terminal errors from within your tool implementations. You can catch these terminal errors in your handler and handle them accordingly.
 
 </GlobalTab>
 <GlobalTab title="Pydantic AI">
@@ -283,14 +280,16 @@ When agent tools use Restate Context actions like `ctx.run`, Restate automatical
 
 For example, wrapping a tool call in `restate_context().run_typed()` makes it durable with automatic retries:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/error_handling.py#here"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#here"} 
 async def get_weather(city: WeatherRequest) -> WeatherResponse:
     """Get the current weather for a given city."""
     return await restate_context().run_typed(
         f"Get weather {city}", fetch_weather, req=city
     )
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py" />
+
+For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37).
 
 For errors that should not be retried, raise a terminal error:
 
@@ -305,7 +304,7 @@ For errors which should not be retried, raise terminal errors from within your t
 
 You can catch these terminal errors in your handler and handle them accordingly:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/error_handling.py#handle"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#handle"} 
 @agent_service.handler()
 async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
     try:
@@ -315,12 +314,14 @@ async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
         return f"The agent couldn't complete the request: {e.message}"
     return result.output
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/error_handling.py" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py" />
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
 
 Restate automatically retries transient errors. This makes your tools resilient to network failures, database hiccups, and other temporary issues.
+
+For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html).
 
 When a tool encounters an unrecoverable error (e.g., resource not found, invalid input, business rule violation), throw a `TerminalError` to stop retries immediately:
 
@@ -334,6 +335,8 @@ You can catch and handle terminal errors in your agent logic if needed.
 <GlobalTab title="Restate Py">
 
 Restate automatically retries transient errors. This makes your tools resilient to network failures, database hiccups, and other temporary issues.
+
+For `ctx.run` actions specifically, you can set a retry policy via [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37).
 
 When a tool encounters an unrecoverable error (e.g., resource not found, invalid input, business rule violation), raise a `TerminalError` to stop retries immediately:
 
