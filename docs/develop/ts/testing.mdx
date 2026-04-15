@@ -80,3 +80,53 @@ it("Can operate on typed state", async () => {
   await state.set("count", 2);
 });
 ```
+
+## Testing edge cases
+
+Two options on `RestateTestEnvironment.start` help you test edge cases in your handler logic.
+
+### `alwaysReplay`
+
+Forces Restate to replay the handler on every suspension point. Use this to hunt non-determinism bugs — if your handler is not replay-safe, this will surface the issue:
+
+```typescript {"CODE_LOAD::ts/src/develop/testing.test.ts#always_replay"} 
+describe("with alwaysReplay", () => {
+  let env: RestateTestEnvironment;
+
+  beforeAll(async () => {
+    env = await RestateTestEnvironment.start({
+      services: [router],
+      alwaysReplay: true,
+    });
+  }, 20_000);
+
+  afterAll(async () => env?.stop());
+
+  it("replays after every suspension", async () => {
+    // handler logic here
+  });
+});
+```
+
+### `disableRetries`
+
+Disables Restate's built-in retry policy so that failures surface immediately instead of hanging through retry backoff. Useful when testing error paths in your handlers:
+
+```typescript {"CODE_LOAD::ts/src/develop/testing.test.ts#disable_retries"} 
+describe("with disableRetries", () => {
+  let env: RestateTestEnvironment;
+
+  beforeAll(async () => {
+    env = await RestateTestEnvironment.start({
+      services: [router],
+      disableRetries: true,
+    });
+  }, 20_000);
+
+  afterAll(async () => env?.stop());
+
+  it("fails immediately without retry backoff", async () => {
+    // handler logic here
+  });
+});
+```

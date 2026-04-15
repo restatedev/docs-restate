@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
-import { RestatePromise } from "@restatedev/restate-sdk";
+import { RestatePromise, isRestatePromise } from "@restatedev/restate-sdk";
 import { myService } from "./service";
 
 function fetchOrderHistory(param: { userId: number }) {
@@ -94,6 +94,24 @@ const service = restate.service({
       // <start_time>
       const now = await ctx.date.now();
       // <end_time>
+
+      // <start_resolve>
+      const resolvedPromise = RestatePromise.resolve("already done");
+      // <end_resolve>
+
+      // <start_reject>
+      const rejectedPromise = RestatePromise.reject(
+        new restate.TerminalError("Access denied", { errorCode: 403 })
+      );
+      // <end_reject>
+
+      // <start_is_restate_promise>
+      const somePromise = ctx.sleep({ milliseconds: 100 });
+      if (isRestatePromise(somePromise)) {
+        // safe to use RestatePromise combinators like .all(), .race(), etc.
+        await RestatePromise.all([somePromise]);
+      }
+      // <end_is_restate_promise>
     },
   },
 });

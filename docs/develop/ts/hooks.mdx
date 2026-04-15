@@ -1,0 +1,149 @@
+---
+title: "Hooks"
+description: "Intercept handler execution for observability, tracing, and cross-cutting concerns."
+icon: "plug"
+---
+
+Hooks let you intercept handler execution and `ctx.run()` closures at the endpoint, service, or handler level. They are useful for integrating observability libraries, adding custom logging, or implementing other cross-cutting concerns.
+
+## How hooks work
+
+A hook is a `HooksProvider` function that receives the invocation request context and returns interceptors:
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#basic_hook"}
+const loggingHook: HooksProvider = (ctx) => ({
+  interceptor: {
+    handler: async (next) => {
+      console.log(`Handler starting: ${ctx.request.target}`);
+      try {
+        await next();
+        console.log(`Handler completed: ${ctx.request.target}`);
+      } catch (e) {
+        console.log(`Handler error: ${ctx.request.target}: ${e}`);
+        throw e;
+      }
+    },
+    run: async (name, next) => {
+      console.log(`  Run "${name}" starting`);
+      try {
+        await next();
+        console.log(`  Run "${name}" completed`);
+      } catch (e) {
+        console.log(`  Run "${name}" error: ${e}`);
+        throw e;
+      }
+    },
+  },
+});
+```
+
+The `HooksProvider` receives a context with `ctx.request`, which includes:
+- `ctx.request.target` — the invocation target (e.g. `MyService/myHandler`)
+- `ctx.request.id` — the invocation ID
+
+<Info>
+The `handler` interceptor fires on every attempt. The `run` interceptor only fires when a `ctx.run()` closure actually executes — if the result is already in the journal (replay), the closure and its interceptor are skipped.
+</Info>
+
+<Warning>
+Always rethrow errors from interceptors. Swallowing an error changes the invocation outcome.
+</Warning>
+
+## Registering hooks
+
+You can register hooks at the service level or the endpoint level.
+
+### Service-level hooks
+
+Hooks registered on a service apply to all handlers in that service:
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#service_hook"}
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, name: string) => {
+      return `Hello ${name}!`;
+    },
+  },
+  options: {
+    hooks: [loggingHook],
+  },
+});
+```
+
+### Endpoint-level hooks
+
+Hooks registered on the endpoint apply to all services served by that endpoint:
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#endpoint_hook"}
+restate.serve({
+  services: [myService],
+  hooks: [loggingHook],
+});
+```
+
+You can register multiple hooks. They execute in the order they are provided.
+
+## OpenTelemetry integration
+
+The `@restatedev/restate-sdk-opentelemetry` package provides a ready-made OpenTelemetry hook. It:
+
+- Extracts W3C trace context from the Restate attempt headers
+- Creates one span per handler attempt with standard attributes (`restate.invocation.id`, `restate.invocation.target`)
+- Creates child spans for `ctx.run()` closures with the `restate.run.name` attribute
+- Suppresses span events during replay (to avoid duplicate events)
+
+### Setup
+
+Install the package:
+
+```bash
+npm install @restatedev/restate-sdk-opentelemetry
+```
+
+Then add the hook to your service or endpoint:
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#otel_hook"}
+import { openTelemetryHook } from "@restatedev/restate-sdk-opentelemetry";
+import { trace } from "@opentelemetry/api";
+
+const greeter = restate.service({
+  name: "Greeter",
+  options: {
+    hooks: [openTelemetryHook({ tracer: trace.getTracer("greeter-service") })],
+  },
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) => {
+      // Add events to the active span
+      trace.getActiveSpan()?.addEvent("processing_started", { name });
+
+      // ctx.run gets its own child span automatically
+      const greeting = await ctx.run("compute-greeting", async () => {
+        return `Hello ${name}!`;
+      });
+
+      return greeting;
+    },
+  },
+});
+```
+
+<Info>
+Initialize your OpenTelemetry SDK (e.g. `NodeSDK`) **before** importing the Restate SDK to ensure instrumentation is active when the first requests arrive.
+</Info>
+
+### Configuration options
+
+`openTelemetryHook` accepts the following options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tracer` | `Tracer \| (ctx) => Tracer` | required | The OpenTelemetry tracer to use. Can be a static tracer or a function resolved per request. |
+| `runSpans` | `boolean` | `true` | Create child spans for `ctx.run()` closures. |
+| `suppressSpanEventsDuringReplay` | `boolean` | `true` | Suppress span events added to the attempt span during replay. Attributes are still recorded. |
+| `additionalAttemptAttributes` | `Attributes \| (ctx) => Attributes` | — | Extra attributes to attach to the attempt span. |
+| `additionalRunAttributes` | `Attributes \| (ctx, name) => Attributes` | — | Extra attributes to attach to `ctx.run()` spans. |
+
+### Full example
+
+For a complete end-to-end tracing example with Jaeger, see the [OpenTelemetry integration example](https://github.com/restatedev/examples/tree/main/typescript/integrations/opentelemetry).
