@@ -45,29 +45,6 @@ Map concepts from existing orchestrators (Temporal, Camunda, Step Functions, Inn
 - **No client SDK.** Invoke services via HTTP (curl, fetch) or from other Restate handlers via durable RPC. No special client library needed.
 - **Side effects are explicit.** Every non-deterministic operation must be wrapped in `ctx.run()`. Orchestrators often handle this implicitly via activity definitions.
 
-### Orchestrator-specific notes
-
-**From Temporal:**
-- Activities map to `ctx.run()` blocks. Remove activity definitions and worker registration.
-- Temporal signals for **data** map to Durable Promises (within Workflow) or Awakeables (external).
-- Temporal signals for **cancellation** map to the Admin cancel API (`ctx.cancel(id)` or CLI). Do NOT port the signal+flag cancel pattern.
-- Temporal queries map to shared handlers on Virtual Objects.
-- `wait_condition` maps to `await` on promises or combinators. Do NOT port polling loops.
-- `continue-as-new` maps to starting a new workflow run.
-- Remove the Temporal client, worker setup, and task queue configuration. Restate handles routing.
-
-**From Step Functions / Inngest:**
-- Each state/step maps to a `ctx.run()` block inside a handler.
-- State machine transitions become sequential code. Conditional branches are plain if/else.
-- Remove the JSON/YAML workflow definition. The handler code is the workflow.
-- Step Functions' Map state maps to Restate's fan-out with concurrency combinators.
-
-**From Camunda:**
-- BPMN service tasks map to `ctx.run()` blocks.
-- Message events map to Awakeables or Durable Promises.
-- User tasks (human-in-the-loop) map to Awakeables resolved via an external UI/API.
-- Remove the process engine deployment. Restate Server replaces it.
-
 ## General application mapping
 
 Map common application components to Restate service types. Use this table to systematically convert each component of the existing architecture.
