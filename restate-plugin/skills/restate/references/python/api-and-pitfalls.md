@@ -472,9 +472,38 @@ All Restate context operations must happen on the same async event loop.
 
 ---
 
+## Testing
+
+Install: `pip install restate-sdk[harness]`
+
+Tests run against a real Restate Server in Docker via Testcontainers. This catches non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+```python
+import restate
+from my_service import app
+
+with restate.test_harness(app, retry_always=True) as harness:
+    # retry_always=True replays every invocation to catch non-determinism
+    client = harness.ingress_client()
+
+    # Invoke a service handler
+    response = client.post("/MyService/myHandler", json="Hello")
+    assert response.json() == "Hello!"
+
+    # Invoke a Virtual Object handler
+    response = client.post("/MyObject/myKey/myHandler", json="Hello")
+    assert response.json() == "Hello myKey!"
+```
+
+Key points:
+- `retry_always=True` forces Restate to replay every invocation, catching non-determinism bugs (e.g., unwrapped `random.random()`, missing `ctx.run()`)
+- The harness provides an `ingress_client()` for HTTP-style invocations
+- Invoke handlers using the same URL patterns as curl: `/Service/handler` or `/Object/key/handler`
+
+---
+
 ## Further resources
 
-- For testing: use the bundled restate-docs MCP server
-- For detailed API: use MCP or Python SDK documentation
+- For detailed API: use the bundled restate-docs MCP server or Python SDK documentation
 - Examples: https://github.com/restatedev/examples
 - AI agent examples: https://github.com/restatedev/ai-examples

@@ -462,5 +462,38 @@ MyServiceClient.fromClient(restateClient)
 - **Use `DurableFuture.all/any`**, NOT `CompletableFuture`. Native Java futures break deterministic replay.
 - **Never use `Thread.sleep`, `Math.random()`, or `System.currentTimeMillis()`** -- use `ctx.sleep`, `ctx.random()` instead.
 - **Never use global mutable variables for state** -- use `ctx.get`/`ctx.set` with `StateKey` for durable state.
-- **For testing:** use the bundled restate-docs MCP server to look up testing documentation.
 - **For detailed API reference:** use the MCP server or JavaDocs.
+
+## Testing
+
+Add dependency: `dev.restate:sdk-testing` (includes Testcontainers support)
+
+Tests run against a real Restate Server in Docker. This catches non-determinism bugs that unit tests miss.
+
+```java
+import dev.restate.sdk.testing.BindService;
+import dev.restate.sdk.testing.RestateClient;
+import dev.restate.sdk.testing.RestateTest;
+import dev.restate.client.Client;
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+@RestateTest
+class MyServiceTest {
+
+  @BindService MyService service = new MyService();
+
+  @Test
+  void testMyHandler(@RestateClient Client ingressClient) {
+    var client = MyServiceClient.fromClient(ingressClient);
+    var response = client.myHandler("Hi");
+    assertEquals("Hi!", response);
+  }
+}
+```
+
+Key points:
+- `@RestateTest` sets up a Testcontainers-based Restate environment
+- `@BindService` registers services with the test environment
+- `@RestateClient Client` is injected into test methods
+- Use the generated typed client (`MyServiceClient.fromClient`) for invocations

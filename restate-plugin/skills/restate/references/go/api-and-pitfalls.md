@@ -475,9 +475,42 @@ The Go SDK supports defining handlers and types via Protocol Buffers for stronge
 
 ---
 
+## Testing
+
+Package: `github.com/restatedev/sdk-go/testing` (Testcontainers-based)
+
+Tests run against a real Restate Server in Docker. This catches non-determinism bugs that unit tests miss.
+
+```go
+import (
+  "testing"
+
+  restate "github.com/restatedev/sdk-go"
+  restateingress "github.com/restatedev/sdk-go/ingress"
+  restatetest "github.com/restatedev/sdk-go/testing"
+  "github.com/stretchr/testify/require"
+)
+
+func TestGreeter(t *testing.T) {
+  tEnv := restatetest.Start(t, restate.Reflect(Greeter{}))
+  client := tEnv.Ingress()
+
+  out, err := restateingress.Service[string, string](client, "Greeter", "Greet").
+    Request(t.Context(), "World")
+  require.NoError(t, err)
+  require.Equal(t, "Hello World!", out)
+}
+```
+
+Key points:
+- `restatetest.Start(t, ...)` creates a Testcontainers environment and registers services
+- `tEnv.Ingress()` returns a client for invoking handlers
+- Test cleanup is automatic via Go's `t.Cleanup`
+
+---
+
 ## Further resources
 
-- For testing: use the bundled restate-docs MCP server
-- For detailed API: use MCP or GoDoc (https://pkg.go.dev/github.com/restatedev/sdk-go)
+- For detailed API: use the bundled restate-docs MCP server or GoDoc (https://pkg.go.dev/github.com/restatedev/sdk-go)
 - Examples: https://github.com/restatedev/examples
 - AI agent examples: https://github.com/restatedev/ai-examples

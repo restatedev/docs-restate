@@ -122,7 +122,13 @@ Restate provides several durable communication mechanisms. All survive crashes a
 - **Awakeable**: Integration with external systems that call back via HTTP (payment processors, human approvals, third-party webhooks).
 - **Durable promise**: Coordination between a Workflow's `run` handler and its interaction handlers.
 
-For detailed SDK-specific API signatures: use the bundled restate-docs MCP server.
+Common mistakes:
+- Do NOT use a durable promise to cancel an invocation. Use the Admin cancel API (`ctx.cancel(id)`) instead. See `references/lifecycle-and-operations.md`.
+- Do NOT poll a state flag to wait for a result. Use `ctx.attach(invocationId)` to wait for a previously sent message.
+- Do NOT use `ctx.sleep()` + send to schedule future work. Use a delayed send directly (it does not block the handler).
+- For bounded waits on a service call, use `.orTimeout({ seconds: N })` instead of racing against `ctx.sleep()`.
+
+For detailed SDK-specific API signatures: use the bundled restate-docs MCP server. For cancellation, idempotency, attach, and retention: see `references/lifecycle-and-operations.md`.
 
 ## Common architecture patterns
 

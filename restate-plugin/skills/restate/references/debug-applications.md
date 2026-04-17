@@ -120,15 +120,3 @@ Base URL: `http://localhost:9070`
 ### SQL Introspection
 
 - `POST /query` -- run SQL queries against invocation and state tables
-
----
-
-## Restate UI
-
-Open `http://localhost:9070` in a browser.
-
-- View all registered services and their handlers
-- Inspect invocations: status, journal entries, state
-- Cancel or kill stuck invocations
-- Service playground: invoke handlers directly from the UI
-- For detailed debugging beyond this reference: use the bundled restate-docs MCP server

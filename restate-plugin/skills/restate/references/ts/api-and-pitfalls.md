@@ -452,5 +452,50 @@ restateClient
 - **Return values from `ctx.run()` must be JSON-serializable** (no functions, circular references, or class instances without custom serde).
 - **Never use `setTimeout`, `Math.random()`, `Date.now()`, or `new Date()`** -- use `ctx.sleep`, `ctx.rand`, and `ctx.date` instead.
 - **Never use global mutable variables for state** -- use `ctx.get`/`ctx.set` for durable state.
-- **For testing:** use the bundled restate-docs MCP server to look up testing documentation.
 - **For detailed API reference:** use the MCP server or TSDocs.
+
+## Testing
+
+Install: `npm install --save-dev @restatedev/restate-sdk-testcontainers`
+
+Tests run against a real Restate Server in Docker via Testcontainers. This catches non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+```typescript
+import { RestateTestEnvironment } from "@restatedev/restate-sdk-testcontainers";
+import * as clients from "@restatedev/restate-sdk-clients";
+import { describe, it, beforeAll, afterAll, expect } from "vitest";
+import { greeter } from "./greeter-service";
+
+describe("MyService", () => {
+  let restateTestEnvironment: RestateTestEnvironment;
+  let restateIngress: clients.Ingress;
+
+  beforeAll(async () => {
+    restateTestEnvironment = await RestateTestEnvironment.start({
+      services: [greeter],
+      retryAlways: true, // Always replay invocations to catch non-determinism
+    });
+    restateIngress = clients.connect({ url: restateTestEnvironment.baseUrl() });
+  }, 20_000);
+
+  afterAll(async () => {
+    await restateTestEnvironment?.stop();
+  });
+
+  it("Can call methods", async () => {
+    const client = restateIngress.objectClient(greeter, "myKey");
+    await client.greet("Test!");
+  });
+
+  it("Can read/write state", async () => {
+    const state = restateTestEnvironment.stateOf(greeter, "myKey");
+    await state.set("count", 123);
+    expect(await state.get("count")).toBe(123);
+  });
+});
+```
+
+Key points:
+- `retryAlways: true` forces Restate to replay every invocation, catching non-determinism bugs (e.g., unwrapped `Math.random()`, missing `ctx.run()`)
+- `stateOf()` reads and writes Virtual Object state for test setup and assertions
+- Set `beforeAll` timeout to 20+ seconds for container startup

@@ -1,4 +1,6 @@
-# Migrate to Restate
+# Translate to Restate
+
+Use this reference when converting projects from other workflow orchestrators or application architectures to Restate.
 
 ## Analysis checklist
 
@@ -17,20 +19,22 @@ Before migrating, identify the following in the existing codebase:
 
 Map concepts from existing orchestrators (Temporal, Camunda, Step Functions, Inngest) to Restate equivalents.
 
-| Orchestrator concept | Restate equivalent | Notes |
+| Orchestrator concept | Restate equivalent | Do NOT reinvent |
 |---|---|---|
-| Activity / Task / Step | `ctx.run()` | Side effects wrapped for durability. Return value is journaled. |
-| Workflow / Process / State Machine | Workflow `run` handler or Service handler | Workflow for exactly-once-per-ID processes; Service for reusable orchestration logic. |
-| Signal / Message Event | Awakeable or Durable Promise | Awakeable for external system callbacks; Durable Promise for within-Workflow signaling. |
-| Query / Read state | Shared handler on Virtual Object | Concurrent reads without blocking exclusive handlers. |
-| Timer / Sleep | `ctx.sleep()` or delayed send | Durable, survives crashes and restarts. |
-| Child Workflow / Sub-process | Service-to-service call | Durable RPC with automatic retries. Callee can be any service type. |
-| Workflow state / Variables | Virtual Object K/V state or Workflow state | Virtual Object for entity state; Workflow for process-scoped state. |
-| Worker / Task Queue | Restate Server + service endpoint | No separate worker process. Restate routes invocations to registered service endpoints. |
-| Retry policy | `ctx.run()` retry options + default infinite retry | Configure per `ctx.run()` block or per service/handler. Use `TerminalError` to stop retries. |
-| Saga / Compensation | Try/catch with compensation list | Track completed steps, execute compensations in reverse on `TerminalError`. |
-| Workflow ID / Run ID | Idempotency key or Workflow ID | Pass via `send` options for deduplication. Workflow IDs are inherently unique. |
-| Cron / Scheduled trigger | Delayed self-invocation | Handler sends a delayed message to itself. No external scheduler needed. |
+| Activity / Task / Step | `ctx.run()` | Manual retry loops, external task queues |
+| Workflow / Process / State Machine | Workflow `run` handler or Service handler | JSON/YAML workflow definitions, state machine libraries |
+| Signal (data) / Message Event | Durable Promise or Awakeable | Polling a state flag in a loop |
+| Signal (cancel) / Stop workflow | Admin cancel API: `ctx.cancel(id)` | Cooperative cancel flag + poll pattern |
+| Query / Read state | Shared handler on Virtual Object | Polling handler, state-dump endpoint |
+| Timer / Sleep | `ctx.sleep()` or delayed send | `setTimeout`, native sleep, external scheduler |
+| Child Workflow / Sub-process | Service-to-service call (durable RPC) | HTTP calls with manual retry logic |
+| Workflow state / Variables | Virtual Object K/V or Workflow state | External database for workflow-scoped data |
+| Worker / Task Queue | Restate Server + service endpoint | Worker pools, polling loops, task queue libraries |
+| Retry policy | `ctx.run()` retry options + default infinite | Retry counter in state, try-catch retry loop |
+| Saga / Compensation | Try/catch with compensation list | Separate compensation service, manual rollback |
+| Workflow ID / Run ID | Idempotency key or Workflow ID | Seen-ID set for deduplication |
+| Cron / Scheduled trigger | Delayed self-invocation | External cron, setInterval, CloudWatch Events |
+| Wait for result of background job | `ctx.attach(invocationId)` | State polling, callback webhook |
 
 ### Key differences from orchestrators
 
@@ -45,8 +49,11 @@ Map concepts from existing orchestrators (Temporal, Camunda, Step Functions, Inn
 
 **From Temporal:**
 - Activities map to `ctx.run()` blocks. Remove activity definitions and worker registration.
-- Temporal signals map to Awakeables (external) or Durable Promises (within Workflow).
+- Temporal signals for **data** map to Durable Promises (within Workflow) or Awakeables (external).
+- Temporal signals for **cancellation** map to the Admin cancel API (`ctx.cancel(id)` or CLI). Do NOT port the signal+flag cancel pattern.
 - Temporal queries map to shared handlers on Virtual Objects.
+- `wait_condition` maps to `await` on promises or combinators. Do NOT port polling loops.
+- `continue-as-new` maps to starting a new workflow run.
 - Remove the Temporal client, worker setup, and task queue configuration. Restate handles routing.
 
 **From Step Functions / Inngest:**

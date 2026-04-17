@@ -23,7 +23,7 @@ claude plugin add github:restatedev/restate-claude-plugin
 
 - **Concepts**: Durable execution, service types (Service, Virtual Object, Workflow), programming model
 - **Design**: Service type selection, Virtual Object keying strategy, deadlock prevention, architecture patterns
-- **Migration**: Mapping from workflow orchestrators (Temporal, Camunda, Step Functions) and existing applications to Restate
+- **Migration/translation**: Mapping from workflow orchestrators and existing applications to Restate
 - **Implementation**: Per-SDK API references with pitfall warnings (TypeScript, Python, Java, Go)
 - **AI agents**: Integration patterns for Vercel AI SDK, OpenAI Agents SDK, Google ADK, Pydantic AI
 - **Debugging**: Common errors, journal mismatches, CLI commands, admin API
@@ -51,8 +51,6 @@ The bundled MCP server at `https://docs.restate.dev/mcp` provides access to the 
 
 ## TODO
 - Figure out how to make the skills stay up to date with new releases
-- Do the references need better descriptions?
 - We miss commands for start-restate, register-service, list-services, get-openapi-spec, etc.
-- We miss good references on lifecycle/operations of invocations
 - Add TS and Python lsp servers
 - Reference to Restate SDK service context in the SDK skill references
