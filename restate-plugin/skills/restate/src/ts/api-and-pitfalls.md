@@ -33,11 +33,9 @@ Or via npx (no install):
 npx @restatedev/restate 
 ```
 
-Or Docker: 
+Or Docker:
 ```bash
-docker run -it --network=host \
-docker.restate.dev/restatedev/restate-cli:latest \
-invocations ls
+docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
 ```
 
 ### Install SDK
@@ -312,6 +310,6 @@ Use tests also to catch non-determinism bugs that unit tests miss: if handler co
 
 ## Further resources
 
-- For detailed API: use the bundled restate-docs MCP server or Python SDK documentation
+- For detailed API: use the TSDocs https://restatedev.github.io/sdk-typescript/ or the bundled restate-docs MCP server
 - Examples: https://github.com/restatedev/examples
 - AI agent examples: https://github.com/restatedev/ai-examples

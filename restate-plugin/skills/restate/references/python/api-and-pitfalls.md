@@ -19,6 +19,17 @@ restate-server
 npx @restatedev/restate-server
 ```
 
+### Install Restate CLI
+
+```bash
+brew install restatedev/tap/restate
+```
+
+Or Docker:
+```bash
+docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
+```
+
 ### SDK installation
 
 ```shell

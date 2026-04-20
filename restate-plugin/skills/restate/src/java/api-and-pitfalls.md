@@ -347,6 +347,6 @@ You can do this by setting the environment variable `RESTATE_WORKER__INVOKER__IN
 
 ## Further resources
 
-- For detailed API: use the bundled restate-docs MCP server or Python SDK documentation
+- For detailed API: use the JavaDoc https://restatedev.github.io/sdk-java/javadocs/ or the bundled restate-docs MCP server
 - Examples: https://github.com/restatedev/examples
 - AI agent examples: https://github.com/restatedev/ai-examples

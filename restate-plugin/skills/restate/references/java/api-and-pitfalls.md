@@ -460,7 +460,7 @@ MyObjectClient.fromClient(restateClient, "Mary")
 ## Java-Specific Pitfalls
 
 - **Code generation creates typed client classes** (e.g., `MyServiceClient`) from `@Service`/`@VirtualObject`/`@Workflow` annotations. Use these for type-safe calls.
-- **Use Restate's future combinators, NOT `CompletableFuture`. Native Java futures break deterministic replay.
+- **Use Restate's future combinators, NOT `CompletableFuture`.** Native Java futures break deterministic replay.
 - **Never use `Thread.sleep`, `Math.random()`, or `System.currentTimeMillis()`** -- use Restate context actions instead.
 - **Never use global mutable variables for state** -- use Restate's K/V store for durable state.
 - **For detailed API reference:** use the MCP server or JavaDocs.
@@ -506,6 +506,6 @@ You can do this by setting the environment variable `RESTATE_WORKER__INVOKER__IN
 
 ## Further resources
 
-- For detailed API: use the bundled restate-docs MCP server or Python SDK documentation
+- For detailed API: use the JavaDoc https://restatedev.github.io/sdk-java/javadocs/ or the bundled restate-docs MCP server
 - Examples: https://github.com/restatedev/examples
 - AI agent examples: https://github.com/restatedev/ai-examples

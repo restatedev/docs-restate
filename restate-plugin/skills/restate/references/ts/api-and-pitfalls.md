@@ -33,6 +33,11 @@ Or via npx (no install):
 npx @restatedev/restate 
 ```
 
+Or Docker:
+```bash
+docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
+```
+
 ### Install SDK
 
 ```bash
@@ -108,8 +113,8 @@ export const myObject = restate.object({
 restate.serve({ services: [myObject] });
 ```
 
-- **Exclusive handlers** (default): only one executes at a time per key. Use for writes.
-- **Shared handlers** (`restate.handlers.object.shared`): run concurrently per key. Use for reads.
+- **Exclusive handlers** (default): only one executes at a time per key. Use for writes. Receive `ObjectContext`.
+- **Shared handlers** (`restate.handlers.object.shared`): run concurrently per key. Use for reads. Receive `ObjectSharedContext`.
 
 ### Workflow
 
@@ -135,14 +140,14 @@ export const myWorkflow = restate.workflow({
 restate.serve({ services: [myWorkflow] });
 ```
 
-- `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution.
-- Other handlers can be called concurrently while `run` is in progress. Use them to send signals or read state.
+- `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution. Uses `WorkflowContext`.
+- Other handlers can be called concurrently while `run` is in progress. Use them to send signals or read state. Use `WorkflowSharedContext`.
 
 ---
 
 ## State Management
 
-Never use global variables for state -- it is not durable across restarts. Use `ctx.get`/`ctx.set` instead (available on ObjectContext and WorkflowContext):
+Never use global variables for state -- it is not durable across restarts. Use `ctx.get`/`ctx.set` instead:
 
 ```ts
 const count = (await ctx.get<number>("count")) ?? 0;
@@ -177,7 +182,7 @@ ctx.objectSendClient(myObject, "key").myHandler("Hi");
 ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
 ```
 
-### Delayed Calls
+### Delayed messages
 
 ```ts
 ctx
@@ -225,7 +230,7 @@ const result = await ctx.run("my-side-effect", async () => {
 
 - The first argument is a label used for observability and debugging.
 - The return value must be JSON-serializable (or use a custom serde).
-- Always `await` the result. Fire-and-forget `ctx.run()` without await loses durability guarantees.
+- No Restate context actions within `ctx.run()`.
 
 ---
 
@@ -249,6 +254,8 @@ Never use `setTimeout`. Use `ctx.sleep` for durable delays that survive crashes 
 await ctx.sleep({ seconds: 30 });
 ```
 
+No limit on duration, but long sleeps in exclusive handlers block other calls for that key.
+
 ---
 
 ## Awakeables
@@ -266,7 +273,10 @@ await ctx.run(() => requestHumanReview(name, id));
 const review = await promise;
 ```
 
-Resolve or reject from another handler or external system:
+External systems can also resolve/reject via HTTP:
+`curl localhost:8080/restate/awakeables/<id>/resolve --json '"Looks good!"'`
+
+Or from another handler:
 
 ```ts
 // Resolve from another handler
@@ -381,7 +391,6 @@ const response = await ctx.attach(invocationId);
 ### Cancel an Invocation
 
 ```ts
-// Cancel invocation
 ctx.cancel(invocationId);
 ```
 
@@ -455,7 +464,10 @@ Throw `TerminalError` to stop retries and propagate failure permanently:
 throw new TerminalError("Something went wrong.", { errorCode: 500 });
 ```
 
-Any other error type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
+
+All other exceptions are retried with exponential backoff by default, and eventually paused.
+
+Catch `TerminalError` from `ctx.run` to handle permanent failures and execute compensations (see sagas).
 
 ---
 
@@ -534,3 +546,11 @@ describe("MyService", () => {
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+## Further resources
+
+- For detailed API: use the TSDocs https://restatedev.github.io/sdk-typescript/ or the bundled restate-docs MCP server
+- Examples: https://github.com/restatedev/examples
+- AI agent examples: https://github.com/restatedev/ai-examples
