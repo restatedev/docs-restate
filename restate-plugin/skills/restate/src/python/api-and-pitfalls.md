@@ -36,18 +36,7 @@ Optional extras:
 
 ### Minimal scaffold
 
-```python
-import restate
-
-my_service = restate.Service("MyService")
-
-
-@my_service.handler("myHandler")
-async def my_handler(ctx: restate.Context, greeting: str) -> str:
-    return f"{greeting}!"
-
-
-app = restate.app([my_service])
+```python {"CODE_LOAD::python/src/develop/my_service.py"}
 ```
 
 ### Register and invoke
@@ -77,23 +66,7 @@ See minimal scaffold above.
 
 ### Virtual Object (stateful, keyed)
 
-```python
-import restate
-
-my_object = restate.VirtualObject("MyVirtualObject")
-
-
-@my_object.handler("myHandler")
-async def my_handler(ctx: restate.ObjectContext, greeting: str) -> str:
-    return f"{greeting} {ctx.key()}!"
-
-
-@my_object.handler(kind="shared")
-async def my_concurrent_handler(ctx: restate.ObjectSharedContext, greeting: str) -> str:
-    return f"{greeting} {ctx.key()}!"
-
-
-app = restate.app([my_object])
+```python {"CODE_LOAD::python/src/develop/my_virtual_object.py"}
 ```
 
 - Exclusive handlers (default): one invocation at a time per key. Use for writes. Receive `ObjectContext`.
@@ -102,25 +75,7 @@ app = restate.app([my_object])
 
 ### Workflow
 
-```python
-import restate
-
-my_workflow = restate.Workflow("MyWorkflow")
-
-
-@my_workflow.main()
-async def run(ctx: restate.WorkflowContext, req: str) -> str:
-    # ... implement workflow logic here ---
-    return "success"
-
-
-@my_workflow.handler()
-async def interact_with_workflow(ctx: restate.WorkflowSharedContext, req: str):
-    # ... implement interaction logic here ...
-    return
-
-
-app = restate.app([my_workflow])
+```python {"CODE_LOAD::python/src/develop/my_workflow.py"}
 ```
 
 - `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution. Uses `WorkflowContext`.
@@ -132,12 +87,7 @@ app = restate.app([my_workflow])
 
 Never use global variables for state -- it is not durable across restarts. Use `ctx.get`/`ctx.set` instead:
 
-```python
-count = await ctx.get("count", type_hint=int) or 0
-ctx.set("count", count + 1)
-ctx.clear("count")
-ctx.clear_all()
-keys = ctx.state_keys()
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#state"}
 ```
 
 ---
@@ -146,50 +96,31 @@ keys = ctx.state_keys()
 
 ### Request-response calls
 
-```python
-response = await ctx.service_call(my_handler, "Hi")
-response2 = await ctx.object_call(my_object_handler, key="object-key", arg="Hi")
-response3 = await ctx.workflow_call(run, "wf-id", arg="Hi")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#service_calls"}
 ```
 
 ### One-way messages (fire-and-forget)
 
-```python
-ctx.service_send(my_handler, "Hi")
-ctx.object_send(my_object_handler, key="object-key", arg="Hi")
-ctx.workflow_send(run, "wf-id", arg="Hi")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#sending_messages"}
 ```
 
 ### Delayed messages
 
-```python
-ctx.service_send(
-    my_handler,
-    "Hi",
-    send_delay=timedelta(hours=5)
-)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#delayed_messages"}
 ```
 
 ### Generic calls (String-Based Service/Method Names)
 
 Use when the service definition is not available at compile time:
 
-```python
-response_bytes = await ctx.generic_call(
-    "MyObject", "my_handler", key="Mary", arg=json.dumps("Hi").encode("utf-8")
-)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#request_response_generic"}
 ```
 
 ## Side effects (ctx.run)
 
 Wrap all non-deterministic operations (API calls, DB writes, HTTP requests, file I/O) in `ctx.run` to journal their results.
 
-```python
-# Wrap non-deterministic code in ctx.run
-result = await ctx.run("my-side-effect", lambda: call_external_api("weather", "123"))
-
-# Or with typed version for better type safety
-result = await ctx.run_typed("my-side-effect", call_external_api, query="weather", some_id="123")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#durable_steps"}
 ```
 
 - The first argument is a label used for observability and debugging.
@@ -202,10 +133,7 @@ result = await ctx.run_typed("my-side-effect", call_external_api, query="weather
 
 Never use `random.random()`, `time.time()`, `datetime.now()`, or `uuid.uuid4()` directly. These produce different values on replay. Instead:
 
-```python
-my_uuid = ctx.uuid()
-ctx.random().random()
-current_time = await ctx.time()
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#deterministic_helpers"}
 ```
 
 ---
@@ -214,16 +142,7 @@ current_time = await ctx.time()
 
 Never use `setTimeout`. Use `ctx.sleep` for durable delays that survive crashes and restarts:
 
-```python
-# Sleep
-await ctx.sleep(timedelta(seconds=30))
-
-# Schedule delayed call (different from sleep + send)
-ctx.service_send(
-    my_handler,
-    "Hi",
-    send_delay=timedelta(hours=5)
-)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#durable_timers"}
 ```
 
 No limit on duration, but long sleeps in exclusive handlers block other calls for that key.
@@ -234,15 +153,7 @@ No limit on duration, but long sleeps in exclusive handlers block other calls fo
 
 Pause a handler until an external system signals completion.
 
-```python
-# Create awakeable
-awakeable_id, promise = ctx.awakeable(type_hint=str)
-
-# Send ID to external system
-await ctx.run_typed("request_human_review", request_human_review, name=name, awakeable_id=awakeable_id)
-
-# Wait for result
-review = await promise
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#awakeables"}
 ```
 
 External systems can also resolve/reject via HTTP:
@@ -250,9 +161,7 @@ External systems can also resolve/reject via HTTP:
 
 Or from another handler:
 
-```python
-ctx.resolve_awakeable(awakeable_id, "Looks good!")
-ctx.reject_awakeable(awakeable_id, "Cannot be reviewed")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#awakeables_resolution"}
 ```
 
 ---
@@ -261,12 +170,7 @@ ctx.reject_awakeable(awakeable_id, "Cannot be reviewed")
 
 Cross-handler signaling within a Workflow. No ID management needed.
 
-```python
-# Wait for promise
-review = await ctx.promise("review", type_hint=str).value()
-
-# Resolve promise
-await ctx.promise("review", type_hint=str).resolve("approval")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#workflow_promises"}
 ```
 
 ---
@@ -277,47 +181,22 @@ Never use `asyncio.gather` / `asyncio.wait`. Native asyncio combinators are not 
 
 ### Gather (wait for all)
 
-```python
-# ❌ BAD
-results1 = await asyncio.gather(call1(), call2())
-
-# ✅ GOOD
-claude_call = ctx.service_call(ask_openai, "What is the weather?")
-openai_call = ctx.service_call(ask_claude, "What is the weather?")
-results2 = await restate.gather(claude_call, openai_call)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#gather"}
 ```
 
 ### Select (race, first to complete)
 
-```python
-# ❌ BAD
-result1 = await asyncio.wait([call1(), call2()], return_when=asyncio.FIRST_COMPLETED)
-
-# ✅ GOOD
-confirmation = ctx.awakeable(type_hint=str)
-match await restate.select(
-    confirmation=confirmation[1],
-    timeout=ctx.sleep(timedelta(days=1))
-):
-    case ["confirmation", result]:
-        print("Got confirmation:", result)
-    case ["timeout", _]:
-        raise restate.TerminalError("Timeout!")
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#select"}
 ```
 
 ### Wait completed (completed + pending split)
 
-```python
-done, pending = await restate.wait_completed(call1, call2)
-results = [await f for f in done]
-# Cancel pending if needed
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#wait_completed"}
 ```
 
 ### As completed (process in completion order)
 
-```python
-async for future in restate.as_completed(call1, call2):
-    print(await future)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#as_completed"}
 ```
 
 ---
@@ -326,24 +205,17 @@ async for future in restate.as_completed(call1, call2):
 
 ### Idempotency Keys
 
-```python
-# Send a request, get the invocation id
-handle = ctx.service_send(
-    my_handler, arg="Hi", idempotency_key="my-idempotency-key"
-)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#idempotency"}
 ```
 
 ### Attach to a Running Invocation
 
-```python
-invocation_id = await handle.invocation_id()
-result = await ctx.attach_invocation(invocation_id)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#attach"}
 ```
 
 ### Cancel an Invocation
 
-```python
-ctx.cancel_invocation(invocation_id)
+```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#cancel"}
 ```
 
 ---
@@ -358,23 +230,7 @@ JSON serialization via Python's `json` library. Primitive types, `TypedDict`, an
 
 Install `restate-sdk[serde]`. Then use Pydantic models directly as handler input/output and in state operations:
 
-```python
-import restate
-from pydantic import BaseModel
-from restate.serde import Serde
-
-
-class Greeting(BaseModel):
-    name: str
-
-class GreetingResponse(BaseModel):
-    result: str
-
-greeter = restate.Service("Greeter")
-
-@greeter.handler()
-async def greet(ctx: restate.Context, greeting: Greeting) -> GreetingResponse:
-    return GreetingResponse(result=f"You said hi to {greeting.name}!")
+```python {"CODE_LOAD::python/src/develop/skillsmd/serialization.py#pydantic"}
 ```
 
 Pydantic models also work with `ctx.get`, `ctx.awakeable`, and `ctx.run_typed` via the `type_hint` parameter.
@@ -387,10 +243,7 @@ Pydantic models also work with `ctx.get`, `ctx.awakeable`, and `ctx.run_typed` v
 
 Raise `TerminalError` to stop retries and propagate failure permanently:
 
-```python
-from restate import TerminalError
-
-raise TerminalError("Invalid input - will not retry")
+```python {"CODE_LOAD::python/src/develop/skillsmd/error_handling.py#terminal"}
 ```
 
 All other exceptions are retried with exponential backoff by default, and eventually paused.
@@ -405,10 +258,7 @@ Catch `TerminalError` from `ctx.run` to handle permanent failures and execute co
 
 Bare exception handlers catch Restate SDK internal exceptions (suspension signals, terminal errors), causing silent failures and lost journal entries.
 
-```python
-from restate import TerminalError
-
-raise TerminalError("Invalid input - will not retry")
+```python {"CODE_LOAD::python/src/develop/skillsmd/error_handling.py#catch"}
 ```
 
 ### 2. Use Restate concurrency combinators, not asyncio
@@ -433,21 +283,7 @@ Install: `pip install restate-sdk[harness]`
 
 Tests run against a real Restate Server in Docker via Testcontainers. 
 
-```python
-import restate
-
-from my_service import app
-
-with restate.test_harness(app, replay_always=True) as harness:
-    client = harness.ingress_client()
-
-    # Invoke a service handler
-    response = client.post("/MyService/myHandler", json="Hello")
-    assert response.json() == "Hello!"
-
-    # Invoke a Virtual Object handler
-    response = client.post("/MyObject/myKey/myHandler", json="Hello")
-    assert response.json() == "Hello myKey!"
+```python {"CODE_LOAD::python/src/develop/skillsmd/testing.py#here"}
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
