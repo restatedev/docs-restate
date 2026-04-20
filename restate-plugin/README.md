@@ -50,7 +50,5 @@ The bundled MCP server at `https://docs.restate.dev/mcp` provides access to the 
 
 
 ## TODO
-- Figure out how to make the skills stay up to date with new releases
-- We miss commands for start-restate, register-service, list-services, get-openapi-spec, etc.
 - Add TS and Python lsp servers
 - Reference to Restate SDK service context in the SDK skill references

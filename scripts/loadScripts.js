@@ -405,9 +405,98 @@ function startWatcher() {
         });
 }
 
+// --- Skills build: resolve CODE_LOAD and output clean files (no CODE_LOAD metadata) ---
+
+const SKILLS_SRC_DIR = path.resolve("./restate-plugin/skills/restate/src");
+const SKILLS_OUT_DIR = path.resolve("./restate-plugin/skills/restate/references");
+
+async function buildSkillFile(srcPath, outPath) {
+    const fileContent = fs.readFileSync(srcPath, "utf8");
+    const matches = [...fileContent.matchAll(CODE_LOAD_REGEX)];
+
+    if (matches.length === 0) {
+        // No CODE_LOAD blocks, copy as-is
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        fs.writeFileSync(outPath, fileContent, "utf8");
+        console.log(`📋 Copied (no CODE_LOAD): ${outPath}`);
+        return;
+    }
+
+    let updatedContent = fileContent;
+    for (const match of matches) {
+        const [fullMatch, lang, metaBefore, loadPathRaw, customTagRaw, optionsStrRaw, metaAfter, oldCode] = match;
+        const fullMeta = (metaBefore + (metaAfter || "")).trim();
+        const loadPath = loadPathRaw ? loadPathRaw.replace(/"/g, '') : undefined;
+        const customTag = customTagRaw ? customTagRaw.replace(/"/g, '') : undefined;
+        const optionsStr = optionsStrRaw ? optionsStrRaw.replace(/"/g, '') : undefined;
+
+        let loadedCode;
+        if (loadPath.startsWith('https://raw.githubusercontent.com/')) {
+            try {
+                const response = await fetch(loadPath);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                loadedCode = await response.text();
+            } catch (e) {
+                console.warn(`❌ Skills build: error fetching ${loadPath}: ${e.message}`);
+                continue;
+            }
+        } else {
+            const snippetFullPath = path.resolve(SNIPPET_DIR, loadPath);
+            if (!fs.existsSync(snippetFullPath)) {
+                console.warn(`❌ Skills build: snippet not found: ${snippetFullPath}`);
+                continue;
+            }
+            loadedCode = fs.readFileSync(snippetFullPath, "utf8").trimEnd();
+        }
+
+        const opts = parseOptions(optionsStr);
+        let codeToInsert;
+        try {
+            const snippetFullPath = loadPath.startsWith('https://raw.githubusercontent.com/') ? loadPath : path.resolve(SNIPPET_DIR, loadPath);
+            codeToInsert = extractAndClean(loadedCode, customTag, snippetFullPath, opts.collapsePrequel, opts.removeComments, opts.collapseImports);
+        } catch (e) {
+            console.warn(`❌ Skills build: error processing ${loadPath}: ${e.message}`);
+            continue;
+        }
+
+        // Clean output: no CODE_LOAD metadata on fence line
+        const cleanMeta = fullMeta.replace(/\s*\{["']?CODE_LOAD::[^}]*\}["']?\s*/g, '').trim();
+        const replacement = `\`\`\`${lang}${cleanMeta ? ' ' + cleanMeta : ''}\n${codeToInsert.trimEnd()}\n\`\`\``;
+        updatedContent = updatedContent.replace(fullMatch, replacement);
+    }
+
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, updatedContent, "utf8");
+    console.log(`✅ Skills build: ${outPath}`);
+}
+
+async function buildAllSkills(srcDir = SKILLS_SRC_DIR, outDir = SKILLS_OUT_DIR) {
+    if (!fs.existsSync(srcDir)) {
+        console.log("⏭️ No skills src directory found, skipping skills build.");
+        return;
+    }
+    console.log("🔧 Building skills...");
+    const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const srcPath = path.join(srcDir, entry.name);
+        const outPath = path.join(outDir, entry.name);
+        if (entry.isDirectory()) {
+            await buildAllSkills(srcPath, outPath);
+        } else if (entry.isFile() && srcPath.endsWith(".md")) {
+            await buildSkillFile(srcPath, outPath);
+        }
+    }
+}
+
+// --- Main execution ---
+
 // Generate guides overview on startup
 console.log("🏗️ Generating guides overview on startup...");
 generateGuidesOverview();
 
 updateAllMdxFiles();
+
+// Build skills (resolve CODE_LOAD, output clean files)
+buildAllSkills();
+
 // startWatcher();
