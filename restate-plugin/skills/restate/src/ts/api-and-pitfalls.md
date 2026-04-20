@@ -33,6 +33,13 @@ Or via npx (no install):
 npx @restatedev/restate 
 ```
 
+Or Docker: 
+```bash
+docker run -it --network=host \
+docker.restate.dev/restatedev/restate-cli:latest \
+invocations ls
+```
+
 ### Install SDK
 
 ```bash
@@ -79,22 +86,22 @@ See minimal scaffold above.
 ```ts {"CODE_LOAD::ts/src/develop/virtual_object.ts"}
 ```
 
-- **Exclusive handlers** (default): only one executes at a time per key. Use for writes.
-- **Shared handlers** (`restate.handlers.object.shared`): run concurrently per key. Use for reads.
+- **Exclusive handlers** (default): only one executes at a time per key. Use for writes. Receive `ObjectContext`.
+- **Shared handlers** (`restate.handlers.object.shared`): run concurrently per key. Use for reads. Receive `ObjectSharedContext`.
 
 ### Workflow
 
 ```ts {"CODE_LOAD::ts/src/develop/workflow.ts"}
 ```
 
-- `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution.
-- Other handlers can be called concurrently while `run` is in progress. Use them to send signals or read state.
+- `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution. Uses `WorkflowContext`.
+- Other handlers can be called concurrently while `run` is in progress. Use them to send signals or read state. Use `WorkflowSharedContext`.
 
 ---
 
 ## State Management
 
-Never use global variables for state -- it is not durable across restarts. Use `ctx.get`/`ctx.set` instead (available on ObjectContext and WorkflowContext):
+Never use global variables for state -- it is not durable across restarts. Use `ctx.get`/`ctx.set` instead:
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#state"}
 ```
@@ -113,7 +120,7 @@ Never use global variables for state -- it is not durable across restarts. Use `
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#sending_messages"}
 ```
 
-### Delayed Calls
+### Delayed messages
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#delayed_messages"}
 ```
@@ -141,7 +148,7 @@ Never call external APIs, databases, or non-deterministic functions directly in 
 
 - The first argument is a label used for observability and debugging.
 - The return value must be JSON-serializable (or use a custom serde).
-- Always `await` the result. Fire-and-forget `ctx.run()` without await loses durability guarantees.
+- No Restate context actions within `ctx.run()`.
 
 ---
 
@@ -161,6 +168,8 @@ Never use `setTimeout`. Use `ctx.sleep` for durable delays that survive crashes 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#durable_timers"}
 ```
 
+No limit on duration, but long sleeps in exclusive handlers block other calls for that key.
+
 ---
 
 ## Awakeables
@@ -170,7 +179,10 @@ Awakeables pause execution until an external system signals completion:
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#awakeables"}
 ```
 
-Resolve or reject from another handler or external system:
+External systems can also resolve/reject via HTTP:
+`curl localhost:8080/restate/awakeables/<id>/resolve --json '"Looks good!"'`
+
+Or from another handler:
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#awakeables_resolution"}
 ```
@@ -261,7 +273,10 @@ Throw `TerminalError` to stop retries and propagate failure permanently:
 ```ts {"CODE_LOAD::ts/src/develop/error_handling.ts#terminal"}
 ```
 
-Any other error type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
+
+All other exceptions are retried with exponential backoff by default, and eventually paused.
+
+Catch `TerminalError` from `ctx.run` to handle permanent failures and execute compensations (see sagas).
 
 ---
 
@@ -292,3 +307,11 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+## Further resources
+
+- For detailed API: use the bundled restate-docs MCP server or Python SDK documentation
+- Examples: https://github.com/restatedev/examples
+- AI agent examples: https://github.com/restatedev/ai-examples

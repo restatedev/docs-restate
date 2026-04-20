@@ -26,6 +26,13 @@ Use the Restate middleware to wrap the language model:
 restate example typescript-vercel-ai-template
 ```
 
+## Durable Sessions
+
+To add session management to the agent:
+
+```typescript {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/chat-agent.ts#here"} 
+```
+
 ## More Examples
 
 `github.com/restatedev/ai-examples/vercel-ai/`
