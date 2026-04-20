@@ -27,10 +27,10 @@ docker run --name restate_dev --rm -p 8080:8080 -p 9070:9070 docker.io/restatede
 brew install restatedev/tap/restate
 ```
 
-Or via npm:
+Or via npx (no install):
 
 ```bash
-npm install -g @restatedev/restate
+npx @restatedev/restate 
 ```
 
 ### Install SDK
@@ -49,11 +49,11 @@ Optional packages:
 ```ts
 import * as restate from "@restatedev/restate-sdk";
 
-const myService = restate.service({
+export const myService = restate.service({
   name: "MyService",
   handlers: {
-    greet: async (ctx: restate.Context, name: string) => {
-      return `Hello ${name}!`;
+    myHandler: async (ctx: restate.Context, greeting: string) => {
+      return `${greeting}!`;
     },
   },
 });
@@ -84,24 +84,13 @@ curl localhost:8080/MyService/greet --json '"World"'
 
 ### Service (Stateless)
 
-```ts
-import * as restate from "@restatedev/restate-sdk";
-
-export const myService = restate.service({
-  name: "MyService",
-  handlers: {
-    myHandler: async (ctx: restate.Context, greeting: string) => {
-      return `${greeting}!`;
-    },
-  },
-});
-
-restate.serve({ services: [myService] });
-```
+See minimal scaffold above.
 
 ### Virtual Object (Stateful, Keyed)
 
 ```ts
+import * as restate from "@restatedev/restate-sdk";
+
 export const myObject = restate.object({
   name: "MyObject",
   handlers: {
@@ -115,6 +104,8 @@ export const myObject = restate.object({
     ),
   },
 });
+
+restate.serve({ services: [myObject] });
 ```
 
 - **Exclusive handlers** (default): only one executes at a time per key. Use for writes.
@@ -123,17 +114,25 @@ export const myObject = restate.object({
 ### Workflow
 
 ```ts
+import * as restate from "@restatedev/restate-sdk";
+
 export const myWorkflow = restate.workflow({
   name: "MyWorkflow",
   handlers: {
     run: async (ctx: restate.WorkflowContext, req: string) => {
+      // implement workflow logic here
+
       return "success";
     },
+
     interactWithWorkflow: async (ctx: restate.WorkflowSharedContext) => {
-      // resolve a promise the workflow is waiting on
+      // implement interaction logic here
+      // e.g. resolve a promise that the workflow is waiting on
     },
   },
 });
+
+restate.serve({ services: [myWorkflow] });
 ```
 
 - `run` executes exactly once per workflow ID. Calling `run` again with the same ID attaches to the existing execution.
@@ -160,8 +159,13 @@ const keys = await ctx.stateKeys();
 ### Request-Response Calls
 
 ```ts
+// Call a Service
 const response = await ctx.serviceClient(myService).myHandler("Hi");
+
+// Call a Virtual Object
 const response2 = await ctx.objectClient(myObject, "key").myHandler("Hi");
+
+// Call a Workflow
 const response3 = await ctx.workflowClient(myWorkflow, "wf-id").run("Hi");
 ```
 
@@ -170,15 +174,15 @@ const response3 = await ctx.workflowClient(myWorkflow, "wf-id").run("Hi");
 ```ts
 ctx.serviceSendClient(myService).myHandler("Hi");
 ctx.objectSendClient(myObject, "key").myHandler("Hi");
+ctx.workflowSendClient(myWorkflow, "wf-id").run("Hi");
 ```
 
 ### Delayed Calls
 
 ```ts
-ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({ delay: { hours: 5 } })
-);
+ctx
+  .serviceSendClient(myService)
+  .myHandler("Hi", restate.rpc.sendOpts({ delay: { hours: 5 } }));
 ```
 
 ### Generic Calls (String-Based Service/Method Names)
@@ -190,7 +194,7 @@ const response = await ctx.genericCall({
   service: "MyObject",
   method: "myHandler",
   parameter: "Hi",
-  key: "Mary",
+  key: "Mary", // drop this for Service calls
   inputSerde: restate.serde.json,
   outputSerde: restate.serde.json,
 });
@@ -243,7 +247,6 @@ Never use `setTimeout`. Use `ctx.sleep` for durable delays that survive crashes 
 
 ```ts
 await ctx.sleep({ seconds: 30 });
-await ctx.sleep({ minutes: 5, seconds: 10 });
 ```
 
 ---
@@ -253,17 +256,23 @@ await ctx.sleep({ minutes: 5, seconds: 10 });
 Awakeables pause execution until an external system signals completion:
 
 ```ts
+// Create awakeable
 const { id, promise } = ctx.awakeable<string>();
-// Send the awakeable ID to an external system
+
+// Send ID to external system
 await ctx.run(() => requestHumanReview(name, id));
-// Wait for the external system to resolve/reject
+
+// Wait for result
 const review = await promise;
 ```
 
 Resolve or reject from another handler or external system:
 
 ```ts
+// Resolve from another handler
 ctx.resolveAwakeable(id, "Looks good!");
+
+// Reject from another handler
 ctx.rejectAwakeable(id, "Cannot be reviewed");
 ```
 
@@ -274,10 +283,10 @@ ctx.rejectAwakeable(id, "Cannot be reviewed");
 Durable promises allow communication between a workflow's `run` handler and its shared handlers:
 
 ```ts
-// In the run handler -- wait for a signal:
+// Wait for promise
 const review = await ctx.promise<string>("review");
 
-// In another handler -- send the signal:
+// Resolve promise
 await ctx.promise<string>("review").resolve(review);
 ```
 
@@ -294,18 +303,23 @@ import { RestatePromise } from "@restatedev/restate-sdk";
 ### All (wait for all to complete)
 
 ```ts
-// WRONG: const results = await Promise.all([call1, call2]);
-// CORRECT:
-const results = await RestatePromise.all([
-  ctx.serviceClient(service1).handler1(),
-  ctx.serviceClient(service2).handler2(),
-]);
+// ❌ BAD
+const results1 = await Promise.all([call1, call2]);
+
+// ✅ GOOD
+const claude = ctx.serviceClient(claudeAgent).ask("What is the weather?");
+const openai = ctx.serviceClient(openAiAgent).ask("What is the weather?");
+const results2 = await RestatePromise.all([claude, openai]);
 ```
 
 ### Race (first to settle)
 
 ```ts
-const first = await RestatePromise.race([
+// ❌ BAD
+const result1 = await Promise.race([call1, call2]);
+
+// ✅ GOOD
+const firstToComplete = await RestatePromise.race([
   ctx.sleep({ milliseconds: 100 }),
   ctx.serviceClient(myService).myHandler("Hi"),
 ]);
@@ -314,7 +328,11 @@ const first = await RestatePromise.race([
 ### Any (first to succeed)
 
 ```ts
-const result = await RestatePromise.any([
+// ❌ BAD - using Promise.any (not journaled)
+const result1 = await Promise.any([call1, call2]);
+
+// ✅ GOOD
+const result2 = await RestatePromise.any([
   ctx.run(() => callLLM("gpt-4", prompt)),
   ctx.run(() => callLLM("claude", prompt)),
 ]);
@@ -323,7 +341,22 @@ const result = await RestatePromise.any([
 ### AllSettled (wait for all, regardless of success/failure)
 
 ```ts
-const results = await RestatePromise.allSettled([call1, call2]);
+// ❌ BAD
+const results1 = await Promise.allSettled([call1, call2]);
+
+// ✅ GOOD
+const results2 = await RestatePromise.allSettled([
+  ctx.serviceClient(service1).call(),
+  ctx.serviceClient(service2).call(),
+]);
+
+results2.forEach((result, i) => {
+  if (result.status === "fulfilled") {
+    console.log(`Call ${i} succeeded:`, result.value);
+  } else {
+    console.log(`Call ${i} failed:`, result.reason);
+  }
+});
 ```
 
 ---
@@ -333,10 +366,9 @@ const results = await RestatePromise.allSettled([call1, call2]);
 ### Idempotency Keys
 
 ```ts
-const handle = ctx.serviceSendClient(myService).myHandler(
-  "Hi",
-  restate.rpc.sendOpts({ idempotencyKey: "my-key" })
-);
+const handle = ctx
+  .serviceSendClient(myService)
+  .myHandler("Hi", restate.rpc.sendOpts({ idempotencyKey: "my-key" }));
 ```
 
 ### Attach to a Running Invocation
@@ -349,6 +381,7 @@ const response = await ctx.attach(invocationId);
 ### Cancel an Invocation
 
 ```ts
+// Cancel invocation
 ctx.cancel(invocationId);
 ```
 
@@ -365,22 +398,25 @@ All handler inputs/outputs and state values use JSON serialization by default.
 Install `@restatedev/restate-sdk-zod`, then define schemas:
 
 ```ts
-import { serde } from "@restatedev/restate-sdk-zod";
+import * as restate from "@restatedev/restate-sdk";
 import { z } from "zod";
+import { serde } from "@restatedev/restate-sdk-zod";
 
-const Greeting = z.object({ name: z.string() });
-const GreetingResponse = z.object({ result: z.string() });
+const Greeting = z.object({
+  name: z.string(),
+});
+
+const GreetingResponse = z.object({
+  result: z.string(),
+});
 
 const greeter = restate.service({
   name: "Greeter",
   handlers: {
     greet: restate.handlers.handler(
-      {
-        input: serde.zod(Greeting),
-        output: serde.zod(GreetingResponse),
-      },
+      { input: serde.zod(Greeting), output: serde.zod(GreetingResponse) },
       async (ctx: restate.Context, { name }) => {
-        return { result: `Hi ${name}!` };
+        return { result: `You said hi to ${name}!` };
       }
     ),
   },
@@ -390,15 +426,23 @@ const greeter = restate.service({
 ### Binary Data
 
 ```ts
-restate.handlers.handler(
-  {
-    input: restate.serde.binary,
-    output: restate.serde.binary,
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: restate.handlers.handler(
+      {
+        // Set the input serde here
+        input: restate.serde.binary,
+        // Set the output serde here
+        output: restate.serde.binary,
+      },
+      async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
+        // Process the request
+        return data;
+      }
+    ),
   },
-  async (ctx: Context, data: Uint8Array): Promise<Uint8Array> => {
-    return data;
-  }
-);
+});
 ```
 
 ---
@@ -408,8 +452,6 @@ restate.handlers.handler(
 Throw `TerminalError` to stop retries and propagate failure permanently:
 
 ```ts
-import { TerminalError } from "@restatedev/restate-sdk";
-
 throw new TerminalError("Something went wrong.", { errorCode: 500 });
 ```
 
@@ -422,8 +464,6 @@ Any other error type causes automatic retries with exponential backoff. For retr
 Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Restate context (e.g., from a REST API, a script, or a cron job):
 
 ```ts
-import * as clients from "@restatedev/restate-sdk-clients";
-
 const restateClient = clients.connect({ url: "http://localhost:8080" });
 
 // Request-response
@@ -432,36 +472,34 @@ const result = await restateClient
   .myHandler("Hi");
 
 // One-way
-restateClient
+await restateClient
   .serviceSendClient<MyService>({ name: "MyService" })
   .myHandler("Hi");
 
 // Delayed
-restateClient
+await restateClient
   .serviceSendClient<MyService>({ name: "MyService" })
-  .myHandler("Hi", { delay: { seconds: 30 } });
+  .myHandler("Hi", clients.rpc.sendOpts({ delay: { seconds: 1 } }));
 ```
 
 ---
 
 ## TypeScript-Specific Pitfalls
 
-- **Always `await` `ctx.run()`** -- fire-and-forget loses durability. The side effect may execute but the result is not journaled.
-- **Use `RestatePromise.all/race/any/allSettled`**, NOT native `Promise.all/race/any/allSettled`. Native promises break deterministic replay.
-- **Import `RestatePromise`** from `@restatedev/restate-sdk`.
+- **Use `RestatePromise`**, NOT native `Promise`. Native promises break deterministic replay.
 - **Return values from `ctx.run()` must be JSON-serializable** (no functions, circular references, or class instances without custom serde).
-- **Never use `setTimeout`, `Math.random()`, `Date.now()`, or `new Date()`** -- use `ctx.sleep`, `ctx.rand`, and `ctx.date` instead.
-- **Never use global mutable variables for state** -- use `ctx.get`/`ctx.set` for durable state.
+- **Never use `setTimeout`, `Math.random()`, `Date.now()`, or `new Date()`** -- use Restate Context actions instead.
+- **Never use global mutable variables for state** -- use Restate's K/V store for durable state.
 - **For detailed API reference:** use the MCP server or TSDocs.
 
 ## Testing
 
 Install: `npm install --save-dev @restatedev/restate-sdk-testcontainers`
 
-Tests run against a real Restate Server in Docker via Testcontainers. This catches non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+Tests run against a real Restate Server in Docker via Testcontainers. 
 
 ```typescript
-import { RestateTestEnvironment } from "@restatedev/restate-sdk-testcontainers";
+import {RestateTestEnvironment, TestEnvironmentOptions} from "@restatedev/restate-sdk-testcontainers";
 import * as clients from "@restatedev/restate-sdk-clients";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { greeter } from "./greeter-service";
@@ -473,8 +511,8 @@ describe("MyService", () => {
   beforeAll(async () => {
     restateTestEnvironment = await RestateTestEnvironment.start({
       services: [greeter],
-      retryAlways: true, // Always replay invocations to catch non-determinism
-    });
+      alwaysReplay: true,
+    } as TestEnvironmentOptions);
     restateIngress = clients.connect({ url: restateTestEnvironment.baseUrl() });
   }, 20_000);
 
@@ -495,7 +533,4 @@ describe("MyService", () => {
 });
 ```
 
-Key points:
-- `retryAlways: true` forces Restate to replay every invocation, catching non-determinism bugs (e.g., unwrapped `Math.random()`, missing `ctx.run()`)
-- `stateOf()` reads and writes Virtual Object state for test setup and assertions
-- Set `beforeAll` timeout to 20+ seconds for container startup
+Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
