@@ -1,6 +1,6 @@
 # Interacting with Restate Services
 
-How to invoke services, interact with running invocations, and control their lifecycle. These are application-level concerns, not just operational tools. For example: a chatbot cancels an in-flight agent when the user sends a new message, a frontend attaches to a running workflow to stream progress, or a webhook uses idempotency keys to deduplicate retries.
+How to invoke services, interact with running invocations, and control their lifecycle. These are application-level concerns, not just operational tools. For example: a chatbot cancels an in-flight agent when the user sends a new message, a frontend attaches to a running workflow to retrieve the result, or a webhook uses idempotency keys to deduplicate retries.
 
 ## Invoking services over HTTP
 
@@ -44,23 +44,23 @@ For Kafka setup and configuration: use the bundled MCP server or see [Kafka invo
 
 These primitives are part of application logic, not just operations.
 
-| I need to... | Use | Not | Example use case |
-|---|---|---|---|
-| Deduplicate external triggers | Idempotency key on send/call | Seen-ID set in state | Webhook retries, user double-clicks |
+| I need to... | Use | Not                     | Example use case |
+|---|---|-------------------------|---|
+| Deduplicate external triggers | Idempotency key on send/call | Seen-ID set in state    | Webhook retries, user double-clicks |
 | Wait for a background result | `ctx.attach(invocationId)` | State polling, callback | Frontend waiting for agent response |
-| Cancel a running invocation | `ctx.cancel(id)` or Admin API | Cancel flag + polling | Chatbot: interrupt agent on new message |
-| Bound how long to wait | `.orTimeout({ seconds: N })` | `ctx.sleep` + race | Deadline on a service call |
-| Pause for external event | Awakeable or Durable Promise | Polling loop | Human approval, payment callback |
-| Schedule future work | Delayed send | `ctx.sleep()` + send | Reminders, retry-after, scheduled tasks |
-| Periodic execution | Delayed self-invocation | External cron | Polling external API, periodic cleanup |
+| Cancel a running invocation | `ctx.cancel(id)` or Admin API | Cancel flag + polling   | Chatbot: interrupt agent on new message |
+| Bound how long to wait | `.orTimeout({ seconds: N })` | /                       | Deadline on a service call |
+| Pause for external event | Awakeable or Durable Promise | Polling loop            | Human approval, payment callback |
+| Schedule future work | Delayed send | `ctx.sleep()` + send    | Reminders, retry-after, scheduled tasks |
+| Periodic execution | Delayed self-invocation | External cron           | Polling external API, periodic cleanup |
 
 For detailed SDK-specific API: see the `api-and-pitfalls.md` reference for the detected SDK.
 
 Docs:
-- [Service communication](https://docs.restate.dev/develop/ts/service-communication) - Durable RPC, sends, delays
-- [External events](https://docs.restate.dev/develop/ts/external-events) - Awakeables, durable promises
-- [Managing invocations](https://docs.restate.dev/services/invocation/managing-invocations) - Cancel, kill, pause, resume, attach
-- [Idempotent invocations](https://docs.restate.dev/foundations/invocations#idempotent-invocations) - Deduplication
+- [Service communication](https://docs.restate.dev/develop/ts/service-communication.md) - Durable RPC, sends, delays
+- [External events](https://docs.restate.dev/develop/ts/external-events.md) - Awakeables, durable promises
+- [Managing invocations](https://docs.restate.dev/services/invocation/managing-invocations.md) - Cancel, kill, pause, resume, attach
+- [Idempotent invocations](https://docs.restate.dev/foundations/invocations.md) - Deduplication
 
 ## Retention
 
@@ -73,7 +73,7 @@ Docs:
 
 After workflow retention expires, shared handlers return errors and state is inaccessible. Mirror critical results to a Virtual Object before the workflow completes.
 
-Docs: [Service configuration](https://docs.restate.dev/services/configuration)
+Docs: [Service configuration](https://docs.restate.dev/services/configuration.md)
 
 ## CLI quick reference
 

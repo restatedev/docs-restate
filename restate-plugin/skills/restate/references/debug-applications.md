@@ -6,13 +6,11 @@
 
 Code changed while an invocation was in flight. The journal no longer matches the code.
 
-**Fix in dev:** `restate deployments register --force`
-
-**Fix in production:** Deploy to a new endpoint and register it separately. The old invocations continue on the old deployment.
-
 **Safe changes:** Fixing bugs inside `ctx.run()` (the side effect name and position remain the same).
 
 **Unsafe changes:** Reordering, adding, or removing Restate operations (calls, sleeps, `ctx.run`, etc.).
+
+Read https://docs.restate.dev/services/versioning.md
 
 ### Service not found / handler not found (RT0011, RT0018)
 
@@ -102,21 +100,4 @@ restate kv edit <SERVICE> <KEY>
 
 ## Admin API
 
-Base URL: `http://localhost:9070`
-
-### Deployment and Service Management
-
-- `GET /deployments` -- list all deployments
-- `POST /deployments` -- register a deployment (body: `{"uri": "http://..."}`)
-- `GET /services` -- list all services
-
-### Invocation Lifecycle
-
-- `PATCH /invocations/{id}/cancel` -- graceful cancel (runs compensations)
-- `PATCH /invocations/{id}/kill` -- forceful kill (no compensations)
-- `PATCH /invocations/{id}/pause` -- pause an invocation
-- `PATCH /invocations/{id}/resume` -- resume a paused invocation
-
-### SQL Introspection
-
-- `POST /query` -- run SQL queries against invocation and state tables
+Base URL: `http://localhost:9070/openapi`

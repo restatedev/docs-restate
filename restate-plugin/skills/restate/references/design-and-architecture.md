@@ -46,9 +46,7 @@ Pick keys that distribute load evenly across instances:
 
 ### Key cardinality rules
 
-- **Too few keys** = bottleneck. If all requests funnel through a single key, exclusive handlers serialize everything.
-- **Too many keys** = fragmentation. Each key carries overhead. Avoid creating a key per individual event when grouping by entity is possible.
-- Target: one key per logical entity that needs its own state and concurrency boundary.
+One key per logical entity that needs its own state and concurrency boundary.
 
 ### Anti-patterns
 
@@ -100,7 +98,6 @@ Deadlocks occur when exclusive handlers on Virtual Objects form circular call ch
 2. **Use one-way sends to break cycles.** A one-way send (`ctx.send()`) does not block. The caller continues immediately.
 3. **Use shared handlers for reads.** If the call only needs to read state, make the target handler shared. Shared handlers do not queue.
 4. **Use a Service as intermediary.** Services have no keyed queues. Place coordination logic in a Service that calls Virtual Objects, avoiding direct Object-to-Object exclusive cycles.
-5. **Avoid self-calls in exclusive handlers.** Never call another exclusive handler on the same object and key from within an exclusive handler. Use a one-way send or refactor the logic into the same handler.
 
 ## Communication patterns
 
@@ -124,11 +121,10 @@ Restate provides several durable communication mechanisms. All survive crashes a
 
 Common mistakes:
 - Do NOT use a durable promise to cancel an invocation. Use the Admin cancel API (`ctx.cancel(id)`) instead. See `references/lifecycle-and-operations.md`.
-- Do NOT poll a state flag to wait for a result. Use `ctx.attach(invocationId)` to wait for a previously sent message.
+- Do NOT poll a state flag to wait for a result. Use `ctx.attach(invocationId)` to wait for a workflow result.
 - Do NOT use `ctx.sleep()` + send to schedule future work. Use a delayed send directly (it does not block the handler).
-- For bounded waits on a service call, use `.orTimeout({ seconds: N })` instead of racing against `ctx.sleep()`.
 
-For detailed SDK-specific API signatures: use the bundled restate-docs MCP server. For cancellation, idempotency, attach, and retention: see `references/lifecycle-and-operations.md`.
+For detailed SDK-specific API signatures: use the bundled restate-docs MCP server. For cancellation, idempotency, attach, and retention: see `references/invocation-lifecycle.md`.
 
 ## Common architecture patterns
 
