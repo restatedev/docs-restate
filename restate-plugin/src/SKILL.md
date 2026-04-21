@@ -12,6 +12,8 @@ description: >
   or migrating from workflow orchestrators to Restate.
   Use proactively when a project contains restate dependencies in
   package.json, requirements.txt, pyproject.toml, pom.xml, build.gradle, or go.mod.
+metadata:
+   version: "0.0.1"
 ---
 
 # Restate
@@ -33,7 +35,7 @@ Scan the project to determine the SDK and context:
 
 3. **Detect AI frameworks**: `@ai-sdk/`, `openai-agents`, `google-adk`, `pydantic-ai`
 
-4. **Detect workflow orchestrators**: `temporalio`, `@temporalio`, `camunda`, `aws-cdk/aws-stepfunctions`, `inngest`
+4. **Detect workflow orchestrators**: `temporalio`, `@temporalio`, `aws-cdk/aws-stepfunctions`, etc.
 
 ## Core reference (always load)
 

@@ -407,8 +407,8 @@ function startWatcher() {
 
 // --- Skills build: resolve CODE_LOAD and output clean files (no CODE_LOAD metadata) ---
 
-const SKILLS_SRC_DIR = path.resolve("./restate-plugin/skills/restate/src");
-const SKILLS_OUT_DIR = path.resolve("./restate-plugin/skills/restate/references");
+const SKILLS_SRC_DIR = path.resolve("./restate-plugin/src");
+const SKILLS_OUT_DIR = path.resolve("./restate-plugin/skills/building-restate-services");
 
 async function buildSkillFile(srcPath, outPath) {
     const fileContent = fs.readFileSync(srcPath, "utf8");
