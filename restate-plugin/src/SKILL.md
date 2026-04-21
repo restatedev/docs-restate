@@ -12,9 +12,6 @@ description: >
   or migrating from workflow orchestrators to Restate.
   Use proactively when a project contains restate dependencies in
   package.json, requirements.txt, pyproject.toml, pom.xml, build.gradle, or go.mod.
-metadata:
-   author: restatedev
-   version: "0.0.1"
 ---
 
 # Restate
@@ -82,4 +79,4 @@ Before designing any Restate service architecture, check:
 - [ ] AI agents: `maxRetryAttempts` on LLM calls
 - [ ] Virtual Objects: no deadlock cycles
 - [ ] Service registered, tested via curl/UI
-- [ ] Tests written using Testcontainers with to catch non-determinism (see Testing section in SDK reference)
+- [ ] Tests written using Testcontainers with replay-always mode enabled to catch non-determinism (see Testing section in SDK reference)

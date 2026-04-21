@@ -417,16 +417,30 @@ Catch `TerminalError` from `ctx.run` to handle permanent failures and execute co
 Bare exception handlers catch Restate SDK internal exceptions (suspension signals, terminal errors), causing silent failures and lost journal entries.
 
 ```python
-from restate import TerminalError
+# Bad: bare except swallows Restate's internal suspension signals
+try:
+    result = await ctx.run("api-call", call_external_api)
+except:
+    result = None
 
-raise TerminalError("Invalid input - will not retry")
+# Good: catch the specific exception you expect
+try:
+    result = await ctx.run("api-call", call_external_api)
+except TimeoutError as e:
+    raise TerminalError(f"API timeout: {e}")
 ```
 
 ### 2. Use Restate concurrency combinators, not asyncio
 
-### 3. Use ctx.run_typed for better type safety
+`asyncio.gather`, `asyncio.wait`, and `asyncio.as_completed` are not journaled and break deterministic replay. Use `restate.gather`, `restate.select`, `restate.wait_completed`, and `restate.as_completed` instead (see the Concurrency section above).
 
-### 4. No native random, time, or UUID. Use Restate's deterministic helpers instead.
+### 3. Use `ctx.run_typed` for better type safety
+
+Prefer `ctx.run_typed("label", fn, **kwargs)` over `ctx.run("label", lambda: fn(...))` for anything more complex than a trivial lambda: the typed variant infers the return type from the function signature and works cleanly with Pydantic models.
+
+### 4. No native random, time, or UUID
+
+`random.random()`, `time.time()`, `datetime.now()`, and `uuid.uuid4()` produce different values on replay. Use `ctx.random()`, `ctx.time()`, and `ctx.uuid()` (see the Deterministic helpers section above).
 
 ### 5. No ctx operations inside ctx.run blocks
 

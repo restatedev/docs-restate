@@ -1,5 +1,5 @@
 ---
-name: restate
+name: building-restate-services
 description: >
   Build, implement, run, and test Restate durable services, virtual objects,
   workflows, and AI agents across TypeScript, Python, Java, and Go.
@@ -12,8 +12,6 @@ description: >
   or migrating from workflow orchestrators to Restate.
   Use proactively when a project contains restate dependencies in
   package.json, requirements.txt, pyproject.toml, pom.xml, build.gradle, or go.mod.
-metadata:
-   version: "0.0.1"
 ---
 
 # Restate
@@ -81,4 +79,4 @@ Before designing any Restate service architecture, check:
 - [ ] AI agents: `maxRetryAttempts` on LLM calls
 - [ ] Virtual Objects: no deadlock cycles
 - [ ] Service registered, tested via curl/UI
-- [ ] Tests written using Testcontainers with `retryAlways` to catch non-determinism (see Testing section in SDK reference)
+- [ ] Tests written using Testcontainers with replay-always mode enabled to catch non-determinism (see Testing section in SDK reference)

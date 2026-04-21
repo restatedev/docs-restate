@@ -274,9 +274,15 @@ Bare exception handlers catch Restate SDK internal exceptions (suspension signal
 
 ### 2. Use Restate concurrency combinators, not asyncio
 
-### 3. Use ctx.run_typed for better type safety
+`asyncio.gather`, `asyncio.wait`, and `asyncio.as_completed` are not journaled and break deterministic replay. Use Restate's Promise combinators instead (see the Concurrency section above).
 
-### 4. No native random, time, or UUID. Use Restate's deterministic helpers instead.
+### 3. Use `ctx.run_typed` for better type safety
+
+Prefer `ctx.run_typed("label", fn, **kwargs)` over `ctx.run("label", lambda: fn(...))` for anything more complex than a trivial lambda: the typed variant infers the return type from the function signature and works cleanly with Pydantic models.
+
+### 4. No native random, time, or UUID
+
+`random.random()`, `time.time()`, `datetime.now()`, and `uuid.uuid4()` produce different values on replay. Use Restate's deterministic helpers instead (see the Deterministic helpers section above).
 
 ### 5. No ctx operations inside ctx.run blocks
 

@@ -55,7 +55,7 @@ implementation("dev.restate:sdk-java-lambda:2.4.1")
     <!-- For deploying using AWS Lambda -->
     <dependency>
         <groupId>dev.restate</groupId>
-        <artifactId>sdk-java-http</artifactId>
+        <artifactId>sdk-java-lambda</artifactId>
         <version>${restate.version}</version>
     </dependency>
 </dependencies>
@@ -237,9 +237,9 @@ Use `DurableFuture` combinators, NOT `CompletableFuture`. Native combinators are
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#combine_all"}
 ```
 
-### Any (first to settle)
+### Select (first to complete)
 
-Returns first future that settles:
+Returns the value of whichever future completes first:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#combine_any"}
 ```
@@ -273,7 +273,7 @@ All handler inputs/outputs and state values use Jackson JSON serialization by de
 
 ### Custom Serde
 
-Implement `Serde<T>` for custom serialization:
+Implement `Serde<T>` for custom serialization when Jackson defaults are not sufficient (binary payloads, non-JSON formats, or types with custom encoding). Pass the serde when declaring a `StateKey`, `DurablePromiseKey`, awakeable, or `ctx.run` call.
 
 ---
 

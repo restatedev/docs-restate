@@ -24,7 +24,7 @@ Map concepts from existing orchestrators (Temporal, Step Functions, etc.) to Res
 | Activity / Task / Step | `ctx.run()`                                                                                                       | Manual retry loops, external task queues |
 | Workflow / Process / State Machine | Workflow `run` handler or Service handler                                                                         | JSON/YAML workflow definitions, state machine libraries |
 | Signal (data) / Message Event | Durable Promise or Awakeable                                                                                      | Polling a state flag in a loop |
-| Signal (cancel) / Stop workflow | Admin cancel API or via SDK `ctx.cancel(id)`                                                                      | Cooperative cancel flag + poll pattern |
+| Signal (cancel) / Stop workflow | SDK cancel API (or Admin API)                                                                                     | Cooperative cancel flag + poll pattern |
 | Query / Read state | Shared handler on Virtual Object / Durable Promise or state get on Workflow                                       | Polling handler, state-dump endpoint |
 | Timer / Sleep | `ctx.sleep()` or delayed send                                                                                     | `setTimeout`, native sleep, external scheduler |
 | Child Workflow / Sub-process | Service-to-service call (durable RPC)                                                                             | HTTP calls with manual retry logic |
@@ -34,7 +34,7 @@ Map concepts from existing orchestrators (Temporal, Step Functions, etc.) to Res
 | Saga / Compensation | Try/catch with compensation list                                                                                  | Separate compensation service, manual rollback |
 | Workflow ID / Run ID | Idempotency key or Workflow ID                                                                                    | Seen-ID set for deduplication |
 | Cron / Scheduled trigger | Delayed self-invocation                                                                                           | External cron, setInterval, CloudWatch Events |
-| Wait for result of background job | `ctx.attach(invocationId)`                                                                                        | State polling, callback webhook |
+| Wait for result of background job | Attach to the invocation (SDK-specific API)                                                                       | State polling, callback webhook |
 
 ### Key differences from orchestrators
 
