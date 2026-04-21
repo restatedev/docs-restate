@@ -151,7 +151,7 @@ Never use `random.random()`, `time.time()`, `datetime.now()`, or `uuid.uuid4()` 
 
 ## Timers (durable sleep)
 
-Never use `setTimeout`. Use `ctx.sleep` for durable delays that survive crashes and restarts:
+Never use `asyncio.sleep` or `time.sleep`. Use `ctx.sleep` for durable delays that survive crashes and restarts:
 
 ```python {"CODE_LOAD::python/src/develop/skillsmd/actions.py#durable_timers"}
 ```

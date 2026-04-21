@@ -295,24 +295,6 @@ Any other exception type causes automatic retries with exponential backoff. For 
 Use `Client` to call Restate handlers from outside a Restate context (e.g., from a REST API, a script, or a cron job):
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Clients.java#here"}
-import dev.restate.sdk.client.Client;
-
-Client restateClient = Client.connect("http://localhost:8080");
-
-// Request-response
-String result = MyServiceClient.fromClient(restateClient)
-    .myHandler("Hi")
-    .await();
-
-// One-way
-MyServiceClient.fromClient(restateClient)
-    .send()
-    .myHandler("Hi");
-
-// Delayed
-MyServiceClient.fromClient(restateClient)
-    .send()
-    .myHandler("Hi", Duration.ofSeconds(30));
 ```
 
 ---

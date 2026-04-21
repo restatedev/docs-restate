@@ -96,12 +96,6 @@ See minimal scaffold above.
 Never use global variables for state -- it is not durable across restarts. Use Restate actions instead. Available in Virtual Objects and Workflows only.
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#state"}
-stateKeys, err := restate.Keys(ctx)                          // List all keys
-myString, err := restate.Get[*string](ctx, "my-string-key")  // nil if not set
-myNumber, err := restate.Get[int](ctx, "my-number-key")      // zero value if not set
-restate.Set(ctx, "my-key", "my-new-value")                   // Set
-restate.Clear(ctx, "my-key")                                 // Clear one key
-restate.ClearAll(ctx)                                        // Clear all
 ```
 
 Use `restate.Get[*string]` (pointer) when distinguishing "not set" (nil) from "set to zero value" matters. Use `restate.Get[int]` (value) when zero value is acceptable.
@@ -137,7 +131,7 @@ Wrap all non-deterministic operations (API calls, DB writes, HTTP requests, file
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#async_run"}
 ```
 
-- No Restate context actions within `ctx.run()`.
+- No Restate context actions within `restate.Run()`.
 - Always supply a name, used for observability and debugging.
 
 ---
@@ -180,9 +174,6 @@ External systems can also resolve/reject via HTTP:
 Or from another handler:
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#awakeables_resolution"}
-// Resolve/reject from another handler
-restate.ResolveAwakeable(ctx, awakeableId, "Looks good!")
-restate.RejectAwakeable(ctx, awakeableId, fmt.Errorf("Cannot do review"))
 ```
 
 ---
@@ -192,11 +183,6 @@ restate.RejectAwakeable(ctx, awakeableId, fmt.Errorf("Cannot do review"))
 Cross-handler signaling within a Workflow. No ID management needed.
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#workflow_promises"}
-// Wait for a promise (in the Run handler)
-review, err := restate.Promise[string](ctx, "review").Result()
-
-// Resolve from an interaction handler
-err := restate.Promise[string](ctx, "review").Resolve(review)
 ```
 
 ---
@@ -208,32 +194,11 @@ CRITICAL: Use `restate.Wait` / `restate.WaitFirst`, NOT goroutines, channels, or
 ### WaitFirst (race, first to complete)
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#wait_first"}
-sleepFuture := restate.After(ctx, 30*time.Second)
-callFuture := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
-
-fut, err := restate.WaitFirst(ctx, sleepFuture, callFuture)
-if err != nil { return "", err }
-switch fut {
-case sleepFuture:
-  sleepFuture.Done()
-  return "sleep won", nil
-case callFuture:
-  result, _ := callFuture.Response()
-  return fmt.Sprintf("call won: %s", result), nil
-}
 ```
 
 ### Wait (all, iterate over completions)
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#wait_all"}
-callFuture1 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi")
-callFuture2 := restate.Service[string](ctx, "MyService", "MyHandler").RequestFuture("hi again")
-
-for fut, err := range restate.Wait(ctx, callFuture1, callFuture2) {
-  if err != nil { return "", err }
-  response, _ := fut.(restate.ResponseFuture[string]).Response()
-  // process response
-}
 ```
 
 ---
