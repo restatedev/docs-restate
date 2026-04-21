@@ -216,7 +216,7 @@ Collection<String> keys = ctx.stateKeys();
 For generic types, use `TypeRef`:
 
 ```java
-// import dev.restate.sdk.common.TypeRef;
+// import dev.restate.serde.TypeRef;
 private static final StateKey<List<String>> ITEMS = StateKey.of("items", new TypeRef<List<String>>() {});
 ```
 
@@ -371,7 +371,7 @@ DurableFuture.all(call1, call2).await();
 Returns the value of whichever future completes first:
 
 ```java
-boolean res = Select.<Boolean>select().or(a1).or(a2).or(a3).await();
+String res = Select.<String>select().or(call1).or(call2).await();
 ```
 
 ---

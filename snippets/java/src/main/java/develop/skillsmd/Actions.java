@@ -5,15 +5,22 @@ import dev.restate.common.Target;
 import dev.restate.sdk.*;
 import dev.restate.sdk.common.DurablePromiseKey;
 import dev.restate.sdk.common.StateKey;
+import dev.restate.serde.TypeRef;
 import dev.restate.serde.TypeTag;
 import develop.MyObjectClient;
 import develop.MyServiceClient;
 import develop.MyWorkflowClient;
 import java.time.Duration;
 import java.util.Collection;
-import dev.restate.sdk.common.TypeRef;
+import java.util.List;
+import java.util.UUID;
 
 public class Actions {
+
+  // <start_generic_state>
+  // import dev.restate.serde.TypeRef;
+  private static final StateKey<List<String>> ITEMS = StateKey.of("items", new TypeRef<List<String>>() {});
+  // <end_generic_state>
 
   public void stateOperations(ObjectContext ctx) {
     // <start_state>
@@ -24,11 +31,6 @@ public class Actions {
     ctx.clearAll();
     Collection<String> keys = ctx.stateKeys();
     // <end_state>
-
-    // <start_generic_state>
-    // import dev.restate.sdk.common.TypeRef;
-    private static final StateKey<List<String>> ITEMS = StateKey.of("items", new TypeRef<List<String>>() {});
-    // <end_generic_state>
   }
 
   public void serviceCommunication(Context ctx) {
@@ -146,7 +148,7 @@ public class Actions {
     // <end_combine_all>
 
     // <start_combine_any>
-    boolean res = Select.<Boolean>select().or(a1).or(a2).or(a3).await();
+    String res = Select.<String>select().or(call1).or(call2).await();
     // <end_combine_any>
   }
 

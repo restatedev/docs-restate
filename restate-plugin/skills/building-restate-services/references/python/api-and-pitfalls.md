@@ -432,7 +432,7 @@ except TimeoutError as e:
 
 ### 2. Use Restate concurrency combinators, not asyncio
 
-`asyncio.gather`, `asyncio.wait`, and `asyncio.as_completed` are not journaled and break deterministic replay. Use `restate.gather`, `restate.select`, `restate.wait_completed`, and `restate.as_completed` instead (see the Concurrency section above).
+`asyncio.gather`, `asyncio.wait`, and `asyncio.as_completed` are not journaled and break deterministic replay. Use Restate's Promise combinators instead (see the Concurrency section above).
 
 ### 3. Use `ctx.run_typed` for better type safety
 
@@ -440,7 +440,7 @@ Prefer `ctx.run_typed("label", fn, **kwargs)` over `ctx.run("label", lambda: fn(
 
 ### 4. No native random, time, or UUID
 
-`random.random()`, `time.time()`, `datetime.now()`, and `uuid.uuid4()` produce different values on replay. Use `ctx.random()`, `ctx.time()`, and `ctx.uuid()` (see the Deterministic helpers section above).
+`random.random()`, `time.time()`, `datetime.now()`, and `uuid.uuid4()` produce different values on replay. Use Restate's deterministic helpers instead (see the Deterministic helpers section above).
 
 ### 5. No ctx operations inside ctx.run blocks
 
