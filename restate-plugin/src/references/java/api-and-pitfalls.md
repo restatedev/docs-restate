@@ -27,12 +27,6 @@ Or Docker:
 docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
 ```
 
-### Install Restate CLI
-
-```bash
-brew install restatedev/tap/restate
-```
-
 ### Install SDK
 
 **Gradle (build.gradle.kts):**
