@@ -19,7 +19,9 @@ public class Actions {
 
   // <start_generic_state>
   // import dev.restate.serde.TypeRef;
-  private static final StateKey<List<String>> ITEMS = StateKey.of("items", new TypeRef<List<String>>() {});
+  private static final StateKey<List<String>> ITEMS =
+      StateKey.of("items", new TypeRef<List<String>>() {});
+
   // <end_generic_state>
 
   public void stateOperations(ObjectContext ctx) {

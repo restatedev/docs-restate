@@ -290,7 +290,7 @@ Never use `asyncio.gather` / `asyncio.wait`. Native asyncio combinators are not 
 
 ```python
 # ❌ BAD
-results1 = await asyncio.gather(call1(), call2())
+results1 = await asyncio.gather(call1, call2)
 
 # ✅ GOOD
 claude_call = ctx.service_call(ask_openai, "What is the weather?")
@@ -302,7 +302,7 @@ results2 = await restate.gather(claude_call, openai_call)
 
 ```python
 # ❌ BAD
-result1 = await asyncio.wait([call1(), call2()], return_when=asyncio.FIRST_COMPLETED)
+result1 = await asyncio.wait([call1, call2], return_when=asyncio.FIRST_COMPLETED)  # type: ignore[type-var]
 
 # ✅ GOOD
 confirmation = ctx.awakeable(type_hint=str)
@@ -461,9 +461,9 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```python
 import restate
 
-from my_service import app
+from ..my_service import app
 
-with restate.test_harness(app, replay_always=True) as harness:
+with restate.test_harness(app, always_replay=True) as harness:
     client = harness.ingress_client()
 
     # Invoke a service handler

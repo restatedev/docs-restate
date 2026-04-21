@@ -12,14 +12,6 @@ my_workflow = restate.Workflow("MyWorkflow")
 claude_service = restate.Service("ClaudeService")
 openai_service = restate.Service("OpenAIService")
 
-async def call1():
-    await asyncio.sleep(1)
-    return "call1"
-
-async def call2():
-    await asyncio.sleep(1)
-    return "call2"
-
 def call_external_api(query: str, some_id: str):
     pass
 
@@ -132,9 +124,16 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     await ctx.promise("review", type_hint=str).resolve("approval")
     # <end_workflow_promises>
 
+    call1 = ctx.run_typed(
+        "LLM call", call_llm, prompt="What is the weather?", model="gpt-4"
+    )
+    call2 = ctx.run_typed(
+        "LLM call", call_llm, prompt="What is the weather?", model="gpt-3.5-turbo"
+    )
+
     # <start_gather>
     # ❌ BAD
-    results1 = await asyncio.gather(call1(), call2())
+    results1 = await asyncio.gather(call1, call2)
 
     # ✅ GOOD
     claude_call = ctx.service_call(ask_openai, "What is the weather?")
@@ -144,7 +143,7 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
 
     # <start_select>
     # ❌ BAD
-    result1 = await asyncio.wait([call1(), call2()], return_when=asyncio.FIRST_COMPLETED)
+    result1 = await asyncio.wait([call1, call2], return_when=asyncio.FIRST_COMPLETED)  # type: ignore[type-var]
 
     # ✅ GOOD
     confirmation = ctx.awakeable(type_hint=str)
@@ -195,8 +194,18 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     # GOOD - catch only specific exceptions
     try:
         result = await ctx.service_call(some_handler, arg="Hi")
-    except TerminalError as e:
+    except restate.TerminalError as e:
         raise e
     # <end_catch>
 
+    return "done"
+
+
+
+@my_service.handler()
+async def some_handler(ctx: restate.Context, arg: str) -> str:
+    return "done"
+
+
+async def call_llm(prompt: str, model: str) -> str:
     return "done"

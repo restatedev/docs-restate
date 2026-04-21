@@ -1,9 +1,9 @@
 # <start_here>
 import restate
 
-from my_service import app
+from ..my_service import app
 
-with restate.test_harness(app, replay_always=True) as harness:
+with restate.test_harness(app, always_replay=True) as harness:
     client = harness.ingress_client()
 
     # Invoke a service handler

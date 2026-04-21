@@ -217,7 +217,8 @@ For generic types, use `TypeRef`:
 
 ```java
 // import dev.restate.serde.TypeRef;
-private static final StateKey<List<String>> ITEMS = StateKey.of("items", new TypeRef<List<String>>() {});
+private static final StateKey<List<String>> ITEMS =
+    StateKey.of("items", new TypeRef<List<String>>() {});
 ```
 
 ---
