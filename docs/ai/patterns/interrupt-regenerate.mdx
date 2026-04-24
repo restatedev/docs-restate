@@ -26,14 +26,14 @@ Restate lets you implement interruptions with **cancellation signals**. Cancelli
 The pattern uses two services:
 
 - **`CodingAgent`** — a Virtual Object, one per agent session. It holds the conversation history and the invocation ID of any running task.
-- **`CodingTask`** — a long-running Service that performs multiple LLM steps (plan → draft → polish) in sequence.
+- **`CodingTask`** — a long-running Service that performs the actual work (a lengthy LLM call, or a chain of them).
 
 When a new user message arrives:
 
 1. The agent's `message` handler loads the conversation history from the Virtual Object state.
 2. If a task is already running, it cancels that invocation and waits for the cleanup to finish.
 3. It sends a new task to the `CodingTask` service and persists the new invocation ID.
-4. Inside `CodingTask`, the cancellation surfaces as a terminal error at the next Restate await (the next LLM call). The task catches it, notifies the orchestrator for durable cleanup, and re-raises so Restate records the invocation as `cancelled`.
+4. Inside `CodingTask`, the cancellation surfaces as a terminal error at the next Restate await. The task catches it, notifies the orchestrator for durable cleanup, and re-raises so Restate records the invocation as `cancelled`.
 
 ## How does Restate help?
 
@@ -47,81 +47,63 @@ When a new user message arrives:
 <GlobalTabs className={"hidden-tabs"}>
 <GlobalTab title="Restate TS">
 
-The orchestrator Virtual Object receives a new user message, cancels the current task (if any), waits for its cleanup, and launches a new one:
+### 1. Interrupt on every new message
 
-```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#here"}
-const codingAgent = restate.object({
-  name: "CodingAgent",
-  handlers: {
-    /** Receive a user message. A new message interrupts any ongoing task. */
-    message: restate.createObjectHandler(
-      { input: schema(UserMessage) },
-      async (ctx: ObjectContext, msg: UserMessage) => {
-        // (1) Access state of the Virtual Object
-        const messages = (await ctx.get<ModelMessage[]>("messages")) ?? [];
-        messages.push({ role: "user", content: msg.content });
+The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel` sends a durable cancellation signal and `ctx.attach` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
 
-        // (2) Interrupt the ongoing task and wait for its cleanup to finish
-        const currentTaskId = await ctx.get<string>("current_task_id");
-        if (currentTaskId) {
-          await cancelAndWait(ctx, currentTaskId);
-        }
+```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#message_handler"}
+message: restate.createObjectHandler(
+  { input: schema(UserMessage) },
+  async (ctx: ObjectContext, msg: UserMessage) => {
+    // (1) Access state of the Virtual Object
+    const messages = (await ctx.get<ModelMessage[]>("messages")) ?? [];
+    messages.push({ role: "user", content: msg.content });
 
-        // (3) Start executing the new task
-        const handle = ctx
-          .serviceSendClient<CodingTask>({ name: "CodingTask" })
-          .runTask({ agentId: ctx.key, messages });
+    // (2) Interrupt the ongoing task and wait for its cleanup to finish.
+    // The cancelled invocation finishes with a TerminalError; swallow it.
+    const currentTaskId = await ctx.get<string>("current_task_id");
+    if (currentTaskId) {
+      const id = InvocationIdParser.fromString(currentTaskId);
+      ctx.cancel(id);
+      try {
+        await ctx.attach(id).orTimeout(30_000);
+      } catch (err) {
+        if (!(err instanceof TerminalError)) throw err;
+      }
+    }
 
-        // (4) Store the handle to the task and persist the updated history
-        const invocationId = await handle.invocationId;
-        ctx.set("current_task_id", invocationId);
-        ctx.set("messages", messages);
-      },
-    ),
-    // ...
+    // (3) Start executing the new task
+    const handle = ctx
+      .serviceSendClient<CodingTask>({ name: "CodingTask" })
+      .runTask({ agentId: ctx.key, messages });
+
+    // (4) Store the handle to the task and persist the updated history
+    const invocationId = await handle.invocationId;
+    ctx.set("current_task_id", invocationId);
+    ctx.set("messages", messages);
   },
-});
-
-async function cancelAndWait(
-  ctx: Context,
-  invocationId: string,
-  timeoutMs: number = 30_000,
-): Promise<void> {
-  const id = InvocationIdParser.fromString(invocationId);
-  ctx.cancel(id);
-  try {
-    await ctx.attach(id).orTimeout(timeoutMs);
-  } catch (err) {
-    // Expected: the cancelled invocation finishes with a TerminalError.
-    if (!(err instanceof TerminalError)) throw err;
-  }
-}
+),
 ```
 
-Inside `CodingTask.runTask`, the cancellation surfaces as a `CancelledError` at the next `ctx.run`. The task catches it, runs cleanup, and re-raises:
+### 2. Catch the cancellation inside the task
 
-```typescript
+On the other side, the cancellation surfaces as a `CancelledError` at the next `ctx.run`. A `try/catch` around the work lets you run durable cleanup before re-raising:
+
+```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#run_task"}
 runTask: async (ctx: Context, inp: TaskInput) => {
-  const steps = [
-    ["plan", "Outline a high-level design for the user's latest request."],
-    ["draft", "Write a first implementation based on the plan."],
-    ["polish", "Refine and clean up the draft."],
-  ] as const;
-
-  const conversation: ModelMessage[] = [...inp.messages];
   try {
-    for (let i = 0; i < steps.length; i++) {
-      const [label, prompt] = steps[i];
-      const { text } = await ctx.run(
-        `LLM: ${label}`,
-        () => llmCall([...conversation, { role: "user", content: prompt }]),
-        { maxRetryAttempts: 3 },
-      );
-      conversation.push({ role: "assistant", content: text });
-      ctx
-        .objectSendClient<CodingAgent>({ name: "CodingAgent" }, inp.agentId)
-        .appendMessage({ content: text, final: i === steps.length - 1 });
-    }
+    const { text } = await ctx.run(
+      "LLM call",
+      () =>
+        llmCall([
+          ...inp.messages,
+          { role: "user", content: TASK_PROMPT },
+        ]),
+      { maxRetryAttempts: 3 },
+    );
+    ctx
+      .objectSendClient<CodingAgent>({ name: "CodingAgent" }, inp.agentId)
+      .appendMessage({ content: text, final: true });
   } catch (err) {
     if (err instanceof TerminalError) {
       const content =
@@ -147,8 +129,7 @@ restate-server
 
 Get the example:
 ```bash
-git clone https://github.com/restatedev/ai-examples.git
-cd ai-examples/typescript-restate-only/examples/interrupt-regenerate
+restate example typescript-restate-agent-examples && cd typescript-restate-agent-examples/interrupt-regenerate
 npm install
 ```
 
@@ -162,7 +143,7 @@ Register the services with Restate:
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
-**Happy path** — one message, full plan/draft/polish output:
+**Happy path** — one message, one full response:
 ```bash
 curl localhost:8080/CodingAgent/alice/message \
   --json '{"content":"Write me a small todo CLI in TypeScript."}'
@@ -190,13 +171,11 @@ Open the Restate UI at `http://localhost:9070` to inspect the invocations — th
 </GlobalTab>
 <GlobalTab title="Restate Py">
 
-The orchestrator Virtual Object receives a new user message, cancels the current task (if any), waits for its cleanup, and launches a new one:
+### 1. Interrupt on every new message
 
-```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#here"}
-# ORCHESTRATOR VIRTUAL OBJECT
-agent = restate.VirtualObject("CodingAgent")
+The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel_invocation` sends a durable cancellation signal and `ctx.attach_invocation` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
 
-
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#message_handler"}
 @agent.handler()
 async def message(ctx: restate.ObjectContext, msg: UserMessage) -> None:
     """Receive a user message. A new message interrupts any ongoing task."""
@@ -205,10 +184,16 @@ async def message(ctx: restate.ObjectContext, msg: UserMessage) -> None:
     messages = await ctx.get("messages", type_hint=list[dict]) or []
     messages.append({"role": "user", "content": msg.content})
 
-    # (2) Interrupt the ongoing task and wait for its cleanup to finish
+    # (2) Interrupt the ongoing task and wait for its cleanup to finish.
+    # The cancelled invocation finishes with a TerminalError; swallow it.
     current_task_id = await ctx.get("current_task_id", type_hint=str)
     if current_task_id:
-        await cancel_and_wait(ctx, current_task_id)
+        ctx.cancel_invocation(current_task_id)
+        done: RestateDurableFuture[None] = ctx.attach_invocation(current_task_id)
+        try:
+            await restate.select(done=done, timed_out=ctx.sleep(timedelta(seconds=30)))
+        except TerminalError:
+            pass
 
     # (3) Start executing the new task
     handle = ctx.service_send(
@@ -219,67 +204,39 @@ async def message(ctx: restate.ObjectContext, msg: UserMessage) -> None:
     invocation_id = await handle.invocation_id()
     ctx.set("current_task_id", invocation_id)
     ctx.set("messages", messages)
-
-
-async def cancel_and_wait(
-    ctx: restate.Context,
-    invocation_id: str,
-    timeout: timedelta = timedelta(seconds=30),
-) -> None:
-    ctx.cancel_invocation(invocation_id)
-    done: RestateDurableFuture[None] = ctx.attach_invocation(invocation_id)
-    try:
-        await restate.select(done=done, timed_out=ctx.sleep(timeout))
-    except TerminalError:
-        # Expected: the cancelled invocation finishes with a TerminalError.
-        pass
 ```
 
-Inside `CodingTask.run_task`, the cancellation surfaces as a `TerminalError` (status `409`) at the next `ctx.run_typed`. The task catches it, runs cleanup, and re-raises:
+### 2. Catch the cancellation inside the task
 
-```python
+On the other side, the cancellation surfaces as a `TerminalError` (status `409`) at the next `ctx.run_typed`. A `try/except` around the work lets you run durable cleanup before re-raising:
+
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#run_task"}
 @task_service.handler()
 async def run_task(ctx: restate.Context, inp: TaskInput) -> None:
-    steps = [
-        ("plan", "Outline a high-level design for the user's latest request."),
-        ("draft", "Write a first implementation based on the plan."),
-        ("polish", "Refine and clean up the draft."),
-    ]
-
-    conversation = list(inp.messages)
     try:
-        for i, (label, prompt) in enumerate(steps):
-            result = await ctx.run_typed(
-                f"LLM: {label}",
-                llm_call,
-                RunOptions(max_attempts=3),
-                messages=conversation + [{"role": "user", "content": prompt}],
-            )
-            content = result.content or ""
-            conversation.append({"role": "assistant", "content": content})
-            ctx.object_send(
-                append_message,
-                key=inp.agent_id,
-                arg=AssistantMessage(content=content, final=i == len(steps) - 1),
-            )
+        result = await ctx.run_typed(
+            "LLM call",
+            llm_call,
+            RunOptions(max_attempts=3),
+            messages=inp.messages + [{"role": "user", "content": TASK_PROMPT}],
+        )
+        ctx.object_send(
+            append_message,
+            key=inp.agent_id,
+            arg=AssistantMessage(content=result.content or "", final=True),
+        )
     except TerminalError as err:
         # Cancellations surface as TerminalError with status_code == 409.
-        if err.status_code == 409:
-            ctx.object_send(
-                append_message,
-                key=inp.agent_id,
-                arg=AssistantMessage(
-                    content="[task cleanup ran after cancellation]", final=True
-                ),
-            )
-        else:
-            ctx.object_send(
-                append_message,
-                key=inp.agent_id,
-                arg=AssistantMessage(
-                    content="[task cleanup ran after error]", final=True
-                ),
-            )
+        content = (
+            "[task cleanup ran after cancellation]"
+            if err.status_code == 409
+            else "[task cleanup ran after error]"
+        )
+        ctx.object_send(
+            append_message,
+            key=inp.agent_id,
+            arg=AssistantMessage(content=content, final=True),
+        )
         raise
 ```
 
@@ -293,8 +250,7 @@ restate-server
 
 Get the example:
 ```bash
-git clone https://github.com/restatedev/ai-examples.git
-cd ai-examples/python-restate-only/examples/interrupt-regenerate
+restate example python-restate-agent-examples && cd python-restate-agent-examples/interrupt-regenerate
 ```
 
 Add your API key to an `.env` file and start the agent service:
@@ -308,7 +264,7 @@ Register the services with Restate:
 restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
 ```
 
-**Happy path** — one message, full plan/draft/polish output:
+**Happy path**: one message, one full response:
 ```bash
 curl localhost:8080/CodingAgent/alice/message \
   --json '{"content":"Write me a small todo CLI in Python."}'
@@ -317,7 +273,7 @@ curl localhost:8080/CodingAgent/alice/message \
 curl localhost:8080/CodingAgent/alice/get_history
 ```
 
-**Interruption path** — fire a first message, then interrupt before it finishes:
+**Interruption path**: fire a first message, then interrupt before it finishes:
 ```bash
 # Fire-and-forget the first message
 curl localhost:8080/CodingAgent/bob/message/send \
