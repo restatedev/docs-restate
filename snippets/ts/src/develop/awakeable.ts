@@ -18,7 +18,7 @@ const service = restate.service({
 
       // <start_resolve>
       // Complete with success data
-      ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
+      ctx.resolveAwakeable(id, "Looks good!");
       // <end_resolve>
 
       // <start_reject>
