@@ -51,10 +51,11 @@ When a new user message arrives:
 
 The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel` sends a durable cancellation signal and `ctx.attach` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
 
-```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#message_handler"}
+```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#message_handler"} 
+/** Receive a user message. A new message interrupts any ongoing task. */
 message: restate.createObjectHandler(
-  { input: schema(UserMessage) },
-  async (ctx: ObjectContext, msg: UserMessage) => {
+  { input: schema(ChatMessage) },
+  async (ctx: ObjectContext, msg: ChatMessage) => {
     // (1) Access state of the Virtual Object
     const messages = (await ctx.get<ModelMessage[]>("messages")) ?? [];
     messages.push({ role: "user", content: msg.content });
@@ -89,21 +90,35 @@ message: restate.createObjectHandler(
 
 On the other side, the cancellation surfaces as a `CancelledError` at the next `ctx.run`. A `try/catch` around the work lets you run durable cleanup before re-raising:
 
-```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#run_task"}
+```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#run_task"} 
+/**
+ * Long-running coding task. If interrupted, the cancellation surfaces
+ * as TerminalError at the next Restate await — we catch it, run durable
+ * cleanup, and re-raise so Restate records the invocation as cancelled.
+ */
 runTask: async (ctx: Context, inp: TaskInput) => {
   try {
-    const { text } = await ctx.run(
-      "LLM call",
-      () =>
-        llmCall([
-          ...inp.messages,
-          { role: "user", content: TASK_PROMPT },
-        ]),
-      { maxRetryAttempts: 3 },
+    // Three sequential LLM calls. Each is a Restate await, so a
+    // cancellation can land between any of them and unwind cleanly.
+    const convo: ModelMessage[] = [...inp.messages];
+
+    const plan = await ctx.run("LLM: plan", () =>
+      llmCall(convo, "Outline a high-level plan."),
     );
+    convo.push({ role: "assistant", content: plan.text });
+
+    const draft = await ctx.run("LLM: draft", () =>
+      llmCall(convo, "Write a draft implementation."),
+    );
+    convo.push({ role: "assistant", content: draft.text });
+
+    const polish = await ctx.run("LLM: polish", () =>
+      llmCall(convo, "Polish it into a final version."),
+    );
+
     ctx
       .objectSendClient<CodingAgent>({ name: "CodingAgent" }, inp.agentId)
-      .appendMessage({ content: text, final: true });
+      .appendMessage({ content: polish.text });
   } catch (err) {
     if (err instanceof TerminalError) {
       const content =
@@ -112,7 +127,7 @@ runTask: async (ctx: Context, inp: TaskInput) => {
           : "[task cleanup ran after error]";
       ctx
         .objectSendClient<CodingAgent>({ name: "CodingAgent" }, inp.agentId)
-        .appendMessage({ content, final: true });
+        .appendMessage({ content });
     }
     throw err;
   }
@@ -175,9 +190,9 @@ Open the Restate UI at `http://localhost:9070` to inspect the invocations — th
 
 The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel_invocation` sends a durable cancellation signal and `ctx.attach_invocation` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
 
-```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#message_handler"}
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#message_handler"} 
 @agent.handler()
-async def message(ctx: restate.ObjectContext, msg: UserMessage) -> None:
+async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> None:
     """Receive a user message. A new message interrupts any ongoing task."""
 
     # (1) Access state of the Virtual Object
@@ -210,20 +225,35 @@ async def message(ctx: restate.ObjectContext, msg: UserMessage) -> None:
 
 On the other side, the cancellation surfaces as a `TerminalError` (status `409`) at the next `ctx.run_typed`. A `try/except` around the work lets you run durable cleanup before re-raising:
 
-```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#run_task"}
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#run_task"} 
 @task_service.handler()
 async def run_task(ctx: restate.Context, inp: TaskInput) -> None:
+    """Long-running coding task. If interrupted, the cancellation surfaces
+    as TerminalError at the next Restate await — we catch it, run durable
+    cleanup, and re-raise so Restate records the invocation as cancelled."""
     try:
-        result = await ctx.run_typed(
-            "LLM call",
-            llm_call,
-            RunOptions(max_attempts=3),
-            messages=inp.messages + [{"role": "user", "content": TASK_PROMPT}],
+        # Three sequential LLM calls. Each is a Restate await, so a
+        # cancellation can land between any of them and unwind cleanly.
+        convo = list(inp.messages)
+
+        plan = await ctx.run_typed(
+            "Plan", llm_call, messages=convo, prompt="Outline a high-level plan."
         )
+        convo.append({"role": "assistant", "content": plan.content or ""})
+
+        draft = await ctx.run_typed(
+            "Draft", llm_call, messages=convo, prompt="Write a draft implementation."
+        )
+        convo.append({"role": "assistant", "content": draft.content or ""})
+
+        polish = await ctx.run_typed(
+            "Polish", llm_call, messages=convo, prompt="Polish it into a final version."
+        )
+
         ctx.object_send(
             append_message,
             key=inp.agent_id,
-            arg=AssistantMessage(content=result.content or "", final=True),
+            arg=ChatMessage(content=polish.content or ""),
         )
     except TerminalError as err:
         # Cancellations surface as TerminalError with status_code == 409.
@@ -235,7 +265,7 @@ async def run_task(ctx: restate.Context, inp: TaskInput) -> None:
         ctx.object_send(
             append_message,
             key=inp.agent_id,
-            arg=AssistantMessage(content=content, final=True),
+            arg=ChatMessage(content=content),
         )
         raise
 ```
