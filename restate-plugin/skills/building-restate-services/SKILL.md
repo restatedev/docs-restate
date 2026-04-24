@@ -66,18 +66,17 @@ Before designing any Restate service architecture, check:
 | Error handling, compensation, sagas?                              | [Error handling guide](https://docs.restate.dev/guides/error-handling), [Sagas guide](https://docs.restate.dev/guides/sagas) |
 | AI agent or LLM calls?                                            | The relevant agent integration reference |
 
-## Always verify before finishing
+## Verification checklist
 
-**All checks below are mandatory**.
-
-- [ ] All side effects, external I/O, and DB calls wrapped in `ctx.run()`
-- [ ] No native random, time, sleep, or UUID -- use ctx helpers
-- [ ] Restate concurrency combinators only (no `Promise.all`, `asyncio.gather`/`wait`, `CompletableFuture`, goroutines + channels, `select`)
+- [ ] All side effects wrapped in `ctx.run()`
+- [ ] No native random, time, or sleep
+- [ ] Restate concurrency combinators (not native)
 - [ ] No ctx operations inside `ctx.run()`
-- [ ] `TerminalError` raised for non-retryable failures
+- [ ] TerminalError for non-retryable failures
 - [ ] Python: no bare `except:`
-- [ ] AI agents: set a retry policy for LLM calls
+- [ ] AI agents: `maxRetryAttempts` on LLM calls
 - [ ] Virtual Objects: no deadlock cycles
+<<<<<<< mintlify/interrupt-regenerate-1776951710
 - [ ] Service registered and invoked via curl or the UI
 
 ### Replay test - required on any handler logic change
@@ -89,3 +88,7 @@ Any change to handler business logic (new `ctx` operations, reordered steps, new
 - Java / Go: `RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0m` on the Restate container
 
 See the Testing section of `references/<sdk>/api-and-pitfalls.md` for the working scaffold.
+=======
+- [ ] Service registered, tested via curl/UI
+- [ ] Tests written using Testcontainers with replay-always mode enabled to catch non-determinism (see Testing section in SDK reference)
+>>>>>>> main
