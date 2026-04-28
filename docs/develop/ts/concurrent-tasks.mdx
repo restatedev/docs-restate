@@ -40,6 +40,7 @@ Restate provides several patterns for coordinating concurrent tasks. All pattern
 Similar to [`Promise.all`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all), waits for all promises to resolve successfully:
 
 ```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#all"} 
+// import { RestatePromise } from "@restatedev/restate-sdk";
 const sleepPromise = ctx.sleep({ milliseconds: 100 });
 const callPromise = ctx.serviceClient(myService).myHandler("Hi");
 const externalCallPromise = ctx.run(() => httpCall());
@@ -95,4 +96,32 @@ const allResults = await RestatePromise.allSettled([
   callPromise3,
   externalCallPromise2,
 ]);
+```
+
+## Creating already-completed promises
+
+You can create `RestatePromise` instances that are already resolved or rejected, mirroring `Promise.resolve` and `Promise.reject`:
+
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#resolve"} 
+const resolvedPromise = RestatePromise.resolve("already done");
+```
+
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#reject"} 
+const rejectedPromise = RestatePromise.reject(
+  new restate.TerminalError("Access denied", { errorCode: 403 })
+);
+```
+
+These are useful when you want to return an already-known value from a function that returns a `RestatePromise`.
+
+## Detecting RestatePromises
+
+Use `isRestatePromise` to check whether a value is a `RestatePromise` before using it with combinators like `RestatePromise.all()`:
+
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#is_restate_promise"} 
+const somePromise = ctx.sleep({ milliseconds: 100 });
+if (isRestatePromise(somePromise)) {
+  // safe to use RestatePromise combinators like .all(), .race(), etc.
+  await RestatePromise.all([somePromise]);
+}
 ```

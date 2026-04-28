@@ -1,0 +1,54 @@
+---
+title: "Tracing"
+description: "OpenTelemetry integration via hooks."
+icon: "magnifying-glass"
+---
+
+The `@restatedev/restate-sdk-opentelemetry` package provides a ready-made OpenTelemetry hook. It:
+
+- Extracts W3C trace context from the Restate attempt headers
+- Creates one span per handler attempt with standard attributes (`restate.invocation.id`, `restate.invocation.target`)
+- Creates child spans for `ctx.run()` closures with the `restate.run.name` attribute
+- Suppresses span events during replay (to avoid duplicate events)
+
+## Setup
+
+Install the package:
+
+```bash
+npm install @restatedev/restate-sdk-opentelemetry
+```
+
+Then add the hook to your service or endpoint:
+
+```ts {"CODE_LOAD::ts/src/develop/tracing.ts#otel_hook"} 
+import * as restate from "@restatedev/restate-sdk";
+import { openTelemetryHook } from "@restatedev/restate-sdk-opentelemetry";
+import { trace } from "@opentelemetry/api";
+
+const greeter = restate.service({
+    name: "Greeter",
+    options: {
+        hooks: [openTelemetryHook({ tracer: trace.getTracer("greeter-service") })],
+    },
+    handlers: {
+        greet: async (ctx: restate.Context, name: string) => {
+            // Add events to the active span
+            trace.getActiveSpan()?.addEvent("processing_started", { name });
+
+            // ctx.run gets its own child span automatically
+            const greeting = await ctx.run("compute-greeting", async () => {
+                return `Hello ${name}!`;
+            });
+
+            return greeting;
+        },
+    },
+});
+```
+
+[Check the TSDocs to see the full list of options.](https://restatedev.github.io/sdk-typescript/interfaces/_restatedev_restate-sdk-opentelemetry.OpenTelemetryHookOptions.html)
+
+## Full example
+
+For a complete end-to-end tracing example with Jaeger, see the [OpenTelemetry integration example](https://github.com/restatedev/examples/tree/main/typescript/integrations/opentelemetry).
