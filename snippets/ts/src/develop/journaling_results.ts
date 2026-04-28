@@ -21,6 +21,7 @@ const service = restate.service({
 
     promiseCombinatorsAll: async (ctx: restate.Context, name: string) => {
       // <start_all>
+      // import { RestatePromise } from "@restatedev/restate-sdk";
       const sleepPromise = ctx.sleep({ milliseconds: 100 });
       const callPromise = ctx.serviceClient(myService).myHandler("Hi");
       const externalCallPromise = ctx.run(() => httpCall());
