@@ -22,14 +22,16 @@ async def my_service_handler(ctx: Context, greeting: str) -> str:
             max_attempts=3,
             # Max duration for retrying, across all retries.
             max_retry_duration=timedelta(seconds=10),
-        )
+        ),
     )
     # <end_here>
 
     # <start_catch>
     try:
         # Fails with a terminal error after 3 attempts or if the function throws one
-        await ctx.run_typed("write", write_to_other_system, restate.RunOptions(max_attempts=3))
+        await ctx.run_typed(
+            "write", write_to_other_system, restate.RunOptions(max_attempts=3)
+        )
     except TerminalError as err:
         # Handle the terminal error: undo previous actions and
         # propagate the error back to the caller

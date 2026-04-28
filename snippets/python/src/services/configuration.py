@@ -16,8 +16,8 @@ my_workflow = restate.Workflow(
         initial_interval=timedelta(seconds=1),
         max_interval=timedelta(seconds=30),
         max_attempts=10,
-        on_max_attempts="pause"
-    )
+        on_max_attempts="pause",
+    ),
 )
 # <end_options>
 
@@ -36,8 +36,8 @@ my_workflow = restate.Workflow(
         initial_interval=timedelta(seconds=1),
         max_interval=timedelta(seconds=30),
         max_attempts=10,
-        on_max_attempts="pause"
-    )
+        on_max_attempts="pause",
+    ),
 )
 async def run(ctx: restate.WorkflowContext, req: str) -> str:
     # ... implement workflow logic here ---

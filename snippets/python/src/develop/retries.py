@@ -30,7 +30,8 @@ async def my_service_handler(ctx: Context, greeting: str) -> str:
                 max_duration=timedelta(minutes=5),
                 # Max attempts (including the initial) before giving up
                 max_attempts=10,
-            ))
+            ),
+        )
     except TerminalError as err:
         # Handle the terminal error after retries exhausted
         # For example, undo previous actions (see sagas guide) and

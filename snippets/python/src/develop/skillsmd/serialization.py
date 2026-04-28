@@ -10,17 +10,23 @@ from restate.serde import Serde
 class Greeting(BaseModel):
     name: str
 
+
 class GreetingResponse(BaseModel):
     result: str
 
+
 greeter = restate.Service("Greeter")
+
 
 @greeter.handler()
 async def greet(ctx: restate.Context, greeting: Greeting) -> GreetingResponse:
     return GreetingResponse(result=f"You said hi to {greeting.name}!")
+
+
 # <end_pydantic>
 
 my_object = restate.VirtualObject("MyService")
+
 
 # <start_custom>
 class MyData(typing.TypedDict):
@@ -43,6 +49,7 @@ class MySerde(Serde[MyData]):
         data = {"some_value": obj["some_value"], "some_number": obj["my_number"]}
         return bytes(json.dumps(data), "utf-8")
 
+
 # For the input/output serialization of your handlers
 @my_object.handler(input_serde=MySerde(), output_serde=MySerde())
 async def my_handler(ctx: restate.ObjectContext, greeting: str) -> str:
@@ -57,4 +64,6 @@ async def my_handler(ctx: restate.ObjectContext, greeting: str) -> str:
     # etc.
 
     return "some-output"
+
+
 # <end_custom>
