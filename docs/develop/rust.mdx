@@ -1,5 +1,109 @@
 ---
 title: "Rust SDK"
 icon: "/img/languages/rust.svg"
-url: "https://docs.rs/restate-sdk/latest/restate_sdk/"
 ---
+
+The Rust SDK lets you write Restate services in Rust. Full API reference is available at [docs.rs/restate-sdk](https://docs.rs/restate-sdk/latest/restate_sdk/).
+
+## Getting started
+
+Add the SDK to your `Cargo.toml`:
+
+```toml
+[dependencies]
+restate-sdk = "0.10"
+tokio = { version = "1", features = ["full"] }
+```
+
+## Concurrent tasks
+
+### Fan-out with `DurableFuturesUnordered`
+
+`DurableFuturesUnordered` lets you push a dynamic number of durable futures and consume results in the order they complete. Each result is paired with the zero-based index of the future that finished, letting you correlate it back to your input.
+
+This is the Restate-safe replacement for `futures::stream::FuturesUnordered`. Because the completion order is recorded in the Restate journal, replays are fully deterministic.
+
+```rust
+use restate_sdk::prelude::*;
+use restate_sdk::futures_util::DurableFuturesUnordered;
+use std::time::Duration;
+
+async fn fan_out(ctx: Context<'_>) -> HandlerResult<String> {
+    let labels = vec!["fast", "medium", "slow"];
+
+    // Push a dynamic number of durable futures
+    let mut futures = DurableFuturesUnordered::new();
+    futures.push(ctx.sleep(Duration::from_secs(1)));
+    futures.push(ctx.sleep(Duration::from_secs(2)));
+    futures.push(ctx.sleep(Duration::from_secs(3)));
+
+    // Drain results in completion order — index identifies which future finished
+    let mut completion_order = Vec::new();
+    while let Some((index, result)) = futures.next().await? {
+        result?;
+        completion_order.push(labels[index]);
+    }
+
+    Ok(format!("Completed in order: {completion_order:?}"))
+}
+```
+
+Use `DurableFuturesUnordered` when:
+- The number of sub-tasks is not known at compile time (e.g., you're fanning out to a slice of service keys)
+- You want to process each result as it arrives rather than waiting for all of them
+
+### Waiting for the first completion with `select!`
+
+For a fixed, small set of futures you can use the [`select!`](https://docs.rs/restate-sdk/latest/restate_sdk/macro.select.html) macro (similar to `tokio::select!`):
+
+```rust
+use restate_sdk::prelude::*;
+use std::time::Duration;
+
+async fn with_timeout(ctx: Context<'_>) -> HandlerResult<String> {
+    let (id, awakeable) = ctx.awakeable::<String>();
+    // send id to an external system ...
+
+    let result = restate_sdk::select! {
+        r = awakeable => r?,
+        _ = ctx.sleep(Duration::from_secs(30)) => {
+            return Err(TerminalError::new("timed out").into());
+        },
+    };
+
+    Ok(result)
+}
+```
+
+## Crypto backend for request identity
+
+The SDK verifies incoming request identity using [`jsonwebtoken`](https://docs.rs/jsonwebtoken). Two crypto backends are available:
+
+| Cargo feature | Backend |
+|---|---|
+| `rust_crypto` *(default)* | Pure-Rust `rust-crypto` backend |
+| `aws_lc_rs` | AWS-LC (`aws-lc-rs`) backend |
+
+The default is `rust_crypto`, so existing projects are not affected. Switch to `aws_lc_rs` if your Cargo workspace already uses `jsonwebtoken` with `aws_lc_rs` — having both backends active at the same time causes a panic.
+
+**Using `aws_lc_rs`:**
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.10", default-features = false, features = ["http_server", "aws_lc_rs"] }
+```
+
+**Bringing your own provider** (disable both backends):
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.10", default-features = false, features = ["http_server"] }
+```
+
+Then call `jsonwebtoken::crypto::CryptoProvider::install_default()` in your `main` before starting the endpoint.
+
+## Further reading
+
+- [API reference on docs.rs](https://docs.rs/restate-sdk/latest/restate_sdk/)
+- [Rust SDK changelog](/changelog/rust-sdk)
+- [Parallelizing work guide](/guides/parallelizing-work)
