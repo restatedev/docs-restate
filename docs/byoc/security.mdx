@@ -1,0 +1,170 @@
+---
+title: "Security Model"
+sidebarTitle: "Security"
+description: "How Restate Cloud BYOC secures the control channel, infrastructure, and customer data."
+---
+
+Restate Cloud BYOC is designed around three principles: **least privilege**, **egress-only connectivity**, and **customer ownership of infrastructure**. Restate never holds credentials to your cloud account.
+
+## Control channel
+
+The BYOC deployment has three network connections, all initiated from within your account:
+
+| Connection | Direction | Protocol | Purpose |
+| :--- | :--- | :--- | :--- |
+| Deployment agent → Restate control plane | Egress from your account | HTTPS (long-polling) | Pulls provisioning and management jobs |
+| Restate control plane → Kubernetes API | Inbound to cluster API endpoint | HTTPS with bearer token | Manages Restate environments (CRDs, namespaces) |
+| Metrics collector → Restate metrics store | Egress from your account | HTTPS | Ships operational metrics for monitoring and alerting |
+
+The deployment agent uses an **egress-only polling model** — it reaches out to Restate's control plane to check for work. Restate's control plane never initiates connections into your account for provisioning or management operations.
+
+Restate's control plane connects to your Kubernetes API to manage Restate environments. This connection uses a bearer token scoped to a limited Kubernetes RBAC role. You can restrict access to the Kubernetes API endpoint by IP allowlisting.
+
+### What crosses the control channel
+
+**Sent to your cluster:**
+
+| Category | Examples |
+| :--- | :--- |
+| Environment manifests | RestateCluster CRDs specifying resource limits, replicas, configuration |
+| Container image references | Image tags (pulled from registry by cluster, not transferred over control channel) |
+| Configuration | Restate server configuration (non-sensitive) |
+| Signing keys | Public keys for request authentication (stored as Kubernetes Secrets in-cluster) |
+
+**Received from your cluster:**
+
+| Category | Examples |
+| :--- | :--- |
+| Health status | Pod readiness, cluster status |
+| Resource metrics | CPU/memory usage, storage utilization |
+| Environment metadata | Version info, replica count |
+
+**What does NOT cross the control channel:**
+
+- Customer application data or invocation payloads
+- State stored in Restate
+- Customer secrets or credentials
+- Application logs (retained in your account)
+
+## Bootstrap security
+
+The foundation template is a standard CloudFormation stack (AWS) or ARM template (Azure) that you deploy yourself. It creates scoped roles for the deployment agent.
+
+<Tabs>
+  <Tab title="AWS">
+    The CloudFormation template creates an IAM role for the deployment agent with the following permissions, scoped to the install's resources:
+
+    | Permission | Scope | Purpose |
+    | :--- | :--- | :--- |
+    | Resource management | Install resources | Create and manage EKS, VPC, S3, and supporting resources |
+    | EKS cluster admin | Install's EKS cluster | Deploy Helm charts and Kubernetes manifests via the Kubernetes API |
+    | Resource provider registration | Subscription (AWS account) | Register required AWS service providers |
+
+    All IAM roles follow least-privilege principles and are scoped to the resources created by the stack.
+  </Tab>
+
+  <Tab title="Azure">
+    The ARM template creates a managed identity for the deployment agent (a Virtual Machine Scale Set) with the following role assignments:
+
+    | Role | Scope | Purpose |
+    | :--- | :--- | :--- |
+    | Contributor | Resource group | Create and manage AKS, VNet, storage, and supporting resources |
+    | Role Based Access Control Administrator | Resource group | Create downstream role assignments (Key Vault access, network, DNS) |
+    | Azure Kubernetes Service RBAC Cluster Admin | Resource group | Deploy Helm charts and Kubernetes manifests via Azure RBAC |
+    | Custom: resource provider registration | Subscription | Register required Azure resource providers (`*/register/action` only) |
+
+    The "Role Based Access Control Administrator" role is required because the deployment agent creates these downstream role assignments during infrastructure provisioning:
+
+    | Downstream role | Assigned to | Purpose |
+    | :--- | :--- | :--- |
+    | Key Vault Secrets User | AKS Secrets Store CSI driver | Mount the Restate region secret key from Key Vault into pods |
+    | Network Contributor | AKS cluster identity | Manage load balancers and network resources |
+    | DNS Zone Contributor | cert-manager identity | Create DNS records for TLS certificate validation |
+
+    All roles are scoped to the install's resource group, except the resource provider registration role which is subscription-scoped but limited to `*/register/action`.
+
+    <Note>
+      "Role Based Access Control Administrator" is narrower than "Owner" — it can only manage role assignments, not create or delete resources. It is the minimum privilege required to create the downstream assignments listed above.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Infrastructure security
+
+### Compute
+
+Kubernetes clusters run on dedicated cloud-managed virtual machines:
+
+| Layer | AWS | Azure |
+| :--- | :--- | :--- |
+| Compute | EC2 instances (Nitro hypervisor) | Azure VMs (Hyper-V isolated) |
+| Container runtime | containerd | containerd |
+| Kubernetes | Amazon EKS (managed control plane) | Azure AKS (managed control plane) |
+| Architecture | ARM64 (Graviton / Ampere) | ARM64 (Ampere) |
+
+Instance security features include IMDSv2 enforcement (AWS), encrypted storage at rest (AES-256), and no local ephemeral storage (all data on network-attached volumes).
+
+### Patching
+
+| Component | Method | Frequency |
+| :--- | :--- | :--- |
+| Node OS | Automated drift detection | Within 24-48 hours of new AMI/image release |
+| Kubernetes | Managed cloud provider upgrades | Per provider schedule, coordinated with customer |
+| Restate components | Rolling deployment | As releases are published |
+| Container images | Image updates | As vulnerabilities are patched |
+
+Vulnerability response targets:
+
+| Severity | Response time | Resolution target |
+| :--- | :--- | :--- |
+| Critical (CVSS 9.0+) | 8 hours | 24 hours |
+| High (CVSS 7.0-8.9) | 24 hours | 7 days |
+| Medium (CVSS 4.0-6.9) | 72 hours | 14 days |
+| Low (CVSS < 4.0) | Best effort | Next maintenance window |
+
+## Network isolation
+
+Each BYOC deployment runs in its own VPC with private subnets across multiple availability zones. Restate environments are isolated via Kubernetes NetworkPolicies:
+
+- **Ingress**: only the ingress proxy and metrics collector can reach environment pods
+- **Egress**: DNS, peer nodes in the same namespace, allowlisted VPC endpoints, tunnel, and the public internet
+- **Cross-namespace**: blocked by default
+
+All in-cluster traffic between components is encrypted with mTLS via a service mesh.
+
+### Service connectivity
+
+Restate environments invoke your service handlers over HTTP. Supported connectivity patterns:
+
+| Pattern | How it works |
+| :--- | :--- |
+| VPC services | Private IP or internal load balancer via VPC endpoints. All traffic stays within the VPC. |
+| FaaS (Lambda) | Invoked via VPC endpoints with IAM authentication. No public internet traversal. |
+| Tunnel | For services in other VPCs or networks. Tunnel clients connect to the BYOC VPC via a VPC endpoint. |
+
+## Data sovereignty
+
+All customer data remains in your cloud account:
+
+- Invocation payloads, stored state, and snapshots never leave your account
+- Application logs are retained in-cluster and accessible to you
+- Restate collects only operational metadata (health, resource utilization, environment configuration) for monitoring and management
+
+### Audit
+
+| Log type | Location | Retention |
+| :--- | :--- | :--- |
+| Kubernetes audit logs | Your CloudWatch / Azure Monitor | Customer-controlled |
+| VPC flow logs | Your S3 / Azure Storage | Customer-controlled |
+| Application logs | In-cluster | Customer-controlled |
+| Control plane operations | Restate audit trail | Per Restate retention policy |
+
+## Customer controls
+
+| Action | Available? | Process |
+| :--- | :--- | :--- |
+| Revoke Restate access | Yes | Remove the Kubernetes bearer token; environments continue running but management is disabled |
+| IP-restrict cluster API | Yes | Configure Kubernetes API server allowlist |
+| Audit management operations | Yes | Kubernetes audit logs capture all control plane actions |
+| Request emergency patching | Yes | File a priority support ticket; Restate SLA applies |
+| Force node replacement | Yes | File a support ticket; completed within SLA |
