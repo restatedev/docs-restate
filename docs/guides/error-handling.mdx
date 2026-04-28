@@ -4,7 +4,7 @@ description: "Learn how to handle transient and terminal errors in your applicat
 tags: ["development"]
 ---
 
-Restate handles retries for failed invocations. By default, Restate infinitely retries all errors with an exponential backoff strategy.
+Restate handles retries for failed invocations. By default, Restate retries all errors with an exponential backoff strategy.
 
 This guide helps you fine-tune the retry behavior for your use cases.
 
@@ -40,7 +40,12 @@ The retry policy can be set on each individual handler, or for all the handlers 
         To configure the retry policy on a service/handler level, check [retry service configuration](/services/configuration#retries).
     </Accordion>
     <Accordion title="Configure Restate server defaults">
-        Via the [`restate-server` configuration file](/server/configuration):
+
+        The default retry policy will retry the invocation a limited number of times, after which the invocation will be paused if no progress can be made. To resume a paused invocation, check the [resume documentation](/services/invocation/managing-invocations#resume).
+
+        Check the [configuration reference](/references/server-config) for the `default-retry-policy`.
+
+        You can change the default behavior via the [`restate-server` configuration file](/server/configuration):
 
         ```toml restate.toml
         [invocation.default-retry-policy]
@@ -65,7 +70,6 @@ The retry policy can be set on each individual handler, or for all the handlers 
         RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL="10s"
         ```
 
-        This retry policy will retry the invocation 100 times, after which the invocation will be paused if no progress can be made. To resume a paused invocation, check the paragraph below.
 
         You can also retry forever, without ever pausing or killing the invocation:
 
@@ -73,7 +77,6 @@ The retry policy can be set on each individual handler, or for all the handlers 
         RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS=unlimited
         ```
 
-        Check the [configuration documentation](/server/configuration) and [reference](/references/server-config) for the `default-retry-policy`.
 
         When a retry policy is unset, Restate by default will retry undefinitely, alike setting `max-attempts = "unlimited"`.
     </Accordion>
@@ -208,7 +211,7 @@ You can also throw `RetryableError` directly in handler code (outside of `ctx.ru
 
 ## Application errors (terminal)
 
-By default, Restate infinitely retries all errors.
+By default, Restate retries all errors.
 In some cases, you might not want to retry an error (e.g. because of business logic, because the issue is not transient, ...).
 
 For these cases you can throw a terminal error. Terminal errors are permanent and are not retried by Restate.
