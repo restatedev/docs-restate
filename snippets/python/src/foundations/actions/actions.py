@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from src.foundations.actions.user_account import UserProfile
 
-
 # Type definitions for examples
 
 

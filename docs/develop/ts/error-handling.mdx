@@ -33,6 +33,38 @@ You can catch terminal errors, and build your control flow around it.
     Have a look at our [sagas guide](/guides/sagas) to learn more.
 </Info>
 
+## Retryable errors with custom delay
+
+Use `RetryableError` to signal that Restate should retry with a specific delay.
+This is useful when interacting with external APIs that return a `Retry-After` header.
+
+`RetryableError` is primarily designed for use inside `ctx.run` blocks:
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#retryable"} 
+await ctx.run("call API", async () => {
+    const res = await fetch("https://api.example.com/data");
+    if (!res.ok) {
+        const retryAfter = res.headers.get("Retry-After");
+        throw new RetryableError("Rate limited", {
+            retryAfter: { seconds: Number(retryAfter ?? 30) },
+        });
+    }
+    return res.json();
+}, { maxRetryAttempts: 10 });
+```
+
+You can also wrap an existing error using the `RetryableError.from` helper:
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#retryable_from"} 
+throw RetryableError.from(cause, {
+    retryAfter: { seconds: 30 },
+});
+```
+
+<Note>
+    Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. You can combine it with `maxRetryAttempts` and `maxRetryDuration` in the run options.
+</Note>
+
 ## Mapping errors to `TerminalError`
 
 If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.

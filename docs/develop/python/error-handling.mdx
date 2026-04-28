@@ -112,6 +112,53 @@ except TerminalError:  # GOOD: Only catches terminal errors
     - `finally`: For releasing resources (files, connections) acquired during the current attempt
 </Accordion>
 
+## Retryable errors with custom delay
+
+Use `RetryableError` to signal that Restate should retry the invocation with a specific delay.
+This is useful when you receive a `Retry-After` header from an external API or want to control the retry timing explicitly.
+
+```python {"CODE_LOAD::python/src/develop/error_handling.py#retryable"} 
+from datetime import timedelta
+from restate.exceptions import RetryableError
+
+raise RetryableError(
+    "Service temporarily unavailable",
+    retry_after=timedelta(seconds=30),
+)
+```
+
+`RetryableError` accepts the following parameters:
+- `message`: The error message
+- `status_code`: HTTP status code (default: `500`)
+- `retry_after`: A `timedelta` specifying when Restate should retry (optional)
+
+Inside a `ctx.run` block, you can combine `RetryableError` with `RunOptions` to control both the retry delay and the maximum number of retries:
+
+```python {"CODE_LOAD::python/src/develop/error_handling.py#retryable_run"} 
+from datetime import timedelta
+from restate.exceptions import RetryableError
+
+async def call_external_api():
+    response = await make_request()
+    if response.status == 429:
+        retry_after = int(response.headers.get("Retry-After", "30"))
+        raise RetryableError(
+            "Rate limited",
+            retry_after=timedelta(seconds=retry_after),
+        )
+    return response.data
+
+result = await ctx.run_typed(
+    "call API",
+    call_external_api,
+    restate.RunOptions(max_attempts=5),
+)
+```
+
+<Note>
+    Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. If no `retry_after` is provided, Restate uses its default retry policy.
+</Note>
+
 ## Retry strategies
 By default, Restate does infinite retries with an exponential backoff strategy.
 

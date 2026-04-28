@@ -55,6 +55,22 @@ const service = restate.service({
     },
     // <end_raw>
 
+    myRetryableHandler: async (ctx: restate.Context) => {
+      // <start_retryable>
+      await ctx.run("call API", async () => {
+          const res = await fetch("https://api.example.com/data");
+          if (!res.ok) {
+              const retryAfter = res.headers.get("Retry-After");
+              // Tell Restate to retry after the specified delay
+              throw new restate.RetryableError("Rate limited", {
+                  retryAfter: { seconds: Number(retryAfter ?? 30) },
+              });
+          }
+          return res.json();
+      }, { maxRetryAttempts: 10 });
+      // <end_retryable>
+    },
+
     myTimeoutHandler: async (ctx: restate.Context) => {
       // <start_timeout>
       try {

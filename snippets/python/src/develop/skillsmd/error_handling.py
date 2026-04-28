@@ -25,5 +25,6 @@ async def my_handler(ctx: restate.Context, greeting: str) -> str:
         raise TerminalError(f"API timeout: {e}")
     # <end_catch>
 
+
 async def call_external_api() -> str:
     return "Hello, world!"

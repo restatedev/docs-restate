@@ -26,9 +26,7 @@ async def my_service_handler(ctx: Context, req: SubscriptionRequest):
     pay_ref = await ctx.run_typed(
         "pay",
         lambda: create_recurring_payment(req["creditCard"], payment_id),
-        restate.RunOptions(
-            max_attempts=10, max_retry_duration=timedelta(seconds=30)
-        ),
+        restate.RunOptions(max_attempts=10, max_retry_duration=timedelta(seconds=30)),
     )
     # <end_here>
 

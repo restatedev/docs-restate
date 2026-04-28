@@ -158,6 +158,54 @@ If you set a maximum number of attempts, then the run block will fail with a Ter
     Service-level retry policies are planned and will come soon.
 </Info>
 
+### Retryable errors with custom delay
+
+Sometimes you need to control the retry timing dynamically, for example when an external API returns a `Retry-After` header. You can use `RetryableError` to tell Restate exactly when to retry.
+
+This is primarily useful inside `ctx.run` blocks:
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::ts/src/guides/retries.ts#retryable"} 
+await ctx.run("call API", async () => {
+    const res = await fetch("https://api.example.com/data");
+    if (!res.ok) {
+        const retryAfter = res.headers.get("Retry-After");
+        // Tell Restate to retry after the specified delay
+        throw new restate.RetryableError("Rate limited", {
+            retryAfter: { seconds: Number(retryAfter ?? 30) },
+        });
+    }
+    return res.json();
+}, { maxRetryAttempts: 10 });
+```
+
+```python Python {"CODE_LOAD::python/src/guides/retries.py#retryable"} 
+from datetime import timedelta
+from restate.exceptions import RetryableError
+
+async def call_external_api():
+    response = await make_request()
+    if response.status == 429:
+        retry_after = int(response.headers.get("Retry-After", "30"))
+        # Tell Restate to retry after the specified delay
+        raise RetryableError(
+            "Rate limited",
+            retry_after=timedelta(seconds=retry_after),
+        )
+    return response.data
+
+result = await ctx.run_typed(
+    "call API",
+    call_external_api,
+    restate.RunOptions(max_attempts=5),
+)
+```
+</CodeGroup>
+
+Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. You can combine it with run retry options like `maxRetryAttempts` and `maxRetryDuration` to bound the total number of retries.
+
+You can also throw `RetryableError` directly in handler code (outside of `ctx.run`), in which case the entire handler invocation will be retried after the specified delay.
+
 ## Application errors (terminal)
 
 By default, Restate infinitely retries all errors.
