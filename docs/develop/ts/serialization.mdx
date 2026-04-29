@@ -128,3 +128,66 @@ await ctx.run("my-side-effect", () => new Uint8Array(), {
   serde: restate.serde.binary,
 });
 ```
+
+## JSON preview for custom serdes
+
+When you use a non-JSON wire format (protobuf, MessagePack, a custom binary encoding, etc.), you can optionally add a `preview` bridge to your `Serde` implementation. This lets the Restate UI and other tooling render and edit values as human-readable JSON, even though the actual bytes on the wire are in a different format.
+
+The `preview` field accepts two methods:
+
+- `toJsonString(value)` – converts a typed value to a JSON string for display
+- `fromJsonString(json)` – parses a JSON string back into the typed value
+
+Both methods may be `async` if your conversion requires I/O.
+
+When `preview` is present, the SDK advertises this capability in service discovery metadata and exposes HTTP endpoints under `/serdes/<service>/(encode|decode)/<serdeName>` for round-tripping values.
+
+```typescript
+import type { Serde } from "@restatedev/restate-sdk-core";
+
+function myCustomSerde<T>(): Serde<T> {
+  return {
+    contentType: "application/x-my-format",
+
+    serialize(value: T): Uint8Array {
+      // ... encode to your wire format
+    },
+
+    deserialize(data: Uint8Array): T {
+      // ... decode from your wire format
+    },
+
+    // Optional: bridge between your wire format and JSON for tooling
+    preview: {
+      toJsonString(value: T): string {
+        return JSON.stringify(value);
+      },
+      fromJsonString(json: string): T {
+        return JSON.parse(json) as T;
+      },
+    },
+  };
+}
+```
+
+For protobuf, you can use the conversion helpers that most protobuf libraries already provide:
+
+```typescript
+import { fromBinary, fromJsonString, toBinary, toJsonString } from "@bufbuild/protobuf";
+import { PersonSchema, type Person } from "./person_pb.js";
+import type { Serde } from "@restatedev/restate-sdk-core";
+
+const personSerde: Serde<Person> = {
+  contentType: "application/protobuf",
+  serialize(message) { return toBinary(PersonSchema, message); },
+  deserialize(bytes) { return fromBinary(PersonSchema, bytes); },
+  preview: {
+    toJsonString: (v) => toJsonString(PersonSchema, v),
+    fromJsonString: (j) => fromJsonString(PersonSchema, j),
+  },
+};
+```
+
+<Note>
+The `preview` field is purely optional. Omitting it has no effect on how values are serialized or deserialized at runtime — it only affects tooling and observability. Plain JSON serdes (the default) do not need it because the wire format is already human-readable.
+</Note>

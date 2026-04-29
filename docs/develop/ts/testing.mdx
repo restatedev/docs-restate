@@ -10,8 +10,8 @@ The Typescript SDK has a companion library which makes it easy to test against a
 This uses [Testcontainers](https://testcontainers.com/) to run a Restate Server in a Docker container and let you test your Restate handlers.
 
 ## Setup
-`RestateTestEnvironment.start` creates a Restate container and executes a user-provided closure to register services.
-An optional second argument allows you to specify a custom [Testcontainer](https://node.testcontainers.org/) for Restate.
+`RestateTestEnvironment.start` creates a Restate container and registers your services with it.
+Pass a `TestEnvironmentOptions` object to configure services and container behavior.
 
 ```typescript {"CODE_LOAD::ts/src/develop/testing.test.ts#setup"} 
 describe("ExampleObject", () => {
@@ -124,5 +124,45 @@ describe("with disableRetries", () => {
   it("fails immediately without retry backoff", async () => {
     // handler logic here
   });
+});
+```
+
+## Storage mode
+
+By default the test environment mounts `/restate-data` as a `tmpfs` in-memory filesystem. This avoids disk I/O and makes tests faster. Set `storage: "disk"` if you need to inspect the Restate data directory after a test run:
+
+```typescript
+restateTestEnvironment = await RestateTestEnvironment.start({
+  services: [myService],
+  storage: "disk",   // default is "memory"
+});
+```
+
+## Service endpoint access
+
+The `serviceEndpointAccess` option controls how the Restate container inside Docker reaches your service endpoint running on the test host.
+
+| Value | Behavior |
+|---|---|
+| `"docker-host"` (default) | Adds `host.docker.internal → host-gateway` to the container and registers the endpoint as `http://host.docker.internal:<port>`. No Testcontainers port exposure is needed. |
+| `"testcontainers"` | Exposes the host port through the Testcontainers port-forwarding mechanism and registers `http://host.testcontainers.internal:<port>`. Slower to start but works in environments where `host.docker.internal` is not available. |
+
+```typescript
+restateTestEnvironment = await RestateTestEnvironment.start({
+  services: [myService],
+  serviceEndpointAccess: "testcontainers", // default is "docker-host"
+});
+```
+
+## Custom container
+
+To use a custom Restate Docker image or configure the container further, pass a factory function via the `container` option:
+
+```typescript
+import { RestateContainer } from "@restatedev/restate-sdk-testcontainers";
+
+restateTestEnvironment = await RestateTestEnvironment.start({
+  services: [myService],
+  container: () => new RestateContainer("docker.io/restatedev/restate:latest"),
 });
 ```
