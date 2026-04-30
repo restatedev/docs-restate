@@ -174,6 +174,48 @@ if (peekOutput.ready) {
 }
 ```
 
+## Serialization
+
+By default, the ingress client uses `restate.serde.json` for serializing requests and deserializing responses.
+You can override this for all calls made through a client instance by passing a `serde` option to `clients.connect()`:
+
+```typescript
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+// Set a default serde for all calls through this client
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde,
+});
+```
+
+This default applies to:
+- Handler calls (request and response payloads)
+- Workflow output polling and attach operations
+- Awakeable resolution payloads
+- Attached invocation results
+
+You can still override the serde on a per-call basis using `clients.rpc.opts()`:
+
+```typescript
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(input, clients.rpc.opts({ input: restate.serde.binary, output: restate.serde.binary }));
+```
+
+And you can pass a `payloadSerde` to `resolveAwakeable` or a `resultSerde` to `result()` to override serialization for those specific calls:
+
+```typescript
+// Resolve an awakeable with a custom serde
+await restateClient.resolveAwakeable(id, payload, myCustomSerde);
+
+// Retrieve a result with a custom serde
+const result = await restateClient.result(handle, myCustomSerde);
+```
+
+Per-call options always take precedence over the client-level default. See the [Serialization docs](/develop/ts/serialization) for how to implement a custom `Serde`.
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
