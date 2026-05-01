@@ -128,3 +128,40 @@ await ctx.run("my-side-effect", () => new Uint8Array(), {
   serde: restate.serde.binary,
 });
 ```
+
+## Ingress client default serde
+
+When using the ingress client (`@restatedev/restate-sdk-clients`), you can set a default serde for all operations by passing it in the connection options.
+This is useful when your services use a non-JSON encoding (such as Protobuf, MessagePack, or a custom binary format) and you want to avoid specifying the serde on every individual call.
+
+```typescript
+import * as clients from "@restatedev/restate-sdk-clients";
+
+// Set a default serde for all operations on this client
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde,
+});
+
+// All calls now use myCustomSerde by default
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(input);
+
+// Per-call serde still overrides the default when needed
+const result2 = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(
+    input,
+    clients.rpc.opts({ input: overrideSerde, output: overrideSerde })
+  );
+```
+
+The default serde applies to:
+- Handler calls (request input and response output)
+- Workflow attach and output polling
+- Awakeable resolution payloads
+- Invocation result retrieval via `restateClient.result(...)`
+
+Per-call serde options always take precedence over the connection-level default.
+If no default is configured and no per-call serde is given, the client falls back to `restate.serde.json`.
