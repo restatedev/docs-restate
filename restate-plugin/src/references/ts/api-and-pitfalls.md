@@ -285,6 +285,22 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
 
+### Default serde for all client calls
+
+Set a default serde once on `connect()` instead of repeating it on every call. Applies to all operations: handler calls, workflow attach/output, awakeable resolution, and result polling.
+
+```ts
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+const rs = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary, // or your custom serde
+});
+```
+
+Priority: per-call opts > connection default > `restate.serde.json`.
+
 ---
 
 ## TypeScript-Specific Pitfalls
