@@ -124,3 +124,28 @@ const workflowAttach = async () => {
   }
   // <end_workflow_attach>
 };
+
+import * as restate from "@restatedev/restate-sdk";
+
+const defaultSerdeExample = async () => {
+  // <start_default_serde>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  // import * as restate from "@restatedev/restate-sdk";
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    // Set a default serde for all ingress operations.
+    // This applies to handler calls, workflow attach/output,
+    // awakeable resolution, and invocation result retrieval.
+    serde: restate.serde.binary,
+  });
+
+  // The default serde is used unless overridden per-operation:
+  const greet = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(
+      new Uint8Array(),
+      // Override per-call if needed:
+      clients.rpc.opts({ input: restate.serde.binary, output: restate.serde.binary })
+    );
+  // <end_default_serde>
+};
