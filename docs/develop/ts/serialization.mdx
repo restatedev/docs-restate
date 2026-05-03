@@ -116,6 +116,32 @@ ctx.serviceClient(myService).myHandler(
 );
 ```
 
+When using the [ingress client](/services/invocation/clients/typescript-sdk) (`@restatedev/restate-sdk-clients`) from outside Restate, you can set a default serde on the connection itself instead of specifying it per-call:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#default_serde"} 
+// import * as clients from "@restatedev/restate-sdk-clients";
+// Set a default serde for all operations on this client connection.
+// This applies to handler calls, workflow attach/output, awakeable
+// resolution, and result retrieval.
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: clients.serde.binary,
+});
+
+// All calls use binary serde by default - no need to specify per operation
+await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet({ greeting: "Hi" });
+
+// Override for a specific operation when needed
+await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(
+    { greeting: "Hi" },
+    clients.rpc.opts({ input: clients.serde.json, output: clients.serde.json })
+  );
+```
+
 To customize the serde for other actions on the context:
 
 ```typescript {"CODE_LOAD::ts/src/develop/serialization.ts#actions"} 
