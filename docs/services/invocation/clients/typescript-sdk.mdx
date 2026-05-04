@@ -174,6 +174,66 @@ if (peekOutput.ready) {
 }
 ```
 
+## Custom serialization
+
+By default, the ingress client serializes and deserializes payloads as JSON. If your handlers use a custom `Serde`, you need to tell the client which serializer to use.
+
+### Per-call serde
+
+You can specify a custom serde for individual calls using the call options:
+
+```typescript
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+const restateClient = clients.connect({ url: "http://localhost:8080" });
+
+// Call a handler that uses binary serde
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(
+    inputPayload,
+    clients.rpc.opts({
+      input: restate.serde.binary,
+      output: restate.serde.binary,
+    })
+  );
+```
+
+### Connection-level default serde
+
+If all (or most) of your handlers use the same custom serde, you can set a default serde when connecting. This applies to all operations — handler calls, workflow attach/output polling, awakeable resolution, and attached invocation results — unless overridden at the call level.
+
+```typescript
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+// Set a default serde for all calls made through this client
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary,
+});
+
+// All calls now use binary serde by default
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(inputPayload);
+
+// You can still override per-call when needed
+const otherResult = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myJsonHandler(
+    jsonPayload,
+    clients.rpc.opts({ input: restate.serde.json, output: restate.serde.json })
+  );
+```
+
+The serde precedence is: **per-call serde → connection default serde → `restate.serde.json`**.
+
+<Tip>
+  The connection-level `serde` option is useful when your services use a custom serialization format (e.g., binary, Protobuf, or a prefixed encoding) and you want to avoid specifying the serde on every call.
+</Tip>
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
