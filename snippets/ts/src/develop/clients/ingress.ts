@@ -1,5 +1,6 @@
 import { MyService, MyObject, MyWorkflow } from "./utils";
 import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
 
 const myPlainTSFunction = async () => {
   // <start_rpc_call_node>
@@ -123,4 +124,40 @@ const workflowAttach = async () => {
     const result2 = peekOutput.result;
   }
   // <end_workflow_attach>
+};
+
+const defaultSerdeExample = async () => {
+  const myCustomSerde = restate.serde.binary;
+  const overrideSerde = restate.serde.json;
+  const input = new Uint8Array();
+  // <start_default_serde>
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: myCustomSerde,
+  });
+
+  // Uses myCustomSerde for both input serialization and output deserialization
+  const result = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet({ greeting: "Hi" });
+  // <end_default_serde>
+};
+
+const defaultSerdeOverrideExample = async () => {
+  const myCustomSerde = restate.serde.binary;
+  const overrideSerde = restate.serde.json;
+  const input = new Uint8Array();
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: myCustomSerde,
+  });
+  // <start_default_serde_override>
+  // This call uses the per-call override serde, not the connection default
+  const result = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(
+      { greeting: "Hi" },
+      restate.rpc.opts({ input: overrideSerde, output: overrideSerde })
+    );
+  // <end_default_serde_override>
 };
