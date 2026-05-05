@@ -174,6 +174,40 @@ if (peekOutput.ready) {
 }
 ```
 
+## Custom serialization
+
+If your handlers use a [custom `Serde`](/develop/ts/serialization#custom-serialization) for their input and output, you can configure a default serde on the ingress client so you don't have to specify it on every call.
+
+Pass the `serde` option to `clients.connect()`:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#default_serde"}
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+// Use your custom serde as the default for all calls made through this client
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde,
+});
+
+// No need to pass serde on every individual call — the client uses myCustomSerde
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(input);
+```
+
+The default serde applies to:
+- Handler calls (request-response and one-way)
+- Workflow attach and output polling
+- Awakeable resolution
+- Attached invocation results via `restateClient.result(...)`
+
+You can still override the serde on individual operations using per-call options. The priority order is: **per-call serde > client-level default serde > `restate.serde.json`** (the built-in default).
+
+<Info>
+  The `serde` option on `clients.connect()` is available from TypeScript SDK v1.14.1.
+</Info>
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
