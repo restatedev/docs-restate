@@ -424,6 +424,23 @@ throw new TerminalException(500, "Something went wrong");
 
 Note: the Java SDK uses `TerminalException`, NOT `TerminalError` (which is used by other SDKs).
 
+You can attach a metadata map to provide structured context to callers (requires Restate Server >= 1.6):
+
+```java
+throw new TerminalException("Something went wrong", Map.of("correlationId", "abc123"));
+```
+
+Callers can read the metadata from the caught exception:
+
+```java
+try {
+    MyServiceClient.fromContext(ctx).myMethod(input).await();
+} catch (TerminalException e) {
+    String correlationId = e.getMetadata().get("correlationId");
+    throw e;
+}
+```
+
 Any other exception type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
 
 ---
