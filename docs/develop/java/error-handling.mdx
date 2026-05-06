@@ -36,3 +36,41 @@ You can catch terminal errors, and build your control flow around it.
 <Info>
     When throwing a terminal error, undo earlier handler actions to keep the system consistent. See our [sagas guide](/guides/sagas) for details.
 </Info>
+
+## Terminal Error metadata
+
+You can attach structured metadata to a `TerminalException`. The metadata is a `Map<String, String>` that is propagated to callers alongside the error message and is readable via `TerminalException.getMetadata()`.
+
+This is useful for passing correlation IDs, error codes, or other diagnostic context to callers without embedding that information in the error message itself.
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#metadata"} 
+throw new TerminalException(500, "Something went wrong", Map.of("correlationId", "abc123", "errorCode", "ERR_001"));
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ErrorHandling.kt#metadata"} 
+throw TerminalException(500, "Something went wrong", mapOf("correlationId" to "abc123", "errorCode" to "ERR_001"))
+```
+</CodeGroup>
+
+The caller can then access the metadata:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#read_metadata"} 
+try {
+  MyServiceClient.fromContext(ctx).myHandler("input").await();
+} catch (TerminalException e) {
+  String correlationId = e.getMetadata().get("correlationId");
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ErrorHandling.kt#read_metadata"} 
+try {
+  MyServiceClient.fromContext(ctx).myHandler("input").await()
+} catch (e: TerminalException) {
+  val correlationId = e.metadata["correlationId"]
+}
+```
+</CodeGroup>
+
+<Info>
+    Metadata propagation requires restate-server >= 1.6.
+</Info>
