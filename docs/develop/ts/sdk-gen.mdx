@@ -1,0 +1,360 @@
+---
+title: "Generator-based SDK"
+sidebarTitle: "Generator-based SDK"
+description: "Write complex workflows with a composable, generator-based DSL."
+icon: "wand-magic-sparkles"
+tag: "NEW"
+---
+
+<Warning>
+`@restatedev/restate-sdk-gen` is experimental. The API may change before a stable release.
+</Warning>
+
+`@restatedev/restate-sdk-gen` is an optional companion package that lets you write Restate handlers using JavaScript generators instead of `await`. It provides a composable DSL with two user-visible concepts:
+
+- **`Operation<T>`** — a lazy, one-shot description of work, built with `gen()`.
+- **`Future<T>`** — an eager, memoized handle to an eventual value, returned by primitives like `run`, `sleep`, `awakeable`, and `spawn`.
+
+All primitives (`run`, `sleep`, `all`, `select`, etc.) are free-standing functions you import directly. Inside a `gen(function*() { ... })` body they automatically resolve the active scheduler from a synchronous slot — no `ops` parameter to thread through.
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+`@restatedev/restate-sdk` is a peer dependency.
+
+## Quick start
+
+Call `execute(ctx, op)` to wire the scheduler to the SDK and run an `Operation<T>`:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run, all } from "@restatedev/restate-sdk-gen";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string): Promise<string> =>
+      execute(
+        ctx,
+        gen(function* () {
+          const a = run(({ signal }) => fetchA(signal), { name: "a" });
+          const b = run(({ signal }) => fetchB(signal), { name: "b" });
+          const [aVal, bVal] = yield* all([a, b]);
+          return `${aVal}+${bVal} for ${name}`;
+        })
+      ),
+  },
+});
+
+restate.endpoint().bind(greeter).listen();
+```
+
+## Primitives
+
+### `run` — journaled side effect
+
+```typescript
+// Basic usage
+const result = yield* run(async () => fetchData(), { name: "fetch" });
+
+// With AbortSignal for cancellation hygiene
+const data = yield* run(async ({ signal }) => {
+  const r = await fetch(url, { signal });
+  return r.json();
+}, { name: "fetch" });
+
+// With custom retry policy
+const result2 = yield* run(async () => callExternalAPI(), {
+  name: "call",
+  retry: {
+    maxAttempts: 5,
+    initialInterval: { seconds: 1 },
+    maxInterval: { seconds: 30 },
+  },
+});
+```
+
+The `signal` argument is an `AbortSignal` that fires before invocation cancellation propagates. Wiring it into `fetch` or other AbortSignal-aware APIs ensures in-flight calls cancel immediately.
+
+### `sleep` — journaled timer
+
+```typescript
+yield* sleep({ seconds: 5 });
+yield* sleep({ milliseconds: 500 });
+```
+
+### `awakeable` — journaled awakeable
+
+```typescript
+const { id, promise } = yield* awakeable<string>();
+// Send `id` to an external system; it resolves the promise when done
+const result = yield* promise;
+```
+
+### `state` / `sharedState` — typed key-value store
+
+Use inside virtual objects and workflows. Pass a shape type for keyof-checked names and per-key value types:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, state, sharedState } from "@restatedev/restate-sdk-gen";
+
+type MyState = { counter: number; name: string };
+
+const myObject = restate.object({
+  name: "myObject",
+  handlers: {
+    // Exclusive (read-write) handler
+    increment: async (ctx: restate.ObjectContext): Promise<number> =>
+      execute(
+        ctx,
+        gen(function* () {
+          const s = state<MyState>();
+          const current = (yield* s.get("counter")) ?? 0;
+          s.set("counter", current + 1);
+          return current + 1;
+        })
+      ),
+
+    // Shared (read-only) handler — can run concurrently
+    get: async (ctx: restate.ObjectSharedContext): Promise<number> =>
+      execute(
+        ctx,
+        gen(function* () {
+          return (yield* sharedState<MyState>().get("counter")) ?? 0;
+        })
+      ),
+  },
+});
+```
+
+### `channel` — in-memory channel
+
+A single-shot `Channel<T>` for passing values between concurrent routines (spawned within the same handler execution):
+
+```typescript
+const stop = channel<void>();
+// In the producer:
+yield* stop.send();
+// In the consumer:
+const r = yield* select({ work: someTask, stop: stop.receive });
+```
+
+### `workflowPromise` — durable workflow promise
+
+For workflows only. A durable promise bound to the workflow lifetime that survives crashes:
+
+```typescript
+// In the `run` handler: park until an external call resolves the promise
+const output = workflowPromise<string>("done");
+const value = yield* output.get();
+
+// In a shared handler: settle the promise
+yield* workflowPromise<string>("done").resolve(result);
+```
+
+## Combinators
+
+Combinators work identically whether inputs are journal-backed (`run`, `sleep`, `awakeable`) or routine-backed (`spawn`). The scheduler chooses the most efficient implementation automatically.
+
+### `all` — wait for all
+
+```typescript
+const aF = run(() => fetchA(), { name: "a" });
+const bF = run(() => fetchB(), { name: "b" });
+const [a, b] = yield* all([aF, bF]);
+```
+
+### `race` — first to settle
+
+```typescript
+const winner = yield* race([
+  run(() => fetchPrimary(), { name: "primary" }),
+  run(() => fetchFallback(), { name: "fallback" }),
+]);
+```
+
+The loser keeps running; its result is discarded.
+
+### `any` — first to succeed
+
+```typescript
+const result = yield* any([
+  run(() => callRegionA(), { name: "region-a" }),
+  run(() => callRegionB(), { name: "region-b" }),
+]);
+```
+
+Ignores rejections; throws `AggregateError` only if every input rejects.
+
+### `allSettled` — wait for all, including failures
+
+```typescript
+const results = yield* allSettled([
+  run(() => fetchA(), { name: "a" }),
+  run(() => fetchB(), { name: "b" }),
+]);
+for (const r of results) {
+  if (r.status === "fulfilled") use(r.value);
+  else log.warn(r.reason);
+}
+```
+
+### `select` — race with a tag
+
+```typescript
+const r = yield* select({
+  fast: run(() => fetchFast(), { name: "fast" }),
+  slow: run(() => fetchSlow(), { name: "slow" }),
+});
+switch (r.tag) {
+  case "fast": return `fast: ${yield* r.future}`;
+  case "slow": return `slow: ${yield* r.future}`;
+}
+```
+
+`select` is `race` plus a discriminating tag. Switch on `r.tag`, then unwrap the winning value with `yield* r.future`.
+
+## Spawning concurrent routines
+
+`spawn` registers an `Operation` as a concurrent sub-routine and returns a `Future<T>` for its result. Use it when each concurrent unit is itself a multi-step workflow with internal logic:
+
+```typescript
+import { gen, execute, spawn, all, type Operation } from "@restatedev/restate-sdk-gen";
+
+const processItem = (item: string): Operation<string> =>
+  gen(function* () {
+    const step1 = yield* run(() => validate(item), { name: "validate" });
+    const step2 = yield* run(() => transform(step1), { name: "transform" });
+    return step2;
+  });
+
+const batchHandler = async (ctx: restate.Context, items: string[]) =>
+  execute(
+    ctx,
+    gen(function* () {
+      const tasks = [];
+      for (const item of items) {
+        tasks.push(yield* spawn(processItem(item)));
+      }
+      return yield* all(tasks); // wait for every routine to finish
+    })
+  );
+```
+
+Use `run` + combinators for flat sets of side effects. Use `spawn` when each unit has its own internal logic, branching, or retries.
+
+## Saga-style compensation
+
+Use `try/catch` around journaled steps. Compensation actions inside `catch` are themselves journaled — if the process crashes mid-compensation, replay resumes at the compensation step:
+
+```typescript
+gen(function* () {
+  const reservation = yield* run(() => reserveItem(req.itemId), { name: "reserve" });
+  try {
+    const charge = yield* run(() => chargeCard(req.amount, req.cardToken), { name: "charge" });
+    const orderId = yield* run(() => createOrder(reservation.id, charge.id), { name: "create" });
+    return { orderId };
+  } catch (e) {
+    // Compensate: release the reservation, then re-throw
+    yield* run(() => releaseItem(reservation.id), { name: "release" });
+    throw e;
+  }
+})
+```
+
+## Cancellation
+
+Invocation-level cancellation delivers a `CancelledError` at the next `yield*` boundary. Catch it to run journaled cleanup before re-throwing:
+
+```typescript
+try {
+  yield* sleep({ seconds: 60 });
+  // ... more work ...
+} catch (e) {
+  if (e instanceof restate.CancelledError) {
+    yield* run(async () => auditLog("cancelled"), { name: "audit" });
+    throw e;
+  }
+  throw e;
+}
+```
+
+Cancellation is **not sticky** — after catching and yielding more journal work, the next cancellation event is independent.
+
+For cooperative stop within a workflow (stopping a spawned routine before the invocation itself is cancelled), use a `Channel<void>` with `select`:
+
+```typescript
+const stop = channel<void>();
+const worker = yield* spawn(pollWorker(jobId, stop));
+
+const r = yield* select({
+  done: worker,
+  budget: sleep({ seconds: budget }),
+});
+
+if (r.tag === "budget") {
+  yield* stop.send(); // signal the worker to stop
+}
+return yield* worker; // wait for the worker to wind down
+```
+
+## Calling other services
+
+Use the same typed clients as the standard SDK. Import them from `@restatedev/restate-sdk-gen`:
+
+```typescript
+import { serviceClient, objectClient, workflowClient } from "@restatedev/restate-sdk-gen";
+
+const result = yield* serviceClient(myService).myHandler(input);
+const value = yield* objectClient(myObject, key).myHandler(input);
+```
+
+Send clients (fire-and-forget) are also available: `serviceSendClient`, `objectSendClient`, `workflowSendClient`.
+
+## Workflows with `restate-sdk-gen`
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, state, workflowPromise } from "@restatedev/restate-sdk-gen";
+
+export const myWorkflow = restate.workflow({
+  name: "myWorkflow",
+  handlers: {
+    run: async (ctx: restate.WorkflowContext, input: string): Promise<string> =>
+      execute(
+        ctx,
+        gen(function* () {
+          state().set("input", input);
+
+          // Park until an external call resolves this promise
+          const value = yield* workflowPromise<string>("done").get();
+          return value;
+        })
+      ),
+
+    unblock: async (
+      ctx: restate.WorkflowSharedContext,
+      result: string
+    ): Promise<void> =>
+      execute(
+        ctx,
+        gen(function* () {
+          yield* workflowPromise<string>("done").resolve(result);
+        })
+      ),
+  },
+});
+```
+
+## When to use `restate-sdk-gen`
+
+Use `restate-sdk-gen` when:
+- You need to express complex multi-step workflows with branching, compensation, or fan-out/fan-in patterns
+- You want to express concurrent work as composable `Operation` values you can pass around and compose
+- Your workflow has deeply nested concurrency or recursive patterns that are hard to express with `RestatePromise` combinators
+
+The standard SDK (`@restatedev/restate-sdk`) with `ctx.run`, `ctx.sleep`, and `RestatePromise` combinators is sufficient for most use cases. The generator SDK adds an alternative authoring model, not additional capabilities.

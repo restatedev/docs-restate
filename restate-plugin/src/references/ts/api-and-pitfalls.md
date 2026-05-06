@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- (experimental) generator-based DSL for complex multi-step workflows
 
 ### Minimal Scaffold
 
@@ -284,6 +285,74 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
+
+---
+
+## Generator-based SDK (`@restatedev/restate-sdk-gen`) — Experimental
+
+An optional companion package for writing complex workflows using JavaScript generators. Install alongside the main SDK:
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+Instead of calling `ctx.run` / `ctx.sleep` / `RestatePromise` directly, you write `gen(function*() { ... })` bodies and call `execute(ctx, op)` to run them:
+
+```typescript
+import { gen, execute, run, all, sleep } from "@restatedev/restate-sdk-gen";
+
+const handler = async (ctx: restate.Context): Promise<string> =>
+  execute(
+    ctx,
+    gen(function* () {
+      // Parallel side effects
+      const a = run(() => fetchA(), { name: "a" });
+      const b = run(() => fetchB(), { name: "b" });
+      const [aVal, bVal] = yield* all([a, b]);
+
+      // Sequential side effect
+      yield* sleep({ seconds: 1 });
+
+      return `${aVal}+${bVal}`;
+    })
+  );
+```
+
+### Key primitives
+
+- `run(action, opts?)` — journaled side effect. Action receives `{ signal }` for cancellation hygiene.
+- `sleep(duration)` — journaled timer.
+- `awakeable<T>()` — journaled awakeable; returns `{ id, promise }`.
+- `state<T>()` / `sharedState<T>()` — typed key-value store (virtual objects/workflows).
+- `workflowPromise<T>(name)` — durable promise for workflows.
+- `serviceClient` / `objectClient` / `workflowClient` — typed RPC.
+
+### Combinators
+
+- `all(futures)` — wait for all, return values in input order.
+- `race(futures)` — return first to settle; losers keep running.
+- `any(futures)` — return first to succeed; throws `AggregateError` if all reject.
+- `allSettled(futures)` — wait for all regardless of success/failure.
+- `select({ tag: future, ... })` — race with a discriminating tag.
+- `spawn(op)` — run an `Operation` as a concurrent sub-routine; returns `Future<T>`.
+
+### Cancellation
+
+Invocation cancellation delivers a `CancelledError` at the next `yield*` boundary. Catch it to run journaled cleanup:
+
+```typescript
+try {
+  yield* sleep({ seconds: 60 });
+} catch (e) {
+  if (e instanceof restate.CancelledError) {
+    yield* run(async () => audit(), { name: "audit" });
+    throw e;
+  }
+  throw e;
+}
+```
+
+Cancellation is not sticky — after catching, subsequent journal work is independent.
 
 ---
 
