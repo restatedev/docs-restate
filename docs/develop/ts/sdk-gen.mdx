@@ -1,0 +1,208 @@
+---
+title: "Generator-based SDK"
+sidebarTitle: "Generator-based SDK"
+description: "Write complex workflows with a composable, generator-based DSL."
+icon: "wand-magic-sparkles"
+tag: "NEW"
+---
+
+<Warning>
+`@restatedev/restate-sdk-gen` is experimental. The API may change before a stable release.
+</Warning>
+
+`@restatedev/restate-sdk-gen` is an optional companion package that lets you write Restate handlers using JavaScript generators. It provides a composable DSL built around two concepts:
+
+- **`Operation<T>`** — a lazy, one-shot description of work, built with `gen()`.
+- **`Future<T>`** — an eager, memoized handle to an eventual value, returned by primitives like `run`, `sleep`, `awakeable`, and `spawn`.
+
+All primitives (`run`, `sleep`, `all`, `select`, etc.) are free-standing functions you import directly. Inside a `gen(function*() { ... })` body they automatically resolve the active scheduler — no context parameter to thread through.
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+`@restatedev/restate-sdk` is a peer dependency.
+
+## Quick start
+
+Call `execute(ctx, op)` to wire the scheduler to the SDK and run an `Operation<T>`:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#quick_start"}
+```
+
+## Primitives
+
+### `run` — journaled side effect
+
+Each call to `run` creates a journal entry. On replay, the recorded value is returned without re-running the closure.
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#run_basic"}
+```
+
+Pass `signal` into AbortSignal-aware APIs for cancellation hygiene:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#run_signal"}
+```
+
+To bound retries, provide a `retry` option:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#run_retry"}
+```
+
+When the retry bound is exceeded, `run` throws a `TerminalError`. When a `TerminalError` is thrown inside the closure, retries stop immediately. For more on retry and error handling, see [error handling](/develop/ts/error-handling).
+
+### `sleep` — journaled timer
+
+```typescript
+yield* sleep({ seconds: 5 });
+yield* sleep({ milliseconds: 500 });
+```
+
+### `awakeable` — journaled awakeable
+
+```typescript
+const { id, promise } = yield* awakeable<string>();
+// Send `id` to an external system; it resolves `promise` when done.
+const result = yield* promise;
+```
+
+### `state` / `sharedState` — typed key-value store
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#state"}
+```
+
+- Use `state<T>()` in exclusive handlers (read-write).
+- Use `sharedState<T>()` in shared handlers (read-only).
+
+### `channel` — in-memory channel for cooperative stop
+
+A single-shot `Channel<T>` for signalling between concurrent routines within the same handler execution:
+
+```typescript
+const stop = channel<void>();
+// Producer:
+yield* stop.send();
+// Consumer:
+const r = yield* select({ work: someTask, stop: stop.receive });
+```
+
+See the [cooperative cancellation](#cooperative-cancellation) section for a full example.
+
+### `workflowPromise` — durable workflow promise
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#workflow_promise"}
+```
+
+## Combinators
+
+Combinators work uniformly over journal-backed futures (`run`, `sleep`, `awakeable`) and routine-backed futures (`spawn`). The scheduler chooses the most efficient implementation.
+
+### `all` — wait for all
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#all"}
+```
+
+### `race` — first to settle
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#race"}
+```
+
+The loser keeps running; its result is discarded.
+
+### `any` — first to succeed
+
+```typescript
+const result = yield* any([
+  run(() => callRegionA(), { name: "region-a" }),
+  run(() => callRegionB(), { name: "region-b" }),
+]);
+```
+
+Ignores rejections. Throws `AggregateError` only if every input rejects.
+
+### `allSettled` — wait for all, regardless of failure
+
+```typescript
+const results = yield* allSettled([
+  run(() => fetchA(), { name: "a" }),
+  run(() => fetchB(), { name: "b" }),
+]);
+for (const r of results) {
+  if (r.status === "fulfilled") console.log(r.value);
+  else console.warn("failed:", r.reason);
+}
+```
+
+### `select` — race with a tag
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#select"}
+```
+
+## Timeouts
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#timeout"}
+```
+
+## Spawning concurrent sub-routines
+
+`spawn` runs an `Operation` as a concurrent sub-routine and returns a `Future<T>` for its result:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#spawn"}
+```
+
+**Use `run` + combinators** when you have a flat set of side effects. **Use `spawn`** when each unit is itself a multi-step workflow with internal logic and branches.
+
+## Cooperative cancellation
+
+Use a `Channel<void>` and `select` to implement graceful stop:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#channel"}
+```
+
+`stop.receive` is the same `Future` on every access. After `yield* stop.send()`, every subsequent `select` with that branch takes it immediately. The stopped routine decides what to do — it can return partial results, run cleanup steps, or continue.
+
+## Saga-style compensation
+
+Each step is journaled; if any step throws, the catch block runs compensation steps which are also journaled and survive restarts:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#saga"}
+```
+
+## Invocation cancellation
+
+When the invocation is cancelled from outside (for example, from the Restate UI or CLI), a `CancelledError` is thrown at the next `yield*` boundary:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#cancellation"}
+```
+
+Cancellation is not sticky — after catching it, subsequent `yield*` calls work normally.
+
+## Common pitfalls
+
+**Do not reuse a generator instance.** `gen()` takes a factory function, not a generator. Pass `myWorkflow()` (a fresh `Operation`) to `spawn`, not the generator itself.
+
+**Journal entry names must be deterministic.** The name is recorded in the journal and must match on replay. Avoid `Date.now()` or `Math.random()` in names. Use a counter variable instead.
+
+**Do not call free functions outside an active fiber.** The free functions (`run`, `sleep`, `all`, etc.) read the active scheduler from a slot set by `execute()`. Calling them outside a `gen` body throws:
+```
+Error: restate-fluent: free-standing API called outside an active fiber.
+```
+
+## When to use `restate-sdk-gen`
+
+The generator SDK provides an alternative authoring model, not additional capabilities. Use it when:
+- Your workflow has complex concurrent patterns that are hard to express with `RestatePromise` combinators.
+- You want to compose `Operation` values and pass them around like first-class values.
+- You need multi-step sub-workflows with their own internal logic (via `spawn`).
+
+The standard SDK (`@restatedev/restate-sdk`) with `ctx.run`, `ctx.sleep`, and `RestatePromise` combinators is sufficient for most workflows.
+
+## See also
+
+- **[Durable steps](/develop/ts/durable-steps)**: Standard `ctx.run` and journaling
+- **[Concurrent tasks](/develop/ts/concurrent-tasks)**: Standard `RestatePromise` combinators
+- **[Durable timers](/develop/ts/durable-timers)**: Standard `ctx.sleep`
+- **[External events](/develop/ts/external-events)**: Standard `ctx.awakeable`
+- **[Error handling](/develop/ts/error-handling)**: `TerminalError` and retry policies
