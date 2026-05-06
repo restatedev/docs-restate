@@ -403,6 +403,49 @@ if err := server.NewRestate().
 ```
 </CodeGroup>
 
+### Spring Boot: global defaults and per-service configuration
+
+When using the [Spring Boot integration](/quickstart?sdk=java), you can configure service options in `application.properties` or `application.yml`.
+
+Top-level `restate.*` properties act as defaults applied to all registered services. Per-service `restate.components.<Name>.*` properties override them on a per-service basis.
+
+```properties
+# Applied to all services by default
+restate.journal-retention=PT48H
+restate.inactivity-timeout=PT10M
+restate.retry-policy.initial-interval=100ms
+restate.retry-policy.max-attempts=5
+
+# Overrides just for MyService
+restate.components.MyService.journal-retention=PT72H
+restate.components.MyService.ingress-private=true
+restate.components.MyService.retry-policy.max-attempts=10
+```
+
+Supported properties (both at the top level and per-service):
+`documentation`, `metadata`, `inactivity-timeout`, `abort-timeout`, `idempotency-retention`, `workflow-retention`, `journal-retention`, `ingress-private`, `enable-lazy-state`, `retry-policy.*`.
+
+You can also configure per-handler options:
+
+```properties
+restate.components.MyService.handlers.myHandler.inactivity-timeout=5m
+restate.components.MyService.handlers.myWorkflowHandler.workflow-retention=30d
+```
+
+Alternatively, use the `@RestateService` annotation with a `RestateComponentProperties` bean:
+
+```java
+@RestateService(configuration = "myServiceConfig")
+public class MyService { /* ... */ }
+
+@Bean
+public RestateComponentProperties myServiceConfig() {
+    return new RestateComponentProperties()
+        .setInactivityTimeout(Duration.ofMinutes(10))
+        .setJournalRetention(Duration.ofDays(7));
+}
+```
+
 ### Override configuration
 
 You can override the service options configured in your code via the UI or CLI.

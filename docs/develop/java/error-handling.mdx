@@ -36,3 +36,43 @@ You can catch terminal errors, and build your control flow around it.
 <Info>
     When throwing a terminal error, undo earlier handler actions to keep the system consistent. See our [sagas guide](/guides/sagas) for details.
 </Info>
+
+### Attaching metadata to terminal errors
+
+You can attach a string metadata map to a `TerminalException`. The metadata is propagated to callers and is accessible via `TerminalException.getMetadata()`. This is useful for passing structured error context (such as correlation IDs or error codes) alongside the message.
+
+Requires Restate server >= 1.6.
+
+<CodeGroup>
+```java Java
+import java.util.Map;
+import dev.restate.sdk.common.TerminalException;
+
+// Throw with metadata
+throw new TerminalException(500, "Payment failed",
+    Map.of("correlationId", "txn-abc123", "errorCode", "INSUFFICIENT_FUNDS"));
+
+// Catch and read metadata
+try {
+    paymentService.charge(amount);
+} catch (TerminalException e) {
+    String correlationId = e.getMetadata().get("correlationId");
+    log.error("Payment failed [correlationId={}]: {}", correlationId, e.getMessage());
+}
+```
+```kotlin Kotlin
+import dev.restate.sdk.common.TerminalException
+
+// Throw with metadata
+throw TerminalException(500, "Payment failed",
+    mapOf("correlationId" to "txn-abc123", "errorCode" to "INSUFFICIENT_FUNDS"))
+
+// Catch and read metadata
+try {
+    paymentService.charge(amount)
+} catch (e: TerminalException) {
+    val correlationId = e.metadata["correlationId"]
+    log.error("Payment failed [correlationId={}]: {}", correlationId, e.message)
+}
+```
+</CodeGroup>
