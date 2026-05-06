@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- (experimental) generator-based DSL for structured concurrency (`all`, `race`, `spawn`, `channel`)
 
 ### Minimal Scaffold
 
