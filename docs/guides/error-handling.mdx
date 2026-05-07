@@ -245,6 +245,38 @@ Err(TerminalError::new("This is a terminal error"))
 
 You can throw terminal errors from any place in your handler, including run blocks.
 
+#### Attaching metadata to terminal errors (Java/Kotlin)
+
+In Java and Kotlin, you can attach a metadata map to a `TerminalException`. The metadata propagates to callers and is accessible via `TerminalException.getMetadata()`. Requires Restate Server >= 1.6.
+
+<CodeGroup>
+```java Java
+throw new TerminalException("Something went wrong", Map.of("correlationId", "abc123"));
+```
+```kotlin Kotlin
+throw TerminalException("Something went wrong", mapOf("correlationId" to "abc123"))
+```
+</CodeGroup>
+
+The caller can read the metadata from the caught exception:
+
+<CodeGroup>
+```java Java
+try {
+    MyServiceClient.fromContext(ctx).myHandler("input").await();
+} catch (TerminalException e) {
+    String correlationId = e.getMetadata().get("correlationId");
+}
+```
+```kotlin Kotlin
+try {
+    myService.myHandler("input")
+} catch (e: TerminalException) {
+    val correlationId = e.metadata["correlationId"]
+}
+```
+</CodeGroup>
+
 Unless catched, terminal errors stop the execution and are propagated back to the caller.
 If the caller is another Restate service, the terminal error will propagate across RPCs, and will get thrown at the line where the RPC was made.
 If this is not caught, it will propagate further up the call stack until it reaches the original caller.
