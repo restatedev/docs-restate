@@ -174,6 +174,41 @@ if (peekOutput.ready) {
 }
 ```
 
+## Custom serialization
+
+If your services use a [custom serde](/develop/ts/serialization#custom-serialization) (non-JSON encoding), you can set a connection-level default instead of passing the serde on every call:
+
+```typescript
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde, // applies to all operations on this client
+});
+```
+
+The `serde` field in `ConnectionOpts` sets the fallback deserializer/serializer for:
+
+- Handler invocations (input encoding and output decoding)
+- Workflow attach and output polling
+- Awakeable resolution
+- Invocation result retrieval via `result()`
+
+Per-call overrides still take precedence over the connection default. For example, to use a different serde for a single call:
+
+```typescript
+// Override for a specific handler call
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .myHandler(input, clients.rpc.opts({ output: anotherSerde }));
+
+// Override when resolving an awakeable
+await restateClient.resolveAwakeable(awakeableId, payload, myCustomSerde);
+
+// Override when retrieving a result
+const output = await restateClient.result(handle, myCustomSerde);
+```
+
+When no `serde` is set on the connection and no per-call override is provided, the default JSON serde is used.
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
