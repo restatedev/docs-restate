@@ -36,3 +36,42 @@ You can catch terminal errors, and build your control flow around it.
 <Info>
     When throwing a terminal error, undo earlier handler actions to keep the system consistent. See our [sagas guide](/guides/sagas) for details.
 </Info>
+
+## Terminal error metadata
+
+You can attach a metadata map to a `TerminalException` to pass additional context to the caller:
+
+<CodeGroup>
+```java Java
+throw new TerminalException("Something went wrong", Map.of("correlationId", "abc123", "orderId", "42"));
+```
+```kotlin Kotlin
+throw TerminalException("Something went wrong", mapOf("correlationId" to "abc123", "orderId" to "42"))
+```
+</CodeGroup>
+
+The caller can retrieve this metadata via `TerminalException.getMetadata()`:
+
+<CodeGroup>
+```java Java
+try {
+    myServiceClient.myHandler(request).await();
+} catch (TerminalException e) {
+    Map<String, String> metadata = e.getMetadata();
+    String correlationId = metadata.get("correlationId");
+    // handle with correlation context
+}
+```
+```kotlin Kotlin
+try {
+    myServiceClient.myHandler(request).await()
+} catch (e: TerminalException) {
+    val correlationId = e.getMetadata()["correlationId"]
+    // handle with correlation context
+}
+```
+</CodeGroup>
+
+<Info>
+    `TerminalException` metadata requires restate-server >= 1.6.
+</Info>
