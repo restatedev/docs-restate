@@ -1,0 +1,392 @@
+---
+title: "Generator-based SDK (experimental)"
+sidebarTitle: "Generator SDK"
+description: "Write Restate handlers using TypeScript generators for structured concurrency."
+icon: "wand-magic-sparkles"
+---
+
+<Warning>
+`@restatedev/restate-sdk-gen` is experimental. The API may change in future releases.
+</Warning>
+
+`@restatedev/restate-sdk-gen` is a composable, generator-based DSL built on top of `@restatedev/restate-sdk`. It lets you write Restate handlers as TypeScript generator functions, making structured concurrency, fan-out/fan-in, and saga-style compensation easier to express.
+
+## Installation
+
+```shell
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+`@restatedev/restate-sdk` is a peer dependency — bring your own SDK version.
+
+## Core concepts
+
+The API is built around two types:
+
+- **`Operation<T>`** — a lazy, one-shot description of work. This is the return type of generator handler bodies and combinators like `gen()`.
+- **`Future<T>`** — an eager, memoized handle to an eventual result. Returned by `run`, `sleep`, `awakeable`, and `spawn`. Use `yield* future` to resolve it.
+
+Handler bodies are generator functions (using `function*` or `*handlerName()` shorthand) that `yield*` futures and return `Operation<T>`.
+
+## Quick start
+
+```typescript
+import { service, run, all } from "@restatedev/restate-sdk-gen";
+
+const greeter = service({
+  name: "greeter",
+  handlers: {
+    *greet(name: string): Operation<string> {
+      const a = run(() => fetchA(), { name: "a" });
+      const b = run(() => fetchB(), { name: "b" });
+      const [aVal, bVal] = yield* all([a, b]);
+      return `${aVal}+${bVal} for ${name}`;
+    },
+  },
+});
+
+restate.endpoint().bind(greeter).listen();
+```
+
+Notice that `run`, `sleep`, `all`, and other primitives are free-standing imports — no `ctx` parameter is needed inside the generator body.
+
+## Primitives
+
+### run
+
+Wraps a non-deterministic side effect and journals its result, equivalent to `ctx.run` in the standard SDK.
+
+```typescript
+import { service, run, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *processPayment(orderId: string): Operation<string> {
+      // Run and journal an HTTP call. On retry, the recorded result is
+      // returned without re-executing the closure.
+      const result = yield* run(
+        ({ signal }) => fetch(`https://payment.example.com/pay/${orderId}`, { signal }).then(r => r.json()),
+        { name: "charge-card" }
+      );
+      return result.transactionId;
+    },
+  },
+});
+```
+
+The `action` closure receives `{ signal: AbortSignal }` — pass it into `fetch` and other AbortSignal-aware APIs for clean cancellation.
+
+Configure retries via `opts.retry`:
+
+```typescript
+const result = yield* run(
+  () => callExternalService(),
+  {
+    name: "external-call",
+    retry: {
+      maxAttempts: 5,
+      initialInterval: { milliseconds: 500 },
+      maxInterval: { seconds: 10 },
+      intervalFactor: 2,
+    },
+  }
+);
+```
+
+### sleep
+
+Journals a durable timer:
+
+```typescript
+import { service, sleep, run, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *retryWithBackoff(input: string): Operation<void> {
+      yield* run(() => doWork(input), { name: "work" });
+      yield* sleep({ seconds: 30 });
+      yield* run(() => doFollowUp(input), { name: "follow-up" });
+    },
+  },
+});
+```
+
+### awakeable
+
+Creates a durable awakeable that parks until an external caller resolves it:
+
+```typescript
+import { service, awakeable, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *waitForApproval(requestId: string): Operation<string> {
+      const { id, promise } = awakeable<string>();
+      // Send `id` to an external system, then park
+      yield* run(() => notifyApprover(requestId, id), { name: "notify" });
+      const decision = yield* promise;
+      return decision;
+    },
+  },
+});
+```
+
+## Concurrency
+
+A key advantage of the generator SDK is expressive concurrent execution via combinators.
+
+### all — wait for every future
+
+```typescript
+import { service, run, all, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *enrichOrder(orderId: string): Operation<object> {
+      const userF = run(() => fetchUser(orderId), { name: "user" });
+      const inventoryF = run(() => checkInventory(orderId), { name: "inventory" });
+      const priceF = run(() => getPrice(orderId), { name: "price" });
+
+      // All three run concurrently; yield* waits for all to finish
+      const [user, inventory, price] = yield* all([userF, inventoryF, priceF]);
+      return { user, inventory, price };
+    },
+  },
+});
+```
+
+### race — first to settle wins
+
+```typescript
+import { service, run, race, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *fastestReplica(query: string): Operation<string> {
+      const primary = run(() => queryPrimary(query), { name: "primary" });
+      const replica = run(() => queryReplica(query), { name: "replica" });
+      // The loser keeps running; its result is discarded
+      return yield* race([primary, replica]);
+    },
+  },
+});
+```
+
+### select — race with a tag
+
+```typescript
+import { service, run, select, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *firstOrTimeout(input: string): Operation<string> {
+      const workF = run(() => doWork(input), { name: "work" });
+      const timeoutF = run(() => new Promise(r => setTimeout(() => r("timeout"), 5000)), { name: "timeout" });
+
+      const r = yield* select({ work: workF, timeout: timeoutF });
+      switch (r.tag) {
+        case "work":
+          return `done: ${yield* r.future}`;
+        case "timeout":
+          return "timed out";
+      }
+    },
+  },
+});
+```
+
+## Spawning concurrent routines
+
+Use `spawn` when each concurrent unit is itself a multi-step `Operation` with internal logic. `spawn` starts a new fiber-based routine and returns a `Future<T>` — identical in shape to futures from `run`, so all combinators work over both.
+
+```typescript
+import { service, spawn, run, all, gen, type Operation } from "@restatedev/restate-sdk-gen";
+
+// A multi-step sub-operation
+const processItem = (itemId: string): Operation<string> =>
+  gen(function* () {
+    const reserved = yield* run(() => reserveItem(itemId), { name: `reserve-${itemId}` });
+    const processed = yield* run(() => processReserved(reserved), { name: `process-${itemId}` });
+    return processed;
+  });
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *processBatch(itemIds: string[]): Operation<string[]> {
+      // Fan out: each item gets its own routine
+      const tasks = itemIds.map(id => spawn(processItem(id)));
+      // Fan in: wait for all routines to complete
+      return yield* all(tasks);
+    },
+  },
+});
+```
+
+## Saga-style compensation
+
+The generator pattern makes rollback logic natural: use try/catch around journaled steps, then compensate in the catch block. Compensation steps are also journaled, so they survive crashes mid-cleanup.
+
+```typescript
+import { service, run, type Operation } from "@restatedev/restate-sdk-gen";
+import * as restate from "@restatedev/restate-sdk";
+
+const orderService = service({
+  name: "orderService",
+  handlers: {
+    *placeOrder(req: { itemId: string; amount: number; cardToken: string }): Operation<{ orderId: string }> {
+      const reservation = yield* run(() => reserveItem(req.itemId), { name: "reserve" });
+      try {
+        const charge = yield* run(() => chargeCard(req.amount, req.cardToken), { name: "charge" });
+        const orderId = yield* run(() => createOrder(reservation.id, charge.id), { name: "create-order" });
+        return { orderId };
+      } catch (e) {
+        // Compensate: journaled, so it survives a crash mid-compensation
+        yield* run(() => releaseItem(reservation.id), { name: "release" });
+        throw e;
+      }
+    },
+  },
+});
+```
+
+## State
+
+Virtual objects and workflows can use typed state via `state()` and `sharedState()`:
+
+```typescript
+import { object, state, sharedState } from "@restatedev/restate-sdk-gen";
+
+type CounterState = { counter: number };
+
+const counter = object({
+  name: "counter",
+  handlers: {
+    *get() {
+      return (yield* sharedState<CounterState>().get("counter")) ?? 0;
+    },
+    *add(addend: number) {
+      const s = state<CounterState>();
+      const current = (yield* s.get("counter")) ?? 0;
+      const next = current + addend;
+      s.set("counter", next);
+      return { old: current, new: next };
+    },
+  },
+  options: {
+    handlers: {
+      get: { shared: true },
+    },
+  },
+});
+```
+
+## Workflows
+
+Workflows use `workflowPromise` — a durable promise bound to the workflow's lifetime that can be resolved from external handlers:
+
+```typescript
+import { workflow, state, sharedState, workflowPromise, type Operation } from "@restatedev/restate-sdk-gen";
+
+const approvalWorkflow = workflow({
+  name: "approvalWorkflow",
+  handlers: {
+    *run(requestId: string): Operation<string> {
+      state<{ requestId: string }>().set("requestId", requestId);
+
+      // Park until `approve` or `reject` is called
+      const decision = workflowPromise<string>("decision");
+      return yield* decision.get();
+    },
+
+    *approve(reason: string) {
+      yield* workflowPromise<string>("decision").resolve(`approved: ${reason}`);
+    },
+
+    *reject(reason: string) {
+      yield* workflowPromise<string>("decision").reject(
+        new Error(`rejected: ${reason}`)
+      );
+    },
+
+    *getRequestId() {
+      return (yield* sharedState<{ requestId: string }>().get("requestId")) ?? null;
+    },
+  },
+});
+```
+
+## Cancellation
+
+Restate's invocation-level cancellation is delivered as a `TerminalError` at the next `yield*` boundary. Catch it to run compensation before re-throwing:
+
+```typescript
+import { service, run, sleep, type Operation } from "@restatedev/restate-sdk-gen";
+import * as restate from "@restatedev/restate-sdk";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *longRunningJob(jobId: string): Operation<void> {
+      const lock = yield* run(() => acquireLock(jobId), { name: "acquire" });
+      try {
+        yield* run(() => doWork(jobId), { name: "work" });
+      } catch (e) {
+        if (e instanceof restate.TerminalError) {
+          // Runs compensation even when cancelled
+          yield* run(() => releaseLock(lock), { name: "release" });
+        }
+        throw e;
+      }
+    },
+  },
+});
+```
+
+Each `run` closure receives `{ signal: AbortSignal }` that aborts before the `TerminalError` propagates — plumb it into `fetch` and similar APIs for immediate cleanup:
+
+```typescript
+yield* run(
+  ({ signal }) => fetch("https://api.example.com/long-op", { signal }),
+  { name: "long-api-call" }
+);
+```
+
+## Comparison with the standard SDK
+
+| Concern | Standard SDK | Generator SDK |
+|---|---|---|
+| Handler body | `async (ctx, input) => { ... }` | `*(input): Operation<T> { ... }` |
+| Side effect | `await ctx.run(...)` | `yield* run(...)` |
+| Sleep | `await ctx.sleep(...)` | `yield* sleep(...)` |
+| Concurrent fan-out | `RestatePromise.all([...])` | `yield* all([...])` |
+| Sub-workflow | Manual async functions | `spawn(operation)` returning `Future<T>` |
+| State | `await ctx.get(...)` / `ctx.set(...)` | `yield* state().get(...)` / `state().set(...)` |
+
+Both SDKs are fully compatible: a generator-based service can call standard-SDK services and vice versa. The generator SDK is a different authoring style layered on the same Restate runtime.
+
+## Service communication
+
+The generator SDK exposes typed clients for calling other services:
+
+```typescript
+import { service, serviceClient, objectClient, type Operation } from "@restatedev/restate-sdk-gen";
+
+const myService = service({
+  name: "myService",
+  handlers: {
+    *callOthers(input: string): Operation<void> {
+      const client = serviceClient(otherService);
+      const result = yield* client.someHandler(input);
+    },
+  },
+});
+```
+
+For more details on the full API, see the [package README](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen).
