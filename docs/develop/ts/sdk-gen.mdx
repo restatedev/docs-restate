@@ -1,0 +1,296 @@
+---
+title: "Generator-based DSL"
+sidebarTitle: "Generator-based DSL"
+description: "Compose complex workflows using a generator-based API with structured concurrency."
+icon: "code-branch"
+---
+
+<Warning>
+`@restatedev/restate-sdk-gen` is an experimental package. Its API may change in future releases.
+</Warning>
+
+The `@restatedev/restate-sdk-gen` package provides a generator-based DSL for composing Restate workflows. It builds on top of the standard TypeScript SDK and introduces two concepts:
+
+- **`Operation<T>`** — a lazy, one-shot description of work.
+- **`Future<T>`** — an eager, memoized handle to an eventual value.
+
+This style is especially useful for workflows with complex branching, fan-out/fan-in, timeouts, and cooperative cancellation — patterns that benefit from structured concurrency primitives.
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+`@restatedev/restate-sdk` is a peer dependency.
+
+## Quick start
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run, all } from "@restatedev/restate-sdk-gen";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string): Promise<string> =>
+      execute(
+        ctx,
+        gen(function* () {
+          const a = run(({ signal }) => fetchA(signal), { name: "a" });
+          const b = run(({ signal }) => fetchB(signal), { name: "b" });
+          const [aVal, bVal] = yield* all([a, b]);
+          return `${aVal}+${bVal} for ${name}`;
+        })
+      ),
+  },
+});
+
+restate.endpoint().bind(greeter).listen();
+```
+
+The handler body is a standard `async` function. `execute(ctx, op)` wires the scheduler to the Restate context and runs the `Operation<T>`. Inside the `gen(function*() { ... })` body, the free-standing functions (`run`, `sleep`, `all`, …) read the active scheduler from a fiber slot — no extra `ctx` parameter is needed inside the generator.
+
+## Core concepts
+
+### Operations and futures
+
+- **`Operation<T>`** — a lazy, one-shot description of work. Constructed via `gen()` for user-authored generators, or by primitives that yield a marker the scheduler dispatches. `gen()` takes a *factory function* (`() => Generator<...>`), not a generator instance, to prevent reuse-after-exhausted bugs.
+- **`Future<T>`** — an eager, memoized, reusable handle. Returned by `run`, `sleep`, `awakeable`, and `spawn`. Yields the same value every time it is awaited.
+
+### Primitives
+
+All primitives are imported from `@restatedev/restate-sdk-gen`:
+
+| Primitive | Description |
+|-----------|-------------|
+| `run(action, opts?)` | Journaled side effect. Receives `{ signal: AbortSignal }` for cancellation-aware APIs. Supports `opts.name` for observability and `opts.retry` for bounded retries. |
+| `sleep(duration)` | Journaled timer. |
+| `awakeable<T>()` | Returns `{ id, promise: Future<T> }`. |
+| `channel<T>()` | Single-shot in-memory channel for cooperative cancellation. |
+| `state<T>()` / `sharedState<T>()` | Typed key-value store. |
+| `serviceClient` / `objectClient` / `workflowClient` | Typed RPC to other Restate services. |
+| `spawn(op)` | Register an `Operation` as a concurrent routine; returns a `Future<T>`. |
+
+### Combinators
+
+| Combinator | Description |
+|------------|-------------|
+| `all(futures)` | Wait for all; returns values in input order. Mirrors `Promise.all`. |
+| `race(futures)` | Return the first to settle; losers keep running. |
+| `any(futures)` | Return the first to succeed; throws `AggregateError` if all fail. |
+| `allSettled(futures)` | Wait for all; never throws; returns `{status, value/reason}` objects. |
+| `select({tag: future, ...})` | Return `{ tag, future }` of the first branch to settle; switch on `tag` to handle each case. |
+
+## Common patterns
+
+### Sequential work
+
+```typescript
+gen(function* () {
+  const a = yield* run(() => fetch("/a").then(r => r.text()), { name: "step-a" });
+  const b = yield* run(() => fetch("/b").then(r => r.text()), { name: "step-b" });
+  return `${a}-${b}`;
+})
+```
+
+Each `run` is a separate journal entry. On replay, the recorded results are returned without re-executing the closures.
+
+### Parallel work
+
+```typescript
+gen(function* () {
+  const aF = run(() => fetchA(), { name: "a" });
+  const bF = run(() => fetchB(), { name: "b" });
+  const [a, b] = yield* all([aF, bF]);
+  return `${a}-${b}`;
+})
+```
+
+`run` returns a `Future<T>` immediately — work starts as soon as the future is constructed. `all` waits for all futures and returns values in input order.
+
+### Timeout
+
+```typescript
+gen(function* () {
+  const r = yield* select({
+    done: run(() => slowCall(), { name: "call" }),
+    timeout: sleep({ seconds: 5 }),
+  });
+  if (r.tag === "timeout") throw new Error("timed out");
+  return yield* r.future;
+})
+```
+
+### Spawning sub-workflows
+
+Use `spawn` when each unit of work is itself a multi-step workflow with internal logic:
+
+```typescript
+gen(function* () {
+  const t1 = yield* spawn(workflowA());
+  const t2 = yield* spawn(workflowB());
+  const [a, b] = yield* all([t1, t2]);
+  return { a, b };
+})
+```
+
+Use `run` + combinators for flat sets of side effects. Use `spawn` when each unit has internal branches, retries, or multi-step logic.
+
+### Cooperative cancellation with channels
+
+```typescript
+import { channel, spawn, select, run, gen } from "@restatedev/restate-sdk-gen";
+import type { Channel } from "@restatedev/restate-sdk-gen";
+
+function workerOp(stop: Channel<void>) {
+  return gen(function* () {
+    for (let i = 0; i < 10; i++) {
+      const r = yield* select({
+        done: run(() => doStep(i), { name: `step-${i}` }),
+        stop: stop.receive,
+      });
+      if (r.tag === "stop") return "stopped";
+    }
+    return "complete";
+  });
+}
+
+// Caller:
+gen(function* () {
+  const stop = channel<void>();
+  const worker = yield* spawn(workerOp(stop));
+  // ... decide to stop ...
+  yield* stop.send();
+  return yield* worker;
+})
+```
+
+`stop.receive` is the same `Future` on every access. After `yield* stop.send()`, it is settled forever — every `select` that includes it immediately takes the stop branch.
+
+### Saga-style compensation
+
+```typescript
+gen(function* () {
+  const reservation = yield* run(() => reserveItem(itemId), { name: "reserve" });
+  try {
+    const charge = yield* run(() => chargeCard(amount), { name: "charge" });
+    return yield* run(() =>
+      createOrder(reservation.id, charge.id), { name: "create-order" }
+    );
+  } catch (e) {
+    yield* run(() => releaseItem(reservation.id), { name: "release" });
+    throw e;
+  }
+})
+```
+
+Each step is journaled, including the compensation — it survives restarts.
+
+### Cancellation from outside
+
+External cancellation (from the Restate UI or a parent invocation) arrives as a `CancelledError` at the next yield point:
+
+```typescript
+import { CancelledError } from "@restatedev/restate-sdk";
+
+gen(function* () {
+  try {
+    return yield* longCall;
+  } catch (e) {
+    if (e instanceof CancelledError) {
+      yield* run(() => recordCancel(), { name: "audit-cancel" });
+      throw e; // propagate
+    }
+    throw e;
+  }
+})
+```
+
+Cancellation is not sticky — subsequent yields work normally after the catch.
+
+## AbortSignal and `run`
+
+The closure passed to `run` receives `{ signal: AbortSignal }`. Wire it into AbortSignal-aware APIs to cancel in-flight requests when invocation cancellation arrives:
+
+```typescript
+const data = yield* run(async ({ signal }) => {
+  const r = await fetch(url, { signal });
+  return r.json();
+}, { name: "fetch" });
+```
+
+## Retry options
+
+`run` supports bounded retries via `opts.retry`:
+
+```typescript
+const data = yield* run(() => fetchUser(id), {
+  name: "fetch-user",
+  retry: {
+    maxAttempts: 3,
+    initialInterval: { milliseconds: 100 },
+  },
+});
+```
+
+When the bound is reached, `run` throws a `TerminalError`. Catch it to provide a fallback:
+
+```typescript
+import { TerminalError } from "@restatedev/restate-sdk";
+
+let data: User;
+try {
+  data = yield* run(() => fetchUser(id), {
+    name: "fetch-user",
+    retry: { maxAttempts: 3 },
+  });
+} catch (e) {
+  if (e instanceof TerminalError) {
+    data = defaultUser;
+  } else {
+    throw e;
+  }
+}
+```
+
+## Deterministic journal entry names
+
+Journal entry names must be deterministic across replays. Use counters, not `Date.now()` or `Math.random()`, in names generated inside loops:
+
+```typescript
+// Correct
+let attempt = 0;
+while (true) {
+  const status = yield* run(() => getStatus(jobId), { name: `poll-${attempt++}` });
+  if (status.done) return status;
+  yield* sleep({ seconds: 5 });
+}
+```
+
+## Common gotchas
+
+**Don't call free functions outside a generator body.** Functions like `run`, `sleep`, and `all` read the active scheduler from a fiber slot set during execution. Calling them at module level or from a `setTimeout` callback throws:
+
+```
+Error: restate-fluent: free-standing API called outside an active fiber.
+```
+
+**Don't reuse a generator instance.** Each `spawn` call needs a fresh `Operation`. `gen()` takes a factory function — call the factory again to produce a new instance:
+
+```typescript
+const myWorkflow = (): Operation<string> =>
+  gen(function* () { /* ... */ });
+
+yield* spawn(myWorkflow()); // fresh instance
+yield* spawn(myWorkflow()); // another fresh instance
+```
+
+**Don't use non-deterministic values in journal entry names.** The closure body can do anything, but the `name` must reproduce identically on replay.
+
+## See also
+
+- [Durable Steps](/develop/ts/durable-steps) — the underlying `ctx.run` API
+- [Concurrent Tasks](/develop/ts/concurrent-tasks) — `RestatePromise` combinators in the standard SDK
+- [External Events](/develop/ts/external-events) — awakeables
+- [Error Handling](/develop/ts/error-handling) — `TerminalError` and `CancelledError`
