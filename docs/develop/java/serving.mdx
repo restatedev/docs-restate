@@ -95,6 +95,79 @@ builder.bind(
 
 </Accordion>
 
+## Spring Boot
+
+When using the Restate Spring Boot integration, you can configure services directly from `application.properties` or `application.yml`.
+
+### Global default configuration
+
+Top-level `restate.*` properties act as defaults applied to all registered services. Per-service `restate.components.<Name>.*` properties override them on a per-service basis:
+
+```properties application.properties
+# Applied to all services by default
+restate.journal-retention=PT48H
+restate.inactivity-timeout=PT10M
+restate.retry-policy.max-attempts=5
+
+# Overrides just for MyService
+restate.components.MyService.journal-retention=PT72H
+restate.components.MyService.ingress-private=true
+```
+
+The following properties are supported as global defaults:
+`documentation`, `metadata`, `inactivity-timeout`, `abort-timeout`, `idempotency-retention`, `workflow-retention`, `journal-retention`, `ingress-private`, `enable-lazy-state`, `retry-policy`.
+
+Per-service and per-handler overrides continue to work as before:
+
+```properties application.properties
+# Global executor for all services (Java only)
+restate.executor=myExecutorBean
+
+# Per-service configuration
+restate.components.MyService.inactivity-timeout=PT30S
+restate.components.MyService.retry-policy.initial-interval=PT0.1S
+restate.components.MyService.retry-policy.exponentiation-factor=2.0
+restate.components.MyService.retry-policy.max-attempts=10
+
+# Per-handler configuration
+restate.components.MyService.handlers.myHandler.inactivity-timeout=PT5M
+restate.components.MyService.handlers.myWorkflowHandler.workflow-retention=PT720H
+```
+
+### Annotation-based configuration
+
+You can also configure a service by specifying a `RestateComponentProperties` bean in the `configuration` attribute of the `@RestateService`, `@RestateVirtualObject`, or `@RestateWorkflow` annotation:
+
+<CodeGroup>
+```java Java
+@RestateService(configuration = "myServiceConfig")
+public class MyService {
+    // ...
+}
+
+@Bean
+public RestateComponentProperties myServiceConfig() {
+    return new RestateComponentProperties()
+        .setInactivityTimeout(Duration.ofMinutes(10))
+        .setDocumentation("My service");
+}
+```
+```kotlin Kotlin
+@RestateService(configuration = "myServiceConfig")
+class MyService {
+    // ...
+}
+
+@Bean
+fun myServiceConfig(): RestateComponentProperties =
+    RestateComponentProperties()
+        .setInactivityTimeout(Duration.ofMinutes(10))
+        .setDocumentation("My service")
+```
+</CodeGroup>
+
+Per-service and annotation-based settings take precedence over global defaults.
+
 ## Validating request identity
 
 SDKs can validate that incoming requests come from a particular Restate

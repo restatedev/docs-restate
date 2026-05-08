@@ -245,6 +245,46 @@ Err(TerminalError::new("This is a terminal error"))
 
 You can throw terminal errors from any place in your handler, including run blocks.
 
+### Attaching metadata to terminal errors (Java/Kotlin)
+
+<Note>
+    Requires restate-server >= 1.6 and Java/Kotlin SDK >= 2.7.0.
+</Note>
+
+In Java and Kotlin, you can attach a key-value metadata map to a `TerminalException`. The metadata is propagated to callers and accessible via `TerminalException.getMetadata()`:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#metadata"} 
+throw new TerminalException("Something went wrong", Map.of("correlationId", "abc123"));
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ErrorHandling.kt#metadata"} 
+throw TerminalException("Something went wrong", mapOf("correlationId" to "abc123"))
+```
+</CodeGroup>
+
+On the receiving end:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#catch_metadata"} 
+try {
+  MyServiceClient.fromContext(ctx).myHandler("input").await();
+} catch (TerminalException e) {
+  String correlationId = e.getMetadata().get("correlationId");
+  throw e;
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ErrorHandling.kt#catch_metadata"} 
+try {
+  MyServiceClient.fromContext(ctx).myHandler("input").await()
+} catch (e: TerminalException) {
+  val correlationId = e.metadata["correlationId"]
+  throw e
+}
+```
+</CodeGroup>
+
+This is useful for passing structured error context (e.g. correlation IDs or domain-specific error codes) across service boundaries.
+
 Unless catched, terminal errors stop the execution and are propagated back to the caller.
 If the caller is another Restate service, the terminal error will propagate across RPCs, and will get thrown at the line where the RPC was made.
 If this is not caught, it will propagate further up the call stack until it reaches the original caller.
