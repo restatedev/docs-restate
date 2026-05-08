@@ -31,6 +31,41 @@ throw TerminalException(500, "Something went wrong")
 ```
 </CodeGroup>
 
+You can also attach a metadata map to a `TerminalException`. The metadata is propagated to callers, where it can be read from the caught exception via `getMetadata()`. This requires restate-server >= 1.6.
+
+<CodeGroup>
+```java Java
+// Throwing with metadata
+throw new TerminalException("Payment failed", Map.of(
+    "correlationId", "abc123",
+    "errorCode", "INSUFFICIENT_FUNDS"
+));
+
+// Reading metadata on the caller side
+try {
+    PaymentServiceClient.fromContext(ctx).charge(request).await();
+} catch (TerminalException e) {
+    Map<String, String> metadata = e.getMetadata();
+    String correlationId = metadata.get("correlationId");
+}
+```
+```kotlin Kotlin
+// Throwing with metadata
+throw TerminalException("Payment failed", mapOf(
+    "correlationId" to "abc123",
+    "errorCode" to "INSUFFICIENT_FUNDS"
+))
+
+// Reading metadata on the caller side
+try {
+    PaymentServiceClient.fromContext(ctx).charge(request).await()
+} catch (e: TerminalException) {
+    val metadata = e.metadata
+    val correlationId = metadata["correlationId"]
+}
+```
+</CodeGroup>
+
 You can catch terminal errors, and build your control flow around it.
 
 <Info>
