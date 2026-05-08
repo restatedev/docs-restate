@@ -1,5 +1,6 @@
 import { MyService, MyObject, MyWorkflow } from "./utils";
 import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
 
 const myPlainTSFunction = async () => {
   // <start_rpc_call_node>
@@ -123,4 +124,59 @@ const workflowAttach = async () => {
     const result2 = peekOutput.result;
   }
   // <end_workflow_attach>
+};
+
+const ingressDefaultSerde = async () => {
+  // <start_ingress_default_serde>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  // import * as restate from "@restatedev/restate-sdk";
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: restate.serde.binary, // default for all operations on this connection
+  });
+  // <end_ingress_default_serde>
+};
+
+const ingressPerCallSerdeOverride = async () => {
+  const restateClient = clients.connect({ url: "http://localhost:8080" });
+  const input = { greeting: "Hi" };
+  // <start_ingress_per_call_serde>
+  // Uses the connection-level default serde
+  const result = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(input);
+
+  // Overrides the serde for this specific call
+  const result2 = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(
+      input,
+      clients.rpc.opts({
+        input: restate.serde.json,
+        output: restate.serde.json,
+      })
+    );
+  // <end_ingress_per_call_serde>
+};
+
+const ingressSerdeAwakeables = async () => {
+  const restateClient = clients.connect({ url: "http://localhost:8080" });
+  const id = "some-awakeable-id";
+  const payload = { greeting: "Hi" };
+  // <start_ingress_awakeable_serde>
+  // Resolve an awakeable — uses connection-level serde by default
+  await restateClient.resolveAwakeable(id, payload);
+
+  // Resolve with a per-call serde override
+  await restateClient.resolveAwakeable(id, payload, restate.serde.binary);
+
+  // Retrieve result — uses connection-level serde by default
+  const handle = await restateClient
+    .workflowClient<MyWorkflow>({ name: "MyWorkflow" }, "someone")
+    .workflowSubmit({ greeting: "Hi" });
+  const output = await restateClient.result(handle);
+
+  // Retrieve result with a per-call serde override
+  const output2 = await restateClient.result(handle, restate.serde.binary);
+  // <end_ingress_awakeable_serde>
 };

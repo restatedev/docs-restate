@@ -174,6 +174,69 @@ if (peekOutput.ready) {
 }
 ```
 
+## Custom serialization
+
+By default, the ingress client uses JSON to serialize and deserialize payloads. If your handlers use a [custom serde](/develop/ts/serialization), you can set a default serde on the connection so you don't have to repeat it on every call.
+
+### Setting a default serde
+
+Pass a `serde` option to `clients.connect()` to use it as the default for all handler calls, workflow attaches and output polling, awakeable resolution, and attached invocation results:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#ingress_default_serde"}
+// import * as clients from "@restatedev/restate-sdk-clients";
+// import * as restate from "@restatedev/restate-sdk";
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary, // default for all operations on this connection
+});
+```
+
+This is useful when your services consistently use a non-JSON encoding (for example, Protobuf or a custom binary format) and you don't want to specify the serde on every individual call.
+
+### Overriding serde per call
+
+Per-call options take precedence over the connection-level default:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#ingress_per_call_serde"}
+// Uses the connection-level default serde
+const result = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(input);
+
+// Overrides the serde for this specific call
+const result2 = await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(
+    input,
+    clients.rpc.opts({
+      input: restate.serde.json,
+      output: restate.serde.json,
+    })
+  );
+```
+
+### Serde for awakeables and results
+
+The connection-level `serde` also applies when resolving awakeables and retrieving invocation results. You can override it per call using the optional `payloadSerde` parameter on `resolveAwakeable` and `resultSerde` parameter on `result`:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#ingress_awakeable_serde"}
+// Resolve an awakeable — uses connection-level serde by default
+await restateClient.resolveAwakeable(id, payload);
+
+// Resolve with a per-call serde override
+await restateClient.resolveAwakeable(id, payload, restate.serde.binary);
+
+// Retrieve result — uses connection-level serde by default
+const output = await restateClient.result(handle);
+
+// Retrieve result with a per-call serde override
+const output2 = await restateClient.result(handle, restate.serde.binary);
+```
+
+<Info>
+The serde priority order is: per-call serde → connection-level default serde → `restate.serde.json`.
+</Info>
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.

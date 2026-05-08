@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- generator-based API for complex concurrent workflows (experimental)
 
 ### Minimal Scaffold
 
@@ -305,6 +306,95 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+---
+
+## Generator-based API (experimental)
+
+`@restatedev/restate-sdk-gen` provides a generator-function programming model for handlers with complex concurrent logic — fan-out/fan-in, timeouts, races, and cooperative cancellation. It is built on top of the standard SDK.
+
+Install: `npm install @restatedev/restate-sdk-gen`
+
+### Key concepts
+
+- **`Operation<T>`** — lazy description of work. Build with `gen()`.
+- **`Future<T>`** — handle to running work. Yielding the same future twice returns the same value.
+- **`run(closure, { name })`** — creates a journal-backed `Future<T>` (like `ctx.run()`).
+- **`execute(ctx, operation)`** — runs an operation inside a normal `async` handler.
+
+### Service definitions
+
+```ts
+import { service, gen, run, type Operation } from "@restatedev/restate-sdk-gen";
+
+const svc = service({
+  name: "svc",
+  handlers: {
+    // Generator shorthand — no execute() wrapper needed
+    *greet(name: string): Operation<string> {
+      return yield* run(async () => `Hello, ${name}!`, { name: "greet" });
+    },
+  },
+});
+```
+
+### Combinators
+
+```ts
+import { all, race, any, allSettled, select, sleep, spawn } from "@restatedev/restate-sdk-gen";
+
+// Wait for all
+const [a, b] = yield* all([run(() => fetchA(), { name: "a" }), run(() => fetchB(), { name: "b" })]);
+
+// First to finish
+const winner = yield* race([run(() => callPrimary(), { name: "p" }), run(() => callSecondary(), { name: "s" })]);
+
+// First to succeed (throws AggregateError if all fail)
+const first = yield* any([run(() => callA(), { name: "a" }), run(() => callB(), { name: "b" })]);
+
+// Tagged race — know which branch won
+const r = yield* select({ fast: run(() => callFast(), { name: "fast" }), slow: sleep({ seconds: 5 }) });
+if (r.tag === "fast") return yield* r.future;
+
+// Spawn sub-workflow
+const t = spawn(mySubWorkflow());
+const result = yield* t;
+```
+
+### Timeouts
+
+```ts
+const r = yield* select({
+  done: run(() => callSlow(), { name: "call" }),
+  timeout: sleep({ seconds: 5 }),
+});
+if (r.tag === "timeout") throw new TerminalError("timed out");
+return yield* r.future;
+```
+
+### Cooperative cancellation
+
+```ts
+import { channel } from "@restatedev/restate-sdk-gen";
+
+const stop = channel<void>();
+const t = spawn(workerOp(stop));
+yield* stop.send(); // signal the worker to stop
+const result = yield* t;
+
+// In the worker:
+const r = yield* select({ done: run(...), stop: stop.receive });
+if (r.tag === "stop") return "stopped";
+```
+
+### Pitfalls
+
+- Use a deterministic counter in `run` names — never `Date.now()` or `Math.random()`.
+- Always re-throw `CancelledError` — never swallow it.
+- Each `spawn` needs a fresh `Operation` — don't reuse generator instances.
+- Free functions (`run`, `sleep`, `all`, etc.) must be called inside a `gen()` body.
 
 ---
 
