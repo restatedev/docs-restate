@@ -288,6 +288,18 @@ Note: the Java SDK uses `TerminalException`, NOT `TerminalError` (which is used 
 
 Any other exception type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
 
+### Terminal exception metadata (SDK >= 2.7.0, restate-server >= 1.6)
+
+You can attach a metadata map to `TerminalException` to propagate structured context to callers:
+
+```java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#metadata"}
+```
+
+The caller can read the metadata:
+
+```java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#catch_metadata"}
+```
+
 ---
 
 ## SDK Clients (External Invocations)
