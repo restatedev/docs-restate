@@ -104,6 +104,19 @@ const servicesAttach = async () => {
   // <end_service_attach>
 };
 
+const defaultSerde = async () => {
+  // <start_default_serde>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    // Set a default serde for all calls made with this client.
+    // Applies to handler calls, workflow attach/output, awakeable resolution, and result retrieval.
+    // Defaults to clients.serde.json if not set.
+    serde: clients.serde.binary,
+  });
+  // <end_default_serde>
+};
+
 const workflowAttach = async () => {
   const request = { greeting: "Hi" };
   // <start_workflow_attach>

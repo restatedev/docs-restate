@@ -285,6 +285,13 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
 
+To use custom serialization for all calls from a client, set a default serde on the connection:
+
+```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#default_serde"}
+```
+
+The `serde` option applies to all handler calls, workflow attach/output, awakeable resolution, and result retrieval from that client. Override per-call with the `opts` parameter.
+
 ---
 
 ## TypeScript-Specific Pitfalls
