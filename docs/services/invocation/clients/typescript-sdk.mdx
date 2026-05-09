@@ -30,6 +30,32 @@ Then, [register the service](/services/versioning) you want to invoke.
 
 Finally, connect to Restate and invoke the handler with your preferred semantics.
 
+## Connecting to Restate
+
+Use `clients.connect()` to create an ingress client. You can optionally pass a `serde` option to configure a default serializer/deserializer for all operations. When provided, this serde is used for handler calls, workflow submit/attach/output, awakeable resolution, and attached invocation results. It falls back to `serde.json` if omitted.
+
+```ts
+import * as clients from "@restatedev/restate-sdk-clients";
+
+// Default connection — uses JSON serde
+const restateClient = clients.connect({ url: "http://localhost:8080" });
+
+// With a custom default serde applied to all operations
+const restateClient2 = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde,
+});
+```
+
+Per-call serde options always take precedence over the connection default:
+
+```ts
+// This overrides the connection-level default for this specific call
+await restateClient2
+  .serviceClient(myService)
+  .myHandler(input, clients.rpc.opts({ input: otherSerde, output: otherSerde }));
+```
+
 ## Request-response invocations
 To wait on a response from the handler:
 
@@ -177,3 +203,8 @@ if (peekOutput.ready) {
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
+
+## See also
+
+- **[Serialization](/develop/ts/serialization)**: Customize how data is serialized for handler calls
+- **[External events (awakeables)](/develop/ts/external-events)**: Signal running invocations from external systems
