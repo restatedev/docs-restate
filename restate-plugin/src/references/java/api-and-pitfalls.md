@@ -288,6 +288,18 @@ Note: the Java SDK uses `TerminalException`, NOT `TerminalError` (which is used 
 
 Any other exception type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
 
+### Attaching metadata to terminal errors
+
+You can pass a string key-value metadata map to `TerminalException`. The metadata is propagated to callers and readable via `e.getMetadata()`. Requires Restate Server >= 1.6.
+
+```java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#metadata"}
+```
+
+To read metadata from a caught error:
+
+```java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#catch"}
+```
+
 ---
 
 ## SDK Clients (External Invocations)
