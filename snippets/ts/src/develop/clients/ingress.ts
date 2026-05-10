@@ -124,3 +124,31 @@ const workflowAttach = async () => {
   }
   // <end_workflow_attach>
 };
+
+// <start_default_serde>
+import * as restate from "@restatedev/restate-sdk";
+
+// Set a default serde for all ingress operations on this client.
+// Applies to handler calls, workflow attaches, awakeable resolution,
+// and attached invocation results. Per-operation serde still takes precedence.
+const restateClientWithSerde = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary,
+});
+
+// The binary serde is used automatically for input and output
+const result = await restateClientWithSerde
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(new Uint8Array() as unknown as { greeting: string });
+
+// You can still override per-call using opts:
+const resultWithOverride = await restateClientWithSerde
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(
+    { greeting: "Hi" },
+    clients.rpc.opts({ input: restate.serde.json, output: restate.serde.json })
+  );
+
+// Awakeable resolution also uses the default serde
+await restateClientWithSerde.resolveAwakeable("awk_id", { value: "done" });
+// <end_default_serde>

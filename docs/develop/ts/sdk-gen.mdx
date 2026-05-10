@@ -1,0 +1,146 @@
+---
+title: "Generator-based SDK (restate-sdk-gen)"
+sidebarTitle: "Generator SDK"
+description: "Write Restate handlers as generator functions for composable, readable durable workflows."
+icon: "bolt"
+---
+
+`@restatedev/restate-sdk-gen` is an experimental package that provides a generator-based DSL on top of the TypeScript SDK.
+Instead of `async/await`, you write handlers as generator functions using `yield*` to compose durable steps.
+The package handles all scheduling and journaling under the hood.
+
+<Info>
+This package is **experimental**. The API surface may change in future releases.
+Install it alongside the core SDK:
+
+```shell
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+</Info>
+
+## Why generators?
+
+The generator API gives you a composable, synchronous-looking style for complex workflows:
+
+- **Free-standing functions** — `run`, `sleep`, `all`, `race`, `select`, `spawn`, and `channel` are imported directly. No `ctx` parameter to thread through nested helpers.
+- **Typed `Future<T>`** — every durable operation returns a memoized, reusable `Future<T>`. Combinators work uniformly over journal-backed and routine-backed futures.
+- **Cooperative cancellation** — use `channel` and `select` to stop sub-workflows cleanly, without exceptions.
+
+## Quick start
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#quickstart"}
+```
+
+The handler is a generator function (`*greet`). Use `yield*` to await durable operations. The return value becomes the handler's response.
+
+## Sequential steps
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#sequential"}
+```
+
+Each `run` call is a journal entry. On replay, the recorded value is returned without re-executing the closure.
+
+## Parallel work
+
+Start multiple operations concurrently and wait for all of them:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#parallel"}
+```
+
+`run` returns a `Future<T>` immediately. The work starts as soon as the future is constructed. `all` waits for every future and returns values in input order, mirroring `Promise.all`.
+
+## Race and select
+
+Return the first result, or branch on which future won:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#race"}
+```
+
+`race` returns the value of the first future to settle; the loser continues running in the background and its result is discarded.
+
+`select` is like `race` but returns a `{ tag, future }` pair so you can branch on which side won before unwrapping the value.
+
+## Spawning sub-workflows
+
+Use `spawn` when each unit of work is itself a multi-step operation with internal logic:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#spawn"}
+```
+
+`spawn` registers an `Operation` as a separate concurrent routine and returns a `Future<T>` for its result. Combinators like `all` and `race` work identically over spawned and journal-backed futures.
+
+## Timeouts
+
+Combine `sleep` with `select` to apply a timeout to any operation:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#timeout"}
+```
+
+## AbortSignal and cancellation
+
+Every `run` closure receives a `{ signal }` argument — an `AbortSignal` that aborts when the invocation is cancelled. Pass it into AbortSignal-aware APIs to cancel in-flight calls promptly:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#abort_signal"}
+```
+
+Without the signal, the closure would run to completion before the cancellation surfaces, delaying cleanup.
+
+## Bounded retries
+
+By default, `run` retries forever on non-terminal errors. Use the `retry` option to bound attempts:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#retry"}
+```
+
+When the limit is hit, `run` throws a `TerminalError` wrapping the original error.
+
+## Saga-style compensation
+
+Combine `run` with `try/catch` to implement compensating transactions. All steps — including compensation — are journaled:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#saga"}
+```
+
+If the process crashes during compensation, the journal replays the handler and resumes from the last completed step.
+
+## Cooperative cancellation with channels
+
+Use a `Channel<void>` and `select` to stop a sub-workflow on demand, without exceptions:
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#cooperative_cancel"}
+```
+
+`stop.send()` settles the channel's receive future permanently. Every subsequent `select` that includes `stop.receive` takes the stop branch immediately. The worker decides what "stop" means — it can clean up, return a partial result, or ignore the signal.
+
+## Combinators reference
+
+| Combinator | Description |
+|---|---|
+| `all(futures)` | Wait for every future; return values in input order |
+| `race(futures)` | Return the first future to settle |
+| `any(futures)` | Return the first *successful* value; throws `AggregateError` if all fail |
+| `allSettled(futures)` | Wait for all; never throws; returns `fulfilled`/`rejected` results |
+| `select({ tag: future, ... })` | Race with a tag; switch on `r.tag`, unwrap with `yield* r.future` |
+| `spawn(op)` | Register an `Operation` as a concurrent routine; returns `Future<T>` |
+
+Combinators have a fast path: when every input future is journal-backed, they collapse to a single Restate combinator call. Otherwise they fall back to a synthesized fiber. The semantics are identical either way.
+
+## Common pitfalls
+
+**Don't use non-deterministic journal entry names.** Names must be identical across executions:
+
+```typescript
+// WRONG — Math.random() changes on every replay
+yield* run(() => fetch(url), { name: `fetch-${Math.random()}` });
+
+// OK — deterministic counter
+yield* run(() => fetch(url), { name: `fetch-${attempt}` });
+```
+
+**Don't call free functions outside a generator body.** Functions like `run`, `sleep`, and `all` read the active scheduler from a slot set by `execute()`. Calling them at module level or from `setTimeout` callbacks throws an error.
+
+**Don't `Promise.all` Restate futures.** Use `yield* all([...])` instead. `Promise.all` doesn't go through the Restate journal and breaks determinism.
+
+<Info>
+For a complete patterns guide including polling, work-stealing, and advanced cancellation, see the [sdk-gen guide](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-gen/guide.md).
+</Info>

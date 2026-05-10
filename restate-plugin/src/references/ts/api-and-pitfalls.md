@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- **experimental** generator-based DSL (see below)
 
 ### Minimal Scaffold
 
@@ -305,6 +306,72 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+---
+
+## Generator-based SDK (`@restatedev/restate-sdk-gen`) — Experimental
+
+An alternative to the standard SDK that uses generator functions and `yield*` instead of `async/await`. Provides free-standing functions (`run`, `sleep`, `all`, `race`, `select`, `spawn`, `channel`) — no `ctx` parameter to pass around.
+
+### When to use
+
+- Complex workflows with many concurrent sub-steps
+- Saga-style compensation patterns
+- Cooperative cancellation (stop a sub-workflow cleanly via a channel)
+- Fan-out/fan-in with typed `Future<T>` for both journal-backed and routine-backed work
+
+### Key API
+
+```ts
+import { service, run, all, sleep, select, spawn, channel, gen, type Operation }
+  from "@restatedev/restate-sdk-gen";
+
+const svc = service({
+  name: "MyService",
+  handlers: {
+    // Generator handler — use `*` and `yield*`
+    *greet(name: string): Operation<string> {
+      const a = run(() => fetchA(), { name: "a" });
+      const b = run(() => fetchB(), { name: "b" });
+      const [va, vb] = yield* all([a, b]);
+      return `${va}+${vb} for ${name}`;
+    },
+  },
+});
+```
+
+### Combinators
+
+| Combinator | Description |
+|---|---|
+| `all(futures)` | All resolve; return values in input order |
+| `race(futures)` | First to settle wins |
+| `any(futures)` | First to succeed; throws AggregateError if all fail |
+| `allSettled(futures)` | Wait for all; never throws |
+| `select({ tag: future })` | Race with a tag; switch on `r.tag` |
+| `spawn(op)` | Concurrent sub-workflow; returns `Future<T>` |
+
+### Cooperative cancellation
+
+```ts
+*runWorker(): Operation<string> {
+  const stop = channel<void>();
+  const task = spawn(worker(stop));
+  yield* stop.send(); // signal stop
+  return yield* task;  // wait for worker to acknowledge
+}
+```
+
+### Pitfalls
+
+- Do NOT call free functions (`run`, `sleep`, etc.) outside a generator body.
+- Do NOT use `Promise.all` — use `yield* all([...])`.
+- Journal entry `name` values must be deterministic across replays (no `Math.random()`, `Date.now()`).
+- `@restatedev/restate-sdk-gen` is **experimental** — API may change.
+
+Full docs: https://docs.restate.dev/develop/ts/sdk-gen
 
 ---
 
