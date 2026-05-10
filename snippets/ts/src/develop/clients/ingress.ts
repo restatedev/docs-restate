@@ -1,5 +1,6 @@
 import { MyService, MyObject, MyWorkflow } from "./utils";
 import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
 
 const myPlainTSFunction = async () => {
   // <start_rpc_call_node>
@@ -123,4 +124,65 @@ const workflowAttach = async () => {
     const result2 = peekOutput.result;
   }
   // <end_workflow_attach>
+};
+
+const defaultSerde = async () => {
+  // <start_default_serde>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  // import * as restate from "@restatedev/restate-sdk";
+
+  // Set a default serde for all requests on this connection.
+  // Per-operation overrides (rpc.opts / rpc.sendOpts) still take precedence.
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: restate.serde.binary,
+  });
+
+  // All calls now use binary serde by default
+  const result = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(new Uint8Array([1, 2, 3]));
+
+  // Override per-call when needed
+  const result2 = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(
+      { greeting: "Hi" },
+      clients.rpc.opts({
+        input: restate.serde.json,
+        output: restate.serde.json,
+      })
+    );
+  // <end_default_serde>
+};
+
+const defaultSerdeAwakeable = async () => {
+  // <start_default_serde_awakeable>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  // import * as restate from "@restatedev/restate-sdk";
+
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: restate.serde.binary,
+  });
+
+  // resolveAwakeable uses the connection default serde unless overridden
+  await restateClient.resolveAwakeable("ack:test:123", new Uint8Array([1]));
+
+  // Override the serde for a specific resolve call
+  await restateClient.resolveAwakeable(
+    "ack:test:456",
+    { status: "ok" },
+    restate.serde.json
+  );
+
+  // result() also respects the connection default serde
+  const handle = await restateClient
+    .serviceSendClient<MyService>({ name: "MyService" })
+    .greet(new Uint8Array([1, 2, 3]), clients.rpc.sendOpts({ idempotencyKey: "k1" }));
+  const r = await restateClient.result(handle);
+
+  // Override result serde per-call
+  const r2 = await restateClient.result(handle, restate.serde.json);
+  // <end_default_serde_awakeable>
 };

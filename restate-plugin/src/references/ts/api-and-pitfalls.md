@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- **experimental** generator-based DSL (see below)
 
 ### Minimal Scaffold
 
@@ -284,6 +285,75 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
+
+### Default serde for the ingress client (v1.14.1+)
+
+`clients.connect()` accepts an optional `serde` field in `ConnectionOpts`. When set, it is used for all handler calls, workflow attach/output polling, awakeable resolution, and `result()` on that connection. Per-call `rpc.opts` / `rpc.sendOpts` overrides it.
+
+```ts
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary, // default for this connection
+});
+
+// Override per-call
+await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(payload, clients.rpc.opts({ input: restate.serde.json, output: restate.serde.json }));
+```
+
+---
+
+## Experimental: Generator-based SDK (`@restatedev/restate-sdk-gen`, v1.14.2+)
+
+An alternative way to write handlers using TypeScript generator functions. Provides free-standing primitives without threading `ctx` everywhere.
+
+**Install:**
+```bash
+npm install @restatedev/restate-sdk-gen
+```
+
+**Basic usage:**
+```ts
+import { gen, execute, run, sleep, all, race, spawn, channel } from "@restatedev/restate-sdk-gen";
+
+const handler = async (ctx: restate.Context, items: string[]) =>
+  execute(
+    ctx,
+    gen(function* () {
+      // Sequential: each run() is a journal entry
+      const a = yield* run(() => stepA(), { name: "step-a" });
+
+      // Parallel: run futures concurrently
+      const futures = items.map((x, i) =>
+        run(() => process(x), { name: `process-${i}` })
+      );
+      const results = yield* all(futures);
+
+      // Timeout with select
+      const r = yield* select({
+        done: run(() => slowCall(), { name: "call" }),
+        timeout: sleep({ seconds: 10 }),
+      });
+      if (r.tag === "timeout") throw new Error("timed out");
+
+      return results;
+    })
+  );
+```
+
+**Key rules:**
+- Call free functions (`run`, `sleep`, `all`, `race`, `select`, `spawn`, `channel`) only inside a `gen(function*() { ... })` body.
+- Use `yield*` (not `yield`) before each operation.
+- Journal entry names must be deterministic — use counters, not `Math.random()` or `Date.now()`.
+- Always re-throw `CancelledError` after cleanup.
+
+**Available combinators:** `all`, `race`, `any`, `allSettled`, `select`, `spawn`, `channel`.
+
+See the [generator API docs](https://docs.restate.dev/develop/ts/sdk-gen) for the full reference.
 
 ---
 
