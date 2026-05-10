@@ -9,4 +9,10 @@ class ErrorHandling {
     throw TerminalException(500, "Something went wrong")
     // <end_here>
   }
+
+  fun errorHandlingWithMetadata(ctx: Context) {
+    // <start_metadata>
+    throw TerminalException("Something went wrong", mapOf("correlationId" to "abc123"))
+    // <end_metadata>
+  }
 }
