@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- **experimental** generator-based DSL (see below)
 
 ### Minimal Scaffold
 
@@ -284,6 +285,61 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
+
+Pass `serde` to `connect()` to set a default serialization format for all requests on that client (per-operation `rpc.opts({ input, output })` overrides it):
+
+```ts
+const client = clients.connect({
+  url: "http://localhost:8080",
+  serde: clients.serde.json, // default; explicit for clarity
+});
+```
+
+---
+
+## Experimental: Generator-Based API (`@restatedev/restate-sdk-gen`)
+
+An alternative SDK that lets handlers be written as TypeScript generator functions. It provides free-standing primitives (`run`, `sleep`, `all`, `select`, `spawn`, ...) without threading `ctx` through every call, and a `spawn()` primitive for true concurrent sub-workflows within a single invocation.
+
+Install:
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+Quick example:
+```ts
+import { service, run, all, type Operation } from "@restatedev/restate-sdk-gen";
+import * as restate from "@restatedev/restate-sdk";
+
+const svc = service({
+  name: "myService",
+  handlers: {
+    *greet(name: string): Operation<string> {
+      // run() journals a side effect — replayed on retry.
+      return yield* run(async () => `Hello, ${name}!`, { name: "greet" });
+    },
+    *parallel(): Operation<string> {
+      // Futures start immediately; all() waits for both.
+      const aF = run(() => fetchA(), { name: "a" });
+      const bF = run(() => fetchB(), { name: "b" });
+      const [a, b] = yield* all([aF, bF]);
+      return `${a}+${b}`;
+    },
+  },
+});
+
+// Bind to the standard endpoint — fully compatible.
+restate.endpoint().bind(svc).listen();
+```
+
+Key differences from the standard SDK:
+- Handlers are `*generator()` functions returning `Operation<T>`, not `async () =>` returning `Promise<T>`.
+- Use `yield*` instead of `await` to unwrap futures.
+- `spawn(op)` runs a multi-step operation as an independent concurrent routine.
+- All combinators (`all`, `race`, `select`, `any`, `allSettled`) work over both journaled and spawned futures.
+- **This is experimental — the API may change. Avoid using it in production code until it stabilises.**
+
+For full documentation: https://docs.restate.dev/develop/ts/sdk-gen
 
 ---
 

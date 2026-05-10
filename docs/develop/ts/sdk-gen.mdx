@@ -1,0 +1,425 @@
+---
+title: "Generator-based API (experimental)"
+sidebarTitle: "Generator API (experimental)"
+description: "Write Restate handlers as TypeScript generator functions with a composable, promise-free API."
+icon: "flask"
+---
+
+<Warning>
+  `@restatedev/restate-sdk-gen` is experimental. Its API may change in future releases.
+</Warning>
+
+`@restatedev/restate-sdk-gen` is an alternative way to write Restate handlers using TypeScript [generator functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*) instead of `async`/`await`. It provides a composable DSL built around two concepts:
+
+- **`Operation<T>`** — a lazy, one-shot description of work (constructed via `gen()` or a generator function `*handler()`).
+- **`Future<T>`** — an eager, memoized handle to an eventual value returned by `run`, `sleep`, `awakeable`, etc.
+
+The main advantages over the standard `async`/`await` SDK are:
+
+- Free-standing functions (`run`, `sleep`, `all`, `select`, …) without threading `ctx` through every call.
+- First-class combinators (`all`, `race`, `select`) over both journaled and concurrently-spawned work.
+- A `spawn()` primitive for true concurrent sub-workflows within a single handler invocation.
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+`@restatedev/restate-sdk` is a required peer dependency. Bring your own SDK version.
+
+## Quick start
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#hello_world"}
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run } from "@restatedev/restate-sdk-gen";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) =>
+      execute(
+        ctx,
+        gen(function* () {
+          const greeting = yield* run(async () => `Hello, ${name}!`, {
+            name: "compose",
+          });
+          return greeting;
+        })
+      ),
+  },
+});
+
+restate.endpoint().bind(greeter).listen();
+```
+
+The generator-defined services are compatible with the standard `@restatedev/restate-sdk` endpoint — `bind()` them the same way.
+
+The generator package also exports its own `service()`, `object()`, and `workflow()` functions that let you write handlers directly as generator methods (no `async` wrapper needed):
+
+```ts
+import { service, type Operation } from "@restatedev/restate-sdk-gen";
+
+const greeter = service({
+  name: "greeter",
+  handlers: {
+    *greet(name: string): Operation<string> {
+      const greeting = yield* run(async () => `Hello, ${name}!`, {
+        name: "compose",
+      });
+      return greeting;
+    },
+  },
+});
+```
+
+## Durable steps
+
+Wrap all side effects in `run()`. Like `ctx.run()` in the standard SDK, the closure runs only on the first execution and its result is replayed on retries.
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#sequential"}
+const sequentialSvc = service({
+  name: "sequential",
+  handlers: {
+    *run(): Operation<string> {
+      const a = yield* run(() => fetch("/a").then((r) => r.text()), {
+        name: "step-a",
+      });
+      const b = yield* run(() => fetch("/b").then((r) => r.text()), {
+        name: "step-b",
+      });
+      return `${a}-${b}`;
+    },
+  },
+});
+```
+
+`run()` closures receive `{ signal }` — an `AbortSignal` that fires when invocation cancellation arrives. Plumb it into `fetch()` or other AbortSignal-aware APIs for prompt cancellation:
+
+```ts
+const data = yield* run(async ({ signal }) => {
+  const r = await fetch(url, { signal });
+  return r.json();
+}, { name: "fetch" });
+```
+
+### Retry policy
+
+Pass a `retry` option to bound the number of attempts:
+
+```ts
+const result = yield* run(() => flakyCall(), {
+  name: "call",
+  retry: { maxAttempts: 5, initialInterval: { milliseconds: 100 } },
+});
+```
+
+If the bound is exhausted, the SDK throws a `TerminalError`. Catch it to implement a fallback:
+
+```ts
+try {
+  return yield* run(() => flakyCall(), {
+    name: "call",
+    retry: { maxAttempts: 3 },
+  });
+} catch (e) {
+  if (e instanceof restate.TerminalError) return "fallback";
+  throw e;
+}
+```
+
+## Concurrent work
+
+Start multiple operations without `yield*` to get `Future<T>` handles, then wait for them with a combinator.
+
+### All
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#parallel"}
+const parallelSvc = service({
+  name: "parallel",
+  handlers: {
+    *run(): Operation<string> {
+      const aF = run(() => fetch("/a").then((r) => r.text()), { name: "a" });
+      const bF = run(() => fetch("/b").then((r) => r.text()), { name: "b" });
+      const [a, b] = yield* all([aF, bF]);
+      return `${a}+${b}`;
+    },
+  },
+});
+```
+
+### Race
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#race"}
+const raceSvc = service({
+  name: "race",
+  handlers: {
+    *run(): Operation<string> {
+      const winner = yield* race([
+        run(() => fetch("/primary").then((r) => r.text()), { name: "primary" }),
+        run(() => fetch("/secondary").then((r) => r.text()), { name: "secondary" }),
+      ]);
+      return winner;
+    },
+  },
+});
+```
+
+The loser keeps running in the background; its result is discarded.
+
+### Select (race + tag)
+
+Use `select` when you need to know which branch won:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#select"}
+const selectSvc = service({
+  name: "select",
+  handlers: {
+    *run(): Operation<string> {
+      const r = yield* select({
+        fast: run(() => fetch("/fast").then((r) => r.text()), { name: "fast" }),
+        slow: run(() => fetch("/slow").then((r) => r.text()), { name: "slow" }),
+      });
+      switch (r.tag) {
+        case "fast":
+          return `fast: ${yield* r.future}`;
+        case "slow":
+          return `slow: ${yield* r.future}`;
+      }
+    },
+  },
+});
+```
+
+## Spawning concurrent routines
+
+Use `spawn()` when each concurrent unit is itself a multi-step operation with its own internal logic. It registers an `Operation<T>` as an independent concurrent routine and returns a `Future<T>`.
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#spawn"}
+const spawnSvc = service({
+  name: "spawn",
+  handlers: {
+    *run(): Operation<string> {
+      const tA = spawn(
+        (function* () {
+          return yield* run(() => fetch("/a").then((r) => r.text()), { name: "a" });
+        })()
+      );
+      const tB = spawn(
+        (function* () {
+          return yield* run(() => fetch("/b").then((r) => r.text()), { name: "b" });
+        })()
+      );
+      const [a, b] = yield* all([tA, tB]);
+      return `${a}|${b}`;
+    },
+  },
+});
+```
+
+Spawned futures and journal-backed futures (from `run`, `sleep`, etc.) are interchangeable in all combinators.
+
+## Timeouts
+
+Race a `sleep` against your work using `select`:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#timeout"}
+const timeoutSvc = service({
+  name: "timeout",
+  handlers: {
+    *withTimeout(req: {
+      workMs: number;
+      budgetSeconds: number;
+    }): Operation<string> {
+      const r = yield* select({
+        done: run(async () => { /* ... work ... */ return "done"; }, { name: "work" }),
+        timeout: sleep({ seconds: req.budgetSeconds }),
+      });
+      if (r.tag === "timeout") {
+        throw new restate.TerminalError(`timed out after ${req.budgetSeconds}s`);
+      }
+      return yield* r.future;
+    },
+  },
+});
+```
+
+## Saga-style compensation
+
+Journal each step; if a later step fails, run compensating actions in a `catch` block. The compensation is itself journaled, so it survives crashes mid-compensation.
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#saga"}
+const sagaSvc = service({
+  name: "saga",
+  handlers: {
+    *placeOrder(req: OrderRequest): Operation<OrderResult> {
+      const reservation = yield* run(() => reserveItem(req.itemId), { name: "reserve" });
+      try {
+        const charge = yield* run(() => chargeCard(req.amount, req.cardToken), { name: "charge" });
+        const orderId = yield* run(() => createOrder(reservation.id, charge.id), { name: "create-order" });
+        return { orderId };
+      } catch (e) {
+        yield* run(() => releaseItem(reservation.id), { name: "release" });
+        throw e;
+      }
+    },
+  },
+});
+```
+
+## State management
+
+Use `state()` (exclusive, read-write) and `sharedState()` (concurrent, read-only) in Virtual Objects:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#state"}
+type CounterState = { counter: number };
+
+const counterObj = object({
+  name: "counter",
+  handlers: {
+    *get() {
+      return (yield* sharedState<CounterState>().get("counter")) ?? 0;
+    },
+    *add(addend: number) {
+      const s = state<CounterState>();
+      const oldValue = (yield* s.get("counter")) ?? 0;
+      s.set("counter", oldValue + addend);
+      return { oldValue, newValue: oldValue + addend };
+    },
+  },
+  options: { handlers: { get: { shared: true } } },
+});
+```
+
+## Awakeables
+
+Park a handler until an external system signals completion:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#awakeable"}
+const awakeableSvc = service({
+  name: "awakeableSvc",
+  handlers: {
+    *waitForApproval(requestId: string): Operation<string> {
+      const { id, promise } = awakeable<string>();
+      yield* run(async () => { await notifyExternalSystem(requestId, id); }, { name: "notify" });
+      return yield* promise;
+    },
+  },
+});
+```
+
+Resolve externally via HTTP:
+```bash
+curl localhost:8080/restate/awakeables/<id>/resolve --json '"approved"'
+```
+
+## Workflows and durable promises
+
+Define a workflow with a `run` handler and shared handlers. Use `workflowPromise()` to communicate between them:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#workflow"}
+const approvalWorkflow = workflow({
+  name: "approval",
+  handlers: {
+    *run(input: string): Operation<string> {
+      state<WfState>().set("input", input);
+      const value = yield* workflowPromise<string>("decision").get();
+      return `Processed: ${value}`;
+    },
+    *approve(decision: string) {
+      yield* workflowPromise<string>("decision").resolve(decision);
+    },
+  },
+});
+```
+
+## Calling other services
+
+Use `client()` for request-response and `sendClient()` for fire-and-forget:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#clients"}
+const callerSvc = service({
+  name: "caller",
+  handlers: {
+    *callOther(name: string): Operation<string> {
+      return yield* client(greeterForClient).greet(name);
+    },
+    *fireAndForget(msg: string) {
+      sendClient(greeterForClient).greet(msg);
+    },
+  },
+});
+```
+
+## Cooperative cancellation
+
+To stop a long-running spawned routine cleanly, pass it a `Channel<void>` and have it `select` between its work and the stop signal:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#cooperative_cancel"}
+const pollSvc = service({
+  name: "poll",
+  handlers: {
+    *pollWithBudget(req: { jobId: string; budgetSeconds: number }) {
+      const stop = channel<void>();
+      const worker = spawn(pollWorker(req.jobId, stop));
+      const r = yield* select({
+        done: worker,
+        budget: sleep({ seconds: req.budgetSeconds }),
+      });
+      if (r.tag === "budget") {
+        yield* stop.send();
+      }
+      return yield* worker;
+    },
+  },
+});
+```
+
+## Cancellation from outside
+
+When an invocation is cancelled externally (via the CLI or UI), a `CancelledError` is thrown at the next `yield*` boundary. Catch it to run cleanup steps before re-throwing:
+
+```ts
+try {
+  yield* sleep({ seconds: 60 });
+  // ... more work ...
+} catch (e) {
+  if (e instanceof restate.CancelledError) {
+    yield* run(async () => { console.log("cleanup"); }, { name: "cleanup" });
+    throw e;
+  }
+  throw e;
+}
+```
+
+## Available primitives
+
+| Primitive | Description |
+|-----------|-------------|
+| `run(action, opts?)` | Journaled side effect. Receives `{ signal }` for cancellation. |
+| `sleep(duration)` | Journaled durable timer. |
+| `awakeable<T>()` | Journaled awakeable — returns `{ id, promise: Future<T> }`. |
+| `channel<T>()` | Single-shot in-memory channel for inter-routine signaling. |
+| `state<T>()` | Read-write K/V store (Virtual Objects only). |
+| `sharedState<T>()` | Read-only K/V store for shared handlers. |
+| `workflowPromise<T>(name)` | Durable promise bound to a workflow's lifetime. |
+| `client(def)` / `sendClient(def)` | Typed RPC into other Restate services. |
+
+## Combinators
+
+| Combinator | Description |
+|------------|-------------|
+| `all(futures)` | Wait for all; return values in input order. |
+| `race(futures)` | Return the first to settle. |
+| `any(futures)` | Return the first to succeed (ignores rejections). |
+| `allSettled(futures)` | Wait for all; return fulfilled/rejected results. |
+| `select({ tag: future })` | Race with a tag — switch on `r.tag`, unwrap with `yield* r.future`. |
+| `spawn(op)` | Run an `Operation` as an independent concurrent routine; returns `Future<T>`. |
+
+## See also
+
+- [Durable steps](/develop/ts/durable-steps)
+- [Concurrent tasks](/develop/ts/concurrent-tasks)
+- [External events](/develop/ts/external-events)
+- [Error handling](/develop/ts/error-handling)
+- [Sagas](/guides/sagas)

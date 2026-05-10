@@ -104,6 +104,19 @@ const servicesAttach = async () => {
   // <end_service_attach>
 };
 
+const defaultSerde = async () => {
+  // <start_default_serde>
+  // import * as clients from "@restatedev/restate-sdk-clients";
+  // import * as restate from "@restatedev/restate-sdk";
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    // Use a custom default serde for all requests.
+    // Per-operation serde in rpc.opts() or rpc.sendOpts() overrides this.
+    serde: clients.serde.json,
+  });
+  // <end_default_serde>
+};
+
 const workflowAttach = async () => {
   const request = { greeting: "Hi" };
   // <start_workflow_attach>
