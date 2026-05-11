@@ -403,6 +403,63 @@ if err := server.NewRestate().
 ```
 </CodeGroup>
 
+### Spring Boot configuration (Java/Kotlin)
+
+When using the Spring Boot integration, you can configure services directly from `application.properties` or `application.yml`.
+
+**Per-service configuration** via `restate.components.<Name>.*`:
+
+```properties
+restate.components.MyService.inactivity-timeout=PT10M
+restate.components.MyService.abort-timeout=PT1M
+restate.components.MyService.journal-retention=PT24H
+restate.components.MyService.idempotency-retention=PT168H
+restate.components.MyService.workflow-retention=PT24H
+restate.components.MyService.ingress-private=false
+restate.components.MyService.enable-lazy-state=true
+restate.components.MyService.documentation=My service description
+restate.components.MyService.metadata.version=1.0
+restate.components.MyService.retry-policy.initial-interval=100ms
+restate.components.MyService.retry-policy.exponentiation-factor=2.0
+restate.components.MyService.retry-policy.max-interval=10s
+restate.components.MyService.retry-policy.max-attempts=10
+restate.components.MyService.retry-policy.on-max-attempts=PAUSE
+
+# Per-handler configuration
+restate.components.MyService.handlers.myHandler.inactivity-timeout=PT5M
+restate.components.MyService.handlers.myHandler.ingress-private=true
+restate.components.MyService.handlers.myWorkflowHandler.workflow-retention=PT720H
+```
+
+**Global defaults** (SDK >= 2.7.0): top-level `restate.*` properties act as defaults for all registered services. Per-service properties override them:
+
+```properties
+# Defaults applied to all services
+restate.journal-retention=PT48H
+restate.inactivity-timeout=PT10M
+restate.retry-policy.max-attempts=5
+
+# Overrides just for MyService (takes precedence over global defaults)
+restate.components.MyService.journal-retention=PT72H
+restate.components.MyService.ingress-private=true
+```
+
+Supported global defaults: `documentation`, `metadata`, `inactivity-timeout`, `abort-timeout`, `idempotency-retention`, `workflow-retention`, `journal-retention`, `ingress-private`, `enable-lazy-state`, `retry-policy`. The `executor` property is a global-only setting via `restate.executor`.
+
+You can also configure services using a bean via `@RestateService(configuration = "beanName")`:
+
+```java
+@RestateService(configuration = "myServiceConfig")
+public class MyService { }
+
+@Bean
+public RestateComponentProperties myServiceConfig() {
+    return new RestateComponentProperties()
+        .setInactivityTimeout(Duration.ofMinutes(10))
+        .setDocumentation("My service");
+}
+```
+
 ### Override configuration
 
 You can override the service options configured in your code via the UI or CLI.

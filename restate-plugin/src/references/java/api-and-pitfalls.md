@@ -32,18 +32,18 @@ docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
 **Gradle (build.gradle.kts):**
 ```kt
 // Annotation processor
-annotationProcessor("dev.restate:sdk-api-gen:2.4.1")
+annotationProcessor("dev.restate:sdk-api-gen:2.7.0")
 
 // For deploying as HTTP service
-implementation("dev.restate:sdk-java-http:2.4.1")
+implementation("dev.restate:sdk-java-http:2.7.0")
 // Or for deploying using AWS Lambda
-implementation("dev.restate:sdk-java-lambda:2.4.1")
+implementation("dev.restate:sdk-java-lambda:2.7.0")
 ```
 
 **Maven**: 
 ```xml Java/Maven
 <properties>
-    <restate.version>2.4.1</restate.version>
+    <restate.version>2.7.0</restate.version>
 </properties>
 <dependencies>
     <!-- For deploying as HTTP service -->
@@ -285,6 +285,23 @@ Throw `TerminalException` to stop retries and propagate failure permanently:
 ```
 
 Note: the Java SDK uses `TerminalException`, NOT `TerminalError` (which is used by other SDKs).
+
+You can attach a metadata map to a `TerminalException` (SDK >= 2.7.0, requires restate-server >= 1.6). The metadata is propagated to callers and accessible via `getMetadata()`:
+
+```java
+throw new TerminalException("Something went wrong", Map.of("correlationId", "abc123"));
+// or with explicit status code:
+throw new TerminalException(500, "Payment failed", Map.of("orderId", "ord-123", "reason", "insufficient_funds"));
+```
+
+Callers can read the metadata:
+```java
+try {
+    MyServiceClient.fromContext(ctx).myHandler(request).await();
+} catch (TerminalException e) {
+    String correlationId = e.getMetadata().get("correlationId");
+}
+```
 
 Any other exception type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
 
