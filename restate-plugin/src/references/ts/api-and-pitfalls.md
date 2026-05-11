@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- experimental generator-based DSL for composing durable workflows (see below)
 
 ### Minimal Scaffold
 
@@ -305,6 +306,50 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+---
+
+## Experimental: Generator-based API (`restate-sdk-gen`)
+
+`@restatedev/restate-sdk-gen` is an experimental alternative for writing handlers with complex concurrency patterns. Instead of `await`-ing `RestatePromise` values, you `yield*` **Operations** and **Futures** inside generator functions. This makes parallel fan-out, race, select, and spawn patterns read as straight-line code without threading `ctx` through every call.
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+```ts
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run, all } from "@restatedev/restate-sdk-gen";
+
+const mySvc = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, input: string): Promise<string> =>
+      execute(
+        ctx,
+        gen(function* () {
+          const a = run(() => fetchA(), { name: "a" });
+          const b = run(() => fetchB(), { name: "b" });
+          const [aVal, bVal] = yield* all([a, b]);
+          return `${aVal}+${bVal} for ${input}`;
+        })
+      ),
+  },
+});
+```
+
+Key differences from the standard SDK:
+- Use `run(action, { name })` instead of `ctx.run(name, action)` — no `ctx` needed inside the generator body
+- Use `sleep({ seconds: N })` instead of `ctx.sleep(...)`
+- Use `all`, `race`, `select`, `spawn` as free-standing functions, NOT `RestatePromise.all/race`
+- Use `state<T>()` instead of `ctx.get/set`
+- The generator is driven by `execute(ctx, gen(function*() { ... }))` inside a normal `async` handler
+
+**API is experimental** — it may change in future releases. For stable workflows, use the standard SDK with `ctx.*` methods and `RestatePromise`.
+
+For detailed patterns (timeouts, sagas, cooperative cancellation, polling), see https://docs.restate.dev/develop/ts/generator-api
 
 ---
 
