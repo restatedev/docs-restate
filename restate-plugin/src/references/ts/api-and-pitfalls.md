@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` (**experimental**) -- generator-based alternative API (see below)
 
 ### Minimal Scaffold
 
@@ -284,6 +285,71 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
+
+### Default serde for the ingress client
+
+`clients.connect()` accepts an optional `serde` field. When set, it becomes the default serializer for all requests on that client — handler calls, workflow attach, awakeable resolution, and result retrieval. Per-call `rpc.opts`/`rpc.sendOpts` still take precedence.
+
+```ts
+import * as clients from "@restatedev/restate-sdk-clients";
+import * as restate from "@restatedev/restate-sdk";
+
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: restate.serde.binary, // default for all calls
+});
+
+// Override per-call with rpc.opts / rpc.sendOpts
+// resolveAwakeable and result also accept serde as last param
+```
+
+---
+
+## Experimental: Generator-based SDK (`@restatedev/restate-sdk-gen`)
+
+An alternative API that uses TypeScript generator functions. Free-standing primitives (`run`, `sleep`, `all`, `race`, `select`, `spawn`, `channel`) implicitly bind to the active execution context — no `ctx` threading required.
+
+Install: `npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen`
+
+**Basic usage:**
+
+```ts
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run, all, sleep, select } from "@restatedev/restate-sdk-gen";
+
+const svc = restate.service({
+  name: "my-svc",
+  handlers: {
+    process: async (ctx: restate.Context, items: string[]) =>
+      execute(ctx, gen(function* () {
+        // Parallel fan-out
+        const futures = items.map((item, i) =>
+          run(() => process(item), { name: `item-${i}` })
+        );
+        return yield* all(futures);
+      })),
+  },
+});
+```
+
+**Key primitives:**
+- `run(fn, { name, retry? })` — journaled side effect; `fn` receives `{ signal }` for cancellation
+- `sleep({ seconds })` — journaled timer
+- `all([...])` — wait for all futures; returns values in input order
+- `race([...])` — first to settle wins; losers keep running
+- `any([...])` — first to succeed
+- `allSettled([...])` — wait for all, never rejects
+- `select({ tag: future, ... })` — race with tag; switch on `r.tag`, unwrap with `yield* r.future`
+- `spawn(op)` — run an Operation as a concurrent sub-routine; returns `Future<T>`
+- `channel<T>()` — single-shot intra-handler channel for cooperative stop signals
+
+**Key rules:**
+- Handlers are still `async (ctx, ...) => execute(ctx, gen(function*() { ... }))` — call `execute` to wire into Restate
+- **Never call free functions outside a `gen()` body** — `run`, `sleep`, etc. must be inside `gen(function*() { ... })`
+- **Journal entry names must be deterministic** — no `Math.random()` or `Date.now()` in names
+- **Always re-throw `CancelledError`** after cleanup
+- `spawn` losers in a race keep running in the background — design routines to always terminate
+- Channels are single-shot and intra-workflow; use awakeables for external signals
 
 ---
 
