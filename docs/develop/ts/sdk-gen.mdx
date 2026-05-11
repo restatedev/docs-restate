@@ -1,0 +1,266 @@
+---
+title: "Generator-based API (experimental)"
+sidebarTitle: "Generator API (experimental)"
+description: "Write Restate handlers as TypeScript generator functions with composable, promise-free concurrency primitives."
+icon: "flask"
+---
+
+<Warning>
+  `@restatedev/restate-sdk-gen` is experimental. Its API may change in future releases.
+</Warning>
+
+`@restatedev/restate-sdk-gen` is an alternative way to write Restate handlers using TypeScript [generator functions](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function*). Instead of threading a `ctx` object through every call, you use free-standing functions (`run`, `sleep`, `all`, `race`, `spawn`, …) that implicitly bind to the active execution context.
+
+Use this package when you want:
+
+- **Clean concurrency composition** — `all`, `race`, `any`, `allSettled`, and `select` work on futures, not promises.
+- **Structured spawning** — run independent multi-step sub-workflows in parallel within a single handler via `spawn`.
+- **Cooperative cancellation** — pass channels between routines to signal stop without throwing exceptions.
+
+For simple sequential handlers, the standard `@restatedev/restate-sdk` with `async/await` is often simpler. Consider `restate-sdk-gen` when your handler has non-trivial concurrency or structured sub-workflow patterns.
+
+## Installation
+
+```shell
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+## Hello, world
+
+Handlers are still normal `async` functions. You call `execute(ctx, ...)` inside the handler and pass a generator operation built with `gen`:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#hello_world"}
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run } from "@restatedev/restate-sdk-gen";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (ctx: restate.Context, name: string) =>
+      execute(
+        ctx,
+        gen(function* () {
+          const greeting = yield* run(
+            async () => `Hello, ${name}!`,
+            { name: "compose-greeting" }
+          );
+          return greeting;
+        })
+      ),
+  },
+});
+```
+
+- The handler is a normal `async (ctx, ...) => ...` function.
+- `execute(ctx, operation)` runs the generator and returns its result.
+- Free functions inside `gen(function*() { ... })` — like `run` and `sleep` — resolve the current execution context automatically; you don't pass `ctx` to them.
+
+## Sequential work
+
+Each `yield* run(...)` is a separate journal entry. On replay, the recorded result is returned without re-running the closure:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#sequential"}
+const a = yield* run(
+  () => fetch("/a").then((r) => r.text()),
+  { name: "step-a" }
+);
+const b = yield* run(
+  () => fetch("/b").then((r) => r.text()),
+  { name: "step-b" }
+);
+return `${a}-${b}`;
+```
+
+Closures receive `{ signal }` for cancellation-aware I/O:
+
+```ts
+const data = yield* run(async ({ signal }) => {
+  return fetch(url, { signal }).then((r) => r.json());
+}, { name: "fetch" });
+```
+
+## Parallel work
+
+### Wait for all (`all`)
+
+`run` returns a `Future<T>` immediately; use `all` to wait for a set of futures:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#parallel_all"}
+const aFuture = run(() => fetch("/a").then((r) => r.text()), { name: "a" });
+const bFuture = run(() => fetch("/b").then((r) => r.text()), { name: "b" });
+const [a, b] = yield* all([aFuture, bFuture]);
+```
+
+### First to finish (`race`)
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#race"}
+const winner = yield* race([
+  run(() => fetch("/primary").then((r) => r.text()), { name: "primary" }),
+  run(() => fetch("/secondary").then((r) => r.text()), { name: "secondary" }),
+]);
+```
+
+The losing call keeps running in the background; its result is discarded. For the first *successful* result (ignoring rejections), use `any`. For all results regardless of success or failure, use `allSettled`.
+
+### First to finish with a tag (`select`)
+
+`select` is like `race` but includes a tag so you know which branch won:
+
+```ts
+const r = yield* select({
+  fast: run(() => fetchFast(), { name: "fast" }),
+  slow: run(() => fetchSlow(), { name: "slow" }),
+});
+switch (r.tag) {
+  case "fast": return `fast: ${yield* r.future}`;
+  case "slow": return `slow: ${yield* r.future}`;
+}
+```
+
+## Spawning concurrent sub-workflows
+
+`spawn` registers an `Operation` as an independent concurrent routine within the current handler. Use it when each unit of work is itself a multi-step process:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#spawn"}
+const t1 = spawn(workflowA);
+const t2 = spawn(workflowB);
+// Both run in parallel
+const [a, b] = yield* all([t1, t2]);
+```
+
+Use `run` + combinators for flat sets of side effects. Use `spawn` when each sub-task has its own internal logic, branches, or retries.
+
+## Timeouts
+
+Combine `select` and `sleep` to add a timeout to any operation:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#timeout"}
+const r = yield* select({
+  done: run(() => fetch("/slow").then((r) => r.text()), { name: "call" }),
+  timeout: sleep({ seconds: 5 }),
+});
+if (r.tag === "timeout") throw new Error("timed out");
+return yield* r.future;
+```
+
+## Retries
+
+`run` retries on non-terminal errors by default. Pass a `retry` option to bound it:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#retry"}
+let data: unknown;
+try {
+  data = yield* run(() => fetchUser("user-id"), {
+    name: "fetch-user",
+    retry: { maxAttempts: 3, initialInterval: { milliseconds: 100 } },
+  });
+} catch (e) {
+  if (e instanceof TerminalError) {
+    data = { id: "user-id", name: "Unknown" };
+  } else {
+    throw e;
+  }
+}
+```
+
+## Saga-style compensation
+
+Because each step is journaled, compensations also survive restarts:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#saga"}
+const reservation = yield* run(() => reserveItem("item-123"), { name: "reserve" });
+try {
+  const charge = yield* run(() => chargeCard(100), { name: "charge" });
+  const orderId = yield* run(
+    () => createOrder(reservation.id, charge.id),
+    { name: "create-order" }
+  );
+  return { orderId };
+} catch (e) {
+  yield* run(() => releaseItem(reservation.id), { name: "release" });
+  throw e;
+}
+```
+
+## Cooperative cancellation with channels
+
+Use a typed `channel` to signal a spawned routine to stop:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#channel"}
+function workerOp(stop: Channel<void>): Operation<string> {
+  return gen(function* () {
+    const collected: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = yield* select({
+        done: run(() => doStep(i), { name: `step-${i}` }),
+        stop: stop.receive,
+      });
+      if (r.tag === "stop") return `stopped-after:${collected.join(",")}`;
+      collected.push(yield* r.future);
+    }
+    return `complete:${collected.join(",")}`;
+  });
+}
+
+// Caller:
+const stop = channel<void>();
+const task = spawn(workerOp(stop));
+yield* stop.send();   // signal the worker
+return yield* task;
+```
+
+`stop.receive` is the same `Future` on every access. After `send()` resolves it, every subsequent `select` with `stop.receive` takes the stop branch immediately. The worker decides what "stop" means — it can return a partial result, clean up, or ignore the signal.
+
+Channels are single-shot and intra-workflow. For signals from outside a handler (webhooks, HTTP calls), use [awakeables](/develop/ts/external-events).
+
+## Invocation cancellation
+
+When the invocation is cancelled externally (e.g., from the Restate UI), a `CancelledError` is thrown at the next yield point. Cleanup yields still work normally:
+
+```ts {"CODE_LOAD::ts/src/develop/gen/sdk_gen.ts#cancellation"}
+try {
+  return yield* run(() => longRunningWork(), { name: "work" });
+} catch (e) {
+  if (e instanceof CancelledError) {
+    yield* run(() => recordCancellation(), { name: "audit-cancel" });
+    throw e; // always re-throw CancelledError
+  }
+  throw e;
+}
+```
+
+## Combinators reference
+
+| Want | Use |
+|---|---|
+| Sequential side effects | `yield* run(...)` in sequence |
+| Parallel, all results | `all([f1, f2, ...])` |
+| Whichever finishes first | `race([...])` |
+| First *successful* result | `any([...])` |
+| Wait for all, never throw | `allSettled([...])` |
+| First to finish, with tag | `select({...})` |
+| Sub-workflow with internal logic | `spawn(op)` |
+| Stop a sub-workflow you control | `channel` + `select` |
+
+## Common pitfalls
+
+**Do not put non-determinism in journal entry names.** Names must be reproducible on replay — use counters, not `Math.random()` or `Date.now()`.
+
+```ts
+// WRONG
+yield* run(() => fetch(url), { name: `fetch-${Math.random()}` });
+
+// OK — deterministic counter
+yield* run(() => fetch(url), { name: `fetch-attempt-${attempt}` });
+```
+
+**Do not swallow `CancelledError`.** Always re-throw it after cleanup.
+
+**Do not call free functions outside an active fiber.** `run`, `sleep`, `all`, etc. must be called inside a `gen(function*() { ... })` body.
+
+## Further reading
+
+- [Durable steps](/develop/ts/durable-steps) — `ctx.run` in the standard SDK
+- [Concurrent tasks](/develop/ts/concurrent-tasks) — `RestatePromise` combinators
+- [External events](/develop/ts/external-events) — awakeables for outside signals
+- [Error handling](/develop/ts/error-handling) — `TerminalError` and cancellation
