@@ -286,6 +286,11 @@ Throw `TerminalException` to stop retries and propagate failure permanently:
 
 Note: the Java SDK uses `TerminalException`, NOT `TerminalError` (which is used by other SDKs).
 
+You can attach metadata to a `TerminalException`. The metadata map is propagated to callers and accessible via `TerminalException.getMetadata()` (requires restate-server >= 1.6):
+
+```java {"CODE_LOAD::java/src/main/java/develop/ErrorHandling.java#metadata"}
+```
+
 Any other exception type causes automatic retries with exponential backoff. For retry policy configuration, refer to the retry guide.
 
 ---
