@@ -9,4 +9,23 @@ class ErrorHandling {
     throw TerminalException(500, "Something went wrong")
     // <end_here>
   }
+
+  fun errorHandlingWithMetadata(ctx: Context) {
+    // <start_metadata>
+    throw TerminalException(
+        "Something went wrong", mapOf("correlationId" to "abc123", "orderId" to "order-456"))
+    // <end_metadata>
+  }
+
+  fun catchTerminalError(ctx: Context) {
+    // <start_catch_metadata>
+    try {
+      // ... call some handler ...
+    } catch (e: TerminalException) {
+      val metadata = e.metadata
+      val correlationId = metadata["correlationId"]
+      // handle accordingly
+    }
+    // <end_catch_metadata>
+  }
 }
