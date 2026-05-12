@@ -1,5 +1,9 @@
 import { MyService, MyObject, MyWorkflow } from "./utils";
 import * as clients from "@restatedev/restate-sdk-clients";
+import { type Serde } from "@restatedev/restate-sdk-clients";
+
+declare const myCustomSerde: Serde<unknown>;
+declare const input: unknown;
 
 const myPlainTSFunction = async () => {
   // <start_rpc_call_node>
@@ -102,6 +106,21 @@ const servicesAttach = async () => {
   // Attach later to retrieve the result
   const response = await restateClient.result(handle);
   // <end_service_attach>
+};
+
+const defaultSerdeExample = async () => {
+  // <start_default_serde>
+  // Set a default serde for all calls from this client
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    serde: myCustomSerde,
+  });
+
+  // All calls now use myCustomSerde by default
+  const result = await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet({ greeting: "Hi" });
+  // <end_default_serde>
 };
 
 const workflowAttach = async () => {

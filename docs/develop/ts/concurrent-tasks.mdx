@@ -125,3 +125,137 @@ if (isRestatePromise(somePromise)) {
   await RestatePromise.all([somePromise]);
 }
 ```
+
+## Generator-based SDK (experimental)
+
+The `@restatedev/restate-sdk-gen` package provides an alternative, composable DSL for writing concurrent workflows using JavaScript generators. It is designed for complex fan-out/fan-in patterns, sagas, and workflows with internal branching logic.
+
+Install alongside the main SDK:
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+<Warning>
+  This package is experimental. The API may change in future releases.
+</Warning>
+
+### Core concepts
+
+The generator SDK introduces two concepts:
+
+- **`Operation<T>`** — a lazy, one-shot description of work, created with `gen(function*() { ... })`.
+- **`Future<T>`** — an eager, memoized handle to an eventual value, returned by primitives like `run`, `sleep`, `awakeable`, and `spawn`.
+
+Use `execute(ctx, op)` to run an `Operation` inside a handler. All primitives inside the generator body (`run`, `sleep`, `all`, etc.) resolve the active scheduler implicitly — no need to pass anything around.
+
+### Basic usage
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#basic"}
+import * as restate from "@restatedev/restate-sdk";
+import { gen, execute, run, all } from "@restatedev/restate-sdk-gen";
+
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    process: async (ctx: restate.Context, name: string): Promise<string> =>
+      execute(
+        ctx,
+        gen(function* () {
+          // Start two tasks concurrently
+          const taskA = run(() => fetchA(), { name: "fetch-a" });
+          const taskB = run(() => fetchB(), { name: "fetch-b" });
+
+          // Wait for both
+          const [a, b] = yield* all([taskA, taskB]);
+          return `${a}+${b} for ${name}`;
+        })
+      ),
+  },
+});
+```
+
+### Concurrency primitives
+
+Inside a `gen` body, these free-standing functions are available:
+
+| Function | Description |
+|---|---|
+| `run(action, opts?)` | Journaled side effect (mirrors `ctx.run`) |
+| `sleep(duration)` | Journaled timer |
+| `awakeable<T>()` | Journaled awakeable |
+| `all(futures)` | Wait for all, return values in order |
+| `race(futures)` | Return the first to settle |
+| `any(futures)` | Return the first to succeed |
+| `allSettled(futures)` | Wait for all, never throw |
+| `select({tag: future, ...})` | Return first winner with its tag |
+| `spawn(op)` | Run an Operation as a concurrent routine |
+| `channel<T>()` | Single-shot in-memory channel for cooperative cancellation |
+
+### Parallel fan-out
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#fan_out"}
+gen(function* () {
+  const futures = items.map((item, i) =>
+    run(() => processItem(item), { name: `process-${i}` })
+  );
+  return yield* all(futures);
+})
+```
+
+### Timeout pattern
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#timeout"}
+gen(function* () {
+  const r = yield* select({
+    done: run(() => slowCall(), { name: "call" }),
+    timeout: sleep({ seconds: 5 }),
+  });
+  if (r.tag === "timeout") throw new Error("timed out");
+  return yield* r.future;
+})
+```
+
+### Saga / compensation
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#saga"}
+gen(function* () {
+  const reservation = yield* run(() => reserveItem(itemId), { name: "reserve" });
+  try {
+    const charge = yield* run(() => chargeCard(amount), { name: "charge" });
+    return { orderId: charge.id };
+  } catch (e) {
+    // Compensate on failure — this step is also journaled
+    yield* run(() => releaseItem(reservation.id), { name: "release" });
+    throw e;
+  }
+})
+```
+
+### Cooperative cancellation with channels
+
+```typescript {"CODE_LOAD::ts/src/develop/sdk_gen.ts#channel"}
+import { gen, execute, run, channel, select, spawn } from "@restatedev/restate-sdk-gen";
+
+gen(function* () {
+  const stop = channel<void>();
+  const worker = spawn(
+    gen(function* () {
+      for (let i = 0; i < 10; i++) {
+        const r = yield* select({
+          done: run(() => doStep(i), { name: `step-${i}` }),
+          stop: stop.receive,
+        });
+        if (r.tag === "stop") return "stopped";
+      }
+      return "complete";
+    })
+  );
+
+  // ... later, signal the worker to stop ...
+  yield* stop.send();
+  return yield* worker;
+})
+```
+
+For a complete guide to all patterns — retries, polling, worker pools, and cancellation — see the [restate-sdk-gen guide](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-gen/guide.md).

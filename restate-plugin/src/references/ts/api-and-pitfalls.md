@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- experimental generator-based DSL for composable concurrent workflows
 
 ### Minimal Scaffold
 
@@ -284,6 +285,56 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
+
+### Default serde for ingress client
+
+You can set a default serde on `clients.connect()` so all calls from that client use the specified encoding without having to configure it on each individual call:
+
+```ts
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  serde: myCustomSerde, // applies to all handler calls, workflow attaches, awakeable resolution, and result retrieval
+});
+```
+
+---
+
+## Generator-based DSL (experimental: `@restatedev/restate-sdk-gen`)
+
+`@restatedev/restate-sdk-gen` is an experimental package for writing composable concurrent workflows using JavaScript generators. Use it for complex fan-out/fan-in, saga, and polling patterns.
+
+```bash
+npm install @restatedev/restate-sdk-gen
+```
+
+```ts
+import { gen, execute, run, all, race, select, sleep, spawn, channel } from "@restatedev/restate-sdk-gen";
+
+const handler = async (ctx, name) =>
+  execute(ctx, gen(function* () {
+    // Parallel fan-out
+    const a = run(() => fetchA(), { name: "a" });
+    const b = run(() => fetchB(), { name: "b" });
+    const [aVal, bVal] = yield* all([a, b]);
+
+    // Timeout pattern
+    const r = yield* select({
+      result: run(() => slowOp(), { name: "op" }),
+      timeout: sleep({ seconds: 10 }),
+    });
+    if (r.tag === "timeout") throw new Error("timed out");
+
+    return `${aVal}+${bVal}:${yield* r.future}`;
+  }));
+```
+
+Key primitives:
+- `run(fn, opts?)` — journaled side effect (same as `ctx.run`, but receives `{ signal }` for cancellation)
+- `sleep(duration)` — journaled timer
+- `awakeable<T>()` — journaled awakeable
+- `all`, `race`, `any`, `allSettled`, `select` — concurrency combinators
+- `spawn(op)` — run an Operation as a concurrent routine; returns a `Future<T>`
+- `channel<T>()` — single-shot channel for cooperative cancellation between routines
 
 ---
 
