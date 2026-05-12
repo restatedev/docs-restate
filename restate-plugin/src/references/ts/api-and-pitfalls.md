@@ -285,6 +285,13 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/clients.ts#here"}
 ```
 
+If your handlers use a custom serde, set a `serde` on the connection options so you don't have to repeat it on every call:
+
+```ts {"CODE_LOAD::ts/src/develop/clients/ingress.ts#default_serde"}
+```
+
+Per-call options (`clients.rpc.opts(...)` / `clients.rpc.sendOpts(...)`) override the connection-level default when provided.
+
 ---
 
 ## TypeScript-Specific Pitfalls
