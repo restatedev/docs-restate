@@ -48,6 +48,7 @@ Optional packages:
 - `@restatedev/restate-sdk-zod` -- Zod validation for handler input/output
 - `@restatedev/restate-sdk-clients` -- invoke Restate handlers from external clients
 - `@restatedev/restate-sdk-testcontainers` -- testing utilities
+- `@restatedev/restate-sdk-gen` -- alternative generator-based (`function*`/`yield*`) API with advanced concurrency primitives
 
 ### Minimal Scaffold
 
@@ -305,6 +306,53 @@ Tests run against a real Restate Server in Docker via Testcontainers.
 ```
 
 Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+
+---
+
+---
+
+## restate-sdk-gen (Generator-based API)
+
+`@restatedev/restate-sdk-gen` is an alternative SDK that uses JavaScript generators (`function*` / `yield*`) instead of `async`/`await`. It provides advanced concurrency primitives (spawn, select, channels) alongside all the standard Restate features.
+
+### Interface / implement pattern
+
+Define a service contract separately from its implementation. Share the interface across packages without importing any implementation:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_define"}
+```
+
+Implement the interface with `implement()`:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_implement"}
+```
+
+Call the interface from another service — no implementation import needed:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_call"}
+```
+
+Use `iface.schemas()` with Standard Schema validators (Zod, TypeBox, Valibot, …):
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_schemas"}
+```
+
+### Deterministic helpers and logging
+
+Use free functions instead of `ctx.*`:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/gen-logging.ts#gen_logger"}
+```
+
+- `logger()` — replay-safe console logger (equivalent to `ctx.console`)
+- `rand()` — deterministic random (equivalent to `ctx.rand`)
+- `date()` — deterministic timestamp (equivalent to `ctx.date`)
+
+### Pitfalls specific to restate-sdk-gen
+
+- **Do NOT use `console.log` directly** — use `logger()` to avoid duplicate log output during replay.
+- **Do NOT use `Math.random()`, `Date.now()`, or `new Date()`** — use `rand()` and `date()` instead.
+- Handlers are `function*` generators — always use `yield*` (not `yield`) to compose operations.
 
 ---
 

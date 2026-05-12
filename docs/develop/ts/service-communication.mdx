@@ -258,6 +258,68 @@ const response = await ctx
 ```
 
     </Accordion>
+    <Accordion title="Option 4: Declare a typed interface with restate-sdk-gen">
+        The [`@restatedev/restate-sdk-gen`](https://www.npmjs.com/package/@restatedev/restate-sdk-gen) package provides a generator-based programming model with first-class support for interface/implementation separation via the `iface` namespace.
+
+        Define the interface once — it contains only type information and can be shared across packages without any implementation dependency:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_define"} 
+import { iface } from "@restatedev/restate-sdk-gen";
+
+export const counterIface = iface.object("counter", {
+  increment: iface.json<number, number>(),
+  get: iface.json<void, number>(),
+});
+```
+
+        Implement the interface separately using `implement()`:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_implement"} 
+import { implement, state } from "@restatedev/restate-sdk-gen";
+
+export const counterImpl = implement(counterIface, {
+  handlers: {
+    *increment(delta) {
+      const s = state<CounterState>();
+      const value = ((yield* s.get("value")) ?? 0) + delta;
+      s.set("value", value);
+      return value;
+    },
+    *get() {
+      return (yield* state<CounterState>().get("value")) ?? 0;
+    },
+  },
+  options: { handlers: { get: { shared: true } } },
+});
+```
+
+        Pass the interface directly to `client()` — no implementation import required:
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_call"} 
+import { client } from "@restatedev/restate-sdk-gen";
+
+export const orchestrator = service({
+  name: "orchestrator",
+  handlers: {
+    *run(itemId: string) {
+      const newValue = yield* client(counterIface, itemId).increment(1);
+      return `counter for ${itemId} is now ${newValue}`;
+    },
+  },
+});
+```
+
+        Use `iface.schemas()` to attach [Standard Schema](https://standardschema.dev/) validation (Zod, TypeBox, Valibot, …):
+
+```ts {"CODE_LOAD::ts/src/develop/sdk-gen/iface.ts#iface_schemas"} 
+const CreateUserReq = z.object({ username: z.string().min(3) });
+const CreateUserRes = z.object({ id: z.string() });
+
+export const userIface = iface.service("users", {
+  create: iface.schemas({ input: CreateUserReq, output: CreateUserRes }),
+});
+```
+    </Accordion>
 </AccordionGroup>
 
 
