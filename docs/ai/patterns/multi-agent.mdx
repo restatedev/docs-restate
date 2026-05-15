@@ -11,6 +11,7 @@ import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
+import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -21,6 +22,7 @@ Many agent systems need a **router** that decides which specialist agent should 
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -68,7 +70,7 @@ async function runFraudAgent(model: LanguageModel, claim: InsuranceClaim){
 
 const run = async (ctx: restate.Context, claim: ClaimInput) => {
   const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.4"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
 
@@ -300,19 +302,19 @@ With Pydantic AI, specialist agents are wrapped in `RestateAgent` and exposed as
 
 ```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/multi_agent.py#here"} 
 medical_agent = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="Review medical claims for coverage and necessity. Approve/deny up to $50,000.",
 )
 restate_medical_agent = RestateAgent(medical_agent)
 
 car_agent = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="Assess car claims for liability and damage. Approve/deny up to $25,000.",
 )
 restate_car_agent = RestateAgent(car_agent)
 
 intake_agent = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="Route insurance claims to the appropriate specialist using the available tools.",
 )
 
@@ -371,6 +373,101 @@ curl localhost:8080/MultiAgentClaimApproval/run --json '{
 In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
 
 Once all sub-agents return, the main agent continues and makes a decision.
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+LangChain's `create_agent` doesn't ship a first-class handoff primitive, but the pattern is expressed cleanly by exposing each specialist as a tool on the intake agent. The intake agent picks which specialist to invoke; each specialist call is a normal LangChain agent run, fully durable through Restate's middleware.
+
+Conversation history (and which specialist most recently handled a claim) is stored in a Virtual Object so subsequent calls with the same key remember prior context.
+
+```python multi_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/multi_agent.py#here"} 
+medical_agent = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    system_prompt=(
+        "You are a medical insurance specialist. Review medical claims for "
+        "coverage and necessity. Approve/deny up to $50,000."
+    ),
+    middleware=[RestateMiddleware()],
+)
+
+car_agent = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    system_prompt=(
+        "You are a car insurance specialist. Assess car claims for liability "
+        "and damage. Approve/deny up to $25,000."
+    ),
+    middleware=[RestateMiddleware()],
+)
+
+
+@tool
+async def to_medical_specialist(claim_json: str) -> str:
+    """Hand the claim to the medical specialist for evaluation."""
+    result = await medical_agent.ainvoke({"messages": claim_json})
+    return result["messages"][-1].content
+
+
+@tool
+async def to_car_specialist(claim_json: str) -> str:
+    """Hand the claim to the car specialist for evaluation."""
+    result = await car_agent.ainvoke({"messages": claim_json})
+    return result["messages"][-1].content
+
+
+intake_agent = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    tools=[to_medical_specialist, to_car_specialist],
+    system_prompt=(
+        "You are an intake agent. Route insurance claims to the appropriate "
+        "specialist. Always call exactly one specialist tool, then summarize "
+        "their decision."
+    ),
+    middleware=[RestateMiddleware()],
+)
+
+
+agent_service = restate.VirtualObject("MultiAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(ctx: restate.ObjectContext, claim: InsuranceClaim) -> str:
+    history = await ctx.get("messages", type_hint=ChatHistory) or ChatHistory()
+    history.messages.append(HumanMessage(content=f"Claim: {claim.model_dump_json()}"))
+
+    result = await intake_agent.ainvoke({"messages": history.messages})
+
+    ctx.set("messages", ChatHistory(messages=result["messages"]))
+    return result["messages"][-1].content
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/multi_agent.py" />
+
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupLangChain />
+```bash
+uv run app/multi_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/session123/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the intake agent called a specialist tool and is waiting for the response.
+
+Once the specialist returns, the intake agent continues and summarizes the decision.
 </Accordion>
 
 </GlobalTab>
