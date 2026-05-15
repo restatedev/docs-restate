@@ -20,6 +20,22 @@ jobs:
         with:
           node-version: "20"
 
+      # Use the existing chore/changelog-refresh branch (if any) as the
+      # comparison baseline instead of main. This prevents re-triggering the
+      # Mintlify agent every 6 hours for releases that were already processed
+      # but whose PR has not been merged yet. When the PR is merged or closed
+      # (with delete-branch: true below), the branch disappears and the next
+      # release is detected normally.
+      - name: Use existing changelog refresh branch as baseline
+        run: |
+          if git ls-remote --exit-code --heads origin chore/changelog-refresh >/dev/null 2>&1; then
+            git fetch origin chore/changelog-refresh
+            git checkout origin/chore/changelog-refresh -- docs/changelog/ || true
+            echo "Baseline restored from chore/changelog-refresh branch."
+          else
+            echo "No chore/changelog-refresh branch; using main as baseline."
+          fi
+
       - name: Regenerate docs/changelog from GitHub releases
         run: node scripts/generate-changelog.js
         env:
