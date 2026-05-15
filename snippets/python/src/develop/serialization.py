@@ -83,7 +83,9 @@ async def deliver(ctx: ObjectContext, delivery: Delivery) -> CompletedDelivery:
     ctx.awakeable(type_hint=Delivery)
 
     # To serialize the results of actions
-    await ctx.run_typed("some-task", do_something, restate.RunOptions(type_hint=Delivery))
+    await ctx.run_typed(
+        "some-task", do_something, restate.RunOptions(type_hint=Delivery)
+    )
 
     return CompletedDelivery(status="delivered", timestamp=datetime.now())
 
@@ -117,7 +119,9 @@ async def ship(ctx: ObjectContext, package: Package) -> CompletedPackage:
     ctx.awakeable(type_hint=Package)
 
     # To serialize the results of actions
-    await ctx.run_typed("some-task", do_package_task, restate.RunOptions(type_hint=Package))
+    await ctx.run_typed(
+        "some-task", do_package_task, restate.RunOptions(type_hint=Package)
+    )
 
     return CompletedPackage(status="shipped", timestamp=datetime.now())
 
@@ -127,4 +131,3 @@ async def ship(ctx: ObjectContext, package: Package) -> CompletedPackage:
 
 def do_package_task() -> Package:
     return Package(timestamp=datetime.now(), dimensions=(10, 20))
-

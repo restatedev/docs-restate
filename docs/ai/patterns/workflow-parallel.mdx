@@ -11,6 +11,7 @@ import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
+import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -35,6 +36,7 @@ Select your SDK:
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -54,7 +56,7 @@ const run = async (ctx: restate.Context, claim: ClaimInput) => {
   ]);
 
   const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.4"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
 
@@ -68,7 +70,7 @@ const run = async (ctx: restate.Context, claim: ClaimInput) => {
   return text;
 };
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/workflow-parallel.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/workflow-parallel.ts" />
 
 <Accordion title="Try out parallel agents" icon="laptop">
 <SetupVercel />
@@ -273,6 +275,64 @@ Once all sub-agents return, the main agent makes a decision.
 <Frame>
 <img src="/img/tour/agents/pydantic/parallel-agents.png" alt="Parallel agent execution trace" />
 </Frame>
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+```python workflow_parallel.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/workflow_parallel.py#here"} 
+decision = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    system_prompt="You are a claim decision engine.",
+    middleware=[RestateMiddleware()],
+)
+
+
+agent_service = restate.Service("ParallelAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    # Start multiple sub-agents in parallel with auto-retries and recovery.
+    eligibility = ctx.service_call(run_eligibility_agent, claim)
+    cost = ctx.service_call(run_rate_comparison_agent, claim)
+    fraud = ctx.service_call(run_fraud_agent, claim)
+
+    await restate.gather(eligibility, cost, fraud)
+
+    result = await decision.ainvoke(
+        {"messages": f"""Decide about claim: {claim.model_dump_json()}.
+        Base your decision on the following analyses:
+        Eligibility: {await eligibility} Cost {await cost} Fraud: {await fraud}"""}
+    )
+    return result["messages"][-1].content
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/workflow_parallel.py" />
+
+<Accordion title="Try out parallel agents" icon="laptop">
+<SetupLangChain />
+```bash
+uv run app/workflow_parallel.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request for a claim that needs to be analyzed by multiple agents in parallel:
+```bash
+curl localhost:8080/ParallelAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the handler called the sub-agents in parallel.
+Once all sub-agents return, the main agent makes a decision.
 </Accordion>
 
 </GlobalTab>

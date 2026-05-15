@@ -11,6 +11,7 @@ import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
+import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -32,6 +33,7 @@ Select your SDK:
     <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+    <GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
     <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
     <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -44,7 +46,7 @@ A generator agent writes code, then an evaluator agent checks it. If the evaluat
 ```typescript workflow-evaluator-optimizer.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/workflow-evaluator-optimizer.ts#here"} 
 const generate = async (ctx: restate.Context, {task}: { task: string }) => {
   const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.4"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
 
@@ -229,7 +231,10 @@ async def generate(ctx: restate.ObjectContext, req: CodeRequest) -> dict:
         events = eval_runner.run_async(
             user_id=ctx.key(),
             session_id=str(ctx.uuid()),
-            new_message=Content(role="user", parts=[Part.from_text(text=f"Task: {req.task}\n\nCode:\n{code}")]),
+            new_message=Content(
+                role="user",
+                parts=[Part.from_text(text=f"Task: {req.task}\n\nCode:\n{code}")],
+            ),
         )
         evaluation = await parse_agent_response(events)
         if evaluation.startswith("PASS"):
@@ -263,13 +268,13 @@ curl localhost:8080/CodeGenerator/user123/generate \
 
 ```python workflow_evaluator_optimizer.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/workflow_evaluator_optimizer.py#here"} 
 generator = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="You are a code generator. Write clean, correct code.",
 )
 restate_generator = RestateAgent(generator)
 
 evaluator = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="""You are a code reviewer. Evaluate the code for correctness,
     readability, and edge cases. Respond with PASS if acceptable,
     or FAIL: <feedback> with specific issues to fix.""",
@@ -309,6 +314,77 @@ async def generate(_ctx: restate.Context, req: CodeRequest) -> dict:
 
 <Accordion title="Run this example" icon="laptop">
 <SetupPydanticAI />
+```bash
+uv run app/workflow_evaluator_optimizer.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Send a request:
+```bash
+curl localhost:8080/CodeGenerator/generate \
+  --json '{"task": "Write a function that checks if a string is a palindrome"}'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+```python workflow_evaluator_optimizer.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/workflow_evaluator_optimizer.py#here"} 
+generator = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    system_prompt="You are a code generator. Write clean, correct code.",
+    middleware=[RestateMiddleware()],
+)
+
+evaluator = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    system_prompt=(
+        "You are a code reviewer. Evaluate the code for correctness, "
+        "readability, and edge cases. Respond with PASS if acceptable, or "
+        "FAIL: <feedback> with specific issues to fix."
+    ),
+    middleware=[RestateMiddleware()],
+)
+
+code_service = restate.Service("CodeGenerator")
+
+
+@code_service.handler()
+async def generate(_ctx: restate.Context, req: CodeRequest) -> dict:
+    feedback = ""
+    max_iterations = 3
+
+    for i in range(max_iterations):
+        # Step 1: Generate code
+        prompt = (
+            f"Task: {req.task}\n\nPrevious attempt was rejected:\n{feedback}\n\nPlease fix the issues."
+            if feedback
+            else f"Task: {req.task}"
+        )
+        gen_result = await generator.ainvoke({"messages": prompt})
+        code = gen_result["messages"][-1].content
+
+        # Step 2: Evaluate the code
+        eval_result = await evaluator.ainvoke(
+            {"messages": f"Task: {req.task}\n\nCode:\n{code}"}
+        )
+        evaluation = eval_result["messages"][-1].content
+
+        if evaluation.startswith("PASS"):
+            return {"code": code, "iterations": i + 1}
+
+        feedback = evaluation
+
+    return {"code": "Max iterations reached", "iterations": max_iterations}
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/workflow_evaluator_optimizer.py" />
+
+<Accordion title="Run this example" icon="laptop">
+<SetupLangChain />
 ```bash
 uv run app/workflow_evaluator_optimizer.py
 ```

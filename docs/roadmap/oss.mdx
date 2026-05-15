@@ -1,0 +1,79 @@
+---
+title: OSS Roadmap
+description: Upcoming capabilities in Restate Open Source.
+---
+
+# Near-term (weeks)
+
+### Virtual Queues and Flow Control
+
+We are making a major change to Restate's invocation scheduler to support more sophisticated flow control. The goal is to make it easier to configure rate- and concurrency limits that protect downstream services from request spikes, and to define limits and quotas that apply to groups of users, principals, or tenants.
+
+```ts
+const client = ctx
+  .scope(customerTeamId)   // new: limits exists in scopes (like namespaces)
+  .serviceClient<Agent>({ name: "researchAgentService" });
+
+// userId is the key on which limits apply
+client.runAgent(prompt, rpc.opts({ limitKey: userId}));
+```
+
+Internally, Restate applies these limits using *Virtual Queues*, which are similar to *Virtual Objects* in that they do not occupy memory, allowing very many to exist concurrently. This makes it possible to track fine-grained limits and quotas for users, tenants, or agents.
+
+Every invocation is associated with a key (think the virtual queue identity). Invocations with the same queue id pass through the same virtual queue, where the configured flow-control policies are applied.
+
+The types of flow control we are initially adding include:
+
+* Concurrency limits
+* Rate limits
+* Priority events
+
+This work also improves observability by showing where invocations are staged when they are not yet eligible for processing.
+
+The feature will roll out in stages. The first steps are concurrency limiting on virtual queues, as well as concurrency limits on deployment endpoints. These endpoint limits are a separate mechanism from virtual queues, but are enabled by the same scheduler rework.
+
+### Cooperative Suspensions
+
+Suspensions ensure that resources are released when a durable function is not actively doing work.
+
+Today, certain scenarios require a careful tuning of parameters: (1) the *inactivity timeout,* after which suspensions trigger (on low-latency http/2 streaming invocations) and (2) the number of *concurrency slots* in the invoker, which limit the number of ongoing (non-suspended) durable function executions. High inactivity timeouts can block slots for too long, while low timeouts lead to more replays than necessary (higher latency).
+
+With cooperative suspensions, tuning the *inactivity timeout* is no longer necessary, because the runtime and SDK jointly decide when a function is in a suspendable state, and when to pre-emptively suspend for best resource utilization and performance.
+
+### Better Tracing
+
+Restate creates OpenTelemetry traces by default for every invocation and action, and propagates tracing context into service invocations so application code can emit additional traces.
+
+We are improving how retries, suspensions, and resumptions are represented, and adding support for nested traces. The goal is for traces to more accurately reflect the logical execution of durable workflows and services.
+
+### Simpler Kafka Subscriptions
+
+Kafka subscriptions will be fully created and parameterizable in a single place, through the Admin API.
+No settings will be needed in the Restate config file anymore.
+This means new subscriptions to new Kafka Clusters can be created without access to the configuration.
+
+### Further AI SDK Integrations
+
+Restate has integrated with multiple AI SDKs and is becoming a foundational durability layer for agents.
+
+We are continuing to add support for more SDKs.
+
+# Mid-term (months)
+
+### Native Streams
+
+Shareable and resumable streams are a primitive for communicating real-time intermediate progress, for example from LLM inference calls, or for building chat sessions with subscriptions.
+
+Today, this is possible through the [stream session pattern using Virtual Objects](/ai/patterns/streaming-responses). This feature adds a more efficient native implementation of the same underlying capability.
+
+This is a general platform feature, but it is especially important for AI use cases that need resumable, shareable streaming interactions.
+
+### Cron Schedules
+
+We are adding a simple way to define schedules for invocations, both in service, workflow, and agent definitions, and in the Restate UI.
+
+This is already possible today by manually scheduling invocations in code, but can be tedious. The cron feature makes recurring invocation schedules straightforward to define and manage.
+
+### Sticky Workers
+
+To improve tenant isolation and make caching more effective, we are adding a deployment mode that gives more control over where durable function invocations execute.

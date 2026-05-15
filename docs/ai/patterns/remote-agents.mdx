@@ -10,6 +10,7 @@ import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
+import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
@@ -20,6 +21,7 @@ When agents need to scale independently, run on different infrastructure, or be 
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -50,7 +52,7 @@ With the Vercel AI, specialist agents are exposed as tools. The LLM decides whic
 ```typescript remote-agents.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/remote-agents.ts#here"} 
 const run = async (ctx: restate.Context, claim: ClaimInput) => {
   const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.4"),
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
 
@@ -80,7 +82,7 @@ const run = async (ctx: restate.Context, claim: ClaimInput) => {
   return text;
 };
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/remote-agents.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/remote-agents.ts" />
 
 Each specialist agent runs as its own Restate service:
 
@@ -92,7 +94,7 @@ export const eligibilityAgent = restate.service({
   handlers: {
     run: async (ctx: restate.Context, claim: InsuranceClaim) => {
       const model = wrapLanguageModel({
-        model: openai("gpt-4o"),
+        model: openai("gpt-5.4"),
         middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
       });
       const { text } = await generateText({
@@ -353,7 +355,7 @@ Each specialist agent runs as its own Restate service:
 
 ```python eligibility_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/utils/utils.py#eligibility"} 
 eligibility_agent = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="Decide whether the following claim is eligible for reimbursement."
     "Respond with eligible if it's a medical claim, and not eligible otherwise.",
 )
@@ -400,6 +402,69 @@ Once all sub-agents return, the main agent continues and makes a decision.
 <img src="/img/tour/agents/pydantic/remote-agents.png" alt="Multi-agent execution trace" />
 </Frame>
 
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+With LangChain, you expose each specialist as a separate Restate service and call it via `restate_context().service_call()`. The LLM response that picks the specialist is durably persisted, so on recovery the routing decision is replayed without re-calling the LLM.
+
+```python remote_agents.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/remote_agents.py#here"} 
+# Durable service call to the fraud agent; persisted and retried by Restate.
+@tool
+async def check_fraud(claim: InsuranceClaim) -> str:
+    """Analyze the probability of fraud."""
+    return await restate_context().service_call(run_fraud_agent, claim)
+
+
+agent = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    tools=[check_eligibility, check_fraud],
+    system_prompt=(
+        "You are a claim approval engine. Analyze the claim and use your "
+        "tools to decide whether to approve it."
+    ),
+    middleware=[RestateMiddleware()],
+)
+
+
+agent_service = restate.Service("MultiAgentClaimApproval")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, claim: InsuranceClaim) -> str:
+    result = await agent.ainvoke({"messages": f"Claim: {claim.model_dump_json()}"})
+    return result["messages"][-1].content
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/remote_agents.py" />
+
+Each specialist agent runs as its own Restate service. The eligibility and fraud agents are defined as standalone LangChain agents in their own Restate services, called via `restate_context().service_call()`.
+
+<Accordion title="Try out multi-agent systems" icon="laptop">
+<SetupLangChain />
+```bash
+uv run app/remote_agents.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request for a claim that needs to be analyzed by multiple agents:
+```bash
+curl localhost:8080/MultiAgentClaimApproval/run --json '{
+    "date":"2024-10-01",
+    "category":"orthopedic",
+    "reason":"hospital bill for a broken leg",
+    "amount":3000,
+    "placeOfService":"General Hospital"
+}'
+```
+
+In the UI, you can see that the agent called the sub-agents and is waiting for their responses.
+
+Once all sub-agents return, the main agent continues and makes a decision.
 </Accordion>
 
 </GlobalTab>

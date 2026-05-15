@@ -20,6 +20,7 @@ Restate distinguishes between two types of errors:
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}/>
 <GlobalTab title="Restate Py" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
@@ -83,11 +84,11 @@ To set a separate retry policy for LLM calls, pass [`RunOptions`](https://restat
 
 ```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#max_attempts_example"} 
 const model = wrapLanguageModel({
-  model: openai("gpt-4o"),
+  model: openai("gpt-5.4"),
   middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
 });
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 
 If you set a maximum number of retry attempts, Restate will still go through the AI SDK's `maxRetries` for each attempt, so the two limits multiply (e.g. `maxRetryAttempts`: 3 × `maxRetries`: 2 = up to 6 attempts).
 
@@ -98,11 +99,19 @@ Once Restate's retries are exhausted, the invocation fails with a `TerminalError
 
 To set a separate retry policy for LLM calls, pass [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37) to `DurableRunner.run`:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/openai-agents/tour-of-agents/app/error_handling.py#retries"} 
-run_opts = RunOptions(
-    max_attempts=3, initial_retry_interval=timedelta(seconds=2)
-)
-result = await DurableRunner.run(agent, req.message, run_options=run_opts)
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    try:
+        run_opts = RunOptions(
+            max_attempts=3, initial_retry_interval=timedelta(seconds=2)
+        )
+        result = await DurableRunner.run(agent, req.message, run_options=run_opts)
+    except restate.TerminalError as e:
+        # Handle terminal errors gracefully
+        return f"The agent couldn't complete the request: {e.message}"
+
+    return result.final_output
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/openai-agents/tour-of-agents/app/error_handling.py" />
 
@@ -113,7 +122,7 @@ Once these retries are exhausted, the invocation fails with a `TerminalError` an
 
 To set a separate retry policy for LLM calls, pass [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37) to the Restate plugin when activating it for your ADK App:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/google-adk/tour-of-agents/app/error_handling.py#retries"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/tour-of-agents/app/error_handling.py#retries"}
 run_options = RunOptions(max_attempts=3, initial_retry_interval=timedelta(seconds=1))
 app = App(
     name=APP_NAME,
@@ -130,7 +139,7 @@ Once these retries are exhausted, the invocation fails with a `TerminalError` an
 
 To set a separate retry policy for LLM calls, pass [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37) to `RestateAgent`:
 
-```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#retries"} 
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#retries"}
 restate_agent = RestateAgent(
     agent,
     run_options=RunOptions(max_attempts=3, initial_retry_interval=timedelta(seconds=2)),
@@ -139,6 +148,22 @@ restate_agent = RestateAgent(
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py" />
 
 Once these retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further. You can catch the Terminal Error in your handler and act accordingly.
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+Restate's `RestateMiddleware` lets you specify the retry behavior for LLM calls via `RunOptions`:
+
+```python error_handling.py
+agent = create_agent(
+    model=init_chat_model("openai:gpt-4o-mini"),
+    tools=[get_weather],
+    middleware=[RestateMiddleware(run_options=RunOptions(max_attempts=3))],
+)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/error_handling.py" />
+
+By default, the middleware retries indefinitely with exponential backoff. Once Restate's retries are exhausted, the invocation fails with a `TerminalError` and won't be retried further.
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
@@ -253,7 +278,7 @@ By default, it uses the policy configured at the [service or handler level](/ser
 
 If you do run actions in your tools, you can override the default retry policy by passing [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html):
 
-```ts {"CODE_LOAD::ts/src/ai/guides/errorhandling/error_handling.ts#retries"} 
+```ts {"CODE_LOAD::ts/src/ai/guides/errorhandling/error_handling.ts#retries"}
 const result = await ctx.run(
     "fetch-data",
     () => fetch("/api/data"),
@@ -268,7 +293,7 @@ See [custom retry policies](/guides/error-handling#at-the-run-block-level) for m
 
 If you do run actions in your tools, you can override the default retry policy by passing [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"}
 result = await restate_context().run_typed(
     "fetch data",
     fetch_data,
@@ -284,7 +309,7 @@ See [custom retry policies](/guides/error-handling#at-the-run-block-level) for m
 
 If you do run actions in your tools, you can override the default retry policy by passing [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"}
 result = await restate_context().run_typed(
     "fetch data",
     fetch_data,
@@ -300,7 +325,7 @@ See [custom retry policies](/guides/error-handling#at-the-run-block-level) for m
 
 If you do run actions in your tools, you can override the default retry policy by passing [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"}
 result = await restate_context().run_typed(
     "fetch data",
     fetch_data,
@@ -316,7 +341,7 @@ See [custom retry policies](/guides/error-handling#at-the-run-block-level) for m
 
 If you do `ctx.run` actions in your tools, you can override the default retry policy by passing [`RunOptions`](https://restatedev.github.io/sdk-typescript/types/_restatedev_restate-sdk.RunOptions.html):
 
-```ts {"CODE_LOAD::ts/src/ai/guides/errorhandling/error_handling.ts#retries"} 
+```ts {"CODE_LOAD::ts/src/ai/guides/errorhandling/error_handling.ts#retries"}
 const result = await ctx.run(
     "fetch-data",
     () => fetch("/api/data"),
@@ -331,7 +356,7 @@ See [custom retry policies](/guides/error-handling#at-the-run-block-level) for m
 
 For `ctx.run_typed` actions specifically, you can override the default retry policy by passing [`RunOptions`](https://github.com/restatedev/sdk-python/blob/main/python/restate/context.py#L37):
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#retries"}
 result = await restate_context().run_typed(
     "fetch data",
     fetch_data,
@@ -352,7 +377,7 @@ For errors that should not be retried (invalid input, business rule violations, 
 <GlobalTabs className={"hidden-tabs"}>
 <GlobalTab title="Vercel AI">
 
-```typescript {"CODE_LOAD::ts/src/tour/agents/terminal_error.ts#terminal_error"} 
+```typescript {"CODE_LOAD::ts/src/tour/agents/terminal_error.ts#terminal_error"}
 throw new TerminalError("This tool is not allowed to run for this input.");
 ```
 
@@ -382,7 +407,7 @@ const { text } = await generateText({
   messages: [{ role: "user", content: prompt }],
 });
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 </Accordion>
 <Accordion title="Stop the agent on terminal tool errors">
 
@@ -410,14 +435,14 @@ if (terminalSteps.length > 0) {
   // Do something with the terminal tool error steps
 }
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts" />
 </Accordion>
 </AccordionGroup>
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"}
 from restate import TerminalError
 
 raise TerminalError("This tool is not allowed to run for this input.")
@@ -425,7 +450,7 @@ raise TerminalError("This tool is not allowed to run for this input.")
 
 The Restate OpenAI integration raises terminal errors to your handler, where you can catch and handle them:
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/openai-agents/tour-of-agents/app/error_handling.py#handle"} 
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/openai-agents/tour-of-agents/app/error_handling.py#handle"}
 @agent_service.handler()
 async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
     try:
@@ -450,7 +475,7 @@ async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
 </GlobalTab>
 <GlobalTab title="Google ADK">
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"}
 from restate import TerminalError
 
 raise TerminalError("This tool is not allowed to run for this input.")
@@ -458,7 +483,7 @@ raise TerminalError("This tool is not allowed to run for this input.")
 
 You can catch these terminal errors in your handler and handle them accordingly:
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/google-adk/tour-of-agents/app/error_handling.py#handle"} 
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/google-adk/tour-of-agents/app/error_handling.py#handle"}
 @agent_service.handler()
 async def run(ctx: restate.ObjectContext, req: WeatherPrompt) -> str | None:
     try:
@@ -477,7 +502,7 @@ async def run(ctx: restate.ObjectContext, req: WeatherPrompt) -> str | None:
 </GlobalTab>
 <GlobalTab title="Pydantic AI">
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"}
 from restate import TerminalError
 
 raise TerminalError("This tool is not allowed to run for this input.")
@@ -485,7 +510,7 @@ raise TerminalError("This tool is not allowed to run for this input.")
 
 You can catch these terminal errors in your handler and handle them accordingly:
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#handle"} 
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/error-handling/pydantic-ai/tour-of-agents/app/error_handling.py#handle"}
 @agent_service.handler()
 async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
     try:
@@ -495,6 +520,41 @@ async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
         return f"The agent couldn't complete the request: {e.message}"
     return result.output
 ```
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+When agent tools use Restate Context actions like `ctx.run`, Restate automatically retries transient errors in these operations. This makes your tools resilient to network failures, database hiccups, and other temporary issues. For all operations that might suffer from transient errors, use Context actions.
+
+For example, wrapping a tool call in `restate_context().run_typed()` makes it durable with automatic retries:
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/error_handling.py#here"}
+@tool
+async def get_weather(city: WeatherRequest) -> WeatherResponse:
+    """Get the current weather for a given city."""
+    return await restate_context().run_typed(
+        "get weather", fetch_weather, RunOptions(max_attempts=3), req=city
+    )
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/error_handling.py" />
+
+For errors that should not be retried, raise a terminal error:
+
+```python
+from restate import TerminalError
+
+raise TerminalError("This tool is not allowed to run for this input.")
+```
+
+Restate retries tool executions until they succeed. Terminal errors propagate past LangChain's tool-error handling back to the service handler, where you can catch them:
+
+```python error_handling.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/error_handling.py#handle"}
+try:
+    result = await agent.ainvoke({"messages": req.message})
+except restate.TerminalError as e:
+    return f"The agent couldn't complete the request: {e.message}"
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/error_handling.py" />
 
 </GlobalTab>
 <GlobalTab title="Restate TS">
@@ -508,7 +568,7 @@ You can catch and handle terminal errors in your agent logic if needed.
 </GlobalTab>
 <GlobalTab title="Restate Py">
 
-```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"} 
+```python {"CODE_LOAD::python/src/ai/error_handling.py#terminal"}
 from restate import TerminalError
 
 raise TerminalError("This tool is not allowed to run for this input.")

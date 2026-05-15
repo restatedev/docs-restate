@@ -12,16 +12,20 @@ my_workflow = restate.Workflow("MyWorkflow")
 claude_service = restate.Service("ClaudeService")
 openai_service = restate.Service("OpenAIService")
 
+
 async def call1():
     await asyncio.sleep(1)
     return "call1"
+
 
 async def call2():
     await asyncio.sleep(1)
     return "call2"
 
+
 def call_external_api(query: str, some_id: str):
     pass
+
 
 def request_human_review(name, awakeable_id):
     pass
@@ -31,18 +35,20 @@ def request_human_review(name, awakeable_id):
 async def ask_claude(ctx: restate.Context, prompt: str) -> str:
     return "Claude response"
 
+
 @openai_service.handler()
 async def ask_openai(ctx: restate.Context, prompt: str) -> str:
     return "OpenAI response"
+
 
 @my_object.handler()
 async def my_object_handler(ctx: restate.ObjectContext, prompt: str) -> str:
     return "done"
 
+
 @my_service.handler()
 async def my_handler(ctx: restate.ObjectContext, prompt: str) -> str:
     return prompt
-
 
 
 @my_workflow.main()
@@ -86,19 +92,19 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     # <end_request_response_generic>
 
     # <start_delayed_messages>
-    ctx.service_send(
-        my_handler,
-        "Hi",
-        send_delay=timedelta(hours=5)
-    )
+    ctx.service_send(my_handler, "Hi", send_delay=timedelta(hours=5))
     # <end_delayed_messages>
 
     # <start_durable_steps>
     # Wrap non-deterministic code in ctx.run
-    result = await ctx.run_typed("my-side-effect", lambda: call_external_api("weather", "123"))
+    result = await ctx.run_typed(
+        "my-side-effect", lambda: call_external_api("weather", "123")
+    )
 
     # Or with typed version for better type safety
-    result = await ctx.run_typed("my-side-effect", call_external_api, query="weather", some_id="123")
+    result = await ctx.run_typed(
+        "my-side-effect", call_external_api, query="weather", some_id="123"
+    )
     # <end_durable_steps>
 
     # <start_durable_timers>
@@ -106,11 +112,7 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     await ctx.sleep(timedelta(seconds=30))
 
     # Schedule delayed call (different from sleep + send)
-    ctx.service_send(
-        my_handler,
-        "Hi",
-        send_delay=timedelta(hours=5)
-    )
+    ctx.service_send(my_handler, "Hi", send_delay=timedelta(hours=5))
     # <end_durable_timers>
 
     name = "Pete"
@@ -119,7 +121,12 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
     awakeable_id, promise = ctx.awakeable(type_hint=str)
 
     # Send ID to external system
-    await ctx.run_typed("request_human_review", request_human_review, name=name, awakeable_id=awakeable_id)
+    await ctx.run_typed(
+        "request_human_review",
+        request_human_review,
+        name=name,
+        awakeable_id=awakeable_id,
+    )
 
     # Wait for result
     review = await promise
@@ -151,13 +158,14 @@ async def run(ctx: restate.WorkflowContext, arg: str) -> str:
 
     # <start_select>
     # ❌ BAD
-    result1 = await asyncio.wait([call1(), call2()], return_when=asyncio.FIRST_COMPLETED)
+    result1 = await asyncio.wait(
+        [call1(), call2()], return_when=asyncio.FIRST_COMPLETED
+    )
 
     # ✅ GOOD
     confirmation = ctx.awakeable(type_hint=str)
     match await restate.select(
-        confirmation=confirmation[1],
-        timeout=ctx.sleep(timedelta(days=1))
+        confirmation=confirmation[1], timeout=ctx.sleep(timedelta(days=1))
     ):
         case ["confirmation", result]:
             print("Got confirmation:", result)

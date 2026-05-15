@@ -12,6 +12,7 @@ import SetupVercel from '/snippets/tour/ai/setup-vercel.mdx';
 import SetupOpenAI from '/snippets/tour/ai/setup-openai.mdx';
 import SetupGoogleADK from '/snippets/tour/ai/setup-google-adk.mdx';
 import SetupPydanticAI from '/snippets/tour/ai/setup-pydantic-ai.mdx';
+import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 
 Agent tools come in two flavors: **local tools** that run inside the agent handler, and **workflows exposed as tools** that run as separate services. This page focuses on deploying workflows as agent tools.
 
@@ -22,6 +23,7 @@ For local tools (wrapping tool logic in `ctx.run()` within the agent handler), s
 <GlobalTab title="OpenAI Agents" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Google ADK" icon={"/img/languages/python.svg"}/>
 <GlobalTab title="Pydantic AI" icon={"/img/languages/python.svg"}/>
+<GlobalTab title="LangChain" icon={"/img/languages/python.svg"}/>
 </GlobalTabs>
 
 ## Why expose workflows as tools?
@@ -59,7 +61,7 @@ export const humanApprovalWorkflow = restate.service({
   },
 });
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
 
 </GlobalTab>
 <GlobalTab title="OpenAI Agents">
@@ -134,6 +136,27 @@ async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/pydantic-ai/tour-of-agents/app/sub_workflow_agent.py" />
 
 </GlobalTab>
+<GlobalTab title="LangChain">
+
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/sub_workflow_agent.py#wf"} 
+# Sub-workflow service for human approval.
+human_approval_workflow = restate.Service("HumanApprovalWorkflow")
+
+
+@human_approval_workflow.handler()
+async def review(ctx: restate.Context, claim: InsuranceClaim) -> str:
+    """Request human approval for a claim and wait for response."""
+    approval_id, approval_promise = ctx.awakeable(type_hint=str)
+
+    await ctx.run_typed(
+        "Request review", request_human_review, claim=claim, awakeable_id=approval_id
+    )
+
+    return await approval_promise
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/sub_workflow_agent.py" />
+
+</GlobalTab>
 </GlobalTabs>
 
 The sub-workflow uses `ctx.awakeable()` to create a durable promise that can be resolved externally via HTTP. The agent suspends while waiting, freeing compute resources.
@@ -153,7 +176,7 @@ humanApproval: tool({
     ctx.serviceClient(humanApprovalWorkflow).requestApproval(claim),
 }),
 ```
-<GitHubLink url="https://github.com/restatedev/ai-examples/tree/ai-structure/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
+<GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/sub-workflow-agent.ts" />
 
 <Accordion title="Try out workflows as tools" icon="laptop">
 <SetupVercel />
@@ -268,6 +291,42 @@ async def human_approval(_run_ctx: RunContext[None], claim: InsuranceClaim) -> s
 
 <Accordion title="Try out workflows as tools" icon="laptop">
 <SetupPydanticAI />
+```bash
+uv run app/sub_workflow_agent.py
+```
+
+Register the agents with Restate:
+```bash
+restate deployments register http://localhost:9080 --force --yes # dev only: overrides previous registrations
+```
+
+Start a request that triggers the human approval sub-workflow:
+```bash
+curl localhost:8080/SubWorkflowClaimAgent/run/send \
+  --json '{"message": "Process my hospital bill of 3000USD for a broken leg."}'
+```
+
+In the UI, you can see the agent calling the sub-workflow and suspending while waiting for approval.
+
+Resolve the approval by executing the **curl request printed in the service logs**, similar to:
+```bash
+curl localhost:8080/restate/awakeables/sign_1M28aqY6ZfuwBmRnmyP/resolve --json 'true'
+```
+</Accordion>
+
+</GlobalTab>
+<GlobalTab title="LangChain">
+
+```python sub_workflow_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/sub_workflow_agent.py#here"} 
+@tool
+async def human_approval(claim: InsuranceClaim) -> str:
+    """Ask for human approval for high-value claims."""
+    return await restate_context().service_call(review, claim)
+```
+<GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/langchain-python/tour-of-agents/app/sub_workflow_agent.py" />
+
+<Accordion title="Try out workflows as tools" icon="laptop">
+<SetupLangChain />
 ```bash
 uv run app/sub_workflow_agent.py
 ```

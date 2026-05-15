@@ -18,13 +18,23 @@ const service = restate.service({
 
       // <start_resolve>
       // Complete with success data
-      ctx.resolveAwakeable(id, { approved: true, comments: "Looks good!" });
+      ctx.resolveAwakeable(id, "Looks good!");
       // <end_resolve>
 
       // <start_reject>
-      // Complete with error
+      // Complete with error (string message)
       ctx.rejectAwakeable(id, "This cannot be reviewed.");
       // <end_reject>
+
+      // <start_reject_terminal>
+      // Complete with a TerminalError — propagates error code and message to the waiter
+      ctx.rejectAwakeable(
+        id,
+        new restate.TerminalError("Review rejected: insufficient documentation", {
+          errorCode: 400,
+        })
+      );
+      // <end_reject_terminal>
     },
   },
 });

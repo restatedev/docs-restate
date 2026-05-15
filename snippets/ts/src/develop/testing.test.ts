@@ -24,6 +24,44 @@ describe("ExampleObject", () => {
   });
   // <end_setup>
 
+  // <start_always_replay>
+  describe("with alwaysReplay", () => {
+    let env: RestateTestEnvironment;
+
+    beforeAll(async () => {
+      env = await RestateTestEnvironment.start({
+        services: [router],
+        alwaysReplay: true,
+      });
+    }, 20_000);
+
+    afterAll(async () => env?.stop());
+
+    it("replays after every suspension", async () => {
+      // handler logic here
+    });
+  });
+  // <end_always_replay>
+
+  // <start_disable_retries>
+  describe("with disableRetries", () => {
+    let env: RestateTestEnvironment;
+
+    beforeAll(async () => {
+      env = await RestateTestEnvironment.start({
+        services: [router],
+        disableRetries: true,
+      });
+    }, 20_000);
+
+    afterAll(async () => env?.stop());
+
+    it("fails immediately without retry backoff", async () => {
+      // handler logic here
+    });
+  });
+  // <end_disable_retries>
+
   // <start_methods>
   it("Can call methods", async () => {
     const client = restateIngress.objectClient(router, "myKey");

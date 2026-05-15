@@ -1,3 +1,4 @@
+import * as http from "node:http";
 import * as http2 from "http2";
 
 const myService = restate.service({
@@ -29,6 +30,15 @@ const http2Handler = restate.createEndpointHandler({
 const httpServer = http2.createServer(http2Handler);
 httpServer.listen();
 // <end_custom_endpoint>
+
+// <start_http1_endpoint>
+const restateHandler = restate.createEndpointHandler({
+  services: [myService, myVirtualObject, myWorkflow],
+});
+// Works with both HTTP/1.1 and HTTP/2 — auto-detects per request
+const server = http.createServer(restateHandler);
+server.listen(9080);
+// <end_http1_endpoint>
 
 // <start_identity>
 restate.serve({

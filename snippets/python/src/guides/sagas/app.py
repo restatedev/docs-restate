@@ -46,7 +46,9 @@ async def run(ctx: restate.Context, req: BookingRequest):
     # <start_idempotency>
     payment_id = str(ctx.uuid())
     compensations.append(lambda: ctx.run_typed("refund", refund, payment_id=payment_id))
-    await ctx.run_typed("charge", charge, payment_info=payment_info, payment_id=payment_id)
+    await ctx.run_typed(
+        "charge", charge, payment_info=payment_info, payment_id=payment_id
+    )
     # <end_idempotency>
 
 

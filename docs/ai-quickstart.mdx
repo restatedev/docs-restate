@@ -7,12 +7,15 @@ icon: "robot"
 import {GitHubLink} from "/snippets/blocks/github-link.mdx";
 import InstallRestate from "/snippets/common/install-server-without-running-cli.mdx";
 import {GlobalTabs, GlobalTab} from "/snippets/components/global-tabs.jsx";
+import CodingAgentPlugin from "/snippets/quickstart/coding-agent-plugin.mdx";
 
 This guide takes you through building your first AI agent with Restate and popular AI SDKs.
 
 We will run a simple weather agent that can answer questions about the weather using durable execution to ensure reliability.
 
 <img src="/img/quickstart/agent-quickstart/weather-agent.png" alt="AI Agent Quickstart" noZoom/>
+
+<CodingAgentPlugin/>
 
 Select your AI SDK:
 
@@ -101,7 +104,7 @@ async function getWeather(ctx: restate.Context, city: string) {
 // AGENT
 const run = async (ctx: restate.Context, { prompt }: { prompt: string }) => {
   const model = wrapLanguageModel({
-    model: openai("gpt-4o"),
+    model: openai("gpt-5.4"),
     // Persist LLM responses
     middleware: durableCalls(ctx, { maxRetryAttempts: 3 }),
   });
@@ -586,7 +589,7 @@ class WeatherPrompt(BaseModel):
 
 # AGENT
 weather_agent = Agent(
-    "openai:gpt-4o-mini",
+    "openai:gpt-5.4",
     system_prompt="You are a helpful agent that provides weather updates.",
 )
 
@@ -649,6 +652,142 @@ Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate m
 </Step>
 </Steps>
 </GlobalTab>
+<GlobalTab title="LangChain" icon={"/img/languages/python.svg"}>
+
+<Info>
+**Prerequisites**:
+- Python >= v3.12
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
+</Info>
+
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template for [LangChain](https://www.langchain.com/) and Restate:
+```shell
+restate example python-langchain-template && cd python-langchain-template
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/langchain/langchain-python/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your OpenAI key and run the agent:
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+uv run .
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the agent service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`):
+
+<Frame>
+    <img src={"/img/ai/registration.png"} alt="Restate UI Playground"/>
+</Frame>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be accessible over the public internet so Restate can invoke it.
+If you want to develop with a local service, you can expose it using our [tunnel](/deploy/server/cloud/#registering-restate-services-with-your-environment) feature.
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/agent/run --json '{"message": "What is the weather in San Francisco?"}'
+```
+Output: `The weather in San Francisco is sunny and 23°C.`
+
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by attaching Restate's `RestateMiddleware` to the LangChain agent so every LLM call is journaled, and by using [Restate Context actions](/foundations/actions) (e.g. `restate_context().run_typed`) inside tools to make side effects durable:
+
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/template/agent.py"} 
+import restate
+from langchain.agents import create_agent
+from langchain_core.messages import AnyMessage
+from langchain_core.tools import tool
+from langchain.chat_models import init_chat_model
+from pydantic import BaseModel
+from restate.ext.langchain import RestateMiddleware, restate_context
+
+
+class WeatherPrompt(BaseModel):
+    message: str = "What is the weather in San Francisco?"
+
+
+# TOOL
+@tool
+async def get_weather(city: str) -> dict:
+    """Get the current weather for a given city."""
+
+    async def call_weather_api() -> dict:
+        return {"temperature": 23, "description": "Sunny and warm."}
+
+    # Durable step: results are journaled, so on retry we replay the value
+    # rather than re-hitting the API.
+    return await restate_context().run_typed(f"Get weather {city}", call_weather_api)
+
+
+# AGENT
+weather_agent = create_agent(
+    model=init_chat_model("openai:gpt-5.4"),
+    tools=[get_weather],
+    system_prompt="You are a helpful agent that provides weather updates.",
+    middleware=[RestateMiddleware()],
+)
+
+
+# AGENT SERVICE
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(_ctx: restate.Context, req: WeatherPrompt) -> str:
+    result = await weather_agent.ainvoke(
+        {"messages": [{"role": "user", "content": req.message}]}
+    )
+    return result["messages"][-1].content
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/langchain-python/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal.
+
+<Accordion title="See how a failing tool call is retried">
+Let the weather tool raise an exception by adding the following line to the `get_weather` function:
+```python
+raise Exception("[👻 SIMULATED] Fetching weather failed: Weather API down...")
+```
+
+You can see in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+Fix the problem, by removing the exception again.
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+</Accordion>
+
+**Next step:**
+Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate makes your AI agents resilient to failures.
+
+</Step>
+</Steps>
+</GlobalTab>
 <GlobalTab title="Restate TS" icon={"/img/languages/typescript.svg"}>
 
 <Info>
@@ -664,7 +803,7 @@ Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate m
 <Step title="Get the AI Agent template">
 Get the weather agent template using the [Restate TypeScript SDK](https://docs.restate.dev/develop/ts/overview) with a custom agent loop:
 ```shell
-restate example typescript-restate-agent && cd typescript-restate-agent
+restate example typescript-restate-agent-template && cd typescript-restate-agent-template
 npm install
 ```
 <GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/typescript-restate-only/template"}/>
@@ -847,7 +986,7 @@ Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate m
 <Step title="Get the AI Agent template">
 Get the weather agent template using the [Restate Python SDK](https://docs.restate.dev/develop/python/overview) with a custom agent loop:
 ```shell
-restate example python-restate-agent && cd python-restate-agent
+restate example python-restate-agent-template && cd python-restate-agent-template
 ```
 <GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/python-restate-only/template"}/>
 </Step>
@@ -949,7 +1088,7 @@ async def run(ctx: restate.Context, message: WeatherPrompt) -> str | None:
         # Call the LLM
         async def call_llm() -> Message:
             resp = await acompletion(
-                model="gpt-4o-mini", messages=messages, tools=TOOLS
+                model="gpt-5.4", messages=messages, tools=TOOLS
             )
             return resp.choices[0].message
 

@@ -1,0 +1,74 @@
+---
+title: "Hooks"
+description: "Intercept handler execution for observability, tracing, and cross-cutting concerns."
+icon: "plug"
+---
+
+Hooks let you intercept handler execution and `ctx.run()` closures at the endpoint, service, or handler level. They are useful for integrating observability libraries, adding custom logging, or implementing other cross-cutting concerns.
+
+## How hooks work
+
+A hook is a `HooksProvider` function that receives the invocation request context and returns interceptors:
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#basic_hook"} 
+const loggingHook: HooksProvider = (ctx) => ({
+  interceptor: {
+    handler: async (next) => {
+      console.log(`Handler starting: ${ctx.request.target}`);
+      try {
+        await next();
+        console.log(`Handler completed: ${ctx.request.target}`);
+      } catch (e) {
+        console.log(`Handler error: ${ctx.request.target}: ${e}`);
+        throw e;
+      }
+    },
+    run: async (name, next) => {
+      console.log(`  Run "${name}" starting`);
+      try {
+        await next();
+        console.log(`  Run "${name}" completed`);
+      } catch (e) {
+        console.log(`  Run "${name}" error: ${e}`);
+        throw e;
+      }
+    },
+  },
+});
+```
+
+The `HooksProvider` receives a context with `ctx.request`, which includes:
+- `ctx.request.target` — the invocation target (e.g. `MyService/myHandler`)
+- `ctx.request.id` — the invocation ID
+
+<Info>
+The `handler` interceptor fires on every attempt. The `run` interceptor only fires when a `ctx.run()` closure executes. If the result is already in the journal (replay), the closure and its interceptor are skipped.
+</Info>
+
+<Warning>
+Always rethrow errors from interceptors. Swallowing an error changes the invocation outcome.
+</Warning>
+
+## Registering hooks
+
+You can register hooks at the service level. They apply to all handlers in that service.
+
+```ts {"CODE_LOAD::ts/src/develop/hooks.ts#service_hook"} 
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: async (ctx: restate.Context, name: string) => {
+      return `Hello ${name}!`;
+    },
+  },
+  options: {
+    hooks: [loggingHook],
+  },
+});
+```
+
+You can register multiple hooks. They execute in the order they are provided.
+
+## OpenTelemetry integration
+
+See the [tracing page](/develop/ts/tracing) to learn how to use hooks for OpenTelemetry integration.

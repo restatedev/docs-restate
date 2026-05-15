@@ -24,6 +24,7 @@ This is a **Mintlify documentation site** for Restate, a platform for building r
 
 **Documentation Structure:**
 - `/docs/` - Main documentation files (MDX format)
+- `/restate-plugin` - Restate Coding Agent plugin for Restate Community
 - `/snippets/` - Code examples in multiple languages (TypeScript, Java, Kotlin, Python, Go, Rust)
 - `docs.json` - Mintlify configuration defining navigation and site structure
 
