@@ -1,0 +1,122 @@
+---
+title: "Installation"
+sidebarTitle: "Installation"
+description: "How a Restate Cloud BYOC deployment is set up in your cloud account."
+---
+
+A BYOC region is a Restate Cloud data plane running in your cloud account. Setting one up is a collaborative process between you and Restate.
+
+## Requesting a BYOC region
+
+To get started, contact Restate with:
+
+- **Cloud provider**: AWS, Azure, or GCP
+- **Region**: the cloud provider region where you want the data plane deployed (e.g. `us-west-2`, `eu-west-1`, `eastus2`)
+
+Restate will provide:
+
+- **Foundation stack deployment instructions** — a CloudFormation quick-create URL (AWS), ARM template link (Azure), or equivalent for your provider
+- **Region secret key** — a one-time token that authenticates the deployment agent with Restate's control plane
+
+## Deploying the foundation
+
+The foundation is the only layer you deploy manually. It creates the networking, secrets store, and deployment agent in your account. The remaining layers are provisioned automatically.
+
+<Tabs>
+  <Tab title="AWS">
+    Restate provides a **CloudFormation quick-create link** that pre-fills the template URL and stack name. The link looks like this:
+
+    ```
+    https://<region>.console.aws.amazon.com/cloudformation/home
+      ?region=<region>
+      #/stacks/quickcreate
+        ?templateUrl=<template-url>
+        &stackName=restate-byoc-<your-name>
+    ```
+
+    Opening this link takes you directly to the CloudFormation "Quick create stack" page.
+
+    <Steps>
+      <Step title="Review the template">
+        The template URL is pre-filled. You can expand **View template** to inspect the resources that will be created.
+
+        The **stack name** is customizable — choose something meaningful to your team, such as `restate-byoc-production` or `restate-byoc-staging`.
+
+        <Frame>
+          <img src="/img/byoc/aws-quick-create-start.png" alt="CloudFormation Quick create stack form showing the pre-filled template URL and stack name" />
+        </Frame>
+      </Step>
+
+      <Step title="Enter the region secret key">
+        Under **Application Secrets**, paste the **region secret key** provided by Restate. This key is used once to authenticate the deployment agent with Restate's control plane.
+
+        Leave the **Access Permissions** defaults as-is.
+
+        <Frame>
+          <img src="/img/byoc/aws-quick-create-params.png" alt="CloudFormation parameters showing the region token input and access permission defaults" />
+        </Frame>
+      </Step>
+
+      <Step title="Acknowledge capabilities and create">
+        At the bottom of the page, check both IAM capability acknowledgement boxes. These are required because the template creates IAM roles for the deployment agent.
+
+        Click **Create stack**.
+
+        <Frame>
+          <img src="/img/byoc/aws-quick-create-capabilities.png" alt="CloudFormation capabilities checkboxes and Create stack button" />
+        </Frame>
+      </Step>
+    </Steps>
+
+    The stack creates:
+    - A VPC with public and private subnets across availability zones
+    - A secrets store (AWS Secrets Manager) for the region secret key
+    - The deployment agent (an EC2 Auto Scaling Group) with scoped IAM roles
+  </Tab>
+
+  <Tab title="Azure">
+    Restate provides an **ARM template deployment link** that guides you through a similar process in the Azure Portal.
+
+    The template creates:
+    - A VNet with public and private subnets
+    - An Azure Key Vault for the region secret key
+    - The deployment agent (a Virtual Machine Scale Set) with scoped Azure role assignments
+
+    <Info>
+      Azure installation details will be documented here as the guided onboarding flow is finalized. Reach out to Restate for current instructions.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Layer 2: Infrastructure
+
+Once the foundation is in place, the deployment agent automatically provisions:
+
+- A managed Kubernetes cluster (EKS on AWS, AKS on Azure)
+- A container registry for Restate component images
+- Certificate management (cert-manager with DNS validation)
+- Service mesh (Linkerd) for in-cluster mTLS
+- Network policies for workload isolation
+
+This step requires no action from you. The deployment agent pulls provisioning jobs from Restate's control plane and applies them using Terraform within your account.
+
+## Layer 3: Application
+
+After the infrastructure is ready, the following Restate data plane components are deployed into the cluster:
+
+- **Ingress proxy** — routes traffic from your services to Restate environments
+- **Tunnel** — enables connectivity between Restate and services in other VPCs or networks
+- **Restate operator** — manages Restate environment lifecycle (create, update, scale, delete)
+- **Monitoring** — metrics collection and log aggregation
+
+Once all three layers are deployed successfully, your BYOC region is activated and you can create Restate environments through the Restate Cloud console.
+
+## Ongoing updates
+
+After the initial deployment, Restate pushes updates to the infrastructure and application layers through the same deployment agent. Updates include:
+
+- Kubernetes version upgrades (coordinated with you in advance)
+- Restate component releases
+- Security patches and node OS updates (automated via drift detection)
+
+You do not need to re-deploy the foundation template for routine updates. Template updates are only needed when the foundation layer itself changes, which is rare.
