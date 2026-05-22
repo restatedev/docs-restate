@@ -1,4 +1,4 @@
-// Custom tab compnent which allows syncing tabs with the same title across different instances
+// Custom tab compnent which allows syncing tabs with the same id (or title, if id is not set) across different instances
 export const GlobalTabs = ({ children, className = '' }) => {
     const [activeTab, setActiveTab] = useState(0)
 
@@ -6,11 +6,13 @@ export const GlobalTabs = ({ children, className = '' }) => {
         child.type && child.type.name === 'GlobalTab'
     )
 
+    const tabKey = (tab) => tab.props.id ?? tab.props.title
+
     // Load saved tab from localStorage on mount
     useEffect(() => {
         const savedLanguage = localStorage.getItem('language')
         if (savedLanguage) {
-            const matchingIndex = tabs.findIndex(tab => tab.props.title === savedLanguage)
+            const matchingIndex = tabs.findIndex(tab => tabKey(tab) === savedLanguage)
             if (matchingIndex !== -1) {
                 setActiveTab(matchingIndex)
             }
@@ -19,8 +21,8 @@ export const GlobalTabs = ({ children, className = '' }) => {
 
     useEffect(() => {
         const handleGlobalTabChange = (event) => {
-            const targetTitle = event.detail.title
-            const matchingIndex = tabs.findIndex(tab => tab.props.title === targetTitle)
+            const targetKey = event.detail.key
+            const matchingIndex = tabs.findIndex(tab => tabKey(tab) === targetKey)
             if (matchingIndex !== -1 && matchingIndex !== activeTab) {
                 setActiveTab(matchingIndex)
             }
@@ -34,12 +36,12 @@ export const GlobalTabs = ({ children, className = '' }) => {
         setActiveTab(index)
 
         // Save selected tab to localStorage
-        const title = tabs[index].props.title
-        localStorage.setItem('language', title)
+        const key = tabKey(tabs[index])
+        localStorage.setItem('language', key)
 
-        // Dispatch global event to sync all tabs with the same title
+        // Dispatch global event to sync all tabs with the same key
         window.dispatchEvent(new CustomEvent('globalTabChange', {
-            detail: { title }
+            detail: { key }
         }))
     }
 
@@ -72,10 +74,10 @@ export const GlobalTabs = ({ children, className = '' }) => {
     )
 }
 
-export const GlobalTab = ({ title, icon, children }) => {
+export const GlobalTab = ({ title, id, icon, children }) => {
     return <div>{children}</div>
 }
 
-export const HiddenGlobalTab = ({ title, children }) => {
+export const HiddenGlobalTab = ({ title, id, children }) => {
 
 }
