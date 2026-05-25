@@ -44,12 +44,12 @@ When a new user message arrives:
 
 ## Example
 
-<GlobalTabs className={"hidden-tabs"}>
-<GlobalTab title="Any LLM SDK" id="any-llm-sdk-ts">
-
 ### 1. Interrupt on every new message
 
-The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel` sends a durable cancellation signal and `ctx.attach` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
+The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. The cancellation API sends a durable cancellation signal and the attach API blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome.
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Any LLM SDK" id="any-llm-sdk-ts">
 
 ```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#message_handler"} 
 /** Receive a user message. A new message interrupts any ongoing task. */
@@ -86,9 +86,49 @@ message: restate.createObjectHandler(
 ),
 ```
 
+</GlobalTab>
+<GlobalTab title="Any LLM SDK" id="any-llm-sdk-py">
+
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#message_handler"} 
+@agent.handler()
+async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> None:
+    """Receive a user message. A new message interrupts any ongoing task."""
+
+    # (1) Access state of the Virtual Object
+    messages = await ctx.get("messages", type_hint=list[dict]) or []
+    messages.append({"role": "user", "content": msg.content})
+
+    # (2) Interrupt the ongoing task and wait for its cleanup to finish.
+    # The cancelled invocation finishes with a TerminalError; swallow it.
+    current_task_id = await ctx.get("current_task_id", type_hint=str)
+    if current_task_id:
+        ctx.cancel_invocation(current_task_id)
+        done: RestateDurableFuture[None] = ctx.attach_invocation(current_task_id)
+        try:
+            await restate.select(done=done, timed_out=ctx.sleep(timedelta(seconds=30)))
+        except TerminalError:
+            pass
+
+    # (3) Start executing the new task
+    handle = ctx.service_send(
+        run_task, arg=TaskInput(agent_id=ctx.key(), messages=messages)
+    )
+
+    # (4) Store the handle to the task and persist the updated history
+    invocation_id = await handle.invocation_id()
+    ctx.set("current_task_id", invocation_id)
+    ctx.set("messages", messages)
+```
+
+</GlobalTab>
+</GlobalTabs>
+
 ### 2. Catch the cancellation inside the task
 
-On the other side, the cancellation surfaces as a `CancelledError` at the next `ctx.run`. A `try/catch` around the work lets you run durable cleanup before re-raising:
+On the other side, the cancellation surfaces as a terminal error at the next Restate await. A `try/catch` around the work lets you run durable cleanup before re-raising.
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Any LLM SDK" id="any-llm-sdk-ts">
 
 ```typescript agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts#run_task"} 
 /**
@@ -133,6 +173,60 @@ runTask: async (ctx: Context, inp: TaskInput) => {
   }
 },
 ```
+
+</GlobalTab>
+<GlobalTab title="Any LLM SDK" id="any-llm-sdk-py">
+
+```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#run_task"} 
+@task_service.handler()
+async def run_task(ctx: restate.Context, inp: TaskInput) -> None:
+    """Long-running coding task. If interrupted, the cancellation surfaces
+    as TerminalError at the next Restate await — we catch it, run durable
+    cleanup, and re-raise so Restate records the invocation as cancelled."""
+    try:
+        # Three sequential LLM calls. Each is a Restate await, so a
+        # cancellation can land between any of them and unwind cleanly.
+        convo = list(inp.messages)
+
+        plan = await ctx.run_typed(
+            "Plan", llm_call, messages=convo, prompt="Outline a high-level plan."
+        )
+        convo.append({"role": "assistant", "content": plan.content or ""})
+
+        draft = await ctx.run_typed(
+            "Draft", llm_call, messages=convo, prompt="Write a draft implementation."
+        )
+        convo.append({"role": "assistant", "content": draft.content or ""})
+
+        polish = await ctx.run_typed(
+            "Polish", llm_call, messages=convo, prompt="Polish it into a final version."
+        )
+
+        ctx.object_send(
+            append_message,
+            key=inp.agent_id,
+            arg=ChatMessage(content=polish.content or ""),
+        )
+    except TerminalError as err:
+        # Cancellations surface as TerminalError with status_code == 409.
+        content = (
+            "[task cleanup ran after cancellation]"
+            if err.status_code == 409
+            else "[task cleanup ran after error]"
+        )
+        ctx.object_send(
+            append_message,
+            key=inp.agent_id,
+            arg=ChatMessage(content=content),
+        )
+        raise
+```
+
+</GlobalTab>
+</GlobalTabs>
+
+<GlobalTabs className={"hidden-tabs"}>
+<GlobalTab title="Any LLM SDK" id="any-llm-sdk-ts">
 
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/typescript-restate-only/examples/interrupt-regenerate/src/agent.ts" />
 
@@ -185,90 +279,6 @@ Open the Restate UI at `http://localhost:9070` to inspect the invocations — th
 
 </GlobalTab>
 <GlobalTab title="Any LLM SDK" id="any-llm-sdk-py">
-
-### 1. Interrupt on every new message
-
-The orchestrator's `message` handler loads the conversation history, cancels any in-flight task, waits for its cleanup to finish, then dispatches a fresh task and stores its invocation ID for the next interruption. `ctx.cancel_invocation` sends a durable cancellation signal and `ctx.attach_invocation` blocks until the target has finished its cleanup; the cancelled invocation terminating with a `TerminalError` is the expected outcome:
-
-```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#message_handler"} 
-@agent.handler()
-async def message(ctx: restate.ObjectContext, msg: ChatMessage) -> None:
-    """Receive a user message. A new message interrupts any ongoing task."""
-
-    # (1) Access state of the Virtual Object
-    messages = await ctx.get("messages", type_hint=list[dict]) or []
-    messages.append({"role": "user", "content": msg.content})
-
-    # (2) Interrupt the ongoing task and wait for its cleanup to finish.
-    # The cancelled invocation finishes with a TerminalError; swallow it.
-    current_task_id = await ctx.get("current_task_id", type_hint=str)
-    if current_task_id:
-        ctx.cancel_invocation(current_task_id)
-        done: RestateDurableFuture[None] = ctx.attach_invocation(current_task_id)
-        try:
-            await restate.select(done=done, timed_out=ctx.sleep(timedelta(seconds=30)))
-        except TerminalError:
-            pass
-
-    # (3) Start executing the new task
-    handle = ctx.service_send(
-        run_task, arg=TaskInput(agent_id=ctx.key(), messages=messages)
-    )
-
-    # (4) Store the handle to the task and persist the updated history
-    invocation_id = await handle.invocation_id()
-    ctx.set("current_task_id", invocation_id)
-    ctx.set("messages", messages)
-```
-
-### 2. Catch the cancellation inside the task
-
-On the other side, the cancellation surfaces as a `TerminalError` (status `409`) at the next `ctx.run_typed`. A `try/except` around the work lets you run durable cleanup before re-raising:
-
-```python agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/examples/interrupt-regenerate/agent.py#run_task"} 
-@task_service.handler()
-async def run_task(ctx: restate.Context, inp: TaskInput) -> None:
-    """Long-running coding task. If interrupted, the cancellation surfaces
-    as TerminalError at the next Restate await — we catch it, run durable
-    cleanup, and re-raise so Restate records the invocation as cancelled."""
-    try:
-        # Three sequential LLM calls. Each is a Restate await, so a
-        # cancellation can land between any of them and unwind cleanly.
-        convo = list(inp.messages)
-
-        plan = await ctx.run_typed(
-            "Plan", llm_call, messages=convo, prompt="Outline a high-level plan."
-        )
-        convo.append({"role": "assistant", "content": plan.content or ""})
-
-        draft = await ctx.run_typed(
-            "Draft", llm_call, messages=convo, prompt="Write a draft implementation."
-        )
-        convo.append({"role": "assistant", "content": draft.content or ""})
-
-        polish = await ctx.run_typed(
-            "Polish", llm_call, messages=convo, prompt="Polish it into a final version."
-        )
-
-        ctx.object_send(
-            append_message,
-            key=inp.agent_id,
-            arg=ChatMessage(content=polish.content or ""),
-        )
-    except TerminalError as err:
-        # Cancellations surface as TerminalError with status_code == 409.
-        content = (
-            "[task cleanup ran after cancellation]"
-            if err.status_code == 409
-            else "[task cleanup ran after error]"
-        )
-        ctx.object_send(
-            append_message,
-            key=inp.agent_id,
-            arg=ChatMessage(content=content),
-        )
-        raise
-```
 
 <GitHubLink url="https://github.com/restatedev/ai-examples/blob/main/python-restate-only/examples/interrupt-regenerate/agent.py" />
 
