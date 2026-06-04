@@ -1,0 +1,149 @@
+---
+title: "Google Cloud Run"
+description: "Run your Restate services on Google Cloud Run with native OIDC authentication"
+---
+
+Deploy your Restate services as containers on Google Cloud Run. Restate
+can invoke private Cloud Run services natively by minting short-lived,
+Google-signed OIDC ID tokens for each discovery and invocation request.
+
+## Set up your service on Cloud Run
+
+Package your Restate service as a container image and deploy it to Cloud
+Run following the [Cloud Run documentation](https://cloud.google.com/run/docs/deploying).
+A typical Restate service exposes its handler on port `9080`; configure
+the Cloud Run service to forward traffic to whichever port your container
+listens on.
+
+For a private Cloud Run service, leave the default access policy in
+place (no unauthenticated invocations). Restate authenticates to the
+service using a Google OIDC ID token, which Cloud Run validates before
+forwarding the request to your container.
+
+## Register the service with native authentication
+
+When registering an HTTP deployment, opt into native Google OIDC
+authentication with `--gcp-id-token`. Restate mints a Google-signed ID
+token for every discovery and invocation request and attaches it as
+`X-Serverless-Authorization: Bearer <token>`. Cloud Run validates this
+header in precedence over `Authorization` and strips it before forwarding
+the request to your container, so any `Authorization` value you set via
+`--extra-header` reaches the workload unchanged.
+
+```shell
+restate deployments register https://svc-abc-uc.a.run.app --gcp-id-token
+```
+
+To call the Cloud Run service as a specific service account, impersonate
+it via the IAM Credentials `generateIdToken` API:
+
+```shell
+restate deployments register https://svc-abc-uc.a.run.app \
+  --gcp-impersonate-service-account caller@my-proj.iam.gserviceaccount.com
+```
+
+`--gcp-impersonate-service-account` implies `--gcp-id-token`.
+
+### Custom domains and audience overrides
+
+By default, Restate derives the OIDC `aud` claim from the deployment URL
+origin (scheme, host, and optional port). If your Cloud Run service sits
+behind a custom domain, a load balancer, or a traffic tag, set the
+audience explicitly to the canonical Cloud Run service URL:
+
+```shell
+restate deployments register https://api.acme.com/svc \
+  --gcp-audience https://svc-abc-uc.a.run.app
+```
+
+`--gcp-audience` also implies `--gcp-id-token`.
+
+### Updating or removing authentication
+
+Authentication configuration is set when the deployment is registered.
+To rotate the impersonation target, change the audience, or remove
+authentication entirely, re-register with `--force`:
+
+```shell
+# Change the impersonation target:
+restate deployments register https://svc-abc-uc.a.run.app --force \
+  --gcp-impersonate-service-account new-caller@my-proj.iam.gserviceaccount.com
+
+# Remove authentication:
+restate deployments register https://svc-abc-uc.a.run.app --force
+```
+
+This mirrors how the [Lambda `--assume-role-arn`](/services/deploy/lambda#register-the-service-to-restate)
+flow is updated for AWS deployments.
+
+## Credentials available to Restate
+
+Restate discovers credentials through Google's [Application Default
+Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials)
+chain. Not every ADC source can mint an OIDC ID token directly; the table
+below summarizes what works.
+
+| ADC source | Ambient `--gcp-id-token` | With `--gcp-impersonate-service-account` |
+|------------|--------------------------|------------------------------------------|
+| GCE / GKE / Cloud Run metadata server | Supported | Supported |
+| Service-account JSON key file | Supported | Supported |
+| Workload Identity Federation (`external_account`) | Not supported | Supported |
+| User credentials from `gcloud auth application-default login` (`authorized_user`) | Not supported | Supported |
+
+When the ambient identity cannot mint ID tokens for arbitrary audiences,
+pair it with `--gcp-impersonate-service-account` so Restate calls the IAM
+Credentials `generateIdToken` API on a target service account that the
+ambient identity is authorized to impersonate.
+
+### IAM roles
+
+The principal whose identity ends up in the minted token must hold:
+
+- `roles/run.invoker` on the target Cloud Run service, so that Cloud
+  Run IAM accepts the request.
+- `roles/iam.serviceAccountOpenIdTokenCreator` on the impersonation
+  target, when `--gcp-impersonate-service-account` is used.
+
+### Self-hosted Restate
+
+For self-hosted Restate calling private Cloud Run services, ensure one
+of the following:
+
+- The Restate process can reach Google's metadata server (typical on
+  GCE, GKE, or Cloud Run hosts), or
+- `GOOGLE_APPLICATION_CREDENTIALS` points to a service-account JSON key
+  file readable by the Restate user.
+
+Restate does not contact any Google API or read any ADC source until the
+first deployment with native authentication enabled is observed.
+
+### Local development
+
+For local development, run `gcloud auth application-default login` to
+populate ADC. This is distinct from `gcloud auth login`, which only
+populates user credentials for the `gcloud` tool itself.
+
+Authorized-user ADC credentials cannot mint ID tokens for arbitrary
+audiences without impersonation, so pair them with
+`--gcp-impersonate-service-account` for the dev flow.
+
+## Token caching and rotation
+
+Tokens are minted on demand and cached per
+`(impersonate_service_account, audience)` pair on the invoker. Cached
+tokens are evicted 60 seconds before expiry so that every outbound
+request carries a token with sufficient lifetime. Discovery requests do
+not cache tokens; a fresh token is minted for each discovery call,
+matching the existing Lambda assume-role behavior.
+
+## Comparison with Lambda authentication
+
+| | AWS Lambda | Google Cloud Run |
+|---|---|---|
+| Mechanism | STS `AssumeRole` | Google OIDC ID token |
+| Credential flag | `--assume-role-arn <ROLE_ARN>` | `--gcp-id-token` (optionally with `--gcp-impersonate-service-account` and `--gcp-audience`) |
+| Header sent to target | Signed AWS SigV4 invoke | `X-Serverless-Authorization: Bearer <token>` |
+| Target validation | Lambda invoke IAM | Cloud Run IAM (validates token, then strips header) |
+
+See the [AWS Lambda deployment guide](/services/deploy/lambda) for the
+parallel AWS flow.
