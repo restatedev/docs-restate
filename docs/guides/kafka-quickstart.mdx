@@ -73,20 +73,18 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
 </Step>
 <Step title="Running Restate Server">
 
-    Now, let's start the Restate Server and let it know about the Kafka cluster via the configuration file.
-
-    Store the following configuration in a file named `restate.toml`:
-
-    ```toml restate.toml
-    [[ingress.kafka-clusters]]
-    name = "my-cluster"
-    brokers = ["PLAINTEXT://localhost:9092"]
-    ```
-
-    Start the Restate Server from the same location as the configuration file:
+    Now, let's start the Restate Server:
 
     ```shell
-    restate-server --config-file restate.toml
+    restate-server
+    ```
+</Step>
+<Step title="Register the Kafka cluster">
+
+    Let the Restate Server know about the Kafka cluster by registering it via the CLI:
+
+    ```shell
+    restate kafka-clusters create my-cluster bootstrap.servers=localhost:9092
     ```
 </Step>
 <Step title="Register the service">
@@ -101,19 +99,15 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
 
     Now, we need to make Restate subscribe to the Kafka topics and tell it where it should push the events that arrive on the topic.
 
-    Execute the following curl command to create a subscription, and invoke the handler for each event:
+    Execute the following command to create a subscription, and invoke the handler for each event:
 
     ```shell
-    curl localhost:9070/subscriptions --json '{
-        "source": "kafka://my-cluster/greetings",
-        "sink": "service://Greeter/greet",
-        "options": {"auto.offset.reset": "earliest"}
-    }'
+    restate subscriptions create kafka://my-cluster/greetings service://Greeter/greet auto.offset.reset=earliest
     ```
 
     For Go, you need to capitalize the handler name: `service://Greeter/Greet`.
 
-    This curl command calls the Admin API of the Restate Server and tells it to invoke the `greet` handler of the `Greeter` service for each event that arrives on the `greetings` topic in the `my-cluster` Kafka cluster.
+    This command tells Restate to invoke the `greet` handler of the `Greeter` service for each event that arrives on the `greetings` topic in the `my-cluster` Kafka cluster.
 </Step>
 <Step title="Invoke the handler by publishing an event">
 
@@ -150,28 +144,16 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
 </Step>
 <Step title="Cleanup: removing the subscription">
 
-    You can see the subscriptions that are active via the Admin API:
+    You can see the subscriptions that are active via the CLI:
 
     ```shell
-    curl localhost:9070/subscriptions
+    restate subscriptions list
     ```
 
     Example output:
-    ```json
-    {
-        "subscriptions": [
-            {
-                "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
-                "source": "kafka://my-cluster/my-topic",
-                "sink": "service://Greeter/greet",
-                "options": {
-                    "auto.offset.reset": "earliest",
-                    "client.id": "restate",
-                    "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
-                }
-            }
-        ]
-    }
+    ```text
+     ID                           SOURCE                        SINK                     OPTIONS
+     sub_11XHoawrCiWtv8kzhEyGtsR  kafka://my-cluster/greetings  service://Greeter/greet  3
     ```
 
     As you can see, subscriptions have an ID that starts with `sub_`.
@@ -179,7 +161,7 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
     Now you can use the subscription ID to delete the subscription:
 
     ```shell
-    curl -X DELETE localhost:9070/subscriptions/sub_11XHoawrCiWtv8kzhEyGtsR
+    restate subscriptions delete sub_11XHoawrCiWtv8kzhEyGtsR
     ```
 </Step>
 </Steps>
