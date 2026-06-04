@@ -17,8 +17,7 @@ public class ErrorHandling {
   public void errorHandlingWithMetadata(Context ctx, String correlationId) {
 
     // <start_metadata>
-    throw new TerminalException(
-        "Something went wrong", Map.of("correlationId", correlationId));
+    throw new TerminalException("Something went wrong", Map.of("correlationId", correlationId));
     // <end_metadata>
 
   }

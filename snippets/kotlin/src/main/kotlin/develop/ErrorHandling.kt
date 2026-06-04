@@ -12,8 +12,7 @@ class ErrorHandling {
 
   fun errorHandlingWithMetadata(ctx: Context, correlationId: String) {
     // <start_metadata>
-    throw TerminalException(
-        "Something went wrong", mapOf("correlationId" to correlationId))
+    throw TerminalException("Something went wrong", mapOf("correlationId" to correlationId))
     // <end_metadata>
   }
 
