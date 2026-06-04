@@ -24,6 +24,9 @@ dependencies {
     implementation(libs.restate.sdk.lambda)
     implementation(libs.restate.sdk.request.identity)
     implementation(libs.restate.sdk.testing)
+    implementation(libs.restate.sdk.interceptor.opentelemetry)
+    implementation(libs.restate.sdk.interceptor.micrometer)
+    implementation(libs.opentelemetry.sdk)
 
     implementation(libs.jackson.parameter.names)
     implementation(libs.jackson.datatype.jdk8)

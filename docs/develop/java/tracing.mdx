@@ -1,0 +1,201 @@
+---
+title: "Tracing"
+description: "Spring Boot, OpenTelemetry and Micrometer integration for distributed tracing."
+icon: "magnifying-glass"
+---
+
+The Java/Kotlin SDK provides ready-made tracing integrations for the common tools in the Java ecosystem:
+
+- If you're using Spring Boot, the usual Spring Boot actuator configuration is required; no additional setup is needed.
+- For the vanilla SDK:
+    - **`dev.restate:sdk-interceptor-opentelemetry`** — OpenTelemetry tracing, directly using the OpenTelemetry SDK.
+    - **`dev.restate:sdk-interceptor-micrometer`** — Micrometer Observation tracing, using the Micrometer bridge.
+
+Both integrations produce the same spans:
+
+- One `attempt <target>` span per handler invocation attempt, linked to the parent trace context propagated from Restate via W3C Trace Context headers.
+- One `run (<name>)` child span per `ctx.run(name, ...)` block that actually executes (replayed runs are skipped).
+
+## Using Spring Boot
+
+When using the Spring Boot starters, tracing is configured automatically if an `ObservationRegistry` bean is present (Micrometer-based). No extra registration is needed.
+
+Add the standard Spring Boot tracing dependencies:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+
+<!-- Required for Restate Client instrumentation, not shipped by spring-boot-actuator -->
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-java11</artifactId>
+</dependency>
+```
+
+Then add an exporter. For the OTLP exporter (e.g. Jaeger):
+
+```xml
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-tracing-bridge-otel</artifactId>
+</dependency>
+<dependency>
+    <groupId>io.opentelemetry</groupId>
+    <artifactId>opentelemetry-exporter-otlp</artifactId>
+</dependency>
+```
+
+Configure the endpoint in `application.properties`:
+
+```properties
+# Sample every request (tune for production)
+management.tracing.sampling.probability=1.0
+# OTLP gRPC endpoint (e.g. Jaeger on 4317)
+management.otlp.tracing.endpoint=http://localhost:4317
+management.otlp.tracing.transport=grpc
+```
+
+For more details on supported exporters, see the [Spring Boot tracing documentation](https://docs.spring.io/spring-boot/reference/actuator/tracing.html).
+
+## Using OpenTelemetry (vanilla SDK)
+
+Add the dependency:
+
+<CodeGroup>
+```kotlin Gradle (Kotlin DSL)
+implementation("dev.restate:sdk-interceptor-opentelemetry:2.8.0")
+```
+```xml Maven
+<dependency>
+    <groupId>dev.restate</groupId>
+    <artifactId>sdk-interceptor-opentelemetry</artifactId>
+    <version>2.8.0</version>
+</dependency>
+```
+</CodeGroup>
+
+Then set up a [`GlobalOpenTelemetry`](https://opentelemetry.io/docs/languages/java/) instance. That's it: the dependency picks up the global instance automatically, **no further setup is needed**.
+
+<Tip>
+The easiest way to set up `GlobalOpenTelemetry` is to use the [OpenTelemetry autoconfigure SDK](https://github.com/open-telemetry/opentelemetry-java-examples/blob/main/autoconfigure/src/main/java/io/opentelemetry/example/autoconfigure/AutoConfigExample.java).
+</Tip>
+
+### Using a specific `OpenTelemetry` instance
+
+If you want to use a specific `OpenTelemetry` instance instead of using the `GlobalOpenTelemetry`, you need to register the factory on your endpoint manually:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/TracingOtel.java#here"} 
+import dev.restate.sdk.HandlerRunner;
+import dev.restate.sdk.endpoint.Endpoint;
+import dev.restate.sdk.interceptor.opentelemetry.OpenTelemetryInterceptorFactory;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+
+class MyOtelApp {
+  public static void main(String[] args) {
+    OpenTelemetry openTelemetry = OpenTelemetrySdk.builder().build(); // your OpenTelemetry instance
+    var otel = new OpenTelemetryInterceptorFactory(openTelemetry);
+
+    var endpoint =
+        Endpoint.bind(
+                new MyService(),
+                new HandlerRunner.Options()
+                    .addHandlerInterceptorFactory(otel)
+                    .addRunInterceptorFactory(otel))
+            .build();
+  }
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/TracingOtel.kt#here"} 
+import dev.restate.sdk.interceptor.opentelemetry.kotlin.OpenTelemetryInterceptorFactory
+import dev.restate.sdk.kotlin.HandlerRunner
+import dev.restate.sdk.kotlin.endpoint.endpoint
+import io.opentelemetry.api.OpenTelemetry
+import io.opentelemetry.sdk.OpenTelemetrySdk
+
+fun otelTracedEndpoint() {
+  val openTelemetry: OpenTelemetry =
+      OpenTelemetrySdk.builder().build() // your OpenTelemetry instance
+  val otel = OpenTelemetryInterceptorFactory(openTelemetry)
+
+  val endpoint = endpoint {
+    bind(
+        MyService(),
+        HandlerRunner.Options(
+            handlerInterceptorFactories = mutableListOf(otel),
+            runInterceptorFactories = mutableListOf(otel),
+        ),
+    )
+  }
+}
+```
+</CodeGroup>
+
+## Using Micrometer (vanilla SDK)
+
+Add the dependency:
+
+<CodeGroup>
+```kotlin Gradle (Kotlin DSL)
+implementation("dev.restate:sdk-interceptor-micrometer:2.8.0")
+```
+```xml Maven
+<dependency>
+    <groupId>dev.restate</groupId>
+    <artifactId>sdk-interceptor-micrometer</artifactId>
+    <version>2.8.0</version>
+</dependency>
+```
+</CodeGroup>
+
+Set up an `ObservationRegistry` instance and register the factory:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/TracingMicrometer.java#here"} 
+import dev.restate.sdk.HandlerRunner;
+import dev.restate.sdk.endpoint.Endpoint;
+import dev.restate.sdk.interceptor.micrometer.MicrometerInterceptorFactory;
+import io.micrometer.observation.ObservationRegistry;
+
+class MyMicrometerApp {
+  public static void main(String[] args) {
+    ObservationRegistry registry = ObservationRegistry.create(); // your ObservationRegistry
+    var micrometer = new MicrometerInterceptorFactory(registry);
+
+    var endpoint =
+        Endpoint.bind(
+                new MyService(),
+                new HandlerRunner.Options()
+                    .addHandlerInterceptorFactory(micrometer)
+                    .addRunInterceptorFactory(micrometer))
+            .build();
+  }
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/TracingMicrometer.kt#here"} 
+import dev.restate.sdk.interceptor.micrometer.kotlin.MicrometerInterceptorFactory
+import dev.restate.sdk.kotlin.HandlerRunner
+import dev.restate.sdk.kotlin.endpoint.endpoint
+import io.micrometer.observation.ObservationRegistry
+
+fun micrometerTracedEndpoint() {
+  val registry: ObservationRegistry = ObservationRegistry.create() // your ObservationRegistry
+  val micrometer = MicrometerInterceptorFactory(registry)
+
+  val endpoint = endpoint {
+    bind(
+        MyService(),
+        HandlerRunner.Options(
+            handlerInterceptorFactories = mutableListOf(micrometer),
+            runInterceptorFactories = mutableListOf(micrometer),
+        ),
+    )
+  }
+}
+```
+</CodeGroup>
+
