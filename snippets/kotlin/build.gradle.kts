@@ -29,6 +29,9 @@ dependencies {
   implementation(libs.restate.sdk.lambda.kotlin)
   implementation(libs.restate.sdk.request.identity)
   implementation(libs.restate.sdk.testing)
+  implementation(libs.restate.sdk.interceptor.opentelemetry)
+  implementation(libs.restate.sdk.interceptor.micrometer)
+  implementation(libs.opentelemetry.sdk)
 
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.coroutines.test)
