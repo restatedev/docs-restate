@@ -16,28 +16,47 @@ Open the UI at port 9070, register your service, click on the service, open the 
     Have a look at [managing invocations](/services/invocation/managing-invocations) to learn how to manage the lifecycle of an invocation.
 </Info>
 
+All ingress endpoints live under the reserved `/restate/` path prefix.
+To invoke a handler, use `/restate/call/...` to wait for the response or `/restate/send/...` to send a message without waiting:
+
+```
+# Request-response
+POST /restate/call/{service}/{handler}
+POST /restate/call/{service}/{key}/{handler}
+
+# Send a message (no response)
+POST /restate/send/{service}/{handler}
+POST /restate/send/{service}/{key}/{handler}
+```
+
+Add the `{key}` segment for Virtual Objects and Workflows; omit it for basic Services.
+
+<Note title="Unversioned paths">
+    The unversioned paths (`/{service}/{handler}`, `/{service}/{key}/{handler}`, and the `/send` suffix) still work for backwards compatibility, but new code should use the `/restate/` paths documented here.
+</Note>
+
 ## Request-response calls
 You can invoke services over HTTP 1.1 or higher.
 Request/response bodies should be encoded as JSON.
 
-Invoking `myHandler` of `myService` as follows:
+Invoke `myHandler` of `MyService` as follows:
 
 ```shell
-curl localhost:8080/MyService/myHandler \
+curl localhost:8080/restate/call/MyService/myHandler \
   --json '{"name": "Mary", "age": 25}'
 ```
 
-Invoke `myHandler` of `myVirtualObject` for `myObjectKey` as follows:
+Invoke `myHandler` of `MyVirtualObject` for `myObjectKey` as follows:
 
 ```shell
-curl localhost:8080/MyVirtualObject/myObjectKey/myHandler \
+curl localhost:8080/restate/call/MyVirtualObject/myObjectKey/myHandler \
   --json '{"name": "Mary", "age": 25}'
 ```
 
 Call the `run` handler of the `MyWorkflow` as follows:
 
 ```shell
-curl localhost:8080/MyWorkflow/myWorkflowId/run \
+curl localhost:8080/restate/call/MyWorkflow/myWorkflowId/run \
   --json '{"name": "Mary", "age": 25}'
 ```
 
@@ -51,10 +70,10 @@ Follow the same pattern for calling the other handlers of the workflow.
 </Note>
 
 ## Sending messages
-If you do not want to wait for the response, you can also send a message by adding `/send` to the URL path:
+If you do not want to wait for the response, you can send a message by using `/restate/send/...` instead of `/restate/call/...`:
 
 ```shell
-curl localhost:8080/MyService/myHandler/send \
+curl localhost:8080/restate/send/MyService/myHandler \
   --json '{"name": "Mary", "age": 25}'
 ```
 
@@ -74,12 +93,12 @@ You can **delay the message** by adding a delay request parameter in ISO8601 not
 <CodeGroup>
 
     ```shell humantime
-    curl "localhost:8080/MyService/myHandler/send?delay=10s" \
+    curl "localhost:8080/restate/send/MyService/myHandler?delay=10s" \
         --json '{"name": "Mary", "age": 25}'
     ```
 
     ```shell ISO8601
-    curl "localhost:8080/MyService/myHandler/send?delay=PT10S" \
+    curl "localhost:8080/restate/send/MyService/myHandler?delay=PT10S" \
         --json '{"name": "Mary", "age": 25}'
     ```
 
@@ -96,7 +115,7 @@ You can **delay the message** by adding a delay request parameter in ISO8601 not
 You can send requests to Restate providing an idempotency key, through the [`Idempotency-Key` header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/):
 
 ```shell
-curl localhost:8080/MyService/myHandler \
+curl localhost:8080/restate/call/MyService/myHandler \
   -H 'idempotency-key: ad5472esg4dsg525dssdfa5loi' \
   --json '{"name": "Mary", "age": 25}'
 ```
@@ -113,6 +132,29 @@ Check out the [service configuration docs](/services/configuration) to tune the 
 </Tip>
 
 
+## Scopes
+
+<Note title="Experimental">
+    Scopes are part of the flow control feature.
+    Scoped invocations are rejected unless the server is started with the experimental `vqueues` feature enabled (`experimental-enable-vqueues = true`).
+</Note>
+
+A scope is an opaque key that assigns an invocation to scope, which Restate uses to apply flow control across invocations that share the same scope.
+Add a `scope/{scopeKey}` segment in front of the `call` or `send` verb:
+
+```
+POST /restate/scope/{scopeKey}/call/{service}/{handler}
+POST /restate/scope/{scopeKey}/call/{service}/{key}/{handler}
+POST /restate/scope/{scopeKey}/send/{service}/{handler}
+POST /restate/scope/{scopeKey}/send/{service}/{key}/{handler}
+```
+
+For example, to call `MyService/myHandler` within the scope `tenant-a`:
+
+```shell
+curl localhost:8080/restate/scope/tenant-a/call/MyService/myHandler \
+  --json '{"name": "Mary", "age": 25}'
+```
 
 ## Cancel
 
@@ -129,32 +171,62 @@ curl -X PATCH http://localhost:9070/invocations/inv_1gdJBtdVEcM942bjcDmb1c1khoaJ
 
 ## Attach to an invocation
 
-Restate allows you to retrieve the result of workflows and invocations with an idempotency key.
+Restate allows you to retrieve the result of workflows and invocations that used an idempotency key.
 There are two options:
-- To **attach** to an invocation or workflow and wait for it to finish, use `/attach`.
-- To **peek at the output** of an invocation or workflow, use `/output`. This will return:
-    - `{"message":"not ready"}` for ongoing workflows
-    - The result for finished workflows
-    - `{"message":"not found"}` for non-existing workflows
+- To **attach** to an invocation or workflow and wait for it to finish, use `attach`.
+- To **peek at the output** of an invocation or workflow, use `output`. This will return:
+    - `{"message":"not ready"}` for ongoing invocations
+    - The result for finished invocations
+    - `{"message":"not found"}` for non-existing invocations
 
-You can attach to a service/object invocation only if the invocation used an idempotency key:
+### By invocation ID
+
+If you already have the invocation ID, attach to it or read its output with a `GET` request:
 
 ```shell
-# Via invocation ID
-curl localhost:8080/restate/invocation/myInvocationId/attach
-curl localhost:8080/restate/invocation/myInvocationId/output
+curl localhost:8080/restate/attach/myInvocationId
+curl localhost:8080/restate/output/myInvocationId
+```
 
-# For Services, via idempotency key
-curl localhost:8080/restate/invocation/MyService/myHandler/myIdempotencyKey/attach
-curl localhost:8080/restate/invocation/MyService/myHandler/myIdempotencyKey/output
+### By target
 
-# For Virtual Objects, via idempotency key
-curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey/attach
-curl localhost:8080/restate/invocation/myObject/myKey/myHandler/myIdempotencyKey/output
+If you don't have the invocation ID, send a `POST` request to `/restate/attach` or `/restate/output` with a JSON body describing the workflow or idempotency target:
 
-# For Workflows, with the Workflow ID
-curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/attach
-curl localhost:8080/restate/workflow/MyWorkflow/myWorkflowId/output
+<CodeGroup>
+
+    ```shell Workflow
+    curl localhost:8080/restate/attach \
+      --json '{"type": "workflow", "name": "MyWorkflow", "key": "myWorkflowId"}'
+    ```
+
+    ```shell Service
+    curl localhost:8080/restate/attach \
+      --json '{"type": "idempotency", "service": "MyService", "handler": "myHandler", "idempotencyKey": "myIdempotencyKey"}'
+    ```
+
+    ```shell Virtual Object
+    curl localhost:8080/restate/attach \
+      --json '{"type": "idempotency", "service": "MyVirtualObject", "serviceKey": "myKey", "handler": "myHandler", "idempotencyKey": "myIdempotencyKey"}'
+    ```
+
+</CodeGroup>
+
+Use the same body shape against `/restate/output` to peek at the result.
+If the target was invoked within a [scope](#scopes), add the optional `"scope"` field to the body.
+
+### Looking up the invocation ID
+
+To resolve a workflow or idempotency target into its invocation ID, send a `POST` request to `/restate/lookup` with the same body shape as above:
+
+```shell
+curl localhost:8080/restate/lookup \
+  --json '{"type": "workflow", "name": "MyWorkflow", "key": "myWorkflowId"}'
+```
+
+The response contains the invocation ID, which you can then pass to the `GET` attach and output endpoints:
+
+```json
+{"invocationId": "inv_1aiqX0vFEFNH1Umgre58JiCLgHfTtztYK5"}
 ```
 
 ## OpenAPI support
