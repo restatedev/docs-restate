@@ -51,6 +51,7 @@ After detecting the SDK, always load the SDK reference:
 | Build AI agent with Google ADK | `references/python/restate-google-adk-agents.md` |
 | Build AI agent with Pydantic AI | `references/python/restate-pydantic-ai-agents.md` |
 | Debug errors, stuck invocations, journal mismatches | `references/debug-applications.md` |
+| Durable workflow deep-dive for Python and Rust (long-running activities, polling, sagas, journal hygiene, Python↔Rust porting) | `references/durable-workflows-python-rust.md` |
 | Testing, deployment, server config, Kafka, advanced topics | Use the bundled **restate-docs** MCP server |
 | Code examples and templates | `github.com/restatedev/examples`, `github.com/restatedev/ai-examples` |
 
