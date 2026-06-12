@@ -66,6 +66,62 @@ View the full spec of the `RestateDeployment` CRD as [pkl file](https://github.c
     Try running a local kind cluster with a Restate deployment by following this [guide](/guides/restate-on-kind-with-operator).
 </Info>
 
+### Autoscaling draining versions
+
+When you deploy a new version of a `RestateDeployment`, the operator keeps old versions running until their in-flight invocations complete (the drain window). Long-running workflows can hold old versions alive for hours, multiplying compute cost across all concurrently-draining versions.
+
+You can reduce this cost by adding an optional `spec.autoscaling` block. The operator will create a `HorizontalPodAutoscaler` for each **non-latest** version, allowing old versions to scale down as their load drops while still remaining available for in-flight invocations.
+
+```yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateDeployment
+metadata:
+  name: service
+spec:
+  replicas: 3
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 10
+    metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 70
+  restate:
+    register:
+      cluster: restate
+  selector:
+    matchLabels:
+      app: service
+  template:
+    metadata:
+      labels:
+        app: service
+    spec:
+      containers:
+        - name: service
+          image: path.to/yourrepo:yourtag
+          resources:
+            requests:
+              cpu: "100m"
+          ports:
+            - containerPort: 9080
+              name: restate
+```
+
+<Note>
+  The `autoscaling` block only controls draining (non-latest) versions. To autoscale the latest version, create your own `HorizontalPodAutoscaler` targeting the `RestateDeployment` scale subresource. The HPA label selector bug that previously caused incorrect metric averaging across all versions was fixed in v2.6.0.
+</Note>
+
+Notes:
+- This field is optional. Omitting it preserves the existing behaviour (draining versions stay at full `replicas`).
+- Not supported in Knative mode (Knative's own autoscaler handles scaling).
+- `minReplicas` is floored at 1 — there is no scale-to-zero in ReplicaSet mode.
+- CPU/memory metrics require container resource `requests`. Prefer CPU-based scaling, as memory-based scaling does not scale down.
+- If you deploy the operator with custom RBAC (not using the Helm chart), you must add `get,list,watch,create,patch,delete` on `horizontalpodautoscalers` in the `autoscaling` API group, or per-version HPAs will silently fail.
+
 ### Connecting to Restate Cloud
 
 The Restate Operator can help you connect your services to Restate Cloud by managing authentication and secure communication.

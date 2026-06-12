@@ -103,6 +103,51 @@ spec:
 
 Once you apply the manifest, the Restate Operator will set up the secure tunnel and automatically register your service with Restate Cloud.
 
+### In-process tunnel mode
+
+By default, the operator routes traffic through tunnel-client pods and a per-version `Service`. An alternative is **in-process tunnel mode**, where each application pod holds its own outbound tunnel connection to Restate Cloud directly — for example using the [`@restatedev/restate-sdk-tunnel`](https://www.npmjs.com/package/@restatedev/restate-sdk-tunnel) npm package. This means your pods require **no inbound networking at all**: no open ports, no Services, no ingress rules.
+
+To enable it, set `tunnelMode: in-process` on your `RestateDeployment`:
+
+```yaml
+spec:
+  restate:
+    register:
+      cloud: my-cloud-environment
+    tunnelMode: in-process
+```
+
+When this mode is active, the operator automatically injects the following environment variables into every container and init container of your pods:
+
+| Variable | Description |
+|---|---|
+| `RESTATE_INPROC_TUNNEL_NAME` | The versioned name of this revision, used to identify the tunnel connection |
+| `RESTATE_INPROC_ENVIRONMENT_ID` | The Restate Cloud environment ID |
+| `RESTATE_INPROC_CLOUD_REGION` | The cloud region (e.g. `eu`, `us`) |
+| `RESTATE_INPROC_SIGNING_PUBLIC_KEY` | The environment's signing public key |
+
+Mount your API key as a Kubernetes Secret and point the reserved `RESTATE_INPROC_AUTH_TOKEN_FILE` environment variable at the file path:
+
+```yaml
+env:
+  - name: RESTATE_INPROC_AUTH_TOKEN_FILE
+    value: /var/secrets/restate/token
+volumeMounts:
+  - name: restate-token
+    mountPath: /var/secrets/restate
+    readOnly: true
+volumes:
+  - name: restate-token
+    secret:
+      secretName: my-cloud-environment-secret
+```
+
+<Note>
+  Do not declare `RESTATE_INPROC_TUNNEL_NAME`, `RESTATE_INPROC_ENVIRONMENT_ID`, `RESTATE_INPROC_CLOUD_REGION`, or `RESTATE_INPROC_SIGNING_PUBLIC_KEY` yourself — these are managed by the operator and declaring them is a reconcile error.
+</Note>
+
+Each version of your deployment is registered under its own tunnel URL, so the operator's transparent per-revision registration and draining still work. If you adopt this mode on an existing deployment, adding `tunnelMode: in-process` creates a new version (new hash); the old Service-routed version drains as usual while the new version communicates through the tunnel.
+
 
 ## Serverless Functions and other public endpoints
 
