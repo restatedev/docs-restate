@@ -86,23 +86,49 @@ function getTypeFromSchema(propSchema) {
     return { type: 'unknown', optional: false };
 }
 
-function getDefaultValueString(propSchema, type) {
-    let value = propSchema.default;
+// Extracts the default value as a display string, or null when the field has
+// no renderable default (unset, or a non-array object default we don't show).
+function getDefaultValue(propSchema, type) {
+    const value = propSchema.default;
     if (value === undefined) return null;
-    else if (value === null) return `default=null`;
-    else if (typeof value === 'string') return `default="${value}"`;
+    else if (value === null) return "null";
+    else if (typeof value === 'string') return value;
     // needs to be checked before 'object' because typeof array is 'object'
-    else if (type === 'array') return `default=${JSON.stringify(value)}`
-    else if (typeof value === 'object') return null
-    else return `default=${String(value)}`;
+    else if (type === 'array') return JSON.stringify(value);
+    else if (typeof value === 'object') return null;
+    else return String(value);
 }
 
-function generatePostAttr(propSchema, type) {
+// Builds the `default="..."` attribute (with a leading space) for a field, or
+// an empty string when there is no renderable default. Inner double quotes are
+// escaped as HTML entities so they don't terminate the JSX attribute.
+function getDefaultAttr(propSchema, type) {
+    const value = getDefaultValue(propSchema, type);
+    return value === null ? "" : ` default="${value.replace(/"/g, '&quot;')}"`;
+}
+
+// Determines whether a field is a settable leaf value (as opposed to a
+// grouping object/array or a oneOf/anyOf container whose variants are objects).
+// Only leaves map to a single environment variable.
+function isLeafField(propSchema, type) {
+    if (type === 'object' || type === 'array') return false;
+    if (type === 'oneOf') return !(propSchema.oneOf || []).some(v => v.properties);
+    if (type === 'anyOf') return !(propSchema.anyOf || []).some(v => v.properties);
+    return true;
+}
+
+// Builds the environment variable name for a config option from its path.
+// Restate uses the `RESTATE_` prefix, `__` between nesting levels, and the
+// snake-cased (upper) field name.
+// TODO: Check if there's a proper way for setting array indicies in env vars
+function buildEnvVar(path) {
+    if (!path || path.length === 0) return null;
+    if (path.includes('[]')) return null;
+    return 'RESTATE_' + path.map(s => s.replace(/-/g, '_').toUpperCase()).join('__');
+}
+
+function generatePostAttr(propSchema, envVar) {
     let postTags = []
-    const defaultValue = getDefaultValueString(propSchema, type)
-    if (defaultValue) {
-        postTags.push(`\'${defaultValue}\'`);
-    }
     if (propSchema.format) {
         postTags.push(`\'format: ${propSchema.format}\'`);
     }
@@ -120,6 +146,9 @@ function generatePostAttr(propSchema, type) {
     }
     if (propSchema.maxLength) {
         postTags.push(`\'maxLength: ${propSchema.maxLength}\'`);
+    }
+    if (envVar) {
+        postTags.push(`\'env: ${envVar}\'`);
     }
 
     return ` post={[${postTags.join(",")}]}`;
@@ -146,26 +175,29 @@ function parseVariantName(variant, index) {
     }
 }
 
-function generateResponseFieldsFromProperties(properties, requiredProps = [], level = 0) {
+function generateResponseFieldsFromProperties(properties, requiredProps = [], level = 0, path = []) {
     let generatedOutput = '';
     Object.entries(properties).forEach(([subPropName, subPropSchema]) => {
         generatedOutput += generateResponseField(
             subPropName,
             subPropSchema,
             requiredProps.includes(subPropName),
-            level + 2
+            level + 2,
+            [...path, subPropName]
         );
     });
     return generatedOutput
 }
 
-function generateResponseField(propName, propSchema, isRequired = false, level = 0) {
+function generateResponseField(propName, propSchema, isRequired = false, level = 0, path = []) {
     const indent = '    '.repeat(level);
     const { type, optional } = getTypeFromSchema(propSchema);
     const required = isRequired && !optional ? ' required' : '';
     let description = formatDescription(propSchema.description, propSchema.title, propSchema.examples);
 
-    let postAttr = generatePostAttr(propSchema, type);
+    const envVar = isLeafField(propSchema, type) ? buildEnvVar(path) : null;
+    let postAttr = generatePostAttr(propSchema, envVar);
+    const defaultAttr = getDefaultAttr(propSchema, type);
 
     // Special case: if type is string and enum has a single value, suggest setting that value (for example for type: "exponential-delay")
     if (propSchema.default === undefined && type === 'string' && Array.isArray(propSchema.enum) && propSchema.enum.length === 1) {
@@ -173,7 +205,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         description += `\n\nSet \`${propName}: "${value}"\``;
     }
 
-    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${postAttr}>\n`;
+    let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${postAttr}${defaultAttr}>\n`;
     if (description) {
         output += `${indent}    ${description}\n\n`;
     }
@@ -189,23 +221,23 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             variants.forEach((variant, index) => {
                 const variantName = parseVariantName(variant, index);
                 output += `${indent}<Expandable title="${variantName}">\n`;
-                output += generateResponseFieldsFromProperties(variant.properties, propSchema.required, level);
-                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level);
+                output += generateResponseFieldsFromProperties(variant.properties, propSchema.required, level, path);
+                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level, path);
                 output += `${indent}    </Expandable>\n`;
             });
 
         } else {
             output += `${indent}    <Expandable title="Properties">\n`;
-            output += generateResponseFieldsFromProperties( propSchema.properties, propSchema.required, level);
+            output += generateResponseFieldsFromProperties( propSchema.properties, propSchema.required, level, path);
             output += `${indent}    </Expandable>\n`;
         }
     }
-    
+
     // Handle array items
     if (type === 'array' && propSchema.items) {
         output += `${indent}    \n`;
         output += `${indent}    <Expandable title="Array Items">\n`;
-        output += generateResponseField('item', propSchema.items, propSchema.required, level + 2);
+        output += generateResponseField('item', propSchema.items, propSchema.required, level + 2, [...path, '[]']);
         output += `${indent}    </Expandable>\n`;
     }
     
@@ -218,7 +250,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             let optionalVariant = variants.find(variant => variant.type !== "null")
 
             const optionalType = getTypeFromSchema(optionalVariant);
-            output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${postAttr}>\n`;
+            output = `${indent}<ResponseField name="${propName}" type="${optionalType.type} | null"${required}${postAttr}${defaultAttr}>\n`;
             if (description) {
                 output += `${indent}    ${description}\n\n`;
             }
@@ -228,7 +260,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             if (optionalType.type === 'object' && optionalVariant.properties) {
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="Properties">\n`;
-                output += generateResponseFieldsFromProperties(optionalVariant.properties, optionalVariant.required, level);
+                output += generateResponseFieldsFromProperties(optionalVariant.properties, optionalVariant.required, level, path);
                 output += `${indent}    </Expandable>\n`;
 
             } else if (optionalType.type === 'oneOf') {
@@ -238,7 +270,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 oneOfVariants.forEach((variant, index) => {
                     let variantName = parseVariantName(variant, index)
                     if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
-                        output += generateResponseFieldsFromProperties(variant.properties, variant.required, level);
+                        output += generateResponseFieldsFromProperties(variant.properties, variant.required, level, path);
                     } else {
                         output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
                     }
@@ -252,7 +284,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
                     output += `${indent}    \n`;
                     output += `${indent}    <Expandable title="Properties">\n`;
-                    output += generateResponseFieldsFromProperties(variant.properties, variant.required, level);
+                    output += generateResponseFieldsFromProperties(variant.properties, variant.required, level, path);
                     output += `${indent}    </Expandable>\n`;
                 } else {
                     output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
@@ -266,7 +298,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     if (type === 'oneOf') {
         const variants = propSchema.oneOf
 
-        output = `${indent}<ResponseField name="${propName}" ${required}${postAttr}>\n`;
+        output = `${indent}<ResponseField name="${propName}" ${required}${postAttr}${defaultAttr}>\n`;
         if (description) {
             output += `${indent}    ${description}\n\n`;
         }
@@ -278,7 +310,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
                 output += `${indent}    \n`;
                 output += `${indent}    <Expandable title="${variantName || "Properties"}">\n`;
                 output += `${indent}    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
-                output += generateResponseFieldsFromProperties( variant.properties, variant.required, level);
+                output += generateResponseFieldsFromProperties( variant.properties, variant.required, level, path);
                 output += `${indent}    </Expandable>\n`;
             } else {
                 output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
@@ -299,7 +331,7 @@ function generateRestateConfigViewer(schema) {
         '\n\n';
 
     if (schema.properties) {
-        output += generateResponseFieldsFromProperties(schema.properties, schema.required, -2);
+        output += generateResponseFieldsFromProperties(schema.properties, schema.required, -2, []);
     }
     return output;
 }
