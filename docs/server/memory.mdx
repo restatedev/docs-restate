@@ -16,6 +16,7 @@ Restate allocates memory from several distinct pools, each with its own configur
 | **RocksDB** | 2 GiB | `rocksdb-total-memory-size` |
 | **Query Engine** | 1 GiB | `admin.query-engine.memory-size` |
 | **Bifrost Record Cache** | 250 MiB | `bifrost.record-cache-memory-size` |
+| **Invoker** | 1.5 GiB | `worker.invoker.memory-limit` |
 
 The total memory footprint is approximately the sum of these pools plus overhead for the runtime, network buffers, and other internal structures. You should configure each pool based on your available resources and workload requirements.
 
@@ -120,6 +121,47 @@ record-cache-memory-size = "250 MiB"
 
 This cache improves read performance for the replicated log by keeping recently written records in memory. Increasing this value can improve performance for workloads that frequently read from the log, such as partition replay during failover.
 
+## Invoker Memory
+
+The invoker is the component that drives invocations by calling your service deployments. It enforces a global memory budget for the in-flight data that flows from the server to your deployments: journal entries and state read from storage.
+
+This budget bounds the invoker's memory usage during events that would otherwise cause memory to balloon, such as a node restart or partition leadership changes, when many pending invocations are resumed at once.
+
+```toml restate.toml
+[worker.invoker]
+# Global memory budget for the invoker, shared across all partitions on this node (default: 1.5 GiB)
+memory-limit = "1.5 GiB"
+```
+
+**Environment variable**: `RESTATE_WORKER__INVOKER__MEMORY_LIMIT`
+
+The limit is shared across all partitions running on a node, rather than applied per partition. To effectively disable invoker memory limiting, set this to a very large value.
+
+### Per-Invocation Budgets
+
+Within the global pool, each invocation receives its own memory budget. Two options control how this budget is sized:
+
+```toml restate.toml
+[worker.invoker]
+# Maximum memory a single invocation may use per direction (default: message-size-limit)
+per-invocation-memory-limit = "32 MiB"
+
+# Memory reserved from the global pool before an invocation starts (default: 32 KiB)
+per-invocation-initial-memory = "32 KiB"
+```
+
+**Environment variables**:
+- `RESTATE_WORKER__INVOKER__PER_INVOCATION_MEMORY_LIMIT`
+- `RESTATE_WORKER__INVOKER__PER_INVOCATION_INITIAL_MEMORY`
+
+`per-invocation-memory-limit` caps how much memory a single invocation may use. Once an invocation reaches this ceiling, it waits for in-flight data to be consumed or yields back to the scheduler. If unset, it defaults to the [`message-size-limit`](/references/server-config), and if set it is clamped to that value.
+
+`per-invocation-initial-memory` is the amount reserved from the global pool before an invocation starts. Smaller values allow more concurrent invocations but may cause more frequent round-trips to the global pool, while larger values reduce contention but limit maximum concurrency.
+
+<Info title="Available since v1.7.0">
+The invoker memory pool and its per-invocation budgets were introduced in Restate Server v1.7.0.
+</Info>
+
 ## Recommendations
 
 ### General Guidelines
@@ -223,6 +265,7 @@ If the Restate process is being killed by the OOM killer:
 2. **Try reducing `admin.query-engine.memory-size`** if running complex queries
 3. **Ensure container memory limits match your configuration**
 4. **Review `bifrost.record-cache-memory-size`** and reduce if necessary
+5. **Reduce `worker.invoker.memory-limit`** if a node has many concurrent invocations transferring large journals or state
 
 ## Advanced Configuration
 
@@ -323,3 +366,6 @@ For the complete list of memory-related configuration options, see the [Server C
 | `rocksdb-total-memtables-ratio` | `0.85` | `RESTATE_ROCKSDB_TOTAL_MEMTABLES_RATIO` | Ratio of total memory allocated to memtables |
 | `admin.query-engine.memory-size` | `1 GiB` | `RESTATE_ADMIN__QUERY_ENGINE__MEMORY_SIZE` | Memory budget for SQL query execution |
 | `bifrost.record-cache-memory-size` | `250 MiB` | `RESTATE_BIFROST__RECORD_CACHE_MEMORY_SIZE` | In-memory cache for log records |
+| `worker.invoker.memory-limit` | `1.5 GiB` | `RESTATE_WORKER__INVOKER__MEMORY_LIMIT` | Global memory budget for in-flight invoker data |
+| `worker.invoker.per-invocation-memory-limit` | `message-size-limit` | `RESTATE_WORKER__INVOKER__PER_INVOCATION_MEMORY_LIMIT` | Max memory per invocation |
+| `worker.invoker.per-invocation-initial-memory` | `32 KiB` | `RESTATE_WORKER__INVOKER__PER_INVOCATION_INITIAL_MEMORY` | Memory reserved from the pool before an invocation starts |

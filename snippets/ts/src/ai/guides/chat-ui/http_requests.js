@@ -1,15 +1,15 @@
 async function main() {
   // <start_here>
   // Request-response
-  const response = await fetch("http://localhost:8080/my-agent/run", {
+  const response = await fetch("http://localhost:8080/restate/call/my-agent/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: "How are you?" }),
   });
   const result = await response.json();
 
-  // Fire-and-forget: add /send to the URL
-  await fetch("http://localhost:8080/my-agent/run/send", {
+  // Fire-and-forget: use the /restate/send/... path
+  await fetch("http://localhost:8080/restate/send/my-agent/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: "How are you?" }),
@@ -17,7 +17,7 @@ async function main() {
   // <end_here>
 
   // <start_idempotency>
-  await fetch("http://localhost:8080/my-agent/run/send", {
+  await fetch("http://localhost:8080/restate/send/my-agent/run", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -31,7 +31,7 @@ async function main() {
 async function main2() {
   // <start_attach>
   // start the invocation
-  const handle = await fetch("http://localhost:8080/agent/run/send", {
+  const handle = await fetch("http://localhost:8080/restate/send/agent/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify("How are you?"),
@@ -40,9 +40,9 @@ async function main2() {
   // retrieve the invocationId
   const { invocationId, status } = await handle.json();
 
-  // retrieve the result
+  // retrieve the result by attaching to the invocation id
   const result = await fetch(
-    `http://localhost:8080/restate/invocation/${invocationId}/attach`,
+    `http://localhost:8080/restate/attach/${invocationId}`,
     { method: "GET" }
   );
   await result.json();
@@ -51,12 +51,18 @@ async function main2() {
 
 async function main3() {
   // <start_attach_idem>
-  // start the invocation with idempotency key
+  // attach via the idempotency key of an earlier invocation
   const idempotencyKey = "abc-123";
-  const result = await fetch(
-    `http://localhost:8080/restate/invocation/agent/run/${idempotencyKey}/attach`,
-    { method: "GET" }
-  );
+  const result = await fetch(`http://localhost:8080/restate/attach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target: "idempotentInvocation",
+      service: "agent",
+      handler: "run",
+      idempotencyKey,
+    }),
+  });
   await result.json();
   // <end_attach_idem>
 }

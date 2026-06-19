@@ -91,15 +91,15 @@ You can also call Restate services using plain HTTP requests without the SDK.
 For example, in JavaScript:
 ```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#here"} 
 // Request-response
-const response = await fetch("http://localhost:8080/my-agent/run", {
+const response = await fetch("http://localhost:8080/restate/call/my-agent/run", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ message: "How are you?" }),
 });
 const result = await response.json();
 
-// Fire-and-forget: add /send to the URL
-await fetch("http://localhost:8080/my-agent/run/send", {
+// Fire-and-forget: use the /restate/send/... path
+await fetch("http://localhost:8080/restate/send/my-agent/run", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ message: "How are you?" }),
@@ -113,7 +113,7 @@ await fetch("http://localhost:8080/my-agent/run/send", {
 You can let Restate deduplicate requests by adding an idempotency key to the header of your request.
 
 ```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#idempotency"} 
-await fetch("http://localhost:8080/my-agent/run/send", {
+await fetch("http://localhost:8080/restate/send/my-agent/run", {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
@@ -136,7 +136,7 @@ There are three ways to do this:
 
 ```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#attach"} 
 // start the invocation
-const handle = await fetch("http://localhost:8080/agent/run/send", {
+const handle = await fetch("http://localhost:8080/restate/send/agent/run", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify("How are you?"),
@@ -145,9 +145,9 @@ const handle = await fetch("http://localhost:8080/agent/run/send", {
 // retrieve the invocationId
 const { invocationId, status } = await handle.json();
 
-// retrieve the result
+// retrieve the result by attaching to the invocation id
 const result = await fetch(
-  `http://localhost:8080/restate/invocation/${invocationId}/attach`,
+  `http://localhost:8080/restate/attach/${invocationId}`,
   { method: "GET" }
 );
 await result.json();
@@ -156,12 +156,18 @@ await result.json();
 3. If you started the invocation with an idempotency key, then you can use that to attach to it. This does not start the invocation as opposed to point 1:
 
 ```javascript {"CODE_LOAD::ts/src/ai/guides/chat-ui/http_requests.js#attach_idem"} 
-// start the invocation with idempotency key
+// attach via the idempotency key of an earlier invocation
 const idempotencyKey = "abc-123";
-const result = await fetch(
-  `http://localhost:8080/restate/invocation/agent/run/${idempotencyKey}/attach`,
-  { method: "GET" }
-);
+const result = await fetch(`http://localhost:8080/restate/attach`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    target: "idempotentInvocation",
+    service: "agent",
+    handler: "run",
+    idempotencyKey,
+  }),
+});
 await result.json();
 ```
 

@@ -217,7 +217,7 @@ This gives the snapshot repository time to replicate snapshots to other regions 
 
 Each partition leader runs a **durability tracker** that monitors:
 - **Durable LSN**: The log position that has been flushed to local storage on each replica (partition store flush)
-- **Archived LSN**: The log position of the latest published snapshot in the object store (or the oldest retained snapshot if `worker.snapshots.experimental-num-retained` is configured)
+- **Archived LSN**: The log position of the latest published snapshot in the object store (or the oldest retained snapshot if `worker.snapshots.num-retained` is greater than 1)
 
 Based on the configured durability mode, the tracker calculates the **durability point**: the LSN up to which the partition store state is considered safely persisted. Once determined:
 
@@ -262,26 +262,28 @@ There are three notable persistence-related attributes in `restatectl`'s partiti
 
 - **Applied LSN** - the latest log record record applied by this processor
 - **Durable LSN** - the log position of the latest partition store flushed to local node storage; by default processors optimize performance by relying on Bifrost for durability and only periodically flush partition store to disk
-- **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot (or the oldest retained snapshot if `worker.snapshots.experimental-num-retained` is configured); this determines the log safe trim point in multi-node clusters
+- **Archived LSN** - if a snapshot repository is configured, this LSN represents the latest published snapshot (or the oldest retained snapshot if `worker.snapshots.num-retained` is greater than 1); this determines the log safe trim point in multi-node clusters
 
 ### Snapshot retention
 
-By default, Restate adds new snapshots without removing old ones. You can configure automatic pruning using the experimental `experimental-num-retained` option:
+Restate automatically prunes old snapshots so that snapshot storage does not grow unboundedly. The number of snapshots to retain per partition is controlled by `worker.snapshots.num-retained`, which defaults to `1`:
 
 ```toml
 [worker.snapshots]
-experimental-num-retained = 1
+num-retained = 1
 ```
 
-This keeps only the most recent snapshot and automatically deletes older ones.
-
-<Info>
-    This feature is only available in Restate v1.6 and newer. Only newly uploaded snapshots after the experimental feature was activated will be pruned. Existing snapshots predating the configuration change will not be affected.
-</Info>
+By default, Restate keeps exactly one snapshot per partition and deletes older snapshots once a newer one has been published. Set `num-retained` to a higher value for added resiliency against corrupted snapshots.
 
 <Warning>
-    When `experimental-num-retained` is greater than 1, the archived LSN advances to the *oldest* retained snapshot rather than the latest. This delays log trimming and increases storage usage on log servers. For most deployments, `experimental-num-retained = 1` is recommended unless you need the ability to fall back to older snapshots.
+    Restate considers the archived LSN to be that of the *oldest* retained snapshot. When you retain multiple snapshots, you gain the ability to fall back to an older one in case the most recent is corrupted. However, be mindful that this causes an increase in storage usage on the log servers as log trimming will follow the oldest snapshot tracked by Restate. For most deployments, `num-retained = 1` (default) is recommended.
 </Warning>
+
+<Info title="Upgrading from Restate 1.6">
+    Snapshot retention was previously opt-in via the `experimental-num-retained` key. Any configuration that still sets `experimental-num-retained` must be renamed to `num-retained` before upgrading; Restate ignores the old key. No action is required for existing snapshot repositories: the first upload after the upgrade rewrites `latest.json` from V1 to V2 in place, and snapshot data files are unchanged. Rolling back to a Restate binary older than v1.6 is not supported once V2 pointers have been written; rolling back to v1.6.x remains safe.
+    
+    Note that of the snapshots produced by the older version, only the most recent will be considered for pruning following the upgrade. Older snapshots must still be cleaned up by the user, just as they would have been under v1.6 and earlier.
+</Info>
 
 
 ## Data Backups

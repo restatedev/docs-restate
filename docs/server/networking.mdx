@@ -95,7 +95,7 @@ These options apply to all services unless overridden per-service:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `bind-ip` | `0.0.0.0` | Local interface IP to bind on |
+| `bind-ip` | `::` | Local interface IP to bind on. The default `::` (IPv6 unspecified) creates a dual-stack socket on most systems. See [Dual-Stack and IPv6](#dual-stack-and-ipv6) |
 | `bind-port` | `5122` | Port for the fabric service |
 | `use-random-ports` | `false` | Use random available ports instead of defaults |
 | `advertised-host` | Auto-detected | Hostname to advertise to peers |
@@ -110,7 +110,7 @@ use-random-ports = true
 
 ### Per-Service Configuration
 
-Each service can override the global settings. Use `bind-port` to change just the port while keeping the default bind IP (`0.0.0.0`):
+Each service can override the global settings. Use `bind-port` to change just the port while keeping the default bind IP (`::`):
 
 ```toml restate.toml
 # Fabric service (node-to-node) - uses global bind-ip with custom port
@@ -134,6 +134,35 @@ bind-address = "192.168.1.10:9070"
 [ingress]
 bind-address = "192.168.1.10:8080"
 ```
+
+<Accordion title="Dual-Stack and IPv6">
+    <Info>
+    The default `bind-ip` changed from `0.0.0.0` to `::` in Restate Server 1.7.0.
+    </Info>
+    
+    By default, Restate binds to `::` (the IPv6 unspecified address). On Linux and macOS the kernel default leaves `IPV6_V6ONLY` disabled (`net.ipv6.bindv6only = 0`), so binding to `::` creates a dual-stack socket: it accepts native IPv6 connections and also accepts IPv4 connections, which arrive as IPv4-mapped IPv6 addresses (`::ffff:a.b.c.d`). The host only needs an IPv6 stack present in the kernel for this to work; it does not need IPv6 network connectivity or IPv6 addresses on its interfaces. As a result, the server is reachable regardless of which address family clients or peers use, and Restate works out of the box in IPv4-only, IPv6-only, and dual-stack environments, including IPv6-only Kubernetes clusters where binding to `0.0.0.0` would fail.
+    
+    Restate also detects the host's publicly routable IP address to derive [advertised addresses](#advertised-addresses). This detection prefers IPv6 and falls back to IPv4 when IPv6 is not available.
+    
+    If you set `bind-ip` explicitly, your value takes precedence and this default does not apply. To restore the previous IPv4-only behavior, set:
+    
+    ```toml restate.toml
+    bind-ip = "0.0.0.0"
+    ```
+    
+    Or via environment variable:
+    
+    ```bash
+    RESTATE_BIND_IP=0.0.0.0
+    ```
+    
+    <Note>
+    Two host configurations require setting `bind-ip = "0.0.0.0"` explicitly:
+    
+    - **IPv6 disabled in the kernel** (for example, booted with `ipv6.disable=1`): binding to `::` fails and the server does not start, because Restate does not fall back to IPv4 automatically.
+    - **`net.ipv6.bindv6only=1`** (rare on Linux): the socket binds but accepts IPv6 connections only, so IPv4 clients cannot connect.
+    </Note>
+</Accordion>
 
 ### Environment Variable Overrides
 
@@ -289,7 +318,7 @@ When using random ports:
 ### Local Development (Default)
 
 No configuration needed. Restate listens on:
-- TCP: `0.0.0.0:8080` (ingress), `0.0.0.0:9070` (admin), `0.0.0.0:5122` (fabric)
+- TCP: `[::]:8080` (ingress), `[::]:9070` (admin), `[::]:5122` (fabric). The default `::` bind address accepts both IPv6 and IPv4 connections on most systems (see [Dual-Stack and IPv6](#dual-stack-and-ipv6))
 - Unix: `restate-data/<node-name>/*.sock`
 
 ### Multi-Node Cluster
@@ -364,7 +393,7 @@ Networking options can also be set via command-line flags:
 ```bash
 restate-server \
   --listen-mode=tcp \
-  --bind-ip=0.0.0.0 \
+  --bind-ip=:: \
   --bind-port=5122 \
   --advertised-host=my-host.example.com
 ```

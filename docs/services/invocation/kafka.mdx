@@ -36,57 +36,53 @@ Since you can invoke any handler via Kafka events, a single handler can be invok
 
 </Step>
 
-<Step title="Configure Restate to connect to a Kafka cluster">
-Define the Kafka cluster that Restate needs to connect to in the [Restate configuration file](/server/configuration#configuration-file):
+<Step title="Register the Kafka cluster in Restate">
+Register the Kafka cluster that Restate needs to connect to, using the [Restate CLI](/installation):
 
-```toml restate.toml
-[[ingress.kafka-clusters]]
-name = "my-cluster"
-brokers = ["PLAINTEXT://broker:9092"]
+```bash
+restate kafka-clusters create my-cluster bootstrap.servers=broker:9092
 ```
 
-And make sure the Restate Server uses it via `restate-server --config-file restate.toml`.
-
-Check the [configuration docs](/server/configuration) for more details.
+You can pass any [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md) parameter as additional `key=value` arguments.
+Alternatively, you can read the properties from a file with `-f my-cluster.properties`, or open an editor on a properties template with `--edit`.
 
 <AccordionGroup>
 <Accordion title="Using SASL/SSL (e.g. Confluent Kafka)">
-To connect to a Kafka cluster that requires SASL/SSL authentication (e.g., Confluent Kafka), you can specify the necessary parameters in the `restate.toml` file:
+To connect to a Kafka cluster that requires SASL/SSL authentication (e.g., Confluent Kafka), you can specify the necessary parameters when registering the cluster:
 
-```toml restate.toml
-[[ingress.kafka-clusters]]
-name = "my-kafka"
-brokers = [ "my-kafka:9092" ]
-"security.protocol" = "SASL_SSL"
-"sasl.mechanisms" = "PLAIN"
-"sasl.username" = "user"
-"sasl.password" = "pass"
-
-"client.id" = "client-id"
+```bash
+restate kafka-clusters create my-kafka \
+    bootstrap.servers=my-kafka:9092 \
+    security.protocol=SASL_SSL \
+    sasl.mechanisms=PLAIN \
+    sasl.username=user \
+    sasl.password=pass \
+    client.id=client-id
 ```
 
-Note the quotation marks around the configuration keys.
+For Confluent Cloud, you can copy the client configuration properties from the Confluent Cloud console into a properties file and register the cluster with it:
 
-For Confluent Cloud, the rest of the configuration can be copied from the Confluent Cloud "Rust client" configuration.
+```bash
+restate kafka-clusters create my-kafka -f confluent-cloud.properties
+```
 
 </Accordion>
 <Accordion title="Using SASL OAuth2.0 / OpenID Connect">
 The Kafka ingress supports SASL OAUTHBEARER authentication, enabling OAuth 2.0/OpenID Connect (OIDC) token-based connections to managed Kafka services.
 
-Configure SASL OAUTHBEARER via the `additional_options` field in your Kafka cluster configuration. These options are passed directly to librdkafka.
+Configure SASL OAUTHBEARER via the cluster properties. These options are passed directly to librdkafka.
 
 **Example for Confluent Cloud:**
-```toml
-[[ingress.kafka-clusters]]
-name = "my-cluster"
-brokers = ["SASL_SSL://pkc-xxxxxx.eu-central-1.aws.confluent.cloud:9092"]
-"security.protocol"="SASL_SSL"
-"sasl.mechanisms"="OAUTHBEARER"
-"sasl.oauthbearer.method"="oidc"
-"sasl.oauthbearer.client.id"="<your-client-id>"
-"sasl.oauthbearer.client.secret"="<your-client-secret>"
-"sasl.oauthbearer.token.endpoint.url"="<your-token-endpoint>"
-"sasl.oauthbearer.scope"="kafka"
+```bash
+restate kafka-clusters create my-cluster \
+    bootstrap.servers=pkc-xxxxxx.eu-central-1.aws.confluent.cloud:9092 \
+    security.protocol=SASL_SSL \
+    sasl.mechanisms=OAUTHBEARER \
+    sasl.oauthbearer.method=oidc \
+    sasl.oauthbearer.client.id=<your-client-id> \
+    sasl.oauthbearer.client.secret=<your-client-secret> \
+    sasl.oauthbearer.token.endpoint.url=<your-token-endpoint> \
+    sasl.oauthbearer.scope=kafka
 ```
 
 **Common OAUTHBEARER options:**
@@ -104,38 +100,6 @@ brokers = ["SASL_SSL://pkc-xxxxxx.eu-central-1.aws.confluent.cloud:9092"]
 For the full list of available options, see the [librdkafka CONFIGURATION.md](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
 
 </Accordion>
-<Accordion title="Configuring Kafka clusters via environment variables">
-
-You can also configure the Kafka clusters via the `RESTATE_INGRESS__KAFKA_CLUSTERS` environment variable:
-
-```bash
-RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker:9092"]}]
-```
-</Accordion>
-
-<Accordion title="Experimental: Improved Kafka batch ingestion">
-    In certain scenarios, such as consuming from a Kafka topic with few partitions, the new batch ingestion can significantly improve ingestion throughput compared to the legacy implementation.
-
-    **This feature is disabled by default and should be used with caution.**
-
-    All nodes in the cluster must be running Restate v1.6 before enabling this feature.
-
-    **Once enabled and data has been ingested, you cannot roll back to a version prior to Restatev1.6.**
-
-    To enable the experimental Kafka batch ingestion, set the following environment variable on all nodes:
-
-    ```bash
-    RESTATE_EXPERIMENTAL_KAFKA_BATCH_INGESTION=true
-    ```
-
-    Or in your configuration file:
-
-    ```toml
-    experimental-kafka-batch-ingestion = true
-    ```
-
-    Contact us on [Discord](https://discord.restate.dev) or [Slack](https://slack.restate.dev) to test it together with us.
-</Accordion>
 </AccordionGroup>
 </Step>
 <Step title="Register the service you want to invoke."/>
@@ -144,17 +108,13 @@ RESTATE_INGRESS__KAFKA_CLUSTERS=[{name="my-cluster",brokers=["PLAINTEXT://broker
 Let Restate forward events from the Kafka topic to the event handler by creating a subscription:
 
 ```bash
-curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster/my-topic",
-    "sink": "service://MyService/handle",
-    "options": {"auto.offset.reset": "earliest"}
-}'
+restate subscriptions create kafka://my-cluster/my-topic service://MyService/handle auto.offset.reset=earliest
 ```
 
 Once you've created a subscription, Restate immediately starts consuming events from Kafka.
 The handler will be invoked for each event received from Kafka.
 
-The `options` field is optional and accepts any configuration parameter from [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
+The trailing `key=value` options are optional and accept any configuration parameter from [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
 
 </Step>
 </Steps>
@@ -162,14 +122,13 @@ The `options` field is optional and accepts any configuration parameter from [li
 <AccordionGroup>
 <Accordion title="Kafka connection configuration">
 
-You can pass arbitrary Kafka cluster options in the `restate.toml`, and those options will be applied for all the subscriptions to that cluster, for example:
+You can pass arbitrary Kafka cluster properties when registering the cluster, and those properties will be applied for all the subscriptions to that cluster, for example:
 
-```toml restate.toml
-[[ingress.kafka-clusters]]
-name = "my-cluster"
-brokers = ["PLAINTEXT://broker:9092"]
-"sasl.username" = "me"
-"sasl.password" = "pass"
+```bash
+restate kafka-clusters create my-cluster \
+    bootstrap.servers=broker:9092 \
+    sasl.username=me \
+    sasl.password=pass
 ```
 
 For the full list of options, check [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md).
@@ -177,32 +136,21 @@ For the full list of options, check [librdkafka configuration](https://github.co
 
 <Accordion title="Multiple Kafka clusters support">
 
-You can configure multiple kafka clusters in the `restate.toml` file:
+You can register multiple Kafka clusters:
 
-```toml restate.toml
-[[ingress.kafka-clusters]]
-name = "my-cluster-1"
-brokers = ["PLAINTEXT://localhost:9092"]
-
-[[ingress.kafka-clusters]]
-name = "my-cluster-2"
-brokers = ["PLAINTEXT://localhost:9093"]
+```bash
+restate kafka-clusters create my-cluster-1 bootstrap.servers=localhost:9092
+restate kafka-clusters create my-cluster-2 bootstrap.servers=localhost:9093
 ```
 
-And then, when creating the subscriptions, you refer to the specific cluster by `name`:
+And then, when creating the subscriptions, you refer to the specific cluster by name:
 
 ```bash
 # Subscription to my-cluster-1
-curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster-1/topic-1",
-    "sink": "service://MyService/handleCluster1"
-}'
+restate subscriptions create kafka://my-cluster-1/topic-1 service://MyService/handleCluster1
 
 # Subscription to my-cluster-2
-curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster-2/topic-2",
-    "sink": "service://MyService/handleCluster2"
-}'
+restate subscriptions create kafka://my-cluster-2/topic-2 service://MyService/handleCluster2
 ```
 </Accordion>
 
@@ -227,7 +175,7 @@ ctx.request().headers
 
 Each event carries within this map the following entries:
 
-* `restate.subscription.id`: The subscription identifier, as shown by the Admin API.
+* `restate.subscription.id`: The subscription identifier, as shown by `restate subscriptions list`.
 * `kafka.offset`: The record offset.
 * `kafka.partition`: The record partition.
 * `kafka.timestamp`: The record timestamp.
@@ -238,56 +186,36 @@ Check out the serialization documentation of your SDK to learn how to receive ra
 </Accordion>
 </AccordionGroup>
 
+## Managing Kafka Clusters
+
+Manage the registered Kafka clusters with the `restate kafka-clusters` CLI commands (alias `kc`):
+
+```bash
+# List the registered Kafka clusters
+restate kafka-clusters list
+# Print the properties of a Kafka cluster and its subscriptions
+restate kafka-clusters describe my-cluster
+# Open an editor to interactively update the cluster properties
+restate kafka-clusters edit my-cluster
+# Update the cluster properties non-interactively, for CI and scripting
+restate kafka-clusters patch my-cluster --set client.id=restate-cli --unset sasl.password
+# Remove a Kafka cluster
+restate kafka-clusters delete my-cluster
+```
+
 ## Managing Kafka Subscriptions
 
-Restate can trigger handlers via Kafka events.
-
-### Create Subscriptions
-
-Subscribe a handler to a Kafka topic:
+Manage the subscriptions with the `restate subscriptions` CLI commands (alias `sub`):
 
 ```bash
-curl localhost:9070/subscriptions --json '{
-    "source": "kafka://my-cluster/my-topic",
-    "sink": "service://MyService/Handle",
-    "options": {"auto.offset.reset": "earliest"}
-}'
-```
-
-The `options` field is optional and accepts any [librdkafka configuration](https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md) parameter.
-
-### List Subscriptions
-
-View current subscriptions:
-
-```bash
-curl localhost:9070/subscriptions
-```
-
-**Example response:**
-```json
-{
-    "subscriptions": [
-        {
-            "id": "sub_11XHoawrCiWtv8kzhEyGtsR",
-            "source": "kafka://my-cluster/my-topic",
-            "sink": "service://Greeter/greet",
-            "options": {
-                "auto.offset.reset": "earliest",
-                "client.id": "restate",
-                "group.id": "sub_11XHoawrCiWtv8kzhEyGtsR"
-            }
-        }
-    ]
-}
-```
-
-### Delete Subscriptions
-
-Remove a subscription using its ID (starts with `sub_`):
-
-```bash
-curl -X DELETE localhost:9070/subscriptions/sub_11XHoawrCiWtv8kzhEyGtsR
+# Subscribe a handler to a Kafka topic
+restate subscriptions create kafka://my-cluster/my-topic service://MyService/Handle auto.offset.reset=earliest
+# List current subscriptions
+restate subscriptions list
+# Print detailed information about a subscription, including its options
+restate subscriptions describe sub_11XHoawrCiWtv8kzhEyGtsR
+# Remove a subscription using its ID (starts with sub_)
+restate subscriptions delete sub_11XHoawrCiWtv8kzhEyGtsR
 ```
 
 When you delete a subscription, Restate stops the associated consumer group. Messages already enqueued by Restate will still be processed.
