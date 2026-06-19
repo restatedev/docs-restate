@@ -1,0 +1,147 @@
+---
+title: "Flow Control"
+sidebarTitle: "Flow control"
+icon: "gauge"
+description: "Shape and limit concurrent invocations with scope-based concurrency limits."
+---
+
+Flow control lets you shape the traffic flowing through Restate instead of letting invocations run unbounded.
+As soon as many invocations compete for the same downstream resources, you need a way to put a ceiling on how much runs at once.
+
+<Note title="Experimental feature">
+    Flow control is an experimental feature and is disabled by default.
+    Its configuration and APIs may change in future releases.
+</Note>
+
+## Why flow control
+
+Flow control gives you a lever over concurrent work, which helps with:
+
+- **Cost control:** Cap how much expensive work runs at once. This is especially valuable for AI agents, where each concurrent invocation can translate directly into model or API spend. A concurrency limit puts a ceiling on that cost.
+- **Endpoint protection:** Keep a burst of invocations from overwhelming a downstream service, database, or third-party API by bounding how many hit it concurrently.
+- **Fairness:** Invocations flow through a scheduler that decides who goes next, so Restate ensures fairness between invocations running on the same partition.
+
+## What Restate supports today
+
+Restate's flow control primitives are built on a scheduler that decides which invocation runs next.
+The first capability built on this scheduler is **concurrency limits**: the maximum number of invocations that may run concurrently for a given [scope](#scopes).
+
+More flow-control capabilities will follow in later releases, all expressed through the same scope-based model.
+Planned follow-ups include throttling and rate limits, invocation priorities, and finite queue (backlog) limits.
+
+<Note title="SDK support">
+    Today, you apply flow control by invoking handlers through the [scoped ingress endpoints](#applying-concurrency-limits).
+    Support for setting a scope directly from the SDKs will be added over the coming weeks.
+</Note>
+
+## Scopes
+
+A **scope** is a namespace for concurrency control.
+Every invocation can carry a scope, and concurrency limits are applied per scope: all invocations sharing the same scope draw from the same concurrency budget.
+
+You choose what a scope represents. For example, you might scope by:
+
+- A tenant or customer, to give each one a fair share of capacity.
+- A downstream dependency, to bound how many invocations hit it at once.
+- A class of work, such as `checkout` or `ai-agent`, to cap how much of it runs concurrently.
+
+You attach a scope to an invocation by sending it through a [scoped ingress endpoint](#applying-concurrency-limits), and you define limits per scope through the [rule book](#configuring-concurrency-limits).
+
+## Enabling flow control
+
+Flow control is disabled by default. Enable it in your server configuration:
+
+```toml restate.toml
+experimental-enable-vqueues = true
+```
+
+Or via the environment variable:
+
+```shell
+RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true
+```
+
+<Warning title="Enable only on fresh clusters">
+    In the current release, flow control can only be enabled on fresh clusters that have no in-flight invocations.
+    If a partition still holds in-flight data (a non-empty inbox, or any invocation whose status is not `Completed`), Restate declines to enable the feature.
+    Migrating an existing cluster with in-flight invocations is planned for a following release.
+</Warning>
+
+## Configuring concurrency limits
+
+Concurrency limits are defined in a cluster-wide **rule book**.
+A rule pairs a *pattern*, which selects the scopes it applies to, with a set of *limits*.
+The only limit available today is `concurrency`: the maximum number of invocations that may run concurrently for a matching scope.
+
+A pattern is either an exact scope or the wildcard `*`:
+
+- `*` matches every scope and acts as a global default.
+- `checkout` matches a single, specific scope.
+
+When both a wildcard and an exact-scope pattern match an invocation, the more specific exact-scope rule wins.
+
+Manage rules dynamically with the `restate rules` CLI commands.
+`set` is idempotent: it creates a rule if it doesn't exist, or merges into the existing values, preserving fields you don't touch.
+
+```bash
+# Set a global default of 1000 concurrent invocations, plus a tighter
+# 50-concurrency cap for the "checkout" scope.
+restate rules set "*" --concurrency 1000 --description "global default"
+restate rules set "checkout" --concurrency 50
+
+# Inspect what's configured
+restate rules list                # one row per rule
+restate rules list --extra        # also shows description, version, last-modified
+
+# Soft-disable or re-enable a rule without losing its definition
+restate rules disable "checkout"
+restate rules enable  "checkout"
+
+# Remove the checkout rule again
+restate rules delete "checkout"
+```
+
+Run `restate rules --help` for the full set of options.
+
+## Applying concurrency limits
+
+To make an invocation count against a scope's concurrency limit, send it through a scoped ingress endpoint under the reserved `/restate/scope/` prefix:
+
+```
+# Scoped service calls
+POST /restate/scope/{scopeKey}/call/{service}/{handler}
+POST /restate/scope/{scopeKey}/call/{service}/{key}/{handler}
+POST /restate/scope/{scopeKey}/send/{service}/{handler}
+POST /restate/scope/{scopeKey}/send/{service}/{key}/{handler}
+```
+
+Add the `{key}` segment for Virtual Objects and Workflows; omit it for basic Services.
+
+For example, to invoke `checkout` of `OrderService` under the `checkout` scope:
+
+```shell
+curl localhost:8080/restate/scope/checkout/call/OrderService/checkout \
+  --json '{"orderId": "order-123"}'
+```
+
+Matching invocations are throttled to the configured `concurrency` and held in their queue until a slot frees up.
+
+<Info>
+    Invocations sent through the non-scoped endpoints (`/restate/call/...` and `/restate/send/...`) are not subject to any scope-based limit.
+    See [HTTP invocation](/services/invocation/http) for the full set of ingress endpoints.
+</Info>
+
+## Observing flow control
+
+When flow control is enabled, several SQL system tables let you inspect the scheduler, queues, and concurrency limits directly:
+
+| Table | What it shows |
+| --- | --- |
+| `sys_rules` | The configured rule book: one row per rule with its pattern, concurrency limit, description, disabled flag, version, and last-modified time. |
+| `sys_user_limits` | Per-scope concurrency counters: current usage, configured limit, available capacity, and the matching rule pattern. |
+| `sys_vqueues` | One row per entry across all queue stages, with its status, attempt counters, and lifecycle timestamps. |
+| `sys_vqueue_meta` | Aggregate statistics per queue: scope, service name, per-stage entry counts, and timing averages. |
+| `sys_scheduler` | Real-time scheduler state for each queue's head entry: queue depth, scheduler status, and what it is blocked on. |
+
+These tables are populated only when flow control is enabled.
+See [introspection](/services/introspection) for how to query the system tables.
