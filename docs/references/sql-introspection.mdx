@@ -7,20 +7,32 @@ description: "API reference for inspecting the invocation status and service sta
 This page contains the reference of the introspection tables.
 To learn how to access the introspection interface, check out the [introspection documentation](/services/introspection).
 
-## Table: `state`
+## Table: `sys_deployment`
+
+
+
+| Column name | Type | Description |
+|-------------|------|-------------|
+| `id` | `Utf8` | The ID of the service deployment. |
+| `ty` | `Utf8` | The type of the endpoint. Either `http` or `lambda`. |
+| `endpoint` | `Utf8` | The address of the endpoint. Either HTTP URL or Lambda ARN. |
+| `created_at` | `TimestampMillisecond` | Timestamp indicating the deployment registration time. |
+| `min_service_protocol_version` | `UInt32` | Minimum supported protocol version. |
+| `max_service_protocol_version` | `UInt32` | Maximum supported protocol version. |
+| `services` | `Utf8 List` | List of service names registered by this deployment. |
+
+## Table: `sys_inbox`
 
 
 
 | Column name | Type | Description |
 |-------------|------|-------------|
 | `partition_key` | `UInt64` | Internal column that is used for partitioning the services invocations. Can be ignored. |
-| `service_name` | `Utf8` | The name of the invoked service. |
-| `service_key` | `Utf8` | The key of the Virtual Object. |
-| `key` | `Utf8` | The `utf8` state key. |
-| `key_length` | `UInt64` | The byte length of the state key. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading octet_length(key). |
-| `value_utf8` | `Utf8` | Only contains meaningful values when a service stores state as `utf8`. This is the case for services that serialize state using JSON (default for Typescript SDK, Java/Kotlin SDK if using JsonSerdes). |
-| `value` | `Binary` | A binary, uninterpreted representation of the value. You can use the more specific column `value_utf8` if the value is a string. |
-| `value_length` | `UInt64` | The byte length of the value. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading length(value). |
+| `service_name` | `Utf8` | The name of the invoked virtual object/workflow. |
+| `service_key` | `Utf8` | The key of the virtual object/workflow. |
+| `id` | `Utf8` | [Invocation ID](/operate/invocation#invocation-identifier). |
+| `sequence_number` | `UInt64` | Sequence number in the inbox. |
+| `created_at` | `TimestampMillisecond` | Timestamp indicating the start of this invocation. DEPRECATED: you should not use this field anymore, but join with the sys_invocation table |
 
 ## Table: `sys_journal`
 
@@ -39,6 +51,7 @@ To learn how to access the introspection interface, check out the [introspection
 | `sleep_wakeup_at` | `TimestampMillisecond` | If this entry represents a sleep, indicates wakeup time. |
 | `promise_name` | `Utf8` | If this entry is a promise related entry (GetPromise, PeekPromise, CompletePromise), indicates the promise name. |
 | `raw` | `Binary` | Raw binary representation of the entry. Check the [service protocol](https://github.com/restatedev/service-protocol) for more details to decode it. |
+| `raw_length` | `UInt64` | The byte length of the raw entry. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading length(raw). |
 | `version` | `UInt32` | The journal version. |
 | `entry_json` | `Utf8` | The entry serialized as a JSON string. Filled only if journal version is 2. |
 | `entry_lite_json` | `Utf8` | The EntryLite projection serialized as a JSON string. Filled only if journal version is 2. |
@@ -68,32 +81,6 @@ To learn how to access the introspection interface, check out the [introspection
 | `service_key` | `Utf8` | The key of the virtual object/workflow. |
 | `invocation_id` | `Utf8` | [Invocation ID](/operate/invocation#invocation-identifier). |
 
-## Table: `sys_inbox`
-
-
-
-| Column name | Type | Description |
-|-------------|------|-------------|
-| `partition_key` | `UInt64` | Internal column that is used for partitioning the services invocations. Can be ignored. |
-| `service_name` | `Utf8` | The name of the invoked virtual object/workflow. |
-| `service_key` | `Utf8` | The key of the virtual object/workflow. |
-| `id` | `Utf8` | [Invocation ID](/operate/invocation#invocation-identifier). |
-| `sequence_number` | `UInt64` | Sequence number in the inbox. |
-| `created_at` | `TimestampMillisecond` | Timestamp indicating the start of this invocation. DEPRECATED: you should not use this field anymore, but join with the sys_invocation table |
-
-## Table: `sys_idempotency`
-
-
-
-| Column name | Type | Description |
-|-------------|------|-------------|
-| `partition_key` | `UInt64` | Internal column that is used for partitioning the services invocations. Can be ignored. |
-| `service_name` | `Utf8` | The name of the invoked service. |
-| `service_key` | `Utf8` | The key of the virtual object or the workflow ID. Null for regular services. |
-| `service_handler` | `Utf8` | The invoked handler. |
-| `idempotency_key` | `Utf8` | The user provided idempotency key. |
-| `invocation_id` | `Utf8` | [Invocation ID](/operate/invocation#invocation-identifier). |
-
 ## Table: `sys_promise`
 
 
@@ -101,6 +88,7 @@ To learn how to access the introspection interface, check out the [introspection
 | Column name | Type | Description |
 |-------------|------|-------------|
 | `partition_key` | `UInt64` | Internal column that is used for partitioning the services invocations. Can be ignored. |
+| `scope` | `Utf8` | The scope of the workflow instance, if scoped. NULL for unscoped entries. Since v1.7.0 |
 | `service_name` | `Utf8` | The name of the workflow service. |
 | `service_key` | `Utf8` | The workflow ID. |
 | `key` | `Utf8` | The promise key. |
@@ -108,6 +96,27 @@ To learn how to access the introspection interface, check out the [introspection
 | `completion_success_value` | `Binary` | The completion success, if any. |
 | `completion_success_value_utf8` | `Utf8` | The completion success as UTF-8 string, if any. |
 | `completion_failure` | `Utf8` | The completion failure, if any. |
+
+## Table: `sys_scheduler`
+
+
+
+| Column name | Type | Description |
+|-------------|------|-------------|
+| `partition_key` | `UInt64` | Internal column that is used for partitioning. Can be ignored. |
+| `id` | `Utf8` | Identifier of the scheduled vqueue (vq_...). |
+| `num_inbox` | `UInt64` | Number of entries currently waiting in the inbox stage. |
+| `status` | `Utf8` | High-level scheduler state (Dormant, Ready, BlockedOn, ...). |
+| `head_entry_id` | `Utf8` | Identifier of the head entry if the scheduler has already advanced to it. Null when the head has not yet been materialized |
+| `scheduled_at` | `TimestampMillisecond` | Earliest time when the head entry becomes runnable. Set only when status is `Scheduled`. |
+| `blocked_on` | `Utf8` | Detailed blocking resource when status is `BlockedOn`. |
+| `invoker_concurrency_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on global invoker concurrency. |
+| `throttling_rules_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on user-defined per-vqueue throttling rules. |
+| `invoker_throttling_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on node-level invoker throttling. |
+| `invoker_memory_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on invoker memory pool capacity. |
+| `concurrency_rules_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on user-defined concurrency rules. |
+| `lock_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on virtual-object locks. |
+| `deployment_concurrency_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on deployment-level concurrency capacity. |
 
 ## Table: `sys_service`
 
@@ -121,19 +130,82 @@ To learn how to access the introspection interface, check out the [introspection
 | `ty` | `Utf8` | The service type. Either `service` or `virtual_object` or `workflow`. |
 | `deployment_id` | `Utf8` | The ID of the latest deployment |
 
-## Table: `sys_deployment`
+## Table: `state`
 
 
 
 | Column name | Type | Description |
 |-------------|------|-------------|
-| `id` | `Utf8` | The ID of the service deployment. |
-| `ty` | `Utf8` | The type of the endpoint. Either `http` or `lambda`. |
-| `endpoint` | `Utf8` | The address of the endpoint. Either HTTP URL or Lambda ARN. |
-| `created_at` | `TimestampMillisecond` | Timestamp indicating the deployment registration time. |
-| `min_service_protocol_version` | `UInt32` | Minimum supported protocol version. |
-| `max_service_protocol_version` | `UInt32` | Maximum supported protocol version. |
-| `services` | `Utf8 List` | List of service names registered by this deployment. |
+| `partition_key` | `UInt64` | Internal column that is used for partitioning the services invocations. Can be ignored. |
+| `scope` | `Utf8` | The scope of the Virtual Object instance, if scoped. NULL for unscoped entries. Since v1.7.0 |
+| `service_name` | `Utf8` | The name of the invoked service. |
+| `service_key` | `Utf8` | The key of the Virtual Object. |
+| `key` | `Utf8` | The `utf8` state key. |
+| `key_length` | `UInt64` | The byte length of the state key. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading octet_length(key). |
+| `value_utf8` | `Utf8` | Only contains meaningful values when a service stores state as `utf8`. This is the case for services that serialize state using JSON (default for Typescript SDK, Java/Kotlin SDK if using JsonSerdes). |
+| `value` | `Binary` | A binary, uninterpreted representation of the value. You can use the more specific column `value_utf8` if the value is a string. |
+| `value_length` | `UInt64` | The byte length of the value. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading length(value). |
+
+## Table: `sys_vqueue_meta`
+
+
+
+| Column name | Type | Description |
+|-------------|------|-------------|
+| `partition_key` | `UInt64` | Internal column that is used for partitioning. Can be ignored. |
+| `id` | `Utf8` | The VQueue Identifier (vq_...) |
+| `is_active` | `Boolean` | Whether this vqueue is active or not. An active vqueue is a vqueue that is not paused, and has non-finished items. |
+| `queue_is_paused` | `Boolean` | Whether this vqueue is paused. |
+| `service_name` | `Utf8` | Service name linked to this vqueue |
+| `scope` | `Utf8` | The scope of this vqueue. |
+| `limit_key` | `Utf8` | The name of the limit-key assigned to this vqueue |
+| `lock_name` | `Utf8` | The name of the lock (in the format of `service/key`) This is only set if this is a vqueue for a virtual object. |
+| `created_at` | `TimestampMillisecond` | When was this vqueue first created |
+| `last_enqueued_at` | `TimestampMillisecond` | Last timestamp an entry moved into Inbox. This covers items enqueued for the first time only. |
+| `last_start_at` | `TimestampMillisecond` | Last timestamp an entry first transitioned to Run. |
+| `last_attempt_at` | `TimestampMillisecond` | Last timestamp an entry transitioned to Run. |
+| `last_finish_at` | `TimestampMillisecond` | Last timestamp an entry transitioned to Finished. |
+| `avg_queue_duration` | `DurationMillisecond` | Exponential moving average (EMA) of first-attempt queue wait time. |
+| `avg_inbox_duration` | `DurationMillisecond` | Exponential moving average (EMA) of how long entries stayed in inbox. |
+| `avg_run_duration` | `DurationMillisecond` | Exponential moving average (EMA) of how long entries stayed running. |
+| `avg_suspension_duration` | `DurationMillisecond` | Exponential moving average (EMA) of how long entries stayed suspended. |
+| `avg_end_to_end_duration` | `DurationMillisecond` | Exponential moving average (EMA) of end-to-end entry lifetime from first-runnable time to completion. Note that this only tracks entries that were not killed/cancelled or failed/paused. |
+| `avg_blocked_on_concurrency_rules` | `DurationMillisecond` | Exponential moving average (EMA) of time the head item spent blocked on user-defined concurrency rules before entering Running. Sampled on every Inbox → Running transition (every run attempt, including retries). |
+| `avg_blocked_on_invoker_concurrency` | `DurationMillisecond` | Exponential moving average (EMA) of time the head item spent blocked on node-level invoker concurrency tokens before entering Running. |
+| `avg_blocked_on_invoker_throttling` | `DurationMillisecond` | Exponential moving average (EMA) of time the head item spent blocked on node-level invoker throttling before entering Running. Sampled on every Inbox → Running transition (every run attempt, including retries). |
+| `avg_blocked_on_lock` | `DurationMillisecond` | Exponential moving average (EMA) of time the head item spent blocked on a virtual object lock before entering Running. |
+| `num_inbox` | `UInt64` | The number of entries that are in the inbox. The inbox is the priority queue that the scheduler uses to choose which entries to run next. |
+| `num_running` | `UInt64` | The number of entries that are currently running. |
+| `num_suspended` | `UInt64` | The number of entries that are suspended. |
+| `num_paused` | `UInt64` | The number of entries that are paused. |
+| `num_finished` | `UInt64` | The number of entries that have finished processing and are pending deletion or archival. |
+
+## Table: `sys_vqueues`
+
+
+
+| Column name | Type | Description |
+|-------------|------|-------------|
+| `partition_key` | `UInt64` | Internal column that is used for partitioning. Can be ignored. |
+| `id` | `Utf8` | The VQueue Identifier (vq_...). |
+| `stage` | `Utf8` | The stage this entry currently belongs to. Choices are 'inbox', 'running', 'paused', 'suspended', and 'finished'. |
+| `status` | `Utf8` | The entry processing status. Examples are `new`, `scheduled`, `started`, `backing-off`, `yielded`, `killed`, `cancelled`, `failed`, and `succeeded`. Note that in stages some cases, the status will reflect the old status prior to transitioning into the current stage. We preserve the last known status because it will be useful to know when the entry transitions out of the current stage. |
+| `has_lock` | `Boolean` | Whether this entry currently holds a lock. |
+| `run_at` | `TimestampMillisecond` | The entry will be eligible to run after this timestamp. Only present for entries that are in the stage=inbox. |
+| `sequence_number` | `UInt64` | Sequence number encoded in the queue ordering key. |
+| `entry_id` | `Utf8` | Identifier of the entry. |
+| `entry_kind` | `Utf8` | Entry kind (`invocation` or `state-mutation`). |
+| `created_at` | `TimestampMillisecond` | Creation timestamp of the entry. |
+| `transitioned_at` | `TimestampMillisecond` | Timestamp of the latest stage transition. |
+| `num_attempts` | `UInt32` | Number of times this entry has been moved to the run queue. |
+| `num_errors` | `UInt32` | Number of times this entry has yielded execution due to transient errors. |
+| `num_pauses` | `UInt32` | Number of times this entry has been moved to the paused stage. |
+| `num_suspensions` | `UInt32` | Number of times this entry has been moved to the suspended stage. |
+| `num_yields` | `UInt32` | Number of times this entry has yielded execution. |
+| `first_attempt_at` | `TimestampMillisecond` | Timestamp of the first attempt to run this entry. |
+| `latest_attempt_at` | `TimestampMillisecond` | Timestamp of the latest attempt to run this entry. |
+| `first_runnable_at` | `TimestampMillisecond` | The realistic earliest time at which this entry can run its first attempt. |
+| `deployment` | `Utf8` | If set, the entry's pinned deployment identifier. |
 
 ## Table: `sys_invocation`
 
@@ -142,11 +214,14 @@ To learn how to access the introspection interface, check out the [introspection
 | Column name | Type | Description |
 |-------------|------|-------------|
 | `id` | `Utf8` | [Invocation ID](/operate/invocation#invocation-identifier). |
+| `vqueue_id` | `Utf8` | The VQueue assigned to the the invocation. NULL if invocation was not migrated to vqueues. Since v1.7.0. |
 | `target` | `Utf8` | Invocation Target. Format for plain services: `ServiceName/HandlerName`, e.g. `Greeter/greet`. Format for virtual objects/workflows: `VirtualObjectName/Key/HandlerName`, e.g. `Greeter/Francesco/greet`. |
 | `target_service_name` | `Utf8` | The name of the invoked service. |
 | `target_service_key` | `Utf8` | The key of the virtual object or the workflow ID. Null for regular services. |
 | `target_handler_name` | `Utf8` | The invoked handler. |
 | `target_service_ty` | `Utf8` | The service type. Either `service` or `virtual_object` or `workflow`. |
+| `scope` | `Utf8` | The scope of the invocation for vqueue partitioning, if scoped. NULL for unscoped invocations. Since v1.7.0. |
+| `limit_key` | `Utf8` | The limit key that was used for the invocation. NULL if no limit key was set. Since v1.7.0. |
 | `idempotency_key` | `Utf8` | Idempotency key, if any. |
 | `invoked_by` | `Utf8` | Either: * `ingress` if the invocation was created externally. * `service` if the invocation was created by another Restate service. * `subscription` if the invocation was created by a subscription (e.g. Kafka). * `restart_as_new` if the invocation was created by restarting an old invocation as new. |
 | `invoked_by_service_name` | `Utf8` | The name of caller service if `invoked_by = 'service'`. |
@@ -169,8 +244,9 @@ To learn how to access the introspection interface, check out the [introspection
 | `completed_at` | `TimestampMillisecond` | Timestamp indicating when the invocation was completed, if ever. |
 | `completion_retention` | `DurationMillisecond` | For how long the metadata of this invocation, including its result, is retained after completion. |
 | `journal_retention` | `DurationMillisecond` | For how long the journal is retained after completion. |
-| `suspended_waiting_for_completions` | `UInt32 List` | List of completion ids the invocation is awaiting on, if `status = suspended`. |
-| `suspended_waiting_for_signals` | `UInt32 List` | List of signals the invocation is awaiting on, if `status = suspended`. |
+| `suspended_waiting_for_completions` | `UInt32 List` | List of completion ids the invocation is awaiting on, if `status = suspended`. DEPRECATED: use `suspended_waiting_future_json` instead. |
+| `suspended_waiting_for_signals` | `UInt32 List` | List of signals the invocation is awaiting on, if `status = suspended`. DEPRECATED: use `suspended_waiting_future_json` instead. |
+| `suspended_waiting_future_json` | `Utf8` | Future tree the invocation is suspended on, if `status = suspended`. |
 | `retry_count` | `UInt64` | The number of invocation attempts since the current leader started executing it. Increments on start, so a value greater than 1 means a failure occurred. Note: the value is not a global attempt counter across invocation suspensions and leadership changes. |
 | `last_start_at` | `TimestampMillisecond` | Timestamp indicating the start of the most recent attempt of this invocation. |
 | `next_retry_at` | `TimestampMillisecond` | Timestamp indicating the start of the next attempt of this invocation. |
@@ -184,6 +260,7 @@ To learn how to access the introspection interface, check out the [introspection
 | `last_failure_related_command_index` | `UInt64` | The index of the command in the journal that caused the failure, if any. It may be out-of-bound of the currently stored commands in `sys_journal`. |
 | `last_failure_related_command_name` | `Utf8` | The name of the command that caused the failure, if any. |
 | `last_failure_related_command_type` | `Utf8` | The type of the command that caused the failure, if any. You can check all the available command types in [`entries.rs`](https://github.com/restatedev/restate/blob/main/crates/types/src/journal_v2/command.rs). |
+| `last_awaiting_on_future_json` | `Utf8` | Last known future the SDK was awaiting on, if `in_flight = true`. |
 | `status` | `Utf8` | Either `pending` or `scheduled` or `ready` or `running` or `paused` or `backing-off` or `suspended` or `completed`. |
 | `completion_result` | `Utf8` | If `status = 'completed'`, this contains either `success` or `failure` |
 | `completion_failure` | `Utf8` | If `status = 'completed' AND completion_result = 'failure'`, this contains the error cause |

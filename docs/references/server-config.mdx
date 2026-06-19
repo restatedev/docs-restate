@@ -8,14 +8,6 @@ import Intro from "/snippets/common/default-configuration.mdx"
 
 <Intro />
 
-<ResponseField name="additional-request-headers" type="object | null" post={['env: RESTATE_ADDITIONAL_REQUEST_HEADERS']}>
-    Additional request headers: Headers that should be applied to all outgoing requests (HTTP and Lambda).
-Defaults to `x-restate-cluster-name: &lt;cluster name&gt;`.
-
-    Proxy type to implement HashMap&lt;HeaderName, HeaderValue&gt; ser/de
-Use it directly or with `#[serde(with = \"serde_with::As::&lt;serde_with::FromInto&lt;restate_serde_util::SerdeableHeaderMap&gt;&gt;\")]`.
-</ResponseField>
-
 <ResponseField name="admin" type="object" post={[]}>
     Admin server options: 
 
@@ -60,7 +52,7 @@ This has precedence over `bind-ip` and `bind-port`
             Bind address: The local network address to bind on for admin-api-server. This service uses default port 9070 and will create a unix-socket file at the data directory under the name `admin.sock`
 
 Examples:
-"0.0.0.0:9070" or "127.0.0.1:9070"
+"[::]:9070" or "0.0.0.0:9070" or "127.0.0.1:9070"
         </ResponseField>
 
         <ResponseField name="bind-ip" type="string | null" post={['format: ip','env: RESTATE_ADMIN__BIND_IP']}>
@@ -185,19 +177,6 @@ Use `restatectl` to provision the cluster/node if automatic provisioning is disa
 This can also be explicitly disabled by setting this value to false.
 
 Default: true
-
-</ResponseField>
-
-<ResponseField name="aws-assume-role-external-id" type="string | null" post={['env: RESTATE_AWS_ASSUME_ROLE_EXTERNAL_ID']} default="null">
-    AssumeRole external ID: An external ID to apply to any AssumeRole operations taken by this client.
-https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
-Can be overridden by the `AWS_EXTERNAL_ID` environment variable.
-
-</ResponseField>
-
-<ResponseField name="aws-profile" type="string | null" post={['env: RESTATE_AWS_PROFILE']} default="null">
-    AWS Profile: Name of the AWS profile to select. Defaults to 'AWS_PROFILE' env var, or otherwise
-the `default` profile.
 
 </ResponseField>
 
@@ -350,23 +329,15 @@ Defaults: 250MB
 
             
             <Expandable title="Properties">
-                <ResponseField name="log-server-retry-policy"  post={[]}>
+                <ResponseField name="log-server-retry-policy" type="oneOf | null" post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY']}>
                     Log Server RPC retry policy
 
 Retry policy for log server RPCs
 
+                    Retry policy: Definition of a retry policy
                     
-                    
-                    <Expandable title="Option 1: None">
-                    No retry strategy.
-
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
-
-                    </Expandable>
-                    
-                    <Expandable title="Option 2: Fixed delay">
-                    Retry with a fixed delay strategy.
 
                         <ResponseField name="interval" type="string" required post={['minLength: 1','env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY__INTERVAL']}>
                             Interval between retries.
@@ -385,11 +356,6 @@ Examples:
 
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
-
-                    </Expandable>
-                    
-                    <Expandable title="Option 3: Exponential">
-                    Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
 
                         <ResponseField name="factor" type="number" required post={['format: float','env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY__FACTOR']}>
                             Factor: The factor to use to compute the next retry attempt.
@@ -425,17 +391,17 @@ Examples:
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
 
-                    </Expandable>
                 </ResponseField>
 
-                <ResponseField name="log-server-rpc-timeout" type="string" post={['minLength: 1','env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RPC_TIMEOUT']} default="2s">
-                    Non-zero human-readable duration: Log Server RPC timeout
+                <ResponseField name="log-server-rpc-timeout" type="string | null" post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__LOG_SERVER_RPC_TIMEOUT']}>
+                    Log Server RPC timeout
 
 Timeout waiting on log server response
 
+                    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
-
                 </ResponseField>
 
                 <ResponseField name="maximum-inflight-records" type="integer" post={['format: uint','minimum: 1','env: RESTATE_BIFROST__REPLICATED_LOGLET__MAXIMUM_INFLIGHT_RECORDS']} default="1000">
@@ -486,36 +452,34 @@ Value must be between 0 and 1. It will be clamped at `1.0`.
 
                 </ResponseField>
 
+                <ResponseField name="rpc-timeout" type="string" post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__RPC_TIMEOUT']} default="250ms..1m">
+                    Adaptive timeout for LogServer RPC
+
+This configures the adaptive timeout range for RPC operations from this node to log servers.
+The timeout range is also used to determine the appropriate retry delay between retry attempts.
+
+Examples:
+"250ms..1m" or "10ms..60s" or "0.5s..5m" or "1s..1h"
+
+                </ResponseField>
+
                 <ResponseField name="sequencer-inactivity-timeout" type="string" post={['minLength: 1','env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_INACTIVITY_TIMEOUT']} default="15s">
-                    Non-zero human-readable duration: Sequencer inactivity timeout
-
-The sequencer is allowed to consider itself quiescent if it did not commit records for this period of time.
-It may use this to sends pre-emptive release/seal check requests to log-servers.
-
-The sequencer is also allowed to use this value as interval to send seal/release checks even if it's not quiescent.
+                    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
 
                 </ResponseField>
 
-                <ResponseField name="sequencer-retry-policy"  post={[]}>
-                    Retry policy: Sequencer retry policy
+                <ResponseField name="sequencer-retry-policy" type="oneOf | null" post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY']}>
+                    Sequencer retry policy
 
 Backoff introduced when sequencer fail to find a suitable spread of log servers
 
+                    Retry policy: Definition of a retry policy
                     
-                    
-                    <Expandable title="Option 1: None">
-                    No retry strategy.
-
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
-
-                    </Expandable>
-                    
-                    <Expandable title="Option 2: Fixed delay">
-                    Retry with a fixed delay strategy.
 
                         <ResponseField name="interval" type="string" required post={['minLength: 1','env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY__INTERVAL']}>
                             Interval between retries.
@@ -534,11 +498,6 @@ Examples:
 
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
-
-                    </Expandable>
-                    
-                    <Expandable title="Option 3: Exponential">
-                    Retry with an exponential strategy. The next retry is computed as `min(last_retry_interval * factor, max_interval)`.
 
                         <ResponseField name="factor" type="number" required post={['format: float','env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY__FACTOR']}>
                             Factor: The factor to use to compute the next retry attempt.
@@ -574,14 +533,25 @@ Examples:
                         <ResponseField name="type" type="string" required post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__SEQUENCER_RETRY_POLICY__TYPE']}>
                         </ResponseField>
 
-                    </Expandable>
+                </ResponseField>
+
+                <ResponseField name="store-timeout" type="string" post={['env: RESTATE_BIFROST__REPLICATED_LOGLET__STORE_TIMEOUT']} default="2s..1m">
+                    Adaptive timeout for LogServer Store Messages
+
+This configures the adaptive timeout range for Store operations from this node to log servers.
+
+Since v1.7.0
+
+Examples:
+"250ms..1m" or "10ms..60s" or "0.5s..5m" or "1s..1h"
+
                 </ResponseField>
 
             </Expandable>
         </ResponseField>
 
         <ResponseField name="seal-retry-interval" type="string" post={['minLength: 1','env: RESTATE_BIFROST__SEAL_RETRY_INTERVAL']} default="2s">
-            Seal retry interval: Interval to wait between retries of loglet seal failures
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -599,7 +569,7 @@ This has precedence over `bind-ip` and `bind-port`
     Bind address: The local network address to bind on for tokio-console-server. This service uses default port 6669 and will create a unix-socket file at the data directory under the name `tokio.sock`
 
 Examples:
-"0.0.0.0:6669" or "127.0.0.1:6669"
+"[::]:6669" or "0.0.0.0:6669" or "127.0.0.1:6669"
 </ResponseField>
 
 <ResponseField name="bind-ip" type="string | null" post={['format: ip','env: RESTATE_BIND_IP']}>
@@ -618,12 +588,11 @@ have the same.
 
 </ResponseField>
 
-<ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_CONNECT_TIMEOUT']} default="10s">
-    Connect timeout: How long to wait for a TCP connection to be established before considering
-it a failed attempt.
+<ResponseField name="default-idempotency-retention" type="string" post={['minLength: 1','env: RESTATE_DEFAULT_IDEMPOTENCY_RETENTION']}>
+    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
-"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
 
 </ResponseField>
 
@@ -674,7 +643,7 @@ Check https://docs.restate.dev/services/configuration#retries for more details.
         </ResponseField>
 
         <ResponseField name="initial-interval" type="string" post={['minLength: 1','env: RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL']} default="500ms">
-            Initial Interval: Initial interval for the first retry attempt.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -691,7 +660,7 @@ No retries if set to 1.
         </ResponseField>
 
         <ResponseField name="max-interval" type="string" post={['minLength: 1','env: RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL']} default="1m">
-            Max interval: Maximum interval between retries.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -714,9 +683,17 @@ For more details about the invocation lifecycle, check https://docs.restate.dev/
     </Expandable>
 </ResponseField>
 
-<ResponseField name="default-thread-pool-size" type="integer | null" post={['format: uint','env: RESTATE_DEFAULT_THREAD_POOL_SIZE']} default="null">
+<ResponseField name="default-thread-pool-size" type="integer | null" post={['format: uint32','env: RESTATE_DEFAULT_THREAD_POOL_SIZE']} default="null">
     Default async runtime thread pool: Size of the default thread pool used to perform internal tasks.
 If not set, it defaults to the number of CPU cores.
+
+</ResponseField>
+
+<ResponseField name="default-workflow-completion-retention" type="string" post={['minLength: 1','env: RESTATE_DEFAULT_WORKFLOW_COMPLETION_RETENTION']}>
+    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
 
 </ResponseField>
 
@@ -728,29 +705,6 @@ If not set, it defaults to the number of CPU cores.
 <ResponseField name="disable-telemetry" type="boolean" post={['env: RESTATE_DISABLE_TELEMETRY']} default="false">
     Disable telemetry: Restate uses Scarf to collect anonymous usage data to help us understand how the software is being used.
 You can set this flag to true to disable this collection. It can also be set with the environment variable DO_NOT_TRACK=1.
-
-</ResponseField>
-
-<ResponseField name="experimental-kafka-batch-ingestion" type="boolean" post={['env: RESTATE_EXPERIMENTAL_KAFKA_BATCH_INGESTION']} default="false">
-    Experimental Kafka batch ingestion: Use the new experimental kafka ingestion path which leverages batching
-for a faster kafka ingestion.
-
-Set to `true` to enable the experimental ingestion mechanism.
-
-The legacy path will be removed in v1.7.
-
-Defaults to `false` in v1.6.
-
-</ResponseField>
-
-<ResponseField name="experimental-shuffler-batch-ingestion" type="boolean" post={['env: RESTATE_EXPERIMENTAL_SHUFFLER_BATCH_INGESTION']} default="false">
-    Experimental Shuffler batch ingestion: Use the new experimental batch ingestion path.
-
-Set to `true` to enable the experimental ingestion mechanism.
-
-The legacy path will be removed in v1.7.
-
-Defaults to `false` in v1.6.
 
 </ResponseField>
 
@@ -808,8 +762,7 @@ Examples:
 </ResponseField>
 
 <ResponseField name="gossip-tick-interval" type="string" post={['minLength: 1','env: RESTATE_GOSSIP_TICK_INTERVAL']} default="100ms">
-    Gossip tick interval: The interval at which the failure detector will tick. Decrease this value for faster reaction
-to node failures. Note, that every tick comes with an overhead.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -817,9 +770,7 @@ Examples:
 </ResponseField>
 
 <ResponseField name="gossip-time-skew-threshold" type="string" post={['minLength: 1','env: RESTATE_GOSSIP_TIME_SKEW_THRESHOLD']} default="1s">
-    Gossips time skew threshold: The time skew is the maximum acceptable time difference between the local node and the time
-reported by peers via gossip messages. The time skew is also used to ignore gossip messages
-that are too old.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -831,44 +782,6 @@ Examples:
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
-
-</ResponseField>
-
-<ResponseField name="http-keep-alive-options" type="object" post={[]}>
-    HTTP/2 Keep-alive: Configuration for the HTTP/2 keep-alive mechanism, using PING frames.
-If unset, HTTP/2 keep-alive are disabled.
-
-    
-    <Expandable title="Properties">
-        <ResponseField name="interval" type="string" post={['minLength: 1','env: RESTATE_HTTP_KEEP_ALIVE_OPTIONS__INTERVAL']} default="40s">
-            HTTP/2 Keep-alive interval: Sets an interval for HTTP/2 PING frames should be sent to keep a
-connection alive.
-
-You should set this timeout with a value lower than the `abort_timeout`.
-
-Examples:
-"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
-
-        </ResponseField>
-
-        <ResponseField name="timeout" type="string" post={['minLength: 1','env: RESTATE_HTTP_KEEP_ALIVE_OPTIONS__TIMEOUT']} default="20s">
-            Timeout: Sets a timeout for receiving an acknowledgement of the keep-alive ping.
-
-If the ping is not acknowledged within the timeout, the connection will
-be closed.
-
-Examples:
-"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
-
-        </ResponseField>
-
-    </Expandable>
-</ResponseField>
-
-<ResponseField name="http-proxy" type="string | null" post={['env: RESTATE_HTTP_PROXY']} default="null">
-    Proxy URI: A URI, such as `http://127.0.0.1:10001`, of a server to which all invocations should be sent, with the `Host` header set to the deployment URI.
-HTTPS proxy URIs are supported, but only HTTP endpoint traffic will be proxied currently.
-Can be overridden by the `HTTP_PROXY` environment variable.
 
 </ResponseField>
 
@@ -916,7 +829,7 @@ This has precedence over `bind-ip` and `bind-port`
             Bind address: The local network address to bind on for http-ingress-server. This service uses default port 8080 and will create a unix-socket file at the data directory under the name `ingress.sock`
 
 Examples:
-"0.0.0.0:8080" or "127.0.0.1:8080"
+"[::]:8080" or "0.0.0.0:8080" or "127.0.0.1:8080"
         </ResponseField>
 
         <ResponseField name="bind-ip" type="string | null" post={['format: ip','env: RESTATE_INGRESS__BIND_IP']}>
@@ -935,6 +848,17 @@ the ingress will reply immediately with an appropriate status code. Default is u
 
         </ResponseField>
 
+        <ResponseField name="http2-max-concurrent-streams" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_INGRESS__HTTP2_MAX_CONCURRENT_STREAMS']}>
+            HTTP/2 max concurrent streams: Caps the number of concurrent HTTP/2 streams accepted per inbound ingress connection.
+If unset, Restate does not configure this limit and leaves it at hyper's runtime default.
+With the current hyper version, that default is 200 streams.
+Service-mesh clients such as Linkerd honor the advertised value as a hard per-connection
+concurrency limit, so high-concurrency or long-poll deployments may need to raise it.
+
+Since v1.7.0
+
+        </ResponseField>
+
         <ResponseField name="ingestion" type="object" post={[]}>
             Ingestion Options: Settings for the ingestion client
 Currently only used by the Kafka ingress and the admin API.
@@ -942,9 +866,7 @@ Currently only used by the Kafka ingress and the admin API.
             
             <Expandable title="Properties">
                 <ResponseField name="connection-retry-policy"  required post={[]}>
-                    Connection retry policy: Retry policy for the ingestion client. It must allow unlimited
-retries; if configured with a cap, the client falls back to
-retrying every 2 seconds.
+                    Retry policy: Definition of a retry policy
 
                     
                     
@@ -1041,10 +963,13 @@ Defaults to 50 KiB.
         </ResponseField>
 
         <ResponseField name="kafka-clusters" type="array" post={[]} default="[]">
+            **Deprecated in 1.7**: Kafka clusters should now be configured through the UI/Admin API
+
             
             <Expandable title="Array Items">
                 <ResponseField name="item" type="object" post={[]}>
                     Kafka cluster options: Configuration options to connect to a Kafka cluster.
+**Deprecated in 1.7**: Kafka clusters should now be configured through the UI/Admin API
 
                     
                     <Expandable title="Properties">
@@ -1084,6 +1009,19 @@ will create a socket file under the data directory.
             - `"all"` : [default] Listen on both Unix and TCP sockets
         </ResponseField>
 
+        <ResponseField name="request-size-limit" type="string | null" post={['env: RESTATE_INGRESS__REQUEST_SIZE_LIMIT']}>
+            Request size limit: Maximum size of request that can be received over ingress. If a request size is
+larger than this limit, the request will fail.
+
+If unset, defaults to `networking.message-size-limit`. If set, it will be clamped at
+the value of `networking.message-size-limit` since larger requests cannot be transmitted
+over the cluster internal network.
+
+Since v1.7.0
+
+            Non-zero human-readable bytes
+        </ResponseField>
+
         <ResponseField name="use-random-ports" type="boolean | null" post={['env: RESTATE_INGRESS__USE_RANDOM_PORTS']}>
             Use random ports instead of the default port
 
@@ -1092,21 +1030,8 @@ will create a socket file under the data directory.
     </Expandable>
 </ResponseField>
 
-<ResponseField name="initial-max-send-streams" type="integer | null" post={['format: uint','env: RESTATE_INITIAL_MAX_SEND_STREAMS']} default="null">
-    Initial Max Send Streams: Sets the initial maximum of locally initiated (send) streams.
-
-This value will be overwritten by the value included in the initial
-SETTINGS frame received from the peer as part of a [connection preface].
-
-Default: None
-
-**NOTE**: Setting this value to None (default) users the default
-recommended value from HTTP2 specs
-
-</ResponseField>
-
 <ResponseField name="initialization-timeout" type="string" post={['minLength: 1','env: RESTATE_INITIALIZATION_TIMEOUT']} default="5m">
-    Initialization timeout: The timeout until the node gives up joining a cluster and initializing itself.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1174,7 +1099,7 @@ Check the [`RUST_LOG` documentation](https://docs.rs/tracing-subscriber/latest/t
 
     
     <Expandable title="Properties">
-        <ResponseField name="incoming-network-queue-length" type="integer" post={['format: uint','minimum: 1','env: RESTATE_LOG_SERVER__INCOMING_NETWORK_QUEUE_LENGTH']} default="1000">
+        <ResponseField name="incoming-network-queue-length" type="integer | null" post={['format: uint','minimum: 1','env: RESTATE_LOG_SERVER__INCOMING_NETWORK_QUEUE_LENGTH']}>
             The number of messages that can queue up on input network stream while request processor is busy.
 
         </ResponseField>
@@ -1208,6 +1133,17 @@ be used. Memory mapped files are not impacted by these parameters.
 
         </ResponseField>
 
+        <ResponseField name="rocksdb-disable-l0-l1-compression" type="boolean | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_L0_L1_COMPRESSION']}>
+            Disable L0/L1 SST compression: When false (the default), L0 and L1 SST files are compressed with Lz4.
+Higher levels (L2+) always use Zstd regardless of this setting.
+Set to true to disable compression for L0/L1, which can improve write
+throughput at the cost of higher disk usage since these files are
+short-lived and frequently compacted.
+
+Default: false (L0/L1 compression enabled)
+
+        </ResponseField>
+
         <ResponseField name="rocksdb-disable-statistics" type="boolean | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_STATISTICS']}>
             Disable rocksdb statistics collection
 
@@ -1215,10 +1151,11 @@ Default: False (statistics enabled)
 
         </ResponseField>
 
-        <ResponseField name="rocksdb-disable-wal" type="boolean | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_WAL']}>
-            Disable WAL: The default depends on the different rocksdb use-cases at Restate.
+        <ResponseField name="rocksdb-disable-wal-compression" type="boolean | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_WAL_COMPRESSION']}>
+            Disable WAL compression: When false (the default), the Write-Ahead Log is compressed with Zstd.
+Set to true to disable WAL compression. Only applies when WAL is enabled.
 
-Supports hot-reloading (Partial / Bifrost only)
+Default: false (WAL compression enabled)
 
         </ResponseField>
 
@@ -1250,33 +1187,17 @@ Default: 64MB
             Non-zero human-readable bytes
         </ResponseField>
 
-        <ResponseField name="rocksdb-max-background-jobs" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_BACKGROUND_JOBS']}>
-            RocksDB max background jobs (flushes and compactions): Default: the number of CPU cores on this node.
+        <ResponseField name="rocksdb-max-file-size" type="string" post={['minLength: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_FILE_SIZE']} default="128.0 MiB">
+            Non-zero human-readable bytes
 
         </ResponseField>
 
-        <ResponseField name="rocksdb-max-sub-compactions" type="integer" post={['format: uint32','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_SUB_COMPACTIONS']} default="0">
+        <ResponseField name="rocksdb-max-sub-compactions" type="integer" post={['format: uint32','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_SUB_COMPACTIONS']} default="1">
             The maximum number of subcompactions to run in parallel.
 
-Setting this to 1 means no sub-compactions are allowed (i.e. only 1 thread will do the compaction).
+Setting this to 1 means no sub-compactions are allowed.
 
-Default is 0 which maps to floor(number of CPU cores / 2)
-
-        </ResponseField>
-
-        <ResponseField name="rocksdb-max-wal-size" type="string" post={['minLength: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_WAL_SIZE']}>
-            Human-readable bytes: The size limit of all WAL files
-
-Use this to limit the size of WAL files. If the size of all WAL files exceeds this limit,
-the oldest WAL file will be deleted and if needed, memtable flush will be triggered.
-
-Note: RocksDB internally counts the uncompressed bytes to determine the WAL size, and since the WAL
-is compressed, the actual size on disk will be significantly smaller than this value (~1/4
-depending on the compression ratio). For instance, if this is set to \"1 MiB\", then rocksdb
-might decide to flush if the total WAL (on disk) reached ~260 KiB (compressed).
-
-Default is `0` which translates into 6 times the memory allocated for membtables for this
-database.
+Default is 1
 
         </ResponseField>
 
@@ -1291,8 +1212,8 @@ If this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.
         <ResponseField name="rocksdb-memory-ratio" type="number" post={['format: float','env: RESTATE_LOG_SERVER__ROCKSDB_MEMORY_RATIO']} default="0.5">
             The memory budget for rocksdb memtables as ratio
 
-This defines the total memory for rocksdb as a ratio of all memory available to the
-log-server.
+This defines the total memory for rocksdb as a ratio of the node's total budget
+for rocksdb memtables.
 
 (See `rocksdb-total-memtables-ratio` in common).
 
@@ -1317,19 +1238,62 @@ If getting time is expensive on the platform to run, it can
 reduce scalability to more threads, especially for writes.
         </ResponseField>
 
-        <ResponseField name="writer-batch-commit-count" type="integer" post={['format: uint','env: RESTATE_LOG_SERVER__WRITER_BATCH_COMMIT_COUNT']} default="5000">
-            Trigger a commit when the batch size exceeds this threshold.
+        <ResponseField name="rocksdb-wal-dir" type="string | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_WAL_DIR']}>
+            Custom Path for WAL files
 
-Set to 0 or 1 to commit the write batch on every command.
+If unset, the default data directory is used for WAL files. If set, the path
+must point to a directory that exists and is writable. The directory will be
+used to store WAL files.
+
+The recommendation is to use low-latency NVMe SSD for the WAL directory with
+sufficient IOPS capacity and bandwidth to your sustained workload. The `fdatasync`
+latency of the storage device is a significant factor in the WAL performance if
+`rocksdb-disable-wal-fsync` is set to `false`.
+
+Since v1.7.0
+
+        </ResponseField>
+
+        <ResponseField name="write-batch-commit-bytes" type="string | null" post={['env: RESTATE_LOG_SERVER__WRITE_BATCH_COMMIT_BYTES']}>
+            Write Batch (in bytes): If unset, a reasonable value is automatically derived from the memory budget
+available for memtables of the log-server.
+
+If `write-batch-commit-count` is set, the write batch will be limited to whichever
+of the two is reached first. The value is clamped to the size of a single memtable
+which is derived from rocksdb-memory-budget.
+
+            Non-zero human-readable bytes
+        </ResponseField>
+
+        <ResponseField name="write-batch-commit-count" type="integer | null" post={['format: uint','minimum: 1','env: RESTATE_LOG_SERVER__WRITE_BATCH_COMMIT_COUNT']}>
+            Write Batch (count): The number of records to batch in a single write batch. This is a (soft) upper bound
+and the actual number of records may be lower in low-throughput scenarios or if
+the write batch size (in bytes) is reached first.
+
+If unset, the write batch will only be limited by its size in bytes.
 
         </ResponseField>
 
     </Expandable>
 </ResponseField>
 
+<ResponseField name="max-idempotency-retention" type="string | null" post={['env: RESTATE_MAX_IDEMPOTENCY_RETENTION']}>
+    Maximum idempotency retention duration that can be configured.
+Applied when ingesting the invocation: values higher than this limit are clamped down to it.
+
+Unset means no limit.
+
+Since v1.7.0
+
+    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+</ResponseField>
+
 <ResponseField name="max-journal-retention" type="string | null" post={['env: RESTATE_MAX_JOURNAL_RETENTION']}>
     Maximum journal retention duration that can be configured.
-When discovering a service deployment, or when modifying the journal retention using the Admin API, the given value will be clamped.
+Applied when ingesting the invocation: values higher than this limit are clamped down to it.
 
 Unset means no limit.
 
@@ -1345,6 +1309,20 @@ When discovering a service deployment with configured retry policies, or when mo
 
 `None` means no limit, that is infinite retries is enabled.
 
+</ResponseField>
+
+<ResponseField name="max-workflow-completion-retention" type="string | null" post={['env: RESTATE_MAX_WORKFLOW_COMPLETION_RETENTION']}>
+    Maximum workflow completion retention duration that can be configured.
+Applied when ingesting the invocation: values higher than this limit are clamped down to it.
+
+Unset means no limit.
+
+Since v1.7.0
+
+    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
 </ResponseField>
 
 <ResponseField name="metadata-client" type="object" post={[]}>
@@ -1368,7 +1346,7 @@ When discovering a service deployment with configured retry policies, or when mo
         </ResponseField>
 
         <ResponseField name="backoff-policy"  post={[]}>
-            Backoff policy used by the metadata client when it encounters concurrent modifications.
+            Retry policy: Definition of a retry policy
 
             
             
@@ -1444,7 +1422,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__CONNECT_TIMEOUT']} default="3s">
-            Connect timeout: TCP connection timeout for connecting to the metadata store.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1452,7 +1430,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_INTERVAL']} default="5s">
-            Metadata Store Keep Alive Interval: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1460,7 +1438,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_TIMEOUT']} default="5s">
-            Metadata Store Keep Alive Timeout: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1490,7 +1468,7 @@ The addresses are formatted as `host:port`">
         </ResponseField>
 
         <ResponseField name="backoff-policy"  post={[]}>
-            Backoff policy used by the metadata client when it encounters concurrent modifications.
+            Retry policy: Definition of a retry policy
 
             
             
@@ -1566,7 +1544,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__CONNECT_TIMEOUT']} default="3s">
-            Connect timeout: TCP connection timeout for connecting to the metadata store.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1574,7 +1552,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_INTERVAL']} default="5s">
-            Metadata Store Keep Alive Interval: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1582,7 +1560,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_TIMEOUT']} default="5s">
-            Metadata Store Keep Alive Timeout: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1646,7 +1624,7 @@ set this to any string, such as `us-east-1`.
         </ResponseField>
 
         <ResponseField name="object-store-retry-policy"  post={[]}>
-            Error retry policy: Definition of a retry policy
+            Retry policy: Definition of a retry policy
 
             
             
@@ -1734,7 +1712,7 @@ Example: `s3://bucket/prefix`
         </ResponseField>
 
         <ResponseField name="backoff-policy"  post={[]}>
-            Backoff policy used by the metadata client when it encounters concurrent modifications.
+            Retry policy: Definition of a retry policy
 
             
             
@@ -1810,7 +1788,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__CONNECT_TIMEOUT']} default="3s">
-            Connect timeout: TCP connection timeout for connecting to the metadata store.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1818,7 +1796,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_INTERVAL']} default="5s">
-            Metadata Store Keep Alive Interval: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1826,7 +1804,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="keep-alive-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_TIMEOUT']} default="5s">
-            Metadata Store Keep Alive Timeout: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1847,10 +1825,7 @@ over the cluster internal network.
 </ResponseField>
 
 <ResponseField name="metadata-fetch-from-peer-timeout" type="string" post={['minLength: 1','env: RESTATE_METADATA_FETCH_FROM_PEER_TIMEOUT']} default="3s">
-    Timeout for metadata peer-to-peer fetching: When a node detects that a new metadata version exists, it'll attempt to fetch it from
-its peers. After this timeout duration has passed, the node will attempt to fetch the
-metadata from metadata store as well. This is to ensure that the nodes converge quickly
-while reducing the load on the metadata store.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1895,12 +1870,7 @@ Decrease this value to send heartbeats more often.
         </ResponseField>
 
         <ResponseField name="raft-tick-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_SERVER__RAFT_TICK_INTERVAL']} default="100ms">
-            Non-zero human-readable duration: The raft tick interval
-
-The interval at which the raft node will tick. Decrease this value in order to let the Raft
-node react more quickly to changes. Note, that every tick comes with an overhead. Moreover,
-the tick interval directly affects the election timeout. If the election timeout becomes too
-small, then this can cause cluster instabilities due to frequent leader changes.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -1943,6 +1913,17 @@ be used. Memory mapped files are not impacted by these parameters.
 
         </ResponseField>
 
+        <ResponseField name="rocksdb-disable-l0-l1-compression" type="boolean | null" post={['env: RESTATE_METADATA_SERVER__ROCKSDB_DISABLE_L0_L1_COMPRESSION']}>
+            Disable L0/L1 SST compression: When false (the default), L0 and L1 SST files are compressed with Lz4.
+Higher levels (L2+) always use Zstd regardless of this setting.
+Set to true to disable compression for L0/L1, which can improve write
+throughput at the cost of higher disk usage since these files are
+short-lived and frequently compacted.
+
+Default: false (L0/L1 compression enabled)
+
+        </ResponseField>
+
         <ResponseField name="rocksdb-disable-statistics" type="boolean | null" post={['env: RESTATE_METADATA_SERVER__ROCKSDB_DISABLE_STATISTICS']}>
             Disable rocksdb statistics collection
 
@@ -1950,10 +1931,11 @@ Default: False (statistics enabled)
 
         </ResponseField>
 
-        <ResponseField name="rocksdb-disable-wal" type="boolean | null" post={['env: RESTATE_METADATA_SERVER__ROCKSDB_DISABLE_WAL']}>
-            Disable WAL: The default depends on the different rocksdb use-cases at Restate.
+        <ResponseField name="rocksdb-disable-wal-compression" type="boolean | null" post={['env: RESTATE_METADATA_SERVER__ROCKSDB_DISABLE_WAL_COMPRESSION']}>
+            Disable WAL compression: When false (the default), the Write-Ahead Log is compressed with Zstd.
+Set to true to disable WAL compression. Only applies when WAL is enabled.
 
-Supports hot-reloading (Partial / Bifrost only)
+Default: false (WAL compression enabled)
 
         </ResponseField>
 
@@ -1978,11 +1960,6 @@ Default: \"error\"
 Default: 64MB
 
             Non-zero human-readable bytes
-        </ResponseField>
-
-        <ResponseField name="rocksdb-max-background-jobs" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_METADATA_SERVER__ROCKSDB_MAX_BACKGROUND_JOBS']}>
-            RocksDB max background jobs (flushes and compactions): Default: the number of CPU cores on this node.
-
         </ResponseField>
 
         <ResponseField name="rocksdb-memory-budget" type="string | null" post={['env: RESTATE_METADATA_SERVER__ROCKSDB_MEMORY_BUDGET']}>
@@ -2021,10 +1998,7 @@ reduce scalability to more threads, especially for writes.
         </ResponseField>
 
         <ResponseField name="status-update-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_SERVER__STATUS_UPDATE_INTERVAL']} default="5s">
-            Non-zero human-readable duration: The status update interval
-
-The interval at which the raft node will update its status. Decrease this value in order to
-see more recent status updates.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2035,10 +2009,7 @@ Examples:
 </ResponseField>
 
 <ResponseField name="metadata-update-interval" type="string" post={['minLength: 1','env: RESTATE_METADATA_UPDATE_INTERVAL']} default="10s">
-    Metadata update interval: The idle time after which the node will check for metadata updates from metadata store.
-This helps the node detect if it has been operating with stale metadata for extended period
-of time, primarily because it didn't interact with other peers in the cluster during that
-period.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2046,7 +2017,7 @@ Examples:
 </ResponseField>
 
 <ResponseField name="network-error-retry-policy"  post={[]}>
-    Network error retry policy: The retry policy for network related errors
+    Retry policy: Definition of a retry policy
 
     
     
@@ -2128,7 +2099,7 @@ similar keys are present in other config sections, such as in Service Client opt
     
     <Expandable title="Properties">
         <ResponseField name="connect-retry-policy"  post={[]}>
-            Connect retry policy: Retry policy to use for internal node-to-node networking.
+            Retry policy: Definition of a retry policy
 
             
             
@@ -2204,7 +2175,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_NETWORKING__CONNECT_TIMEOUT']} default="3s">
-            Connect timeout: TCP connection timeout for Restate cluster node-to-node network connections.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2221,8 +2192,13 @@ Examples:
 
         </ResponseField>
 
+        <ResponseField name="fabric-memory-limit" type="string" post={['minLength: 1','env: RESTATE_NETWORKING__FABRIC_MEMORY_LIMIT']}>
+            Non-zero human-readable bytes
+
+        </ResponseField>
+
         <ResponseField name="handshake-timeout" type="string" post={['minLength: 1','env: RESTATE_NETWORKING__HANDSHAKE_TIMEOUT']} default="3s">
-            Handshake timeout: Timeout for receiving a handshake response from Restate cluster peers.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2235,7 +2211,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="http2-keep-alive-interval" type="string" post={['minLength: 1','env: RESTATE_NETWORKING__HTTP2_KEEP_ALIVE_INTERVAL']} default="1s">
-            HTTP/2 Keep Alive Interval: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2243,7 +2219,7 @@ Examples:
         </ResponseField>
 
         <ResponseField name="http2-keep-alive-timeout" type="string" post={['minLength: 1','env: RESTATE_NETWORKING__HTTP2_KEEP_ALIVE_TIMEOUT']} default="3s">
-            HTTP/2 Keep Alive Timeout: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2258,43 +2234,9 @@ Examples:
     </Expandable>
 </ResponseField>
 
-<ResponseField name="no-proxy" type="string | null" post={['env: RESTATE_NO_PROXY']} default="null">
-    No proxy: IP subnets, addresses, and domain names eg `localhost,restate.dev,127.0.0.1,::1,192.168.1.0/24` that should not be proxied by the http_proxy.
-IP addresses must not have ports, and IPv6 addresses must not be wrapped in '[]'.
-Subdomains are also matched. An entry “*” matches all hostnames.
-Can be overridden by the `NO_PROXY` environment variable, which supports comma separated values.
-
-</ResponseField>
-
 <ResponseField name="node-name" type="string | null" post={['env: RESTATE_NODE_NAME']} default="null">
     Node Name: Unique name for this node in the cluster. The node must not change unless
 it's started with empty local store. It defaults to the node's hostname.
-
-</ResponseField>
-
-<ResponseField name="request-compression-threshold" type="string | null" post={['env: RESTATE_REQUEST_COMPRESSION_THRESHOLD']} default="4.0 MiB">
-    Request Compression threshold: Request minimum size to enable compression.
-The request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.
-
-Default: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).
-
-    Human-readable bytes
-</ResponseField>
-
-<ResponseField name="request-identity-private-key-pem-file" type="string | null" post={['env: RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE']} default="null">
-    Request identity private key PEM file: A path to a file, such as \"/var/secrets/key.pem\", which contains exactly one ed25519 private
-key in PEM format. Such a file can be generated with `openssl genpkey -algorithm ed25519`.
-If provided, this key will be used to attach JWTs to requests from this client which
-SDKs may optionally verify, proving that the caller is a particular Restate instance.
-
-This file is currently only read on client creation, but this may change in future.
-Parsed public keys will be logged at INFO level in the same format that SDKs expect.
-
-</ResponseField>
-
-<ResponseField name="rocksdb-bg-threads" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_ROCKSDB_BG_THREADS']}>
-    Rocksdb Background Threads: The number of threads to reserve to Rocksdb background tasks. Defaults to the number of
-cores on the machine.
 
 </ResponseField>
 
@@ -2327,6 +2269,17 @@ be used. Memory mapped files are not impacted by these parameters.
 
 </ResponseField>
 
+<ResponseField name="rocksdb-disable-l0-l1-compression" type="boolean | null" post={['env: RESTATE_ROCKSDB_DISABLE_L0_L1_COMPRESSION']}>
+    Disable L0/L1 SST compression: When false (the default), L0 and L1 SST files are compressed with Lz4.
+Higher levels (L2+) always use Zstd regardless of this setting.
+Set to true to disable compression for L0/L1, which can improve write
+throughput at the cost of higher disk usage since these files are
+short-lived and frequently compacted.
+
+Default: false (L0/L1 compression enabled)
+
+</ResponseField>
+
 <ResponseField name="rocksdb-disable-statistics" type="boolean | null" post={['env: RESTATE_ROCKSDB_DISABLE_STATISTICS']}>
     Disable rocksdb statistics collection
 
@@ -2334,15 +2287,20 @@ Default: False (statistics enabled)
 
 </ResponseField>
 
-<ResponseField name="rocksdb-disable-wal" type="boolean | null" post={['env: RESTATE_ROCKSDB_DISABLE_WAL']}>
-    Disable WAL: The default depends on the different rocksdb use-cases at Restate.
+<ResponseField name="rocksdb-disable-wal-compression" type="boolean | null" post={['env: RESTATE_ROCKSDB_DISABLE_WAL_COMPRESSION']}>
+    Disable WAL compression: When false (the default), the Write-Ahead Log is compressed with Zstd.
+Set to true to disable WAL compression. Only applies when WAL is enabled.
 
-Supports hot-reloading (Partial / Bifrost only)
+Default: false (WAL compression enabled)
 
 </ResponseField>
 
-<ResponseField name="rocksdb-high-priority-bg-threads" type="integer" post={['format: uint32','minimum: 1','env: RESTATE_ROCKSDB_HIGH_PRIORITY_BG_THREADS']} default="2">
+<ResponseField name="rocksdb-high-priority-threads" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_ROCKSDB_HIGH_PRIORITY_THREADS']}>
     Rocksdb High Priority Background Threads: The number of threads to reserve to high priority Rocksdb background tasks.
+
+Defaults to 1/4 of the number of CPU cores.
+
+Since v1.7.0 (renamed from `rocksdb-high-priority-bg-threads`)
 
 </ResponseField>
 
@@ -2369,8 +2327,17 @@ Default: 64MB
     Non-zero human-readable bytes
 </ResponseField>
 
-<ResponseField name="rocksdb-max-background-jobs" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_ROCKSDB_MAX_BACKGROUND_JOBS']}>
-    RocksDB max background jobs (flushes and compactions): Default: the number of CPU cores on this node.
+<ResponseField name="rocksdb-low-priority-threads" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_ROCKSDB_LOW_PRIORITY_THREADS']}>
+    Rocksdb Low Priority Background Threads: The number of threads to reserve to lower priority Rocksdb background tasks.
+
+Defaults to the remaining CPU cores not used by high-priority rocksdb threads
+
+Since v1.7.0 (renamed from `rocksdb-bg-threads`)
+
+</ResponseField>
+
+<ResponseField name="rocksdb-max-write-rate-per-second" type="string" post={['minLength: 1','env: RESTATE_ROCKSDB_MAX_WRITE_RATE_PER_SECOND']} default="7.0 GiB">
+    Non-zero human-readable bytes
 
 </ResponseField>
 
@@ -2413,10 +2380,12 @@ reduce scalability to more threads, especially for writes.
 </ResponseField>
 
 <ResponseField name="rocksdb-total-memtables-ratio" type="number" post={['format: float','env: RESTATE_ROCKSDB_TOTAL_MEMTABLES_RATIO']} default="0.8500000238418579">
-    Rocksdb total memtable size ratio: The memory size used across all memtables (ratio between 0 to 1.0). This
+    Rocksdb total memtable size ratio: The memory size used across all memtables (ratio between 0.1 to 1.0). This
 limits how much memory memtables can eat up from the value in rocksdb-total-memory-limit.
-When set to 0, memtables can take all available memory up to the value specified
-in rocksdb-total-memory-limit. This value will be sanitized to 1.0 if outside the valid bounds.
+
+The remaining memory will be dedicated to the block cache.
+
+This value will be sanitized to 1.0 if outside the valid bounds.
 
 </ResponseField>
 
@@ -2439,7 +2408,7 @@ starts with all roles.
 </ResponseField>
 
 <ResponseField name="shutdown-timeout" type="string" post={['minLength: 1','env: RESTATE_SHUTDOWN_TIMEOUT']} default="1m">
-    Shutdown grace timeout: This timeout is used when shutting down the various Restate components to drain all the internal queues.
+    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
@@ -2465,7 +2434,7 @@ low-priority or latency-insensitive storage tasks.
 
 <ResponseField name="tokio-console-bind-address" type="string" post={['env: RESTATE_TOKIO_CONSOLE_BIND_ADDRESS']}>
     Address to bind for the tokio-console tracing subscriber. If unset and restate-server is
-built with tokio-console support, it'll listen on `0.0.0.0:6669`.
+built with tokio-console support, it'll listen on `[::]:6669`.
 
 </ResponseField>
 
@@ -2487,8 +2456,8 @@ Check the [`RUST_LOG` documentation](https://docs.rs/tracing-subscriber/latest/t
 </ResponseField>
 
 <ResponseField name="tracing-headers" type="object" post={[]}>
-    Additional tracing headers: Proxy type to implement HashMap&lt;HeaderName, HeaderValue&gt; ser/de
-Use it directly or with `#[serde(with = \"serde_with::As::&lt;serde_with::FromInto&lt;restate_serde_util::SerdeableHeaderMap&gt;&gt;\")]`.
+    Additional tracing headers: Specify additional headers you want the system to send to the tracing endpoint (e.g.
+authentication headers).
 
 </ResponseField>
 
@@ -2537,12 +2506,15 @@ To configure the sampling, please refer to the [opentelemetry autoconfigure docs
     
     <Expandable title="Properties">
         <ResponseField name="cleanup-interval" type="string" post={['minLength: 1','env: RESTATE_WORKER__CLEANUP_INTERVAL']} default="1h">
-            Cleanup interval: In order to clean up completed invocations, that is invocations invoked with an idempotency id, or workflows,
-Restate periodically scans among the completed invocations to check whether they need to be removed or not.
-This interval sets the scan interval of the cleanup procedure. Default: 1 hour.
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+        </ResponseField>
+
+        <ResponseField name="data-service-memory-limit" type="string" post={['minLength: 1','env: RESTATE_WORKER__DATA_SERVICE_MEMORY_LIMIT']} default="256.0 MiB">
+            Non-zero human-readable bytes
 
         </ResponseField>
 
@@ -2586,7 +2558,7 @@ condition that the leader didn't move to another node. In the latter case, the s
 fetch the snapshot as usual.
 
 [requires snapshot repository]
-[default] if snapshot repository configured
+[default] if restate-server is in cluster mode.
 DurabilityPoint = Min(Max(ReplicaSetDurablePoints), SnapshotDurablePoint)
             - `"replica-set-only"` : A partition is considered durable once all nodes in the replica-set are durable, regardless
 of the state of snapshots.
@@ -2595,7 +2567,7 @@ Do not trim unless all replicas durably include this Lsn.
 
 default in standalone-mode with no snapshot repository configured
 
-[default] if snapshot repository is not configured
+[default] if restate-server is in single-node mode.
 DurabilityPoint = Min(ReplicaSetDurablePoints)
             - `"snapshot-only"` : A partition is durable ONLY after a snapshot has been created.
 [requires snapshot repository]
@@ -2612,7 +2584,10 @@ DurabilityPoint = SnapshotDurablePoint
         </ResponseField>
 
         <ResponseField name="invoker" type="object" post={[]}>
-            Invoker options: 
+            Invoker options: Configuration for the HTTP/2 keep-alive mechanism, using PING frames.
+
+Please note: most gateways don't propagate the HTTP/2 keep-alive between downstream and upstream hosts.
+In those environments, you need to make sure the gateway can detect a broken connection to the upstream deployment(s).
 
             
             <Expandable title="Properties">
@@ -2655,8 +2630,134 @@ unit defaults to per second if not specified.
                     </Expandable>
                 </ResponseField>
 
+                <ResponseField name="additional-request-headers" type="object | null" post={['env: RESTATE_WORKER__INVOKER__ADDITIONAL_REQUEST_HEADERS']}>
+                    Additional request headers: Headers that should be applied to all outgoing requests (HTTP and Lambda).
+Defaults to `x-restate-cluster-name: &lt;cluster name&gt;`.
+
+                    Proxy type to implement HashMap&lt;HeaderName, HeaderValue&gt; ser/de
+Use it directly or with `#[serde(with = \"serde_with::As::&lt;serde_with::FromInto&lt;restate_serde_util::SerdeableHeaderMap&gt;&gt;\")]`.
+                </ResponseField>
+
+                <ResponseField name="aws-assume-role-external-id" type="string | null" post={['env: RESTATE_WORKER__INVOKER__AWS_ASSUME_ROLE_EXTERNAL_ID']} default="null">
+                    AssumeRole external ID: An external ID to apply to any AssumeRole operations taken by this client.
+https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html
+Can be overridden by the `AWS_EXTERNAL_ID` environment variable.
+
+                </ResponseField>
+
+                <ResponseField name="aws-profile" type="string | null" post={['env: RESTATE_WORKER__INVOKER__AWS_PROFILE']} default="null">
+                    AWS Profile: Name of the AWS profile to select. Defaults to 'AWS_PROFILE' env var, or otherwise
+the `default` profile.
+
+                </ResponseField>
+
                 <ResponseField name="concurrent-invocations-limit" type="integer | null" post={['format: uint','minimum: 1','env: RESTATE_WORKER__INVOKER__CONCURRENT_INVOCATIONS_LIMIT']} default="1000">
                     Limit number of concurrent invocations from this node: Number of concurrent invocations that can be processed by the invoker.
+
+                </ResponseField>
+
+                <ResponseField name="connect-timeout" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__CONNECT_TIMEOUT']} default="10s">
+                    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+                </ResponseField>
+
+                <ResponseField name="eager-state-size-limit" type="string | null" post={['env: RESTATE_WORKER__INVOKER__EAGER_STATE_SIZE_LIMIT']}>
+                    Eager state size limit (since v1.7.0): Maximum total size (in bytes) of state entries to send eagerly in the StartMessage.
+When the total size of state entries exceeds this limit, only a partial state is sent
+and the service will fetch remaining state lazily using GetEagerState commands.
+
+Set to `0` to disable eager state entirely (equivalent to enabling lazy state).
+
+This helps reduce memory pressure on deployments for services with large state.
+If unset, defaults to `message-size-limit` (clamped to that value if set higher).
+
+                    Human-readable bytes
+                </ResponseField>
+
+                <ResponseField name="http-proxy" type="string | null" post={['env: RESTATE_WORKER__INVOKER__HTTP_PROXY']} default="null">
+                    Proxy URI: A URI, such as `http://127.0.0.1:10001`, of a server to which all invocations should be sent, with the `Host` header set to the deployment URI.
+HTTPS proxy URIs are supported, but only HTTP endpoint traffic will be proxied currently.
+Can be overridden by the `HTTP_PROXY` environment variable.
+
+                </ResponseField>
+
+                <ResponseField name="http2-idle-connection-timeout" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_IDLE_CONNECTION_TIMEOUT']} default="5m">
+                    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+
+                </ResponseField>
+
+                <ResponseField name="http2-initial-connection-window-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_INITIAL_CONNECTION_WINDOW_SIZE']} default="5.0 MiB">
+                    Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="http2-initial-max-send-streams" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__INVOKER__HTTP2_INITIAL_MAX_SEND_STREAMS']} default="null">
+                    HTTP/2 Initial Max Send Streams: Sets the initial maximum of locally initiated (send) streams.
+
+This value will be overwritten by the value included in the initial
+SETTINGS frame received from the peer as part of a [connection preface].
+
+Note: This value is capped by [`Self::streams_per_connection_limit`]
+
+Default: None
+
+**NOTE**: Setting this value to None (default) users the default
+recommended value from HTTP2 specs
+
+                </ResponseField>
+
+                <ResponseField name="http2-initial-stream-window-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_INITIAL_STREAM_WINDOW_SIZE']} default="2.0 MiB">
+                    Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="http2-keep-alive-interval" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_KEEP_ALIVE_INTERVAL']} default="40s">
+                    Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+
+                </ResponseField>
+
+                <ResponseField name="http2-keep-alive-jitter" type="number" post={['format: float','env: RESTATE_WORKER__INVOKER__HTTP2_KEEP_ALIVE_JITTER']} default="0.20000000298023224">
+                    HTTP/2 Keep-Alive Jitter: Fractional jitter added to `http2-keep-alive-interval`, expressed as a fraction
+of the interval (e.g. 0.1 = up to +10%, 1.0 = up to +100%).
+
+Default 0.2 (20% of http2-keep-alive-interval)
+
+                </ResponseField>
+
+                <ResponseField name="http2-keep-alive-timeout" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_KEEP_ALIVE_TIMEOUT']} default="20s">
+                    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+                </ResponseField>
+
+                <ResponseField name="http2-max-frame-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__HTTP2_MAX_FRAME_SIZE']} default="16.0 KiB">
+                    Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="http2-streams-per-connection-limit" type="integer" post={['format: uint','minimum: 1','env: RESTATE_WORKER__INVOKER__HTTP2_STREAMS_PER_CONNECTION_LIMIT']} default="128">
+                    Upper bound on the per-connection max-send-streams.
+
+Caps the remote server's advertised `max_concurrent_streams`.
+
+A high number of concurrent streams per connection works
+poorly with L4 load balancers because streams are not balanced across
+backends.
+
+Since v1.7.0
+
+Default: 128
 
                 </ResponseField>
 
@@ -2706,6 +2807,11 @@ unit defaults to per second if not specified.
                     </Expandable>
                 </ResponseField>
 
+                <ResponseField name="memory-limit" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__MEMORY_LIMIT']} default="1.5 GiB">
+                    Non-zero human-readable bytes
+
+                </ResponseField>
+
                 <ResponseField name="message-size-limit" type="string | null" post={['env: RESTATE_WORKER__INVOKER__MESSAGE_SIZE_LIMIT']}>
                     Message size limit: Maximum size of journal messages that can be received from a service. If a service sends a message
 larger than this limit, the invocation will fail.
@@ -2719,6 +2825,60 @@ over the cluster internal network.
 
                 <ResponseField name="message-size-warning" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__MESSAGE_SIZE_WARNING']} default="10.0 MiB">
                     Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="no-proxy" type="string | null" post={['env: RESTATE_WORKER__INVOKER__NO_PROXY']} default="null">
+                    No proxy: IP subnets, addresses, and domain names eg `localhost,restate.dev,127.0.0.1,::1,192.168.1.0/24` that should not be proxied by the http_proxy.
+IP addresses must not have ports, and IPv6 addresses must not be wrapped in '[]'.
+Subdomains are also matched. An entry “*” matches all hostnames.
+Can be overridden by the `NO_PROXY` environment variable, which supports comma separated values.
+
+                </ResponseField>
+
+                <ResponseField name="per-invocation-initial-memory" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__PER_INVOCATION_INITIAL_MEMORY']} default="32.0 KiB">
+                    Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="per-invocation-memory-limit" type="string | null" post={['env: RESTATE_WORKER__INVOKER__PER_INVOCATION_MEMORY_LIMIT']}>
+                    Per-invocation memory limit: Maximum memory (in bytes) a single invocation may use per direction (inbound and
+outbound). Once an invocation's directional budget reaches this ceiling it must
+wait for in-flight data to be consumed or yield back to the scheduler.
+
+If unset, defaults to `message-size-limit`. If set, it will be clamped at
+the value of `message-size-limit`.
+
+Since v1.7.0
+
+                    Human-readable bytes
+                </ResponseField>
+
+                <ResponseField name="request-compression-threshold" type="string | null" post={['env: RESTATE_WORKER__INVOKER__REQUEST_COMPRESSION_THRESHOLD']} default="4.0 MiB">
+                    Request Compression threshold: Request minimum size to enable compression.
+The request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.
+
+Default: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).
+
+                    Human-readable bytes
+                </ResponseField>
+
+                <ResponseField name="request-identity-expiration" type="string" post={['minLength: 1','env: RESTATE_WORKER__INVOKER__REQUEST_IDENTITY_EXPIRATION']} default="1m">
+                    Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+                </ResponseField>
+
+                <ResponseField name="request-identity-private-key-pem-file" type="string | null" post={['env: RESTATE_WORKER__INVOKER__REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE']} default="null">
+                    Request identity private key PEM file: A path to a file, such as \"/var/secrets/key.pem\", which contains exactly one ed25519 private
+key in PEM format. Such a file can be generated with `openssl genpkey -algorithm ed25519`.
+If provided, this key will be used to attach JWTs to requests from this client which
+SDKs may optionally verify, proving that the caller is a particular Restate instance.
+
+This file is currently only read on client creation, but this may change in future.
+Parsed public keys will be logged at INFO level in the same format that SDKs expect.
 
                 </ResponseField>
 
@@ -2742,6 +2902,14 @@ value is, the higher the throughput and latency are.
 
         </ResponseField>
 
+        <ResponseField name="rule-book-poll-interval" type="string" post={['minLength: 1','env: RESTATE_WORKER__RULE_BOOK_POLL_INTERVAL']} default="30s">
+            Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+        </ResponseField>
+
         <ResponseField name="shuffle" type="object" post={[]}>
             Worker Shuffle Options: Settings for the shared ingestion client used by all workers to
 manage record ingestion across partitions (shuffle).
@@ -2749,9 +2917,7 @@ manage record ingestion across partitions (shuffle).
             
             <Expandable title="Properties">
                 <ResponseField name="connection-retry-policy"  required post={[]}>
-                    Connection retry policy: Retry policy for the ingestion client. It must allow unlimited
-retries; if configured with a cap, the client falls back to
-retrying every 2 seconds.
+                    Retry policy: Definition of a retry policy
 
                     
                     
@@ -2908,8 +3074,32 @@ Default: `None`
                 <ResponseField name="enable-cleanup" type="boolean" post={['env: RESTATE_WORKER__SNAPSHOTS__ENABLE_CLEANUP']} default="true">
                 </ResponseField>
 
+                <ResponseField name="export-concurrency-limit" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__SNAPSHOTS__EXPORT_CONCURRENCY_LIMIT']}>
+                    Export concurrency limit: Maximum number of concurrent partition snapshot exports. This controls how
+many partition stores can simultaneously export snapshots to the snapshot
+repository.
+
+Default: 4
+
+                </ResponseField>
+
+                <ResponseField name="num-retained" type="integer" post={['format: uint8','minimum: 1','maximum: 255','env: RESTATE_WORKER__SNAPSHOTS__NUM_RETAINED']} default="1">
+                    Snapshot retention count: Number of most recent snapshots to retain. Older snapshots will be
+deleted automatically. Only snapshots created after this setting is enabled will
+be considered for pruning.
+
+Retaining multiple snapshots causes the partition archived LSN to be reported as that of the
+oldest retained snapshot. Therefore, retaining multiple snapshots will cause increased disk
+usage on log-server nodes.
+
+Default: `1`
+
+Since v1.7.0
+
+                </ResponseField>
+
                 <ResponseField name="object-store-retry-policy"  post={[]}>
-                    Error retry policy: A retry policy for dealing with retryable object store errors.
+                    Retry policy: Definition of a retry policy
 
                     
                     
@@ -3040,6 +3230,18 @@ That way RocksDB's compaction is doing sequential instead of random reads.
                     Non-zero human-readable bytes
                 </ResponseField>
 
+                <ResponseField name="rocksdb-disable-auto-memory-reclaimer" type="boolean" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_AUTO_MEMORY_RECLAIMER']} default="false">
+                    Disable automatic rocksdb memory reclaimer: When set to `true`, disables RocksDB's memory reclaimer for partition stores.
+The reclaimer automatically reclaims memory from memtables when they are no longer
+needed, or when the total memtable budget is exceeded. Disabling this will cause
+rocksdb to exceed the specific budget under extreme conditions and when flushes
+are falling behind. The benefit of disabling the reclaimer is reduce the chances
+of rocksdb write stalls under heavy load.
+
+[Supports configuration hot-reloading]
+
+                </ResponseField>
+
                 <ResponseField name="rocksdb-disable-compact-on-deletion" type="boolean" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_COMPACT_ON_DELETION']}>
                     Disable compact-on-deletion collector: When set to `true`, disables RocksDB's CompactOnDeletionCollector for partition stores.
 The collector automatically triggers compaction when SST files accumulate a high density
@@ -3066,6 +3268,17 @@ be used. Memory mapped files are not impacted by these parameters.
 
                 </ResponseField>
 
+                <ResponseField name="rocksdb-disable-l0-l1-compression" type="boolean | null" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_L0_L1_COMPRESSION']}>
+                    Disable L0/L1 SST compression: When false (the default), L0 and L1 SST files are compressed with Lz4.
+Higher levels (L2+) always use Zstd regardless of this setting.
+Set to true to disable compression for L0/L1, which can improve write
+throughput at the cost of higher disk usage since these files are
+short-lived and frequently compacted.
+
+Default: false (L0/L1 compression enabled)
+
+                </ResponseField>
+
                 <ResponseField name="rocksdb-disable-statistics" type="boolean | null" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_STATISTICS']}>
                     Disable rocksdb statistics collection
 
@@ -3073,10 +3286,11 @@ Default: False (statistics enabled)
 
                 </ResponseField>
 
-                <ResponseField name="rocksdb-disable-wal" type="boolean | null" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_WAL']}>
-                    Disable WAL: The default depends on the different rocksdb use-cases at Restate.
+                <ResponseField name="rocksdb-disable-wal-compression" type="boolean | null" post={['env: RESTATE_WORKER__STORAGE__ROCKSDB_DISABLE_WAL_COMPRESSION']}>
+                    Disable WAL compression: When false (the default), the Write-Ahead Log is compressed with Zstd.
+Set to true to disable WAL compression. Only applies when WAL is enabled.
 
-Supports hot-reloading (Partial / Bifrost only)
+Default: false (WAL compression enabled)
 
                 </ResponseField>
 
@@ -3103,8 +3317,8 @@ Default: 64MB
                     Non-zero human-readable bytes
                 </ResponseField>
 
-                <ResponseField name="rocksdb-max-background-jobs" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_MAX_BACKGROUND_JOBS']}>
-                    RocksDB max background jobs (flushes and compactions): Default: the number of CPU cores on this node.
+                <ResponseField name="rocksdb-max-file-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_MAX_FILE_SIZE']} default="64.0 MiB">
+                    Non-zero human-readable bytes
 
                 </ResponseField>
 
