@@ -8,8 +8,8 @@ description: "Shape and limit concurrent invocations with scope-based concurrenc
 Flow control lets you shape the traffic flowing through Restate instead of letting invocations run unbounded.
 As soon as many invocations compete for the same downstream resources, you need a way to put a ceiling on how much runs at once.
 
-<Note title="Experimental feature">
-    Flow control is an experimental feature and is disabled by default.
+<Note title="Opt-in feature">
+    Flow control is an opt-in feature and is disabled by default.
     Its configuration and APIs may change in future releases.
 </Note>
 
@@ -28,11 +28,6 @@ The first capability built on this scheduler is **concurrency limits**: the maxi
 
 More flow-control capabilities will follow in later releases, all expressed through the same scope-based model.
 Planned follow-ups include throttling and rate limits, invocation priorities, and finite queue (backlog) limits.
-
-<Note title="SDK support">
-    Today, you apply flow control by invoking handlers through the [scoped ingress endpoints](#applying-concurrency-limits).
-    Support for setting a scope directly from the SDKs will be added over the coming weeks.
-</Note>
 
 ## Scopes
 
@@ -75,16 +70,23 @@ The only limit available today is `concurrency`: the maximum number of invocatio
 
 A pattern is either an exact scope or the wildcard `*`:
 
-- `*` matches every scope and acts as a global default.
+- `*` matches every scope and acts as a default for scopes without their own rule.
 - `checkout` matches a single, specific scope.
 
 When both a wildcard and an exact-scope pattern match an invocation, the more specific exact-scope rule wins.
+
+<Warning title="A `*` limit is not a global pool">
+    A concurrency limit always applies **per scope**, never globally, including for the `*` wildcard.
+    `restate rules set "*" --concurrency 1000` does not cap total concurrency across all scopes at 1000.
+    Instead, every scope that matches `*` gets its own independent budget of 1000.
+    Two different scopes can each run 1000 invocations concurrently under the same `*` rule.
+</Warning>
 
 Manage rules dynamically with the `restate rules` CLI commands.
 `set` is idempotent: it creates a rule if it doesn't exist, or merges into the existing values, preserving fields you don't touch.
 
 ```bash
-# Set a global default of 1000 concurrent invocations, plus a tighter
+# Set a default of 1000 concurrent invocations per scope, plus a tighter
 # 50-concurrency cap for the "checkout" scope.
 restate rules set "*" --concurrency 1000 --description "global default"
 restate rules set "checkout" --concurrency 50
