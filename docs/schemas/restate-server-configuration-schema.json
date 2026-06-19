@@ -4,18 +4,6 @@
   "description": "Configuration for Restate server.",
   "type": "object",
   "properties": {
-    "additional-request-headers": {
-      "title": "Additional request headers",
-      "description": "Headers that should be applied to all outgoing requests (HTTP and Lambda).\nDefaults to `x-restate-cluster-name: <cluster name>`.",
-      "anyOf": [
-        {
-          "$ref": "#/$defs/SerdeableHeaderHashMap"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "admin": {
       "$ref": "#/$defs/AdminOptions",
       "default": {
@@ -54,24 +42,6 @@
       "type": "boolean",
       "default": true
     },
-    "aws-assume-role-external-id": {
-      "title": "AssumeRole external ID",
-      "description": "An external ID to apply to any AssumeRole operations taken by this client.\nhttps://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html\nCan be overridden by the `AWS_EXTERNAL_ID` environment variable.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "default": null
-    },
-    "aws-profile": {
-      "title": "AWS Profile",
-      "description": "Name of the AWS profile to select. Defaults to 'AWS_PROFILE' env var, or otherwise\nthe `default` profile.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "default": null
-    },
     "base-dir": {
       "description": "The working directory which this Restate node should use for relative paths. The default is\n`restate-data` under the current working directory.",
       "type": [
@@ -107,26 +77,13 @@
         },
         "record-cache-memory-size": "250.0 MiB",
         "replicated-loglet": {
-          "log-server-retry-policy": {
-            "factor": 2.0,
-            "initial-interval": "250ms",
-            "max-attempts": 3,
-            "max-interval": "2s",
-            "type": "exponential"
-          },
-          "log-server-rpc-timeout": "2s",
           "maximum-inflight-records": 1000,
           "read-batch-size": "32.0 KiB",
           "readahead-records": 20,
           "readahead-trigger-ratio": 0.5,
+          "rpc-timeout": "250ms..1m",
           "sequencer-inactivity-timeout": "15s",
-          "sequencer-retry-policy": {
-            "factor": 2.0,
-            "initial-interval": "250ms",
-            "max-attempts": null,
-            "max-interval": "5s",
-            "type": "exponential"
-          }
+          "store-timeout": "2s..1m"
         },
         "seal-retry-interval": "2s"
       }
@@ -166,11 +123,10 @@
       "type": "string",
       "default": "localcluster"
     },
-    "connect-timeout": {
-      "title": "Connect timeout",
-      "description": "How long to wait for a TCP connection to be established before considering\nit a failed attempt.",
-      "$ref": "#/$defs/NonZeroFriendlyDuration",
-      "default": "10s"
+    "default-idempotency-retention": {
+      "title": "Default idempotency retention",
+      "description": "Default idempotency retention for all invocations carrying an idempotency key.\n\nThis default is used when neither the service nor the handler configures an idempotency retention,\nand can be overridden per service/handler using the respective SDK APIs.\n\nSince v1.7.0",
+      "$ref": "#/$defs/FriendlyDuration"
     },
     "default-journal-retention": {
       "title": "Default journal retention",
@@ -211,9 +167,14 @@
         "integer",
         "null"
       ],
-      "format": "uint",
+      "format": "uint32",
       "default": null,
       "minimum": 0
+    },
+    "default-workflow-completion-retention": {
+      "title": "Default workflow completion retention",
+      "description": "Default workflow completion retention for all workflow invocations.\n\nThis default is used when neither the workflow service nor the handler configures a workflow completion retention,\nand can be overridden per service/handler using the respective SDK APIs.\n\nSince v1.7.0",
+      "$ref": "#/$defs/FriendlyDuration"
     },
     "disable-prometheus": {
       "description": "Disable prometheus metric recording and reporting. Default is `false`.",
@@ -223,18 +184,6 @@
     "disable-telemetry": {
       "title": "Disable telemetry",
       "description": "Restate uses Scarf to collect anonymous usage data to help us understand how the software is being used.\nYou can set this flag to true to disable this collection. It can also be set with the environment variable DO_NOT_TRACK=1.",
-      "type": "boolean",
-      "default": false
-    },
-    "experimental-kafka-batch-ingestion": {
-      "title": "Experimental Kafka batch ingestion",
-      "description": "Use the new experimental kafka ingestion path which leverages batching\nfor a faster kafka ingestion.\n\nSet to `true` to enable the experimental ingestion mechanism.\n\nThe legacy path will be removed in v1.7.\n\nDefaults to `false` in v1.6.",
-      "type": "boolean",
-      "default": false
-    },
-    "experimental-shuffler-batch-ingestion": {
-      "title": "Experimental Shuffler batch ingestion",
-      "description": "Use the new experimental batch ingestion path.\n\nSet to `true` to enable the experimental ingestion mechanism.\n\nThe legacy path will be removed in v1.7.\n\nDefaults to `false` in v1.6.",
       "type": "boolean",
       "default": false
     },
@@ -311,24 +260,6 @@
       "$ref": "#/$defs/FriendlyDuration",
       "default": "0s"
     },
-    "http-keep-alive-options": {
-      "title": "HTTP/2 Keep-alive",
-      "description": "Configuration for the HTTP/2 keep-alive mechanism, using PING frames.\nIf unset, HTTP/2 keep-alive are disabled.",
-      "$ref": "#/$defs/Http2KeepAliveOptions",
-      "default": {
-        "interval": "40s",
-        "timeout": "20s"
-      }
-    },
-    "http-proxy": {
-      "title": "Proxy URI",
-      "description": "A URI, such as `http://127.0.0.1:10001`, of a server to which all invocations should be sent, with the `Host` header set to the deployment URI.\nHTTPS proxy URIs are supported, but only HTTP endpoint traffic will be proxied currently.\nCan be overridden by the `HTTP_PROXY` environment variable.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "default": null
-    },
     "ingress": {
       "$ref": "#/$defs/IngressOptions",
       "default": {
@@ -336,9 +267,9 @@
         "ingestion": {
           "connection-retry-policy": {
             "factor": 2.0,
-            "initial-interval": "10ms",
+            "initial-interval": "250ms",
             "max-attempts": null,
-            "max-interval": "2s",
+            "max-interval": "3s",
             "type": "exponential"
           },
           "inflight-memory-budget": "1.0 MiB",
@@ -346,17 +277,6 @@
         },
         "kafka-clusters": []
       }
-    },
-    "initial-max-send-streams": {
-      "title": "Initial Max Send Streams",
-      "description": "Sets the initial maximum of locally initiated (send) streams.\n\nThis value will be overwritten by the value included in the initial\nSETTINGS frame received from the peer as part of a [connection preface].\n\nDefault: None\n\n**NOTE**: Setting this value to None (default) users the default\nrecommended value from HTTP2 specs",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint",
-      "default": null,
-      "minimum": 0
     },
     "initialization-timeout": {
       "title": "Initialization timeout",
@@ -401,20 +321,31 @@
     "log-server": {
       "$ref": "#/$defs/LogServer",
       "default": {
-        "incoming-network-queue-length": 1000,
-        "rocksdb-disable-wal": false,
         "rocksdb-disable-wal-fsync": false,
+        "rocksdb-enable-blob-separation": false,
         "rocksdb-log-keep-file-num": null,
         "rocksdb-log-level": null,
         "rocksdb-log-max-file-size": null,
-        "rocksdb-max-sub-compactions": 0,
-        "rocksdb-memory-ratio": 0.5,
-        "writer-batch-commit-count": 5000
+        "rocksdb-max-file-size": "128.0 MiB",
+        "rocksdb-max-sub-compactions": 1,
+        "rocksdb-memory-ratio": 0.5
       }
+    },
+    "max-idempotency-retention": {
+      "title": "Maximum idempotency retention duration",
+      "description": "Maximum idempotency retention duration that can be configured.\nApplied when ingesting the invocation: values higher than this limit are clamped down to it.\n\nUnset means no limit.\n\nSince v1.7.0",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FriendlyDuration"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "max-journal-retention": {
       "title": "Maximum journal retention duration",
-      "description": "Maximum journal retention duration that can be configured.\nWhen discovering a service deployment, or when modifying the journal retention using the Admin API, the given value will be clamped.\n\nUnset means no limit.",
+      "description": "Maximum journal retention duration that can be configured.\nApplied when ingesting the invocation: values higher than this limit are clamped down to it.\n\nUnset means no limit.",
       "anyOf": [
         {
           "$ref": "#/$defs/FriendlyDuration"
@@ -433,6 +364,18 @@
       ],
       "format": "uint",
       "minimum": 1
+    },
+    "max-workflow-completion-retention": {
+      "title": "Maximum workflow completion retention duration",
+      "description": "Maximum workflow completion retention duration that can be configured.\nApplied when ingesting the invocation: values higher than this limit are clamped down to it.\n\nUnset means no limit.\n\nSince v1.7.0",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FriendlyDuration"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "metadata-client": {
       "$ref": "#/$defs/MetadataClientOptions",
@@ -466,7 +409,6 @@
         "raft-heartbeat-tick": 2,
         "raft-tick-interval": "100ms",
         "request-queue-length": 32,
-        "rocksdb-disable-wal": false,
         "rocksdb-log-keep-file-num": null,
         "rocksdb-log-level": null,
         "rocksdb-log-max-file-size": null,
@@ -511,15 +453,6 @@
         "http2-keep-alive-timeout": "3s"
       }
     },
-    "no-proxy": {
-      "title": "No proxy",
-      "description": "IP subnets, addresses, and domain names eg `localhost,restate.dev,127.0.0.1,::1,192.168.1.0/24` that should not be proxied by the http_proxy.\nIP addresses must not have ports, and IPv6 addresses must not be wrapped in '[]'.\nSubdomains are also matched. An entry “*” matches all hostnames.\nCan be overridden by the `NO_PROXY` environment variable, which supports comma separated values.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "default": null
-    },
     "node-name": {
       "title": "Node Name",
       "description": "Unique name for this node in the cluster. The node must not change unless\nit's started with empty local store. It defaults to the node's hostname.",
@@ -528,38 +461,6 @@
         "null"
       ],
       "default": null
-    },
-    "request-compression-threshold": {
-      "title": "Request Compression threshold",
-      "description": "Request minimum size to enable compression.\nThe request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.\n\nDefault: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).",
-      "anyOf": [
-        {
-          "$ref": "#/$defs/HumanBytes"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": "4.0 MiB"
-    },
-    "request-identity-private-key-pem-file": {
-      "title": "Request identity private key PEM file",
-      "description": "A path to a file, such as \"/var/secrets/key.pem\", which contains exactly one ed25519 private\nkey in PEM format. Such a file can be generated with `openssl genpkey -algorithm ed25519`.\nIf provided, this key will be used to attach JWTs to requests from this client which\nSDKs may optionally verify, proving that the caller is a particular Restate instance.\n\nThis file is currently only read on client creation, but this may change in future.\nParsed public keys will be logged at INFO level in the same format that SDKs expect.",
-      "type": [
-        "string",
-        "null"
-      ],
-      "default": null
-    },
-    "rocksdb-bg-threads": {
-      "title": "Rocksdb Background Threads",
-      "description": "The number of threads to reserve to Rocksdb background tasks. Defaults to the number of\ncores on the machine.",
-      "type": [
-        "integer",
-        "null"
-      ],
-      "format": "uint32",
-      "minimum": 1
     },
     "rocksdb-block-size": {
       "title": "RocksDB block size",
@@ -601,6 +502,14 @@
         "null"
       ]
     },
+    "rocksdb-disable-l0-l1-compression": {
+      "title": "Disable L0/L1 SST compression",
+      "description": "When false (the default), L0 and L1 SST files are compressed with Lz4.\nHigher levels (L2+) always use Zstd regardless of this setting.\nSet to true to disable compression for L0/L1, which can improve write\nthroughput at the cost of higher disk usage since these files are\nshort-lived and frequently compacted.\n\nDefault: false (L0/L1 compression enabled)",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "rocksdb-disable-statistics": {
       "description": "Disable rocksdb statistics collection\n\nDefault: False (statistics enabled)",
       "type": [
@@ -608,20 +517,22 @@
         "null"
       ]
     },
-    "rocksdb-disable-wal": {
-      "title": "Disable WAL",
-      "description": "The default depends on the different rocksdb use-cases at Restate.\n\nSupports hot-reloading (Partial / Bifrost only)",
+    "rocksdb-disable-wal-compression": {
+      "title": "Disable WAL compression",
+      "description": "When false (the default), the Write-Ahead Log is compressed with Zstd.\nSet to true to disable WAL compression. Only applies when WAL is enabled.\n\nDefault: false (WAL compression enabled)",
       "type": [
         "boolean",
         "null"
       ]
     },
-    "rocksdb-high-priority-bg-threads": {
+    "rocksdb-high-priority-threads": {
       "title": "Rocksdb High Priority Background Threads",
-      "description": "The number of threads to reserve to high priority Rocksdb background tasks.",
-      "type": "integer",
+      "description": "The number of threads to reserve to high priority Rocksdb background tasks.\n\nDefaults to 1/4 of the number of CPU cores.\n\nSince v1.7.0 (renamed from `rocksdb-high-priority-bg-threads`)",
+      "type": [
+        "integer",
+        "null"
+      ],
       "format": "uint32",
-      "default": 2,
       "minimum": 1
     },
     "rocksdb-log-keep-file-num": {
@@ -661,15 +572,21 @@
       ],
       "default": null
     },
-    "rocksdb-max-background-jobs": {
-      "title": "RocksDB max background jobs (flushes and compactions)",
-      "description": "Default: the number of CPU cores on this node.",
+    "rocksdb-low-priority-threads": {
+      "title": "Rocksdb Low Priority Background Threads",
+      "description": "The number of threads to reserve to lower priority Rocksdb background tasks.\n\nDefaults to the remaining CPU cores not used by high-priority rocksdb threads\n\nSince v1.7.0 (renamed from `rocksdb-bg-threads`)",
       "type": [
         "integer",
         "null"
       ],
       "format": "uint32",
       "minimum": 1
+    },
+    "rocksdb-max-write-rate-per-second": {
+      "title": "Rocksdb global disk write rate limiter",
+      "description": "This lets Rocksdb calibrates its IO operations to make the best use out of\nthe available IO bandwidth of the underlying storage device. Rocksdb will\nauto-tune the rate according to the actual background IO workload and will\nuse this value as an upper bound.\n\nYou can use a tool like `fio` to measure the actual IO bandwidth of your storage\ndevice (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a\nreasonable estimate).\n\nFor instance, consider the output of the following command:\n\n```text\nfio --name=c --directory=/restate-data --rw=write --bs=1m --size=8g --numjobs=4 --direct=1 --group_reporting\n...\n  WRITE: bw=601MiB/s (630MB/s), 601MiB/s-601MiB/s (630MB/s-630MB/s), io=32.0GiB (34.4GB), run=54560-54560msec\n```\n\nThe default value assumes a fast NVMe with bandwidth of 7GiB (per second).",
+      "$ref": "#/$defs/NonZeroHumanBytes",
+      "default": "7.0 GiB"
     },
     "rocksdb-perf-level": {
       "title": "Rocksdb performance statistics level",
@@ -691,13 +608,13 @@
     },
     "rocksdb-total-memory-size": {
       "title": "Total memory limit for rocksdb caches and memtables.",
-      "description": "This includes memory for uncompressed block cache and all memtables by all open databases.\nThe memory size used for rocksdb caches.",
+      "description": "This includes memory for uncompressed block cache and all memtables by all open databases.\n\nThe minimum supported is 256 MiB. Any value below this will be sanitized automatically to 256 MiB.",
       "$ref": "#/$defs/NonZeroHumanBytes",
       "default": "2.0 GiB"
     },
     "rocksdb-total-memtables-ratio": {
       "title": "Rocksdb total memtable size ratio",
-      "description": "The memory size used across all memtables (ratio between 0 to 1.0). This\nlimits how much memory memtables can eat up from the value in rocksdb-total-memory-limit.\nWhen set to 0, memtables can take all available memory up to the value specified\nin rocksdb-total-memory-limit. This value will be sanitized to 1.0 if outside the valid bounds.",
+      "description": "The memory size used across all memtables (ratio between 0.1 to 1.0). This\nlimits how much memory memtables can eat up from the value in rocksdb-total-memory-limit.\n\nThe remaining memory will be dedicated to the block cache.\n\nThis value will be sanitized to 1.0 if outside the valid bounds.",
       "type": "number",
       "format": "float",
       "default": 0.8500000238418579
@@ -741,7 +658,7 @@
       "minimum": 1
     },
     "tokio-console-bind-address": {
-      "description": "Address to bind for the tokio-console tracing subscriber. If unset and restate-server is\nbuilt with tokio-console support, it'll listen on `0.0.0.0:6669`.",
+      "description": "Address to bind for the tokio-console tracing subscriber. If unset and restate-server is\nbuilt with tokio-console support, it'll listen on `[::]:6669`.",
       "type": "string"
     },
     "tracing-endpoint": {
@@ -797,25 +714,46 @@
       "$ref": "#/$defs/WorkerOptions",
       "default": {
         "cleanup-interval": "1h",
+        "data-service-memory-limit": "256.0 MiB",
         "internal-queue-length": 1000,
         "invoker": {
           "abort-timeout": "10m",
           "action-throttling": null,
+          "aws-assume-role-external-id": null,
+          "aws-profile": null,
           "concurrent-invocations-limit": 1000,
+          "connect-timeout": "10s",
+          "http-proxy": null,
+          "http2-idle-connection-timeout": "5m",
+          "http2-initial-connection-window-size": "5.0 MiB",
+          "http2-initial-max-send-streams": null,
+          "http2-initial-stream-window-size": "2.0 MiB",
+          "http2-keep-alive-interval": "40s",
+          "http2-keep-alive-jitter": 0.20000000298023224,
+          "http2-keep-alive-timeout": "20s",
+          "http2-max-frame-size": "16.0 KiB",
+          "http2-streams-per-connection-limit": 128,
           "in-memory-queue-length-limit": 66049,
           "inactivity-timeout": "1m",
           "invocation-throttling": null,
+          "memory-limit": "1.5 GiB",
           "message-size-warning": "10.0 MiB",
+          "no-proxy": null,
+          "per-invocation-initial-memory": "32.0 KiB",
+          "request-compression-threshold": "4.0 MiB",
+          "request-identity-expiration": "1m",
+          "request-identity-private-key-pem-file": null,
           "tmp-dir": null
         },
         "max-command-batch-size": 32,
         "num-timers-in-memory-limit": null,
+        "rule-book-poll-interval": "30s",
         "shuffle": {
           "connection-retry-policy": {
             "factor": 2.0,
-            "initial-interval": "10ms",
+            "initial-interval": "250ms",
             "max-attempts": null,
-            "max-interval": "1s",
+            "max-interval": "3s",
             "type": "exponential"
           },
           "inflight-memory-budget": "10.0 MiB",
@@ -824,6 +762,7 @@
         "snapshots": {
           "destination": null,
           "enable-cleanup": true,
+          "num-retained": 1,
           "object-store-retry-policy": {
             "factor": 2.0,
             "initial-interval": "100ms",
@@ -834,10 +773,11 @@
           "snapshot-interval-num-records": null
         },
         "storage": {
-          "rocksdb-disable-wal": true,
+          "rocksdb-disable-auto-memory-reclaimer": false,
           "rocksdb-log-keep-file-num": null,
           "rocksdb-log-level": null,
           "rocksdb-log-max-file-size": null,
+          "rocksdb-max-file-size": "64.0 MiB",
           "rocksdb-memory-ratio": 0.49000000953674316
         },
         "trim-delay-interval": "10m"
@@ -1083,26 +1023,13 @@
           "description": "Configuration of replicated loglet provider",
           "$ref": "#/$defs/ReplicatedLoglet",
           "default": {
-            "log-server-retry-policy": {
-              "factor": 2.0,
-              "initial-interval": "250ms",
-              "max-attempts": 3,
-              "max-interval": "2s",
-              "type": "exponential"
-            },
-            "log-server-rpc-timeout": "2s",
             "maximum-inflight-records": 1000,
             "read-batch-size": "32.0 KiB",
             "readahead-records": 20,
             "readahead-trigger-ratio": 0.5,
+            "rpc-timeout": "250ms..1m",
             "sequencer-inactivity-timeout": "15s",
-            "sequencer-retry-policy": {
-              "factor": 2.0,
-              "initial-interval": "250ms",
-              "max-attempts": null,
-              "max-interval": "5s",
-              "type": "exponential"
-            }
+            "store-timeout": "2s..1m"
           }
         },
         "seal-retry-interval": {
@@ -1118,6 +1045,7 @@
       "description": "The local network address to bind on for admin-api-server. This service uses default port 9070 and will create a unix-socket file at the data directory under the name `admin.sock`",
       "type": "string",
       "examples": [
+        "[::]:9070",
         "0.0.0.0:9070",
         "127.0.0.1:9070"
       ]
@@ -1127,6 +1055,7 @@
       "description": "The local network address to bind on for http-ingress-server. This service uses default port 8080 and will create a unix-socket file at the data directory under the name `ingress.sock`",
       "type": "string",
       "examples": [
+        "[::]:8080",
         "0.0.0.0:8080",
         "127.0.0.1:8080"
       ]
@@ -1136,6 +1065,7 @@
       "description": "The local network address to bind on for message-fabric-server. This service uses default port 5122 and will create a unix-socket file at the data directory under the name `fabric.sock`",
       "type": "string",
       "examples": [
+        "[::]:5122",
         "0.0.0.0:5122",
         "127.0.0.1:5122"
       ]
@@ -1145,6 +1075,7 @@
       "description": "The local network address to bind on for tokio-console-server. This service uses default port 6669 and will create a unix-socket file at the data directory under the name `tokio.sock`",
       "type": "string",
       "examples": [
+        "[::]:6669",
         "0.0.0.0:6669",
         "127.0.0.1:6669"
       ]
@@ -1162,12 +1093,12 @@
           "const": "snapshot-and-replica-set"
         },
         {
-          "description": "In this mode, a partition is considered durable when its state can be restored from\nthe snapshot and at least a single replica.\n\nDo not trim unless the Lsn is covered (durably) by _any_ of the replicas **and** by\nthe snapshot. Gives weight to snapshots over the durability of the replica-set but\nwithout ignoring the replica-set completely.\n\nIn practice, this means that after a snapshot has been created on the leader, the\nsystem will wait for the nearest memtable flush that cover this Lsn before considering\nthis Lsn for trimming. If the leader crashes before the memtable flush, we are confident\nthat the leader will be able to replay the log without any trim-gaps. This is under the\ncondition that the leader didn't move to another node. In the latter case, the system will\nfetch the snapshot as usual.\n\n[requires snapshot repository]\n[default] if snapshot repository configured\nDurabilityPoint = Min(Max(ReplicaSetDurablePoints), SnapshotDurablePoint)",
+          "description": "In this mode, a partition is considered durable when its state can be restored from\nthe snapshot and at least a single replica.\n\nDo not trim unless the Lsn is covered (durably) by _any_ of the replicas **and** by\nthe snapshot. Gives weight to snapshots over the durability of the replica-set but\nwithout ignoring the replica-set completely.\n\nIn practice, this means that after a snapshot has been created on the leader, the\nsystem will wait for the nearest memtable flush that cover this Lsn before considering\nthis Lsn for trimming. If the leader crashes before the memtable flush, we are confident\nthat the leader will be able to replay the log without any trim-gaps. This is under the\ncondition that the leader didn't move to another node. In the latter case, the system will\nfetch the snapshot as usual.\n\n[requires snapshot repository]\n[default] if restate-server is in cluster mode.\nDurabilityPoint = Min(Max(ReplicaSetDurablePoints), SnapshotDurablePoint)",
           "type": "string",
           "const": "balanced"
         },
         {
-          "description": "A partition is considered durable once all nodes in the replica-set are durable, regardless\nof the state of snapshots.\n\nDo not trim unless all replicas durably include this Lsn.\n\ndefault in standalone-mode with no snapshot repository configured\n\n[default] if snapshot repository is not configured\nDurabilityPoint = Min(ReplicaSetDurablePoints)",
+          "description": "A partition is considered durable once all nodes in the replica-set are durable, regardless\nof the state of snapshots.\n\nDo not trim unless all replicas durably include this Lsn.\n\ndefault in standalone-mode with no snapshot repository configured\n\n[default] if restate-server is in single-node mode.\nDurabilityPoint = Min(ReplicaSetDurablePoints)",
           "type": "string",
           "const": "replica-set-only"
         },
@@ -1191,25 +1122,6 @@
         "0"
       ],
       "minLength": 1
-    },
-    "Http2KeepAliveOptions": {
-      "title": "HTTP/2 Keep alive options",
-      "description": "Configuration for the HTTP/2 keep-alive mechanism, using PING frames.\n\nPlease note: most gateways don't propagate the HTTP/2 keep-alive between downstream and upstream hosts.\nIn those environments, you need to make sure the gateway can detect a broken connection to the upstream deployment(s).",
-      "type": "object",
-      "properties": {
-        "interval": {
-          "title": "HTTP/2 Keep-alive interval",
-          "description": "Sets an interval for HTTP/2 PING frames should be sent to keep a\nconnection alive.\n\nYou should set this timeout with a value lower than the `abort_timeout`.",
-          "$ref": "#/$defs/NonZeroFriendlyDuration",
-          "default": "40s"
-        },
-        "timeout": {
-          "title": "Timeout",
-          "description": "Sets a timeout for receiving an acknowledgement of the keep-alive ping.\n\nIf the ping is not acknowledged within the timeout, the connection will\nbe closed.",
-          "$ref": "#/$defs/NonZeroFriendlyDuration",
-          "default": "20s"
-        }
-      }
     },
     "HumanBytes": {
       "title": "Human-readable bytes",
@@ -1319,6 +1231,16 @@
           "default": null,
           "minimum": 1
         },
+        "http2-max-concurrent-streams": {
+          "title": "HTTP/2 max concurrent streams",
+          "description": "Caps the number of concurrent HTTP/2 streams accepted per inbound ingress connection.\nIf unset, Restate does not configure this limit and leaves it at hyper's runtime default.\nWith the current hyper version, that default is 200 streams.\nService-mesh clients such as Linkerd honor the advertised value as a hard per-connection\nconcurrency limit, so high-concurrency or long-poll deployments may need to raise it.\n\nSince v1.7.0",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
         "ingestion": {
           "title": "Ingestion Options",
           "description": "Settings for the ingestion client\nCurrently only used by the Kafka ingress and the admin API.",
@@ -1326,9 +1248,9 @@
           "default": {
             "connection-retry-policy": {
               "factor": 2.0,
-              "initial-interval": "10ms",
+              "initial-interval": "250ms",
               "max-attempts": null,
-              "max-interval": "2s",
+              "max-interval": "3s",
               "type": "exponential"
             },
             "inflight-memory-budget": "1.0 MiB",
@@ -1336,6 +1258,8 @@
           }
         },
         "kafka-clusters": {
+          "title": "Kafka clusters",
+          "description": "**Deprecated in 1.7**: Kafka clusters should now be configured through the UI/Admin API",
           "type": "array",
           "default": [],
           "items": {
@@ -1347,6 +1271,18 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ListenMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request-size-limit": {
+          "title": "Request size limit",
+          "description": "Maximum size of request that can be received over ingress. If a request size is\nlarger than this limit, the request will fail.\n\nIf unset, defaults to `networking.message-size-limit`. If set, it will be clamped at\nthe value of `networking.message-size-limit` since larger requests cannot be transmitted\nover the cluster internal network.\n\nSince v1.7.0",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NonZeroHumanBytes"
             },
             {
               "type": "null"
@@ -1400,6 +1336,7 @@
     },
     "InvokerOptions": {
       "title": "Invoker options",
+      "description": "Configuration for the HTTP/2 keep-alive mechanism, using PING frames.\n\nPlease note: most gateways don't propagate the HTTP/2 keep-alive between downstream and upstream hosts.\nIn those environments, you need to make sure the gateway can detect a broken connection to the upstream deployment(s).",
       "type": "object",
       "properties": {
         "abort-timeout": {
@@ -1421,6 +1358,36 @@
           ],
           "default": null
         },
+        "additional-request-headers": {
+          "title": "Additional request headers",
+          "description": "Headers that should be applied to all outgoing requests (HTTP and Lambda).\nDefaults to `x-restate-cluster-name: <cluster name>`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SerdeableHeaderHashMap"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aws-assume-role-external-id": {
+          "title": "AssumeRole external ID",
+          "description": "An external ID to apply to any AssumeRole operations taken by this client.\nhttps://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html\nCan be overridden by the `AWS_EXTERNAL_ID` environment variable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "aws-profile": {
+          "title": "AWS Profile",
+          "description": "Name of the AWS profile to select. Defaults to 'AWS_PROFILE' env var, or otherwise\nthe `default` profile.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "concurrent-invocations-limit": {
           "title": "Limit number of concurrent invocations from this node",
           "description": "Number of concurrent invocations that can be processed by the invoker.",
@@ -1430,6 +1397,94 @@
           ],
           "format": "uint",
           "default": 1000,
+          "minimum": 1
+        },
+        "connect-timeout": {
+          "title": "Connect timeout",
+          "description": "How long to wait for a TCP connection to be established before considering\nit a failed attempt.",
+          "$ref": "#/$defs/NonZeroFriendlyDuration",
+          "default": "10s"
+        },
+        "eager-state-size-limit": {
+          "title": "Eager state size limit (since v1.7.0)",
+          "description": "Maximum total size (in bytes) of state entries to send eagerly in the StartMessage.\nWhen the total size of state entries exceeds this limit, only a partial state is sent\nand the service will fetch remaining state lazily using GetEagerState commands.\n\nSet to `0` to disable eager state entirely (equivalent to enabling lazy state).\n\nThis helps reduce memory pressure on deployments for services with large state.\nIf unset, defaults to `message-size-limit` (clamped to that value if set higher).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "http-proxy": {
+          "title": "Proxy URI",
+          "description": "A URI, such as `http://127.0.0.1:10001`, of a server to which all invocations should be sent, with the `Host` header set to the deployment URI.\nHTTPS proxy URIs are supported, but only HTTP endpoint traffic will be proxied currently.\nCan be overridden by the `HTTP_PROXY` environment variable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "http2-idle-connection-timeout": {
+          "title": "HTTP/2 Idle Connection Timeout",
+          "description": "How long a connection can be idle before it is evicted\nand closed. Set to `0` to disable eviction.\n\nSince: v1.7.0\n\nDefault: 5 minutes",
+          "$ref": "#/$defs/FriendlyDuration",
+          "default": "5m"
+        },
+        "http2-initial-connection-window-size": {
+          "title": "HTTP/2 initial connection window size",
+          "description": "Initial connection-level flow-control window (in bytes) for received\ndata. Should be >= the per-stream window. Valid range: 65535 B .. 2 GiB.\n\nSince: v1.7.0\n\nDefault: 5 MiB",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "5.0 MiB"
+        },
+        "http2-initial-max-send-streams": {
+          "title": "HTTP/2 Initial Max Send Streams",
+          "description": "Sets the initial maximum of locally initiated (send) streams.\n\nThis value will be overwritten by the value included in the initial\nSETTINGS frame received from the peer as part of a [connection preface].\n\nNote: This value is capped by [`Self::streams_per_connection_limit`]\n\nDefault: None\n\n**NOTE**: Setting this value to None (default) users the default\nrecommended value from HTTP2 specs",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 1
+        },
+        "http2-initial-stream-window-size": {
+          "title": "HTTP/2 initial stream window size",
+          "description": "Initial flow-control window (in bytes) for received data on each HTTP/2\nstream in the connection pool. Valid range: 65535 B .. 2 GiB.\n\nSince: v1.7.0\n\nDefault: 2 MiB",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "2.0 MiB"
+        },
+        "http2-keep-alive-interval": {
+          "title": "HTTP/2 Keep-alive interval",
+          "description": "Sets an interval for HTTP/2 PING frames should be sent to keep a\nconnection alive.\n\n`0` disables keep-alive pings entirely. Defaults to `40s`.\n\nYou should set this timeout with a value lower than the `abort_timeout`.",
+          "$ref": "#/$defs/FriendlyDuration",
+          "default": "40s"
+        },
+        "http2-keep-alive-jitter": {
+          "title": "HTTP/2 Keep-Alive Jitter",
+          "description": "Fractional jitter added to `http2-keep-alive-interval`, expressed as a fraction\nof the interval (e.g. 0.1 = up to +10%, 1.0 = up to +100%).\n\nDefault 0.2 (20% of http2-keep-alive-interval)",
+          "type": "number",
+          "format": "float",
+          "default": 0.20000000298023224
+        },
+        "http2-keep-alive-timeout": {
+          "title": "HTTP/2 Keep-Alive Timeout",
+          "description": "Sets a timeout for receiving an acknowledgement of the keep-alive ping.\n\nIf the ping is not acknowledged within the timeout, the connection will\nbe closed.\n\nOnly meaningful when `http2-keep-alive-interval` is not zero. Defaults to 20 s.",
+          "$ref": "#/$defs/NonZeroFriendlyDuration",
+          "default": "20s"
+        },
+        "http2-max-frame-size": {
+          "title": "HTTP/2 max frame size",
+          "description": "Largest HTTP/2 DATA frame payload (in bytes) this client will accept.\nMust be within 16 KiB .. 16 MiB (h2 protocol limits).\n\nSince: v1.7.0\n\nDefault: 16 KiB",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "16.0 KiB"
+        },
+        "http2-streams-per-connection-limit": {
+          "description": "Upper bound on the per-connection max-send-streams.\n\nCaps the remote server's advertised `max_concurrent_streams`.\n\nA high number of concurrent streams per connection works\npoorly with L4 load balancers because streams are not balanced across\nbackends.\n\nSince v1.7.0\n\nDefault: 128",
+          "type": "integer",
+          "format": "uint",
+          "default": 128,
           "minimum": 1
         },
         "in-memory-queue-length-limit": {
@@ -1459,6 +1514,12 @@
           ],
           "default": null
         },
+        "memory-limit": {
+          "title": "Memory limit",
+          "description": "Global memory budget for the invoker, shared across all partitions on this node.\nThis controls how much memory can be used for in-flight journal entries, state,\nand protocol messages between the invoker and service deployments.\n\nTo effectively disable memory limiting, set this to a very large value.\n\nSince v1.7.0",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "1.5 GiB"
+        },
         "message-size-limit": {
           "title": "Message size limit",
           "description": "Maximum size of journal messages that can be received from a service. If a service sends a message\nlarger than this limit, the invocation will fail.\n\nIf unset, defaults to `networking.message-size-limit`. If set, it will be clamped at\nthe value of `networking.message-size-limit` since larger messages cannot be transmitted\nover the cluster internal network.",
@@ -1477,6 +1538,61 @@
           "$ref": "#/$defs/NonZeroHumanBytes",
           "default": "10.0 MiB"
         },
+        "no-proxy": {
+          "title": "No proxy",
+          "description": "IP subnets, addresses, and domain names eg `localhost,restate.dev,127.0.0.1,::1,192.168.1.0/24` that should not be proxied by the http_proxy.\nIP addresses must not have ports, and IPv6 addresses must not be wrapped in '[]'.\nSubdomains are also matched. An entry “*” matches all hostnames.\nCan be overridden by the `NO_PROXY` environment variable, which supports comma separated values.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "per-invocation-initial-memory": {
+          "title": "Per-invocation initial memory",
+          "description": "Memory (in bytes) reserved from the global memory pool before an invocation\nstarts. Used for the outbound budget and acts as the minimum reserved floor.\n\nSmaller values allow more concurrent invocations but may cause frequent\nround-trips to the global pool. Larger values reduce contention but limit\nmaximum concurrency.\n\nSince v1.7.0",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "32.0 KiB"
+        },
+        "per-invocation-memory-limit": {
+          "title": "Per-invocation memory limit",
+          "description": "Maximum memory (in bytes) a single invocation may use per direction (inbound and\noutbound). Once an invocation's directional budget reaches this ceiling it must\nwait for in-flight data to be consumed or yield back to the scheduler.\n\nIf unset, defaults to `message-size-limit`. If set, it will be clamped at\nthe value of `message-size-limit`.\n\nSince v1.7.0",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "request-compression-threshold": {
+          "title": "Request Compression threshold",
+          "description": "Request minimum size to enable compression.\nThe request size includes the total of the journal replay and its framing using Restate service protocol, without accounting for the json envelope and the base 64 encoding.\n\nDefault: 4MB (The default AWS Lambda Limit is 6MB, 4MB roughly accounts for +33% of Base64 and the json envelope).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "4.0 MiB"
+        },
+        "request-identity-expiration": {
+          "title": "Request identity expiration leeway",
+          "description": "The validity window of the JWTs attached to outgoing requests when a request identity key is\nconfigured. The token's `exp` (expiry) is set to `now + leeway` and its `nbf` (not-before) to\n`now - leeway`, so this value bounds both how long a token remains valid and how much clock\nskew between this client and the receiving SDK is tolerated.\n\nThe minimum expiration leeway is 1s and lower values will be automatically clamped.\nDefault: 60s.\n\nSince v1.7.0",
+          "$ref": "#/$defs/NonZeroFriendlyDuration",
+          "default": "1m"
+        },
+        "request-identity-private-key-pem-file": {
+          "title": "Request identity private key PEM file",
+          "description": "A path to a file, such as \"/var/secrets/key.pem\", which contains exactly one ed25519 private\nkey in PEM format. Such a file can be generated with `openssl genpkey -algorithm ed25519`.\nIf provided, this key will be used to attach JWTs to requests from this client which\nSDKs may optionally verify, proving that the caller is a particular Restate instance.\n\nThis file is currently only read on client creation, but this may change in future.\nParsed public keys will be logged at INFO level in the same format that SDKs expect.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "tmp-dir": {
           "title": "Temporary directory",
           "description": "Temporary directory to use for the invoker temporary files.\nIf empty, the system temporary directory will be used instead.",
@@ -1490,7 +1606,7 @@
     },
     "KafkaClusterOptions": {
       "title": "Kafka cluster options",
-      "description": "Configuration options to connect to a Kafka cluster.",
+      "description": "Configuration options to connect to a Kafka cluster.\n**Deprecated in 1.7**: Kafka clusters should now be configured through the UI/Admin API",
       "type": "object",
       "properties": {
         "brokers": {
@@ -1563,9 +1679,12 @@
       "properties": {
         "incoming-network-queue-length": {
           "description": "The number of messages that can queue up on input network stream while request processor is busy.",
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 1000,
+          "deprecated": true,
           "minimum": 1
         },
         "rocksdb-block-size": {
@@ -1608,6 +1727,14 @@
             "null"
           ]
         },
+        "rocksdb-disable-l0-l1-compression": {
+          "title": "Disable L0/L1 SST compression",
+          "description": "When false (the default), L0 and L1 SST files are compressed with Lz4.\nHigher levels (L2+) always use Zstd regardless of this setting.\nSet to true to disable compression for L0/L1, which can improve write\nthroughput at the cost of higher disk usage since these files are\nshort-lived and frequently compacted.\n\nDefault: false (L0/L1 compression enabled)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rocksdb-disable-statistics": {
           "description": "Disable rocksdb statistics collection\n\nDefault: False (statistics enabled)",
           "type": [
@@ -1615,9 +1742,9 @@
             "null"
           ]
         },
-        "rocksdb-disable-wal": {
-          "title": "Disable WAL",
-          "description": "The default depends on the different rocksdb use-cases at Restate.\n\nSupports hot-reloading (Partial / Bifrost only)",
+        "rocksdb-disable-wal-compression": {
+          "title": "Disable WAL compression",
+          "description": "When false (the default), the Write-Ahead Log is compressed with Zstd.\nSet to true to disable WAL compression. Only applies when WAL is enabled.\n\nDefault: false (WAL compression enabled)",
           "type": [
             "boolean",
             "null"
@@ -1665,26 +1792,18 @@
           ],
           "default": null
         },
-        "rocksdb-max-background-jobs": {
-          "title": "RocksDB max background jobs (flushes and compactions)",
-          "description": "Default: the number of CPU cores on this node.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 1
+        "rocksdb-max-file-size": {
+          "title": "Clamps target size for sst files",
+          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 16 MiB if set to a smaller value.\n\n[default] is 128 MiB\n\nSince v1.7.0",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "128.0 MiB"
         },
         "rocksdb-max-sub-compactions": {
-          "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed (i.e. only 1 thread will do the compaction).\n\nDefault is 0 which maps to floor(number of CPU cores / 2)",
+          "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed.\n\nDefault is 1",
           "type": "integer",
           "format": "uint32",
-          "default": 0,
+          "default": 1,
           "minimum": 0
-        },
-        "rocksdb-max-wal-size": {
-          "description": "The size limit of all WAL files\n\nUse this to limit the size of WAL files. If the size of all WAL files exceeds this limit,\nthe oldest WAL file will be deleted and if needed, memtable flush will be triggered.\n\nNote: RocksDB internally counts the uncompressed bytes to determine the WAL size, and since the WAL\nis compressed, the actual size on disk will be significantly smaller than this value (~1/4\ndepending on the compression ratio). For instance, if this is set to \"1 MiB\", then rocksdb\nmight decide to flush if the total WAL (on disk) reached ~260 KiB (compressed).\n\nDefault is `0` which translates into 6 times the memory allocated for membtables for this\ndatabase.",
-          "$ref": "#/$defs/HumanBytes"
         },
         "rocksdb-memory-budget": {
           "description": "The memory budget for rocksdb memtables in bytes\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.",
@@ -1698,7 +1817,7 @@
           ]
         },
         "rocksdb-memory-ratio": {
-          "description": "The memory budget for rocksdb memtables as ratio\n\nThis defines the total memory for rocksdb as a ratio of all memory available to the\nlog-server.\n\n(See `rocksdb-total-memtables-ratio` in common).",
+          "description": "The memory budget for rocksdb memtables as ratio\n\nThis defines the total memory for rocksdb as a ratio of the node's total budget\nfor rocksdb memtables.\n\n(See `rocksdb-total-memtables-ratio` in common).",
           "type": "number",
           "format": "float",
           "default": 0.5
@@ -1715,12 +1834,34 @@
             }
           ]
         },
-        "writer-batch-commit-count": {
-          "description": "Trigger a commit when the batch size exceeds this threshold.\n\nSet to 0 or 1 to commit the write batch on every command.",
-          "type": "integer",
+        "rocksdb-wal-dir": {
+          "description": "Custom Path for WAL files\n\nIf unset, the default data directory is used for WAL files. If set, the path\nmust point to a directory that exists and is writable. The directory will be\nused to store WAL files.\n\nThe recommendation is to use low-latency NVMe SSD for the WAL directory with\nsufficient IOPS capacity and bandwidth to your sustained workload. The `fdatasync`\nlatency of the storage device is a significant factor in the WAL performance if\n`rocksdb-disable-wal-fsync` is set to `false`.\n\nSince v1.7.0",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "write-batch-commit-bytes": {
+          "title": "Write Batch (in bytes)",
+          "description": "If unset, a reasonable value is automatically derived from the memory budget\navailable for memtables of the log-server.\n\nIf `write-batch-commit-count` is set, the write batch will be limited to whichever\nof the two is reached first. The value is clamped to the size of a single memtable\nwhich is derived from rocksdb-memory-budget.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NonZeroHumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "write-batch-commit-count": {
+          "title": "Write Batch (count)",
+          "description": "The number of records to batch in a single write batch. This is a (soft) upper bound\nand the actual number of records may be lower in low-throughput scenarios or if\nthe write batch size (in bytes) is reached first.\n\nIf unset, the write batch will only be limited by its size in bytes.",
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint",
-          "default": 5000,
-          "minimum": 0
+          "minimum": 1
         }
       }
     },
@@ -1999,6 +2140,14 @@
             "null"
           ]
         },
+        "rocksdb-disable-l0-l1-compression": {
+          "title": "Disable L0/L1 SST compression",
+          "description": "When false (the default), L0 and L1 SST files are compressed with Lz4.\nHigher levels (L2+) always use Zstd regardless of this setting.\nSet to true to disable compression for L0/L1, which can improve write\nthroughput at the cost of higher disk usage since these files are\nshort-lived and frequently compacted.\n\nDefault: false (L0/L1 compression enabled)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rocksdb-disable-statistics": {
           "description": "Disable rocksdb statistics collection\n\nDefault: False (statistics enabled)",
           "type": [
@@ -2006,9 +2155,9 @@
             "null"
           ]
         },
-        "rocksdb-disable-wal": {
-          "title": "Disable WAL",
-          "description": "The default depends on the different rocksdb use-cases at Restate.\n\nSupports hot-reloading (Partial / Bifrost only)",
+        "rocksdb-disable-wal-compression": {
+          "title": "Disable WAL compression",
+          "description": "When false (the default), the Write-Ahead Log is compressed with Zstd.\nSet to true to disable WAL compression. Only applies when WAL is enabled.\n\nDefault: false (WAL compression enabled)",
           "type": [
             "boolean",
             "null"
@@ -2050,16 +2199,6 @@
             }
           ],
           "default": null
-        },
-        "rocksdb-max-background-jobs": {
-          "title": "RocksDB max background jobs (flushes and compactions)",
-          "description": "Default: the number of CPU cores on this node.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 1
         },
         "rocksdb-memory-budget": {
           "description": "The memory budget for rocksdb memtables in bytes\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.",
@@ -2131,6 +2270,11 @@
           "description": "Disables Zstd compression for internal gRPC network connections",
           "type": "boolean",
           "default": false
+        },
+        "fabric-memory-limit": {
+          "title": "Global Fabric Memory Limit",
+          "description": "This sets the memory limit for all in-flight fabric services that don't own dedicated\nmemory pools. The memory limit will be sanitized to the configured `message-size-limit`\nif smaller.\n\nDefault: `64MiB`",
+          "$ref": "#/$defs/NonZeroHumanBytes"
         },
         "handshake-timeout": {
           "title": "Handshake timeout",
@@ -2246,19 +2390,27 @@
       "properties": {
         "log-server-retry-policy": {
           "description": "Log Server RPC retry policy\n\nRetry policy for log server RPCs",
-          "$ref": "#/$defs/RetryPolicy",
-          "default": {
-            "factor": 2.0,
-            "initial-interval": "250ms",
-            "max-attempts": 3,
-            "max-interval": "2s",
-            "type": "exponential"
-          }
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "deprecated": true
         },
         "log-server-rpc-timeout": {
           "description": "Log Server RPC timeout\n\nTimeout waiting on log server response",
-          "$ref": "#/$defs/NonZeroFriendlyDuration",
-          "default": "2s"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NonZeroFriendlyDuration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "deprecated": true
         },
         "maximum-inflight-records": {
           "description": "Maximum number of inflight records sequencer can accept\n\nOnce this maximum is hit, sequencer will induce back pressure\non clients. This controls the total number of records regardless of how many batches.\n\nNote that this will be increased to fit the biggest batch of records being enqueued.",
@@ -2287,6 +2439,18 @@
           "format": "float",
           "default": 0.5
         },
+        "rpc-timeout": {
+          "description": "Adaptive timeout for LogServer RPC\n\nThis configures the adaptive timeout range for RPC operations from this node to log servers.\nThe timeout range is also used to determine the appropriate retry delay between retry attempts.",
+          "type": "string",
+          "default": "250ms..1m",
+          "examples": [
+            "250ms..1m",
+            "10ms..60s",
+            "0.5s..5m",
+            "1s..1h"
+          ],
+          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$"
+        },
         "sequencer-inactivity-timeout": {
           "description": "Sequencer inactivity timeout\n\nThe sequencer is allowed to consider itself quiescent if it did not commit records for this period of time.\nIt may use this to sends pre-emptive release/seal check requests to log-servers.\n\nThe sequencer is also allowed to use this value as interval to send seal/release checks even if it's not quiescent.",
           "$ref": "#/$defs/NonZeroFriendlyDuration",
@@ -2294,14 +2458,27 @@
         },
         "sequencer-retry-policy": {
           "description": "Sequencer retry policy\n\nBackoff introduced when sequencer fail to find a suitable spread of log servers",
-          "$ref": "#/$defs/RetryPolicy",
-          "default": {
-            "factor": 2.0,
-            "initial-interval": "250ms",
-            "max-attempts": null,
-            "max-interval": "5s",
-            "type": "exponential"
-          }
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetryPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "deprecated": true
+        },
+        "store-timeout": {
+          "description": "Adaptive timeout for LogServer Store Messages\n\nThis configures the adaptive timeout range for Store operations from this node to log servers.\n\nSince v1.7.0",
+          "type": "string",
+          "default": "2s..1m",
+          "examples": [
+            "250ms..1m",
+            "10ms..60s",
+            "0.5s..5m",
+            "1s..1h"
+          ],
+          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$"
         }
       }
     },
@@ -2589,6 +2766,25 @@
           "type": "boolean",
           "default": true
         },
+        "export-concurrency-limit": {
+          "title": "Export concurrency limit",
+          "description": "Maximum number of concurrent partition snapshot exports. This controls how\nmany partition stores can simultaneously export snapshots to the snapshot\nrepository.\n\nDefault: 4",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
+        "num-retained": {
+          "title": "Snapshot retention count",
+          "description": "Number of most recent snapshots to retain. Older snapshots will be\ndeleted automatically. Only snapshots created after this setting is enabled will\nbe considered for pruning.\n\nRetaining multiple snapshots causes the partition archived LSN to be reported as that of the\noldest retained snapshot. Therefore, retaining multiple snapshots will cause increased disk\nusage on log-server nodes.\n\nDefault: `1`\n\nSince v1.7.0",
+          "type": "integer",
+          "format": "uint8",
+          "default": 1,
+          "maximum": 255,
+          "minimum": 1
+        },
         "object-store-retry-policy": {
           "title": "Error retry policy",
           "description": "A retry policy for dealing with retryable object store errors.",
@@ -2654,6 +2850,12 @@
             }
           ]
         },
+        "rocksdb-disable-auto-memory-reclaimer": {
+          "title": "Disable automatic rocksdb memory reclaimer",
+          "description": "When set to `true`, disables RocksDB's memory reclaimer for partition stores.\nThe reclaimer automatically reclaims memory from memtables when they are no longer\nneeded, or when the total memtable budget is exceeded. Disabling this will cause\nrocksdb to exceed the specific budget under extreme conditions and when flushes\nare falling behind. The benefit of disabling the reclaimer is reduce the chances\nof rocksdb write stalls under heavy load.\n\n[Supports configuration hot-reloading]",
+          "type": "boolean",
+          "default": false
+        },
         "rocksdb-disable-compact-on-deletion": {
           "title": "Disable compact-on-deletion collector",
           "description": "When set to `true`, disables RocksDB's CompactOnDeletionCollector for partition stores.\nThe collector automatically triggers compaction when SST files accumulate a high density\nof tombstones (deletion markers), helping reclaim disk space after bulk deletions.\n\nThis helps control space amplification when invocation journal retention expires and\nthe cleaner purges completed invocations.\n\nConsider disabling this if you observe frequent unnecessary compactions triggered by\nthe collector causing performance issues.",
@@ -2675,6 +2877,14 @@
             "null"
           ]
         },
+        "rocksdb-disable-l0-l1-compression": {
+          "title": "Disable L0/L1 SST compression",
+          "description": "When false (the default), L0 and L1 SST files are compressed with Lz4.\nHigher levels (L2+) always use Zstd regardless of this setting.\nSet to true to disable compression for L0/L1, which can improve write\nthroughput at the cost of higher disk usage since these files are\nshort-lived and frequently compacted.\n\nDefault: false (L0/L1 compression enabled)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rocksdb-disable-statistics": {
           "description": "Disable rocksdb statistics collection\n\nDefault: False (statistics enabled)",
           "type": [
@@ -2682,9 +2892,9 @@
             "null"
           ]
         },
-        "rocksdb-disable-wal": {
-          "title": "Disable WAL",
-          "description": "The default depends on the different rocksdb use-cases at Restate.\n\nSupports hot-reloading (Partial / Bifrost only)",
+        "rocksdb-disable-wal-compression": {
+          "title": "Disable WAL compression",
+          "description": "When false (the default), the Write-Ahead Log is compressed with Zstd.\nSet to true to disable WAL compression. Only applies when WAL is enabled.\n\nDefault: false (WAL compression enabled)",
           "type": [
             "boolean",
             "null"
@@ -2727,15 +2937,11 @@
           ],
           "default": null
         },
-        "rocksdb-max-background-jobs": {
-          "title": "RocksDB max background jobs (flushes and compactions)",
-          "description": "Default: the number of CPU cores on this node.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 1
+        "rocksdb-max-file-size": {
+          "title": "Clamps target size for sst files",
+          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 16 MiB if set to a smaller value.\n\n[default] is 64 MiB\n\nSince v1.7.0",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "64.0 MiB"
         },
         "rocksdb-memory-budget": {
           "description": "The memory budget for rocksdb memtables in bytes\n\nThe total is divided evenly across partitions. The server will rebalance the memory budget\nperiodically depending on the number of running partitions on this node.\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.",
@@ -2803,6 +3009,11 @@
           "$ref": "#/$defs/NonZeroFriendlyDuration",
           "default": "1h"
         },
+        "data-service-memory-limit": {
+          "description": "Memory limit for incoming partition data service messages (Ingestion).\n\nDefault is 256 MiB.",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "256.0 MiB"
+        },
         "durability-mode": {
           "title": "Durability mode",
           "description": "Every partition store is backed up by a durable log that is used to recover the state of\nthe partition on restart or failover. The durability mode defines the criteria used\nto determine whether a partition is considered fully durable or not at a given point in the\nlog history. Once a partition is fully durable, its backing log is allowed to be trimmed to\nthe durability point.\n\nThis helps keeping the log's disk usage under control but it forces nodes that need to restore\nthe state of the partition to fetch a snapshot of that partition that covers the changes up to\nand including the \"durability point\".\n\nSince v1.4.2 (not compatible with earlier versions)",
@@ -2827,11 +3038,30 @@
           "default": {
             "abort-timeout": "10m",
             "action-throttling": null,
+            "aws-assume-role-external-id": null,
+            "aws-profile": null,
             "concurrent-invocations-limit": 1000,
+            "connect-timeout": "10s",
+            "http-proxy": null,
+            "http2-idle-connection-timeout": "5m",
+            "http2-initial-connection-window-size": "5.0 MiB",
+            "http2-initial-max-send-streams": null,
+            "http2-initial-stream-window-size": "2.0 MiB",
+            "http2-keep-alive-interval": "40s",
+            "http2-keep-alive-jitter": 0.20000000298023224,
+            "http2-keep-alive-timeout": "20s",
+            "http2-max-frame-size": "16.0 KiB",
+            "http2-streams-per-connection-limit": 128,
             "in-memory-queue-length-limit": 66049,
             "inactivity-timeout": "1m",
             "invocation-throttling": null,
+            "memory-limit": "1.5 GiB",
             "message-size-warning": "10.0 MiB",
+            "no-proxy": null,
+            "per-invocation-initial-memory": "32.0 KiB",
+            "request-compression-threshold": "4.0 MiB",
+            "request-identity-expiration": "1m",
+            "request-identity-private-key-pem-file": null,
             "tmp-dir": null
           }
         },
@@ -2854,6 +3084,12 @@
           "default": null,
           "minimum": 1
         },
+        "rule-book-poll-interval": {
+          "title": "Rule book poll interval",
+          "description": "How often each node's `RuleBookCache` polls the metadata store\nfor rule-book updates. The cache also receives push-style\nnotifications when partition processors apply\n`Command::UpsertRuleBook` from Bifrost, so this poll interval\nis mainly a fallback for cross-node propagation when no\npartition leader has yet observed the change. Default: 30 s.\n*Since v1.7.0*",
+          "$ref": "#/$defs/NonZeroFriendlyDuration",
+          "default": "30s"
+        },
         "shuffle": {
           "title": "Worker Shuffle Options",
           "description": "Settings for the shared ingestion client used by all workers to\nmanage record ingestion across partitions (shuffle).",
@@ -2861,9 +3097,9 @@
           "default": {
             "connection-retry-policy": {
               "factor": 2.0,
-              "initial-interval": "10ms",
+              "initial-interval": "250ms",
               "max-attempts": null,
-              "max-interval": "1s",
+              "max-interval": "3s",
               "type": "exponential"
             },
             "inflight-memory-budget": "10.0 MiB",
@@ -2877,6 +3113,7 @@
           "default": {
             "destination": null,
             "enable-cleanup": true,
+            "num-retained": 1,
             "object-store-retry-policy": {
               "factor": 2.0,
               "initial-interval": "100ms",
@@ -2890,10 +3127,11 @@
         "storage": {
           "$ref": "#/$defs/StorageOptions",
           "default": {
-            "rocksdb-disable-wal": true,
+            "rocksdb-disable-auto-memory-reclaimer": false,
             "rocksdb-log-keep-file-num": null,
             "rocksdb-log-level": null,
             "rocksdb-log-max-file-size": null,
+            "rocksdb-max-file-size": "64.0 MiB",
             "rocksdb-memory-ratio": 0.49000000953674316
           }
         },
