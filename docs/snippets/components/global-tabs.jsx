@@ -1,6 +1,4 @@
 // Custom tab compnent which allows syncing tabs with the same title across different instances
-import React, { useState, useEffect } from 'react';
-
 export const GlobalTabs = ({ children, className = '' }) => {
     const [activeTab, setActiveTab] = useState(0)
 
