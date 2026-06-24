@@ -8,7 +8,7 @@ Restate uses an execution log to replay operations after failures and suspension
 
 ## Run 
 
-Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
+Use `ctx.run_typed` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
 ```python {"CODE_LOAD::python/src/develop/journaling_results.py#side_effect"} 
 async def call_llm(prompt: str) -> str:
@@ -22,7 +22,13 @@ result = await ctx.run_typed("LLM call", call_llm, prompt="What is the weather?"
 my_number = await ctx.run_typed("generate number", lambda: random.randint(0, 10))
 ```
 
-Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run`).
+Note that inside `ctx.run_typed`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run_typed`).
+
+<Note title="`ctx.run` vs `ctx.run_typed`">
+    `ctx.run_typed` is the recommended API. It accepts the action's positional and keyword arguments directly after the action, and uses `RunOptions` for retry configuration, while preserving the action's type hints on its parameters and return value.
+
+    The older `ctx.run` is **deprecated**. It takes retry options as top-level keyword arguments (`max_attempts`, `max_retry_duration`, `type_hint`, `serde`, `args`) and does not propagate the action's parameter types. New code should use `ctx.run_typed`; existing `ctx.run` calls continue to work but should be migrated.
+</Note>
 
 <AccordionGroup>
 
