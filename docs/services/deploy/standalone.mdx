@@ -15,3 +15,55 @@ Most of the Restate service templates come with a `Dockerfile` that you can use 
 To spread load across multiple instances of services and higher availability, we recommend using a load balancer. The Restate server does not currently support multiple endpoints for a single deployment.
 
 When running an L7 load balancer such AWS Application Load Balancer, be sure to configure it to support HTTP/2 as this enables Restate to use the more efficient bi-directional service invocation protocol.
+
+<Accordion title="Using nginx load balancer">
+When using `nginx` as the load balancer, you must use the `grpc_pass` directive instead of `proxy_pass` to forward requests to your services. The `proxy_pass` directive only speaks HTTP/1.1 to the upstream, which downgrades the connection and prevents Restate from using the bidirectional protocol. The `grpc_pass` directive keeps HTTP/2 end-to-end. You also need `http2 on;` on the listener so that nginx accepts HTTP/2 from Restate.
+
+```nginx Expandable nginx.conf
+events {}
+
+http {
+    server {
+        # Plain HTTP + h2c (HTTP/1.1 and HTTP/2 prior knowledge)
+        # In production, either remove this plain HTTP listener or redirect it
+        # to HTTPS (note: HTTP/2 prior-knowledge clients won't follow redirects).
+        listen 80;
+        http2 on;
+        server_name _;
+
+        client_max_body_size 0;
+
+        location / {
+            grpc_pass grpc://app:9080;
+            grpc_set_header   Host              $host;
+            grpc_set_header   X-Real-IP         $remote_addr;
+            grpc_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            grpc_set_header   X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        # HTTPS + HTTP/2 (HTTP/1.1 and HTTP/2 via ALPN)
+        listen 443 ssl;
+        http2 on;
+        server_name _;
+
+        ssl_certificate     /etc/nginx/certs/server.crt;
+        ssl_certificate_key /etc/nginx/certs/server.key;
+
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        client_max_body_size 0;
+
+        location / {
+            grpc_pass grpc://app:9080;
+            grpc_set_header   Host              $host;
+            grpc_set_header   X-Real-IP         $remote_addr;
+            grpc_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            grpc_set_header   X-Forwarded-Proto $scheme;
+        }
+    }
+}
+```
+</Accordion>
