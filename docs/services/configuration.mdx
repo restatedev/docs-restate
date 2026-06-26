@@ -155,6 +155,46 @@ Virtual Objects and Workflow allow to store [persistent state](/foundations/key-
     [Learn how to configure this](#how-to-configure)
 </Info>
 
+## Non-determinism behavior
+
+When Restate detects a journal mismatch (non-determinism) error — for example, if your handler code changed in an incompatible way after invocations were already in flight — you can control what happens using the `onJournalMismatchErrors` option (TypeScript SDK v1.15.0+).
+
+The available values are:
+
+- **`"retry"`** (default): the invocation follows the normal retry policy.
+- **`"pause"`**: the invocation is paused instead of retried, requiring [manual intervention](/services/invocation/managing-invocations#resume).
+- **`"fail"`**: the invocation fails terminally instead of being retried.
+
+Setting `"pause"` is useful during deployments: if a new service version is incompatible with in-flight invocations, they pause automatically rather than endlessly retrying, and you can decide how to handle them one by one.
+
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: { /* ... */ },
+  options: {
+    onJournalMismatchErrors: "pause",
+  },
+});
+```
+
+You can also set this at the handler level:
+
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: {
+    myHandler: restate.handlers.handler(
+      { onJournalMismatchErrors: "fail" },
+      async (ctx: restate.Context) => {}
+    ),
+  },
+});
+```
+
+<Note>
+    `onJournalMismatchErrors` requires restate-server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
 ## How to configure
 
 ### Service-level configuration

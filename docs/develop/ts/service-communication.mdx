@@ -193,9 +193,64 @@ const response = ctx.attach(invocationId);
 - Without an idempotency key: Can only wait, not retrieve the result.
 
 
+## Signals
+
+Signals let invocations communicate directly with each other: one invocation waits for a named signal, and any other handler can resolve or reject it by referencing the target invocation's ID.
+
+**Waiting for a signal** (inside the invocation that wants to pause):
+
+```typescript
+// Suspend until another handler sends a signal named "approved"
+const approved = await ctx.signal<boolean>("approved");
+```
+
+**Sending a signal** (from another handler that knows the target invocation's ID):
+
+```typescript
+// Get a reference to the target invocation
+const target = ctx.invocation(targetInvocationId);
+
+// Resolve the signal with a value — wakes the waiting handler
+target.signal<boolean>("approved").resolve(true);
+
+// Or reject it — wakes the waiting handler with a terminal error
+target.signal("approved").reject("Request denied");
+```
+
+The target invocation's ID is available via `ctx.request().id`. Pass it to other handlers using state, awakeables, or any other mechanism you prefer.
+
+Each invocation can wait on multiple distinct signal names at the same time. Signals are scoped to the invocation — the same name on different invocations is independent.
+
+<Note>
+    Signals require restate-server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
+## InvocationReference
+
+`ctx.invocation(invocationId)` returns an `InvocationReference` that lets you interact with any other invocation by its ID:
+
+```typescript
+const ref = ctx.invocation(targetInvocationId);
+
+// Send a signal
+ref.signal<boolean>("approved").resolve(true);
+
+// Cancel the target invocation
+ref.cancel();
+
+// Attach and wait for the target invocation's result
+const result = await ref.attach<string>();
+```
+
 ## Cancel an invocation
 
-To cancel a running handler:
+To cancel a running handler, use `InvocationReference`:
+
+```typescript
+ctx.invocation(targetInvocationId).cancel();
+```
+
+Or using the legacy `ctx.cancel()` (deprecated):
 
 ```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#cancel"} 
 const handle = ctx.serviceSendClient(myService).myHandler("Hi");

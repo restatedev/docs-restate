@@ -1,0 +1,130 @@
+---
+title: "Tunnel (Preview)"
+sidebarTitle: "Tunnel"
+description: "Serve a Restate deployment from a private network over an outbound connection to Restate Cloud."
+icon: "tunnel"
+---
+
+<Note title="Preview package">
+    `@restatedev/restate-sdk-tunnel` is a preview package available since TypeScript SDK v1.15.0.
+    Its API may change in future releases.
+</Note>
+
+`@restatedev/restate-sdk-tunnel` lets you serve a Restate deployment over an **outbound** connection to Restate Cloud — no inbound HTTP listener and no public ingress into your network.
+
+It is a drop-in alternative to `restate.serve(...)` for services running in private networks such as a corporate VPC, a Kubernetes cluster without a public load balancer, or a developer's laptop.
+
+## How it works
+
+The tunnel package dials out to Restate Cloud's tunnel servers over TLS. Restate Cloud then drives HTTP/2 over that connection — the roles are flipped compared to a normal server. Invocations arrive as HTTP/2 streams, are verified using your environment's request-identity key, and are dispatched to your SDK handlers in-process, exactly as if they arrived on a local port.
+
+On reconnect, the tunnel dials again automatically with jittered exponential backoff.
+
+## Installation
+
+```bash
+npm install @restatedev/restate-sdk-tunnel @restatedev/restate-sdk
+```
+
+## Quick start
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { connectTunnel } from "@restatedev/restate-sdk-tunnel";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: {
+    greet: async (_ctx, name: string) => `Hello ${name}!`,
+  },
+});
+
+const connection = connectTunnel({
+  region: "us",                                 // Restate Cloud region
+  environmentId: "env_...",                      // your environment ID
+  authToken: process.env.RESTATE_AUTH_TOKEN!,    // Cloud API key with the Full role
+  signingPublicKey: "publickeyv1_...",           // your environment's request-identity key
+  tunnelName: "greeter-v1",                     // unique identity for this deployment
+  services: [greeter],
+});
+
+await connection.ready;
+console.log(`Register me at: ${connection.deploymentUrl}`);
+```
+
+Once connected, register the deployment with:
+
+```bash
+restate dep register <connection.deploymentUrl>
+```
+
+## Key options
+
+| Option | Description |
+| --- | --- |
+| `region` | Restate Cloud region (e.g. `"us"`, `"eu"`). Used for tunnel server DNS discovery. |
+| `environmentId` | Your Restate Cloud environment ID (`env_...` prefix included). |
+| `authToken` | Cloud API key with the Full role (`key_...`). |
+| `signingPublicKey` | Your environment's request-identity key (`publickeyv1_...`). Required for request verification. |
+| `tunnelName` | The deployment's identity. Unique per deployment; **replicas of the same deployment should share the same name** for load balancing. |
+| `services` | Same shape as `restate.serve()` accepts. |
+| `startupReady` | A promise or callback that resolves when the process is ready to serve. The tunnel delays dialing until this completes. |
+
+## Zero config on Kubernetes
+
+When deployed via the [restate-operator](https://github.com/restatedev/restate-operator) in `tunnelMode: in-process`, the operator injects the required environment variables automatically. You only need:
+
+```typescript
+connectTunnel({ services: [greeter] });
+```
+
+And a mounted API-key Secret (set `RESTATE_INPROC_AUTH_TOKEN_FILE` to its path).
+
+The operator injects these environment variables:
+
+| Option | Environment variable |
+| --- | --- |
+| `tunnelName` | `RESTATE_INPROC_TUNNEL_NAME` |
+| `environmentId` | `RESTATE_INPROC_ENVIRONMENT_ID` |
+| `region` | `RESTATE_INPROC_CLOUD_REGION` |
+| `signingPublicKey` | `RESTATE_INPROC_SIGNING_PUBLIC_KEY` |
+
+## Graceful shutdown on Kubernetes
+
+The tunnel handles `SIGTERM` automatically by default. On receiving `SIGTERM`, it:
+
+1. Sends an HTTP/2 GOAWAY to stop Restate Cloud from opening new streams.
+2. Lets in-flight invocations finish for up to `drainGraceMs` (default 120 seconds).
+3. Force-closes after the grace window and calls `process.exit(0)`.
+
+Set the pod's `terminationGracePeriodSeconds` to at least `ceil(drainGraceMs / 1000)` to give the drain time to complete.
+
+To manage shutdown yourself, pass `gracefulShutdown: false` and call `connection.shutdown()` explicitly.
+
+## `TunnelConnection` API
+
+```typescript
+interface TunnelConnection {
+  close(): Promise<void>;              // stop reconnecting and close
+  shutdown(opts?: { graceMs?: number }): Promise<void>; // graceful drain
+  readonly ready: Promise<void>;       // resolves on first successful handshake
+  readonly deploymentUrl: string | undefined; // registration URL
+  readonly error: Error | undefined;   // set on fatal errors
+}
+```
+
+`connection.ready` rejects if a fatal error occurs (for example, an invalid auth token). Errors that are retryable (network failures, server restarts) are handled transparently.
+
+## Comparison with `restate.serve()`
+
+| | `restate.serve()` | `connectTunnel()` |
+| --- | --- | --- |
+| Network direction | Inbound (listens on a port) | Outbound (dials Restate Cloud) |
+| Requires public ingress | Yes | No |
+| Works in private VPCs | Needs extra config | Yes, out of the box |
+| Restate Cloud only | No | Yes |
+
+## Requirements
+
+- Node.js ≥ 22
+- Restate Cloud environment with a tunnel-capable server

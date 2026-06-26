@@ -65,6 +65,30 @@ throw RetryableError.from(cause, {
     Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. You can combine it with `maxRetryAttempts` and `maxRetryDuration` in the run options.
 </Note>
 
+## Pausing invocations with `PauseError`
+
+Beyond [retry policies](/services/configuration#retries), you can explicitly pause an invocation from within a `ctx.run` closure using `PauseError`.
+A paused invocation stops retrying and stays in the `paused` state until you [manually resume it](/services/invocation/managing-invocations#resume).
+
+Use this when you want to halt processing until a human or operator resolves an issue:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+
+await ctx.run("charge-card", async () => {
+  if (!paymentProviderConfigured()) {
+    throw new restate.PauseError("Payment provider not configured yet");
+  }
+  // ... proceed with charging
+});
+```
+
+When the condition is resolved, resume the invocation from the UI or CLI.
+
+<Note>
+    `PauseError` requires restate-server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
 ## Mapping errors to `TerminalError`
 
 If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.
