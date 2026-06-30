@@ -142,4 +142,59 @@ func (ReviewWorkflow) SubmitReview(ctx restate.WorkflowSharedContext, review str
 }
 ```
 
+## Signals
+
+**Best for:** Communicating between any two invocations by ID — not just within a workflow.
+
+Signals let one invocation wait on a named signal, while any other handler resolves or rejects it by referencing the target invocation's ID.
+Unlike Durable Promises, signals are not scoped to a workflow — any invocation can send a signal to any other invocation.
+
+<Note>
+    Signals are part of the [flow control](/services/flow-control) feature and require Restate Server 1.7 with protocol v7 enabled.
+    To enable: set `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` and `RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true` on a fresh cluster.
+</Note>
+
+**Use this for:**
+- Human-in-the-loop approval flows where the approver is not a workflow handler
+- Signaling a long-running handler from an external trigger or another service
+- Broadcasting an event that multiple invocations can await independently
+
+### Waiting for a signal
+
+Inside the waiting invocation, block until a named signal arrives:
+
+```go
+approved, err := restate.Signal[bool](ctx, "approved").Result()
+if err != nil {
+  return err
+}
+```
+
+A `SignalFuture` can also be combined with other futures using `restate.WaitFirst` or `restate.Wait`, exactly like awakeables, calls, and timers.
+
+### Resolving and rejecting signals
+
+From any other handler, resolve or reject a signal by the target invocation's ID:
+
+```go
+// Resolve the signal with a value
+restate.ResolveSignal(ctx, targetInvocationID, "approved", true)
+
+// Reject the signal with a terminal error
+restate.RejectSignal(ctx, targetInvocationID, "approved",
+  restate.TerminalErrorf("Request denied: %s", reason))
+```
+
+You can get the invocation ID of the waiting handler via `ctx.Request().ID` or by reading the response of a prior `Send` call.
+
+### Reading inbound signal metadata
+
+Inside a handler, you can read the inbound scope, limit key, and idempotency key from the request:
+
+```go
+scope := ctx.Request().Scope
+limitKey := ctx.Request().LimitKey
+idempotencyKey := ctx.Request().IdempotencyKey
+```
+
 <AwakeablesOutro/>

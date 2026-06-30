@@ -109,6 +109,35 @@ Run `restate rules --help` for the full set of options.
 
 ## Applying concurrency limits
 
+There are two ways to attach a scope to an invocation: through the HTTP ingress endpoints, or from within a handler using the SDK.
+
+### From within a handler (Go SDK)
+
+The Go SDK lets you attach a scope and an optional limit key directly when making service-to-service calls, without going through the HTTP ingress:
+
+```go
+// Route a call through a named scope
+out, err := restate.Service[Output](ctx, "MyService", "Process",
+    restate.WithScope("tenant-123")).
+    Request(input)
+
+// Add an optional hierarchical limit key for finer-grained limits
+out, err := restate.Service[Output](ctx, "MyService", "Process",
+    restate.WithScope("tenant-123")).
+    Request(input, restate.WithLimitKey("api-key/user42"))
+```
+
+`WithScope` works on `Service`, `Object`, and `Workflow` clients and their `Send` variants. `WithLimitKey` works on both in-handler calls and ingress requests.
+
+You can read the inbound scope and limit key on the receiving side:
+
+```go
+scope := ctx.Request().Scope
+limitKey := ctx.Request().LimitKey
+```
+
+### From an external application (HTTP ingress)
+
 To make an invocation count against a scope's concurrency limit, send it through a scoped ingress endpoint under the reserved `/restate/scope/` prefix:
 
 ```

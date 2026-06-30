@@ -15,20 +15,47 @@ By default, Restate does infinite retries with an exponential backoff strategy.
 
 Check out the [error handling guide](/guides/error-handling) to learn how to customize this.
 
-## Terminal Errors
+## Terminal errors
 
-For failures for which you do not want retries, but instead want the invocation to end and the error message
-to be propagated back to the caller, you can throw a **terminal error**.
+For failures where you do not want retries, but instead want the invocation to end and the error message
+propagated back to the caller, return a **terminal error**.
 
-You can throw a `TerminalError` with an optional HTTP status code and a message anywhere in your handler, as follows:
+`TerminalError` is a concrete type. Use `ToTerminalError` to wrap an existing error, or `TerminalErrorf` to construct one directly:
 
 ```go {"CODE_LOAD::go/develop/errorhandling.go#here"} 
 return restate.ToTerminalError(fmt.Errorf("Something went wrong."), restate.WithErrorCode(500))
 ```
 
-You can catch terminal errors, and build your control flow around it.
+Operations that can only fail terminally — such as `Get`, `Keys`, `Sleep`, `Wait`, and `WaitFirst` — return `TerminalError` directly in their signature. Since `TerminalError` satisfies the `error` interface, most call sites are unaffected.
+
+To check whether an error is terminal and downcast it:
+
+```go
+if te := restate.AsTerminalError(err); te != nil {
+    // handle terminal error
+    code := te.Code()
+}
+```
+
+You can catch terminal errors and build your control flow around them.
 
 <Info>
-    When you throw a terminal error, you might need to undo the actions you did earlier in your handler to make sure that your system remains in a consistent state.
+    When you return a terminal error, you might need to undo the actions you did earlier in your handler to make sure that your system remains in a consistent state.
     Have a look at our [sagas guide](/guides/sagas) to learn more.
 </Info>
+
+## Retryable errors
+
+Use `RetryableError` when you want Restate to retry the invocation but also need to attach a specific HTTP status code. Returning a plain `error` or calling `panic` already triggers a retry — `RetryableError` lets you additionally control the status code:
+
+```go
+return restate.ToRetryableError(fmt.Errorf("rate limited by upstream"), restate.WithErrorCode(429))
+```
+
+To check whether an error is retryable and downcast it:
+
+```go
+if re := restate.AsRetryableError(err); re != nil {
+    code := re.Code()
+}
+```
