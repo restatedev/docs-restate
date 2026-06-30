@@ -49,7 +49,7 @@ func (OrderService) processOrder(ctx restate.ObjectContext, order Order) error {
 	restate.Set(ctx, "status", "processing")
 
 	// If cancellation happened right before this line, this still executes
-	paymentId := restate.Rand(ctx).UUID().String()
+	paymentId := restate.UUID(ctx).String()
 
 	// If cancelled right before this line, Run won't execute
 	// If cancelled during run block execution,

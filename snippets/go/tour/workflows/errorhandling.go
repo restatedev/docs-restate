@@ -10,6 +10,6 @@ type ErrorHanding struct{}
 
 func (ErrorHanding) Greet(ctx restate.Context, name string) error {
 	// <start_here>
-	return restate.TerminalError(fmt.Errorf("subscription plan not available"))
+	return restate.ToTerminalError(fmt.Errorf("subscription plan not available"))
 	// <end_here>
 }
