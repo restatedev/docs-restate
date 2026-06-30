@@ -19,7 +19,7 @@ func (UserAccount) UpdateBalance(ctx restate.ObjectContext, amount float64) (flo
 
 	newBalance := balance + amount
 	if newBalance < 0.0 {
-		return 0.0, restate.TerminalError(errors.New("insufficient funds"))
+		return 0.0, restate.ToTerminalError(errors.New("insufficient funds"))
 	}
 
 	restate.Set(ctx, "balance", newBalance)

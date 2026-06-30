@@ -25,9 +25,9 @@ func main() {
 			restate.Reflect(
 				MyWorkflow{},
 				restate.WithInvocationRetryPolicy(
-					restate.WithInitialInterval(time.Second),
-					restate.WithMaxInterval(30*time.Second),
-					restate.WithMaxAttempts(10),
+					restate.WithInitialRetryInterval(time.Second),
+					restate.WithMaxRetryInterval(30*time.Second),
+					restate.WithMaxRetryAttempts(10),
 					restate.PauseOnMaxAttempts()),
 				restate.WithInactivityTimeout(15*time.Minute),
 				restate.WithAbortTimeout(15*time.Minute),
@@ -50,9 +50,9 @@ func main() {
 			restate.Reflect(MyWorkflow{}).
 				ConfigureHandler("MyHandler",
 					restate.WithInvocationRetryPolicy(
-						restate.WithInitialInterval(time.Second),
-						restate.WithMaxInterval(30*time.Second),
-						restate.WithMaxAttempts(10),
+						restate.WithInitialRetryInterval(time.Second),
+						restate.WithMaxRetryInterval(30*time.Second),
+						restate.WithMaxRetryAttempts(10),
 						restate.PauseOnMaxAttempts()),
 					restate.WithInactivityTimeout(15*time.Minute),
 					restate.WithAbortTimeout(15*time.Minute),

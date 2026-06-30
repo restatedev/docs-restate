@@ -29,7 +29,7 @@ func (DeliveryTracker) SetLocation(ctx restate.ObjectContext, location Location)
 		return err
 	}
 	if packageInfo == nil {
-		return restate.TerminalError(errors.New("delivery not found"))
+		return restate.ToTerminalError(errors.New("delivery not found"))
 	}
 
 	packageInfo.Locations = append(packageInfo.Locations, location)
