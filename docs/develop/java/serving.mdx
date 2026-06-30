@@ -95,6 +95,49 @@ builder.bind(
 
 </Accordion>
 
+## Troubleshooting HTTP/2 with Spring Boot
+
+Restate communicates with your service over HTTP/2 bidirectional streaming. When using the Java/Kotlin SDK with Spring Boot, you may encounter errors such as:
+
+```
+[META0003] error when calling 'http://app:9080/': h2 pool connection error: stream closed because of a broken pipe
+```
+
+This is most often caused by a misaligned Netty version pulled in by the Spring Parent POM or the Gradle dependency management plugin, not by the embedded servlet container. The Restate Java SDK ships its own HTTP server (`RestateHttpServer` from `sdk-http-vertx`); it does not use Spring Boot's embedded Tomcat for the Restate endpoint.
+
+### Force the correct Netty version
+
+Pin Netty to a version compatible with the SDK's bundled Vert.x.
+
+<CodeGroup>
+```xml Maven (pom.xml)
+<properties>
+    <netty.version>4.1.124.Final</netty.version>
+</properties>
+```
+```properties Gradle (gradle.properties)
+netty.version=4.1.124.Final
+```
+</CodeGroup>
+
+### Disable bidirectional streaming as a workaround
+
+If your environment cannot reliably carry HTTP/2 streams (for example, an intermediate proxy that closes idle HTTP/2 connections), you can fall back to request-response mode:
+
+<CodeGroup>
+```java Java
+var handler = HttpEndpointRequestHandler.fromEndpoint(
+    Endpoint.builder().bind(new MyService()).build(),
+    /* disableBidirectionalStreaming */ true);
+RestateHttpServer.listen(handler);
+```
+```properties Spring Boot
+restate.sdk.http.disableBidirectionalStreaming=true
+```
+</CodeGroup>
+
+Bidirectional streaming is recommended whenever possible because it lets a single deployment handle multiple concurrent invocations over one connection. Disable it only when you cannot fix the underlying HTTP/2 path.
+
 ## Validating request identity
 
 SDKs can validate that incoming requests come from a particular Restate
