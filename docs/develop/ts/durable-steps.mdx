@@ -6,6 +6,14 @@ icon: "list-check"
 
 Restate uses an execution log to replay operations after failures and suspensions. Non-deterministic operations (database calls, HTTP requests, UUID generation) must be wrapped to ensure deterministic replay.
 
+<Note title="Handlers re-execute from the top on every resume">
+Any time a handler suspends (a service call, `ctx.sleep`, an awakeable, or when the SDK yields under back-pressure) and later resumes, Restate re-invokes it from the top and replays the journal up to the suspension point. Journaled operations (`ctx.run`, calls, sleeps, state reads) are skipped and return their recorded results, but plain code between those operations — including `console.log` and any un-journaled work — runs again on each resume.
+
+Two consequences:
+- Do not rely on plain log lines to count how often a step ran; the same line can appear multiple times in a successful, retry-free invocation.
+- Anything non-deterministic between journaled operations (HTTP calls, timestamps, random values) must be wrapped in `ctx.run` or use the deterministic helpers below. See [Request Lifecycle](/guides/request-lifecycle) for the full replay model.
+</Note>
+
 ## Run 
 
 Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
