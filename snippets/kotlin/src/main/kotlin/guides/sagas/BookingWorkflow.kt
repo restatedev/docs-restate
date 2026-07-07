@@ -24,7 +24,7 @@ data class BookingRequest(
 class BookingWorkflow {
 
   @Handler
-  suspend fun run(ctx: Context, req: BookingRequest) {
+  suspend fun run(req: BookingRequest) {
     val customerId = req.customerId
     val flight = req.flight
     val paymentInfo = req.paymentInfo
@@ -34,18 +34,18 @@ class BookingWorkflow {
 
     // <start_twostep>
     // For each action, we register a compensation that will be executed on failures
-    val bookingId = ctx.runBlock { reserveFlight(customerId, flight) }
-    compensations.add { ctx.runBlock { cancelFlight(bookingId) } }
+    val bookingId = runBlock { reserveFlight(customerId, flight) }
+    compensations.add { runBlock { cancelFlight(bookingId) } }
 
     // ... do other work, like reserving a car, etc. ...
 
-    compensations.add { ctx.runBlock { confirmFlight(bookingId) } }
+    compensations.add { runBlock { confirmFlight(bookingId) } }
     // <end_twostep>
 
     // <start_idempotency>
-    val paymentId = ctx.random().nextUUID().toString()
-    compensations.add { ctx.runBlock { refund(paymentId) } }
-    ctx.runBlock { charge(paymentInfo, paymentId) }
+    val paymentId = random().nextUUID().toString()
+    compensations.add { runBlock { refund(paymentId) } }
+    runBlock { charge(paymentInfo, paymentId) }
     // <end_idempotency>
 
   }

@@ -1,20 +1,20 @@
 package develop
 
 import dev.restate.sdk.common.TimeoutException
-import dev.restate.sdk.kotlin.Context
+import dev.restate.sdk.kotlin.*
 import kotlin.time.Duration.Companion.seconds
 
 class DurableTimers {
-  suspend fun timers(ctx: Context) {
+  suspend fun timers() {
     // <start_sleep>
-    ctx.sleep(10.seconds)
+    sleep(10.seconds)
     // <end_sleep>
   }
 
-  suspend fun timeouts(ctx: Context) {
+  suspend fun timeouts() {
     // <start_timer>
     try {
-      MyServiceClient.fromContext(ctx).myHandler("Hi!").await(5.seconds)
+      toService<MyService>().request { myHandler("Hi!") }.call().await(5.seconds)
     } catch (e: TimeoutException) {
       // Handle the timeout
     }

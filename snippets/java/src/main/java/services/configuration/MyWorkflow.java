@@ -1,6 +1,5 @@
 package services.configuration;
 
-import dev.restate.sdk.WorkflowContext;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.endpoint.definition.InvocationRetryPolicy;
@@ -11,7 +10,7 @@ import java.time.Duration;
 public class MyWorkflow {
 
   @Workflow
-  public void run(WorkflowContext context) {
+  public void run() {
     // Workflow implementation
   }
 

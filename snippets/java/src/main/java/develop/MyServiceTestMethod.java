@@ -17,7 +17,7 @@ class MyServiceTestMethod {
   @Test
   void testMyHandler(@RestateClient Client ingressClient) {
     // Create the service client from the injected ingress client
-    var client = MyServiceClient.fromClient(ingressClient);
+    var client = ingressClient.service(MyService.class);
 
     // Send request to service and assert the response
     var response = client.myHandler("Hi");

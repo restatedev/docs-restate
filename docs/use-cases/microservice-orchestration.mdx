@@ -35,14 +35,14 @@ export const orderService = restate.service({
 public class OrderService {
 
   @Handler
-  public OrderResult process(Context ctx, Order order) {
+  public OrderResult process(Order order) {
     // Each step is automatically durable and resumable
     String paymentId = UUID.randomUUID().toString();
 
-    ctx.run(() -> chargePayment(order.creditCard, paymentId));
+    Restate.run("charge-payment", () -> chargePayment(order.creditCard, paymentId));
 
     for (var item : order.items) {
-      ctx.run(() -> reserveInventory(item.id, item.quantity));
+      Restate.run("reserve-inventory", () -> reserveInventory(item.id, item.quantity));
     }
 
     return new OrderResult(true, paymentId);
@@ -131,13 +131,14 @@ ctx
 
 ```java Java {"CODE_LOAD::java/src/main/java/usecases/microservices/ServiceActions.java#communication"} 
 // Request-response: Wait for result
-var result = InventoryServiceClient.fromContext(ctx).checkStock(item);
+var result = Restate.service(InventoryService.class).checkStock(item);
 
 // Fire-and-forget: Guaranteed delivery without waiting
-EmailServiceClient.fromContext(ctx).send().emailTicket(order);
+Restate.serviceHandle(EmailService.class).send(EmailService::emailTicket, order);
 
 // Delayed execution: Schedule for later
-EmailServiceClient.fromContext(ctx).send().sendReminder(order, Duration.ofDays(21));
+Restate.serviceHandle(EmailService.class)
+    .send(EmailService::sendReminder, order, Duration.ofDays(21));
 ```
 
 ```python Python {"CODE_LOAD::python/src/usecases/microservices/service_actions.py#communication"} 
@@ -210,21 +211,21 @@ public class UserAccount {
   private static final StateKey<Double> BALANCE = StateKey.of("balance", Double.class);
 
   @Handler
-  public double updateBalance(ObjectContext ctx, double amount) {
-    double balance = ctx.get(BALANCE).orElse(0.0);
+  public double updateBalance(double amount) {
+    double balance = Restate.state().get(BALANCE).orElse(0.0);
     double newBalance = balance + amount;
 
     if (newBalance < 0) {
       throw new TerminalException("Insufficient funds");
     }
 
-    ctx.set(BALANCE, newBalance);
+    Restate.state().set(BALANCE, newBalance);
     return newBalance;
   }
 
   @Shared
-  public double getBalance(SharedObjectContext ctx) {
-    return ctx.get(BALANCE).orElse(0.0);
+  public double getBalance() {
+    return Restate.state().get(BALANCE).orElse(0.0);
   }
 }
 ```

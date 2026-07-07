@@ -16,6 +16,6 @@ class MyJsonSerdeFactory : KotlinSerializationSerdeFactory(json = Json { prettyP
 @CustomSerdeFactory(MyJsonSerdeFactory::class)
 @Service
 class ServiceWithCustomSerdeFactory {
-  @Handler suspend fun greet(ctx: Context) = "Hello world!"
+  @Handler suspend fun greet() = "Hello world!"
 }
 // <end_custom_service>

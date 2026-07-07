@@ -1,8 +1,6 @@
 package develop;
 
 // <start_here>
-import dev.restate.sdk.SharedWorkflowContext;
-import dev.restate.sdk.WorkflowContext;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.endpoint.Endpoint;
@@ -12,7 +10,7 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 public class MyWorkflow {
 
   @Workflow
-  public String run(WorkflowContext ctx, String input) {
+  public String run(String input) {
 
     // implement workflow logic here
 
@@ -20,7 +18,7 @@ public class MyWorkflow {
   }
 
   @Shared
-  public String interactWithWorkflow(SharedWorkflowContext ctx, String input) {
+  public String interactWithWorkflow(String input) {
     // implement interaction logic here
     return "my result";
   }

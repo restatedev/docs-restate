@@ -12,13 +12,13 @@ import dev.restate.sdk.kotlin.endpoint.*
 class MyObject {
 
   @Handler
-  suspend fun myHandler(ctx: ObjectContext, greeting: String): String {
-    val objectKey = ctx.key()
+  suspend fun myHandler(greeting: String): String {
+    val objectKey = objectKey()
 
     return "$greeting $objectKey!"
   }
 
-  @Shared suspend fun myConcurrentHandler(ctx: SharedObjectContext, input: String) = "my-output"
+  @Shared suspend fun myConcurrentHandler(input: String) = "my-output"
 }
 
 fun main() {

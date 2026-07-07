@@ -1,8 +1,7 @@
 package develop;
 
 // <start_here>
-import dev.restate.sdk.ObjectContext;
-import dev.restate.sdk.SharedObjectContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.VirtualObject;
@@ -13,14 +12,14 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 public class MyObject {
 
   @Handler
-  public String myHandler(ObjectContext ctx, String greeting) {
-    String objectId = ctx.key();
+  public String myHandler(String greeting) {
+    String objectId = Restate.key();
 
     return greeting + " " + objectId + "!";
   }
 
   @Shared
-  public String myConcurrentHandler(SharedObjectContext ctx, String input) {
+  public String myConcurrentHandler(String input) {
     return "my-output";
   }
 

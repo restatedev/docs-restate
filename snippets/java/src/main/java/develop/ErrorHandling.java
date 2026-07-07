@@ -1,12 +1,11 @@
 package develop;
 
-import dev.restate.sdk.Context;
 import dev.restate.sdk.common.TerminalException;
 import java.util.Map;
 
 public class ErrorHandling {
 
-  public void errorHandling(Context ctx) {
+  public void errorHandling() {
 
     // <start_here>
     throw new TerminalException(500, "Something went wrong");
@@ -14,7 +13,7 @@ public class ErrorHandling {
 
   }
 
-  public void errorHandlingWithMetadata(Context ctx, String correlationId) {
+  public void errorHandlingWithMetadata(String correlationId) {
 
     // <start_metadata>
     throw new TerminalException("Something went wrong", Map.of("correlationId", correlationId));
@@ -22,7 +21,7 @@ public class ErrorHandling {
 
   }
 
-  public void catchMetadata(Context ctx) {
+  public void catchMetadata() {
     try {
       // ... some operation
     } catch (TerminalException e) {

@@ -1,6 +1,6 @@
 package develop;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import dev.restate.sdk.common.RetryPolicy;
@@ -11,7 +11,7 @@ import java.time.Duration;
 public class RetryRunService {
 
   @Handler
-  public String myHandler(Context ctx, String greeting) {
+  public String myHandler(String greeting) {
 
     // <start_here>
     try {
@@ -22,7 +22,7 @@ public class RetryRunService {
               .setMaxDelay(Duration.ofSeconds(10))
               .setMaxAttempts(10)
               .setMaxDuration(Duration.ofMinutes(5));
-      ctx.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
+      Restate.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
     } catch (TerminalException e) {
       // Handle the terminal error after retries exhausted
       // For example, undo previous actions (see sagas guide) and

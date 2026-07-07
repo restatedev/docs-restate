@@ -17,71 +17,83 @@ import java.util.Map;
 public class Actions {
 
   @Handler
-  public void durableStepsExample(Context ctx, String userId) {
+  public void durableStepsExample(String userId) {
     var user = "";
 
     // <start_durable_steps>
     // External API call
-    String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+    String apiResult =
+        Restate.run("fetchData", String.class, () -> fetchData("https://api.example.com/data"));
 
     // Database operation
-    boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
+    boolean dbResult =
+        Restate.run("updateUserDatabase", Boolean.class, () -> updateUserDatabase(userId, user));
 
     // Idempotency key generation
-    String id = ctx.random().nextUUID().toString();
+    String id = Restate.random().nextUUID().toString();
     // <end_durable_steps>
   }
 
   @Handler
-  public void serviceCallsExample(Context ctx, ServiceCallRequest req) {
+  public void serviceCallsExample(ServiceCallRequest req) {
     // <start_service_calls>
     // Call another service
-    var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
+    var validation =
+        Restate.serviceHandle(ValidationService.class)
+            .call(ValidationService::validateOrder, req.order())
+            .await();
 
     // Call Virtual Object function
-    var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
+    var profile =
+        Restate.virtualObjectHandle(UserAccount.class, req.userId())
+            .call(UserAccount::getProfile)
+            .await();
 
     // Submit Workflow
-    var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
+    var result =
+        Restate.workflowHandle(OrderWorkflow.class, req.orderId())
+            .call(OrderWorkflow::run, req.order())
+            .await();
     // <end_service_calls>
   }
 
   @Handler
-  public void sendingMessagesExample(Context ctx, String userId) {
+  public void sendingMessagesExample(String userId) {
     var event = Map.of("kind", "user_signup", "userId", userId);
     // <start_sending_messages>
     // Fire-and-forget notification
-    NotificationServiceClient.fromContext(ctx)
-        .send()
-        .sendEmail(new EmailRequest(userId, "Welcome!"));
+    Restate.serviceHandle(NotificationService.class)
+        .send(NotificationService::sendEmail, new EmailRequest(userId, "Welcome!"));
 
     // Background analytics
-    AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
+    Restate.serviceHandle(AnalyticsService.class).send(AnalyticsService::recordEvent, event);
 
     // Cleanup task
-    ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
+    Restate.virtualObjectHandle(ShoppingCartObject.class, userId)
+        .send(ShoppingCartObject::emptyExpiredCart);
     // <end_sending_messages>
   }
 
   @Handler
-  public void delayedMessagesExample(Context ctx, DelayedMessageRequest req) {
+  public void delayedMessagesExample(DelayedMessageRequest req) {
     var reminderRequest = new ReminderRequest(req.userId(), req.message());
     // <start_delayed_messages>
     // Schedule reminder for tomorrow
-    ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
+    Restate.serviceHandle(ReminderService.class)
+        .send(ReminderService::sendReminder, reminderRequest, Duration.ofDays(1));
     // <end_delayed_messages>
   }
 
   @Handler
-  public void durableTimersExample(Context ctx, TimerRequest req) {
+  public void durableTimersExample(TimerRequest req) {
     // <start_durable_timers>
     // Sleep for specific duration
-    ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
+    Restate.sleep(Duration.ofMinutes(5)); // 5 minutes
 
     // Wait for action or timeout
     try {
-      OrderWorkflowClient.fromContext(ctx, req.orderId())
-          .run(req.order())
+      Restate.workflowHandle(OrderWorkflow.class, req.orderId())
+          .call(OrderWorkflow::run, req.order())
           .await(Duration.ofMinutes(5));
     } catch (TimeoutException e) {
       // Handle timeout

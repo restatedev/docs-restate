@@ -1,6 +1,6 @@
 package usecases.microservices;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import java.util.ArrayList;
@@ -14,24 +14,24 @@ public class BookingService {
 
   // <start_here>
   @Handler
-  public BookingResult reserve(Context ctx, BookingRequest request) {
+  public BookingResult reserve(BookingRequest request) {
     List<Runnable> compensations = new ArrayList<>();
 
     try {
       // Reserve hotel
       compensations.add(() -> cancelHotel(request.hotelId));
-      ctx.run("book-hotel", () -> bookHotel(request));
+      Restate.run("book-hotel", () -> bookHotel(request));
 
       // Reserve flight
       compensations.add(() -> cancelFlight(request.flightId));
-      ctx.run("book-flight", () -> bookFlight(request));
+      Restate.run("book-flight", () -> bookFlight(request));
 
       return new BookingResult(true);
     } catch (Exception error) {
       // Run compensations in reverse order
       Collections.reverse(compensations);
       for (Runnable compensation : compensations) {
-        ctx.run("compensation", compensation::run);
+        Restate.run("compensation", compensation::run);
       }
       throw error;
     }

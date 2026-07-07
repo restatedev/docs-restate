@@ -14,13 +14,13 @@ class Greeter {
   }
 
   @Handler
-  suspend fun greet(ctx: ObjectContext, greeting: String): String {
+  suspend fun greet(greeting: String): String {
     // Get the count and increment it
-    val count = ctx.get(COUNT) ?: 1
-    ctx.set(COUNT, count + 1)
+    val count = state().get(COUNT) ?: 1
+    state().set(COUNT, count + 1)
 
     // Send the response back
-    return "$greeting ${ctx.key()} for the $count time!"
+    return "$greeting ${objectKey()} for the $count time!"
   }
 }
 

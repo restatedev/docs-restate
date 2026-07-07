@@ -40,33 +40,41 @@ To wait on a response from the handler:
 Client restateClient = Client.connect("http://localhost:8080");
 
 // To call a service
-String svcResponse = MyServiceClient.fromClient(restateClient).myHandler("Hi");
+String svcResponse = restateClient.service(MyService.class).myHandler("Hi");
 
 // To call a virtual object
-String objResponse = MyObjectClient.fromClient(restateClient, "Mary").myHandler("Hi");
+String objResponse = restateClient.virtualObject(MyObject.class, "Mary").myHandler("Hi");
 
 // To submit a workflow
 String wfResponse =
-    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi").attach().response();
+    restateClient
+        .workflowHandle(MyWorkflow.class, "Mary")
+        .send(MyWorkflow::run, "Hi")
+        .attach()
+        .response();
 // To interact with a workflow
 String status =
-    MyWorkflowClient.fromClient(restateClient, "Mary").interactWithWorkflow("my signal");
+    restateClient.workflow(MyWorkflow.class, "Mary").interactWithWorkflow("my signal");
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/IngressClient.kt#rpc"} 
 val restateClient = Client.connect("http://localhost:8080")
 
 // To call a service
-val svcResponse = MyServiceClient.fromClient(restateClient).myHandler("Hi")
+val svcResponse = restateClient.service<MyService>().myHandler("Hi")
 
 // To call a virtual object
-val objResponse = MyObjectClient.fromClient(restateClient, "Mary").myHandler("Hi")
+val objResponse = restateClient.virtualObject<MyObject>("Mary").myHandler("Hi")
 
 // To submit a workflow
 val wfResponse =
-    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi").attach().response()
+    restateClient
+        .toWorkflow<MyWorkflow>("Mary")
+        .request { run("Hi") }
+        .send()
+        .attachSuspend()
+        .response()
 // To interact with a workflow
-val status =
-    MyWorkflowClient.fromClient(restateClient, "Mary").interactWithWorkflow("my signal")
+val status = restateClient.workflow<MyWorkflow>("Mary").interactWithWorkflow("my signal")
 ```
 </CodeGroup>
 
@@ -78,25 +86,25 @@ To send a message without waiting for a response:
 Client restateClient = Client.connect("http://localhost:8080");
 
 // To message a service
-MyServiceClient.fromClient(restateClient).send().myHandler("Hi");
+restateClient.serviceHandle(MyService.class).send(MyService::myHandler, "Hi");
 
 // To message a virtual object
-MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi");
+restateClient.virtualObjectHandle(MyObject.class, "Mary").send(MyObject::myHandler, "Hi");
 
 // To submit a workflow without waiting for the result
-MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi");
+restateClient.workflowHandle(MyWorkflow.class, "Mary").send(MyWorkflow::run, "Hi");
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/IngressClient.kt#one_way_call"} 
 val restateClient = Client.connect("http://localhost:8080")
 
 // To message a service
-MyServiceClient.fromClient(restateClient).send().myHandler("Hi")
+restateClient.toService<MyService>().request { myHandler("Hi") }.send()
 
 // To message a virtual object
-MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi")
+restateClient.toVirtualObject<MyObject>("Mary").request { myHandler("Hi") }.send()
 
 // To submit a workflow without waiting for the result
-MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi")
+restateClient.toWorkflow<MyWorkflow>("Mary").request { run("Hi") }.send()
 ```
 </CodeGroup>
 
@@ -108,22 +116,28 @@ To schedule an invocation for a later point in time:
 Client restateClient = Client.connect("http://localhost:8080");
 
 // To message a service with a delay
-MyServiceClient.fromClient(restateClient).send().myHandler("Hi", Duration.ofDays(5));
+restateClient
+    .serviceHandle(MyService.class)
+    .send(MyService::myHandler, "Hi", Duration.ofDays(5));
 
 // To message a virtual object with a delay
-MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi", Duration.ofDays(5));
+restateClient
+    .virtualObjectHandle(MyObject.class, "Mary")
+    .send(MyObject::myHandler, "Hi", Duration.ofDays(5));
 
 // To submit a workflow with a delay
-MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi", Duration.ofDays(5));
+restateClient
+    .workflowHandle(MyWorkflow.class, "Mary")
+    .send(MyWorkflow::run, "Hi", Duration.ofDays(5));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/IngressClient.kt#delayed_call"} 
 val restateClient = Client.connect("http://localhost:8080")
 
 // To message a service with a delay
-MyServiceClient.fromClient(restateClient).send().myHandler("Hi", 5.days)
+restateClient.toService<MyService>().request { myHandler("Hi") }.send(5.days)
 
 // To message a virtual object with a delay
-MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi", 5.days)
+restateClient.toVirtualObject<MyObject>("Mary").request { myHandler("Hi") }.send(5.days)
 ```
 </CodeGroup>
 
@@ -137,13 +151,17 @@ Add the idempotency key [to the header](https://datatracker.ietf.org/doc/draft-i
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/IngressClient.java#service_idempotent"} 
 Client restateClient = Client.connect("http://localhost:8080");
-MyObjectClient.fromClient(restateClient, "Mary")
-    .send()
-    .myHandler("Hi", opt -> opt.idempotencyKey("abc"));
+restateClient
+    .virtualObjectHandle(MyObject.class, "Mary")
+    .send(MyObject::myHandler, "Hi", InvocationOptions.idempotencyKey("abc"));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/IngressClient.kt#service_idempotent"} 
 val restateClient = Client.connect("http://localhost:8080")
-MyServiceClient.fromClient(restateClient).send().myHandler("Hi") { idempotencyKey = "abc" }
+restateClient
+    .toService<MyService>()
+    .request { myHandler("Hi") }
+    .options { idempotencyKey = "abc" }
+    .send()
 ```
 </CodeGroup>
 
@@ -170,9 +188,10 @@ Client restateClient = Client.connect("http://localhost:8080");
 
 // The call to which we want to attach later
 var handle =
-    MyServiceClient.fromClient(restateClient)
-        .send()
-        .myHandler("Hi", opt -> opt.idempotencyKey("my-idempotency-key"));
+    restateClient
+        .serviceHandle(MyService.class)
+        .send(
+            MyService::myHandler, "Hi", InvocationOptions.idempotencyKey("my-idempotency-key"));
 
 // ... do something else ...
 
@@ -207,18 +226,20 @@ val restateClient = Client.connect("http://localhost:8080")
 
 // The call to which we want to attach later
 val handle =
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi") {
-      idempotencyKey = "my-idempotency-key"
-    }
+    restateClient
+        .toService<MyService>()
+        .request { myHandler("Hi") }
+        .options { idempotencyKey = "my-idempotency-key" }
+        .send()
 
 // ... do something else ...
 
 // ---------------------------------
 // OPTION 1: With the handle returned by the call
 // - Attach
-val result1 = handle.attach().response()
+val result1 = handle.attachSuspend().response()
 // - Peek
-val output = handle.getOutput().response()
+val output = handle.getOutputSuspend().response()
 if (output.isReady()) {
   val result2 = output.getValue()
 }
@@ -249,7 +270,8 @@ For workflows, you can attach to the workflow execution and wait for it to finis
 Client restateClient = Client.connect("http://localhost:8080");
 
 // The workflow to which we want to attach later
-var wfHandle = MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi");
+var wfHandle =
+    restateClient.workflowHandle(MyWorkflow.class, "Mary").send(MyWorkflow::run, "Hi");
 
 // ... do something else ...
 
@@ -272,16 +294,16 @@ var wfHandle2 = restateClient.workflowHandle("MyWorkflow", "wf-id", String.class
 val restateClient = Client.connect("http://localhost:8080")
 
 // The workflow to which we want to attach later
-val wfHandle = MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi")
+val wfHandle = restateClient.toWorkflow<MyWorkflow>("Mary").request { run("Hi") }.send()
 
 // ... do something else ...
 
 // ---------------------------------
 // OPTION 1: With the handle returned by the workflow submission
 // - Attach
-val result = wfHandle.attach().response()
+val result = wfHandle.attachSuspend().response()
 // - Peek
-val output = wfHandle.getOutput().response()
+val output = wfHandle.getOutputSuspend().response()
 if (output.isReady()) {
   val result2 = output.getValue()
 }

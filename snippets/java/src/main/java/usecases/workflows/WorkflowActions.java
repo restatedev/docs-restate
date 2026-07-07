@@ -2,8 +2,7 @@ package usecases.workflows;
 
 import static usecases.workflows.utils.DomainModels.*;
 
-import dev.restate.sdk.SharedWorkflowContext;
-import dev.restate.sdk.WorkflowContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.common.DurablePromiseKey;
@@ -25,25 +24,26 @@ public class WorkflowActions {
       DurablePromiseKey.of("user-response", String.class);
 
   @Workflow
-  public Map<String, Boolean> run(WorkflowContext ctx, User user) {
+  public Map<String, Boolean> run(User user) {
     OrderDetails order = new OrderDetails("order123", 1500);
 
     // <start_state>
     // Store intermediate results
-    ctx.set(PAYMENT_STATUS, "completed");
-    ctx.set(ORDER_DETAILS, order);
+    Restate.state().set(PAYMENT_STATUS, "completed");
+    Restate.state().set(ORDER_DETAILS, order);
     // <end_state>
 
     // <start_approval>
     // Wait for external approval
-    var approval = ctx.promise(APPROVAL_PROMISE);
+    var approval = Restate.promise(APPROVAL_PROMISE);
     Boolean decision = approval.future().await();
     // <end_approval>
 
     // <start_timers>
     // Wait for user action with timeout
     try {
-      var userResponse = ctx.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
+      var userResponse =
+          Restate.promise(USER_RESPONSE_PROMISE).future().await(Duration.ofHours(24));
     } catch (TimeoutException e) {
       // Handle timeout
     }
@@ -55,8 +55,8 @@ public class WorkflowActions {
   // <start_approve>
   // External system resolves the promise
   @Shared
-  public void approve(SharedWorkflowContext ctx, boolean decision) {
-    ctx.promiseHandle(APPROVAL_PROMISE).resolve(decision);
+  public void approve(boolean decision) {
+    Restate.promiseHandle(APPROVAL_PROMISE).resolve(decision);
   }
 
   // <end_approve>
@@ -64,8 +64,10 @@ public class WorkflowActions {
   // <start_state_get>
   // Query from external handler
   @Shared
-  public OrderDetails getOrderDetails(SharedWorkflowContext ctx) {
-    return ctx.get(ORDER_DETAILS).orElseThrow(() -> new TerminalException("Order not found"));
+  public OrderDetails getOrderDetails() {
+    return Restate.state()
+        .get(ORDER_DETAILS)
+        .orElseThrow(() -> new TerminalException("Order not found"));
   }
   // <end_state_get>
 }

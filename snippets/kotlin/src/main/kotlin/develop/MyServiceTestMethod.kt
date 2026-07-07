@@ -1,6 +1,7 @@
 package develop
 
 import dev.restate.client.Client
+import dev.restate.client.kotlin.*
 import dev.restate.sdk.testing.BindService
 import dev.restate.sdk.testing.RestateClient
 import dev.restate.sdk.testing.RestateTest
@@ -17,7 +18,7 @@ class MyServiceTestMethod {
   @Test
   fun testMyHandler(@RestateClient ingressClient: Client) = runTest {
     // Create the service client from the injected ingress client
-    val client = MyServiceClient.fromClient(ingressClient)
+    val client = ingressClient.service<MyService>()
 
     // Send request to service and assert the response
     val response = client.myHandler("Hi")

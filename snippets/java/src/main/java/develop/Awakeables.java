@@ -1,19 +1,19 @@
 package develop;
 
 import dev.restate.sdk.Awakeable;
-import dev.restate.sdk.ObjectContext;
+import dev.restate.sdk.Restate;
 
 public class Awakeables {
 
-  public void awakeables(ObjectContext ctx) {
+  public void awakeables() {
     String name = "hello";
     // <start_here>
     // Create awakeable and get unique ID
-    Awakeable<String> awakeable = ctx.awakeable(String.class);
+    Awakeable<String> awakeable = Restate.awakeable(String.class);
     String awakeableId = awakeable.id();
 
     // Send ID to external system (email, queue, webhook, etc.)
-    ctx.run(() -> requestHumanReview(name, awakeableId));
+    Restate.run("request-human-review", () -> requestHumanReview(name, awakeableId));
 
     // Handler suspends here until external completion
     String review = awakeable.await();
@@ -21,12 +21,12 @@ public class Awakeables {
 
     // <start_resolve>
     // Complete with success data
-    ctx.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
+    Restate.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
     // <end_resolve>
 
     // <start_reject>
     // Complete with error
-    ctx.awakeableHandle(awakeableId).reject("This cannot be reviewed.");
+    Restate.awakeableHandle(awakeableId).reject("This cannot be reviewed.");
     // <end_reject>
   }
 

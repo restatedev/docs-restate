@@ -8,29 +8,30 @@ Restate uses an execution log to replay operations after failures and suspension
 
 ## Run
 
-Use `ctx.run` to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
+Use `Restate.run` (Java) / `runBlock` (Kotlin) to safely wrap any non-deterministic operation, like HTTP calls or database responses, and have Restate store its result in the execution log.
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#side_effect"} 
-String output = ctx.run(String.class, () -> doDbRequest());
+String output = Restate.run("db-request", String.class, () -> doDbRequest());
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#side_effect"} 
-val output = ctx.runBlock { doDbRequest() }
+val output = runBlock { doDbRequest() }
 ```
 </CodeGroup>
 
-Note that inside `ctx.run`, you cannot use the Restate context (e.g., `ctx.get`, `ctx.sleep`, or nested `ctx.run`).
+Note that inside a run block, you cannot use other Restate operations (e.g., state access, sleep, or a nested run).
 
 <AccordionGroup>
 
     <Accordion title="Asynchronous run actions">
-        To run an action asynchronously, use `ctx.runAsync`:
+        To run an action asynchronously, use `Restate.runAsync` (Java) / `runAsync` (Kotlin):
         <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#async_side_effect"} 
-DurableFuture<String> myRunFuture = ctx.runAsync(String.class, () -> doSomethingSlow());
+DurableFuture<String> myRunFuture =
+    Restate.runAsync("something-slow", String.class, () -> doSomethingSlow());
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#async_side_effect"} 
-val myRunFuture = ctx.runAsync { doSomethingSlow() }
+val myRunFuture = runAsync { doSomethingSlow() }
 ```
         </CodeGroup>
 
@@ -46,10 +47,10 @@ val myRunFuture = ctx.runAsync { doSomethingSlow() }
 
     <Accordion title="Error handling and retry policies">
 
-        Failures in `ctx.run` are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalException`](/develop/java/error-handling) is thrown.
+        Failures in a run block are treated the same as any other handler error. Restate will retry it unless configured otherwise or unless a [`TerminalException`](/develop/java/error-handling) is thrown.
 
 
-        You can customize how `ctx.run` retries via:
+        You can customize how a run block retries via:
 
         <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/RetryRunService.java#here"} 
@@ -61,7 +62,7 @@ try {
           .setMaxDelay(Duration.ofSeconds(10))
           .setMaxAttempts(10)
           .setMaxDuration(Duration.ofMinutes(5));
-  ctx.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
+  Restate.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
 } catch (TerminalException e) {
   // Handle the terminal error after retries exhausted
   // For example, undo previous actions (see sagas guide) and
@@ -77,7 +78,7 @@ try {
           maxDelay = 60.seconds,
           maxAttempts = 10,
           maxDuration = 5.minutes)
-  ctx.runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
+  runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
 } catch (e: TerminalException) {
   // Handle the terminal error after retries exhausted
   // For example, undo previous actions (see sagas guide) and
@@ -114,10 +115,10 @@ To generate stable UUIDs for things like idempotency keys:
 
 <CodeGroup>
     ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#uuid"} 
-UUID uuid = ctx.random().nextUUID();
+UUID uuid = Restate.random().nextUUID();
 ```
     ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#uuid"} 
-val uuid = ctx.random().nextUUID()
+val uuid = random().nextUUID()
 ```
 </CodeGroup>
 
@@ -129,10 +130,10 @@ To generate a deterministic float between `0` and `1`:
 
 <CodeGroup>
     ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#random_nb"} 
-int value = ctx.random().nextInt();
+int value = Restate.random().nextInt();
 ```
     ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#random_nb"} 
-val value = ctx.random().nextInt()
+val value = random().nextInt()
 ```
 </CodeGroup>
 

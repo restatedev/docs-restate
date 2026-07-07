@@ -3,7 +3,7 @@ package develop;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.restate.common.Slice;
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.CustomSerdeFactory;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
@@ -39,7 +39,7 @@ class MyJacksonSerdeFactory extends JacksonSerdeFactory {
 @Service
 class ServiceWithCustomJacksonObjectMapper {
   @Handler
-  public String greet(Context context) {
+  public String greet() {
     return "Hello world";
   }
 }
@@ -47,9 +47,9 @@ class ServiceWithCustomJacksonObjectMapper {
 // <end_custom_jackson_service>
 
 public class SerializationExample {
-  private void someFn(Context ctx) {
+  private void someFn() {
     // <start_use_person_serde>
-    ctx.run(new MyPersonSerde(), () -> new Person());
+    Restate.run("create-person", new MyPersonSerde(), () -> new Person());
     // <end_use_person_serde>
   }
 }

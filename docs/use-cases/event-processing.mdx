@@ -36,16 +36,17 @@ export default restate.object({
 @VirtualObject
 public class UserFeed {
   @Handler
-  public void processPost(ObjectContext ctx, SocialMediaPost post) {
-    String userId = ctx.key();
+  public void processPost(SocialMediaPost post) {
+    String userId = Restate.key();
 
-    String postId = ctx.run(String.class, () -> createPost(userId, post));
+    String postId = Restate.run("create-post", String.class, () -> createPost(userId, post));
 
-    while (ctx.run(String.class, () -> getPostStatus(postId)).equals("PENDING")) {
-      ctx.sleep(Duration.ofSeconds(5));
+    while (Restate.run("get-post-status", String.class, () -> getPostStatus(postId))
+        .equals("PENDING")) {
+      Restate.sleep(Duration.ofSeconds(5));
     }
 
-    ctx.run(() -> updateUserFeed(userId, postId));
+    Restate.run("update-user-feed", () -> updateUserFeed(userId, postId));
   }
 }
 ```
@@ -152,21 +153,26 @@ public class DeliveryTracker {
   private static final StateKey<Delivery> DELIVERY = StateKey.of("delivery", Delivery.class);
 
   @Handler
-  public void register(ObjectContext ctx, Delivery packageInfo) {
-    ctx.set(DELIVERY, packageInfo);
+  public void register(Delivery packageInfo) {
+    Restate.state().set(DELIVERY, packageInfo);
   }
 
   @Handler
-  public void setLocation(ObjectContext ctx, Location location) {
-    var delivery = ctx.get(DELIVERY).orElseThrow(() -> new TerminalException("Delivery not found"));
+  public void setLocation(Location location) {
+    var delivery =
+        Restate.state()
+            .get(DELIVERY)
+            .orElseThrow(() -> new TerminalException("Delivery not found"));
 
     delivery.addLocation(location);
-    ctx.set(DELIVERY, delivery);
+    Restate.state().set(DELIVERY, delivery);
   }
 
   @Shared
-  public Delivery getDelivery(SharedObjectContext ctx) {
-    return ctx.get(DELIVERY).orElseThrow(() -> new TerminalException("Delivery not found"));
+  public Delivery getDelivery() {
+    return Restate.state()
+        .get(DELIVERY)
+        .orElseThrow(() -> new TerminalException("Delivery not found"));
   }
 }
 ```

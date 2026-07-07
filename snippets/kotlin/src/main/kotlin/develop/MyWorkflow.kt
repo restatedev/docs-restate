@@ -11,14 +11,14 @@ import dev.restate.sdk.kotlin.endpoint.*
 class MyWorkflow {
 
   @Workflow
-  suspend fun run(ctx: WorkflowContext, input: String): String {
+  suspend fun run(input: String): String {
     // implement workflow logic here
 
     return "success"
   }
 
   @Handler
-  suspend fun interactWithWorkflow(ctx: SharedWorkflowContext, input: String): String {
+  suspend fun interactWithWorkflow(input: String): String {
     // implement interaction logic here
     return "my result"
   }

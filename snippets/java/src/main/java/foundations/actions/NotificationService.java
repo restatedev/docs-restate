@@ -1,18 +1,17 @@
 package foundations.actions;
 
-import dev.restate.sdk.Context;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 
 @Service
 public class NotificationService {
   @Handler
-  public void sendEmail(Context ctx, EmailRequest req) {
+  public void sendEmail(EmailRequest req) {
     // Implementation
   }
 
   @Handler
-  public void sendNotification(Context ctx, String msg) {
+  public void sendNotification(String msg) {
     // Implementation
   }
 

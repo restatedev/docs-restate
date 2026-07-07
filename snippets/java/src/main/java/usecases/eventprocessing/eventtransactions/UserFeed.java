@@ -2,7 +2,7 @@ package usecases.eventprocessing.eventtransactions;
 
 import static usecases.eventprocessing.eventtransactions.utils.Stubs.*;
 
-import dev.restate.sdk.ObjectContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.VirtualObject;
 import java.time.Duration;
@@ -12,16 +12,17 @@ import usecases.eventprocessing.eventtransactions.utils.SocialMediaPost;
 @VirtualObject
 public class UserFeed {
   @Handler
-  public void processPost(ObjectContext ctx, SocialMediaPost post) {
-    String userId = ctx.key();
+  public void processPost(SocialMediaPost post) {
+    String userId = Restate.key();
 
-    String postId = ctx.run(String.class, () -> createPost(userId, post));
+    String postId = Restate.run("create-post", String.class, () -> createPost(userId, post));
 
-    while (ctx.run(String.class, () -> getPostStatus(postId)).equals("PENDING")) {
-      ctx.sleep(Duration.ofSeconds(5));
+    while (Restate.run("get-post-status", String.class, () -> getPostStatus(postId))
+        .equals("PENDING")) {
+      Restate.sleep(Duration.ofSeconds(5));
     }
 
-    ctx.run(() -> updateUserFeed(userId, postId));
+    Restate.run("update-user-feed", () -> updateUserFeed(userId, postId));
   }
 }
 // <end_here>

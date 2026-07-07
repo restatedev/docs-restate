@@ -1,22 +1,21 @@
 package develop
 
 import dev.restate.sdk.common.TerminalException
-import dev.restate.sdk.kotlin.Context
 
 class ErrorHandling {
-  fun errorHandling(ctx: Context) {
+  fun errorHandling() {
     // <start_here>
     throw TerminalException(500, "Something went wrong")
     // <end_here>
   }
 
-  fun errorHandlingWithMetadata(ctx: Context, correlationId: String) {
+  fun errorHandlingWithMetadata(correlationId: String) {
     // <start_metadata>
     throw TerminalException("Something went wrong", mapOf("correlationId" to correlationId))
     // <end_metadata>
   }
 
-  fun catchMetadata(ctx: Context) {
+  fun catchMetadata() {
     try {
       // ... some operation
     } catch (e: TerminalException) {

@@ -15,9 +15,11 @@ Start multiple durable operations concurrently by calling them without immediate
 <CodeGroup>
     ```java Java {"CODE_LOAD::java/src/main/java/develop/JournalingResults.java#parallel"} 
 // Start operations concurrently using DurableFuture
-var call1 = ctx.runAsync(UserData.class, () -> fetchUserData(123));
-var call2 = ctx.runAsync(OrderHistory.class, () -> fetchOrderHistory(123));
-var call3 = AnalyticsServiceClient.fromContext(ctx).calculateMetric(123);
+var call1 = Restate.runAsync("fetch-user-data", UserData.class, () -> fetchUserData(123));
+var call2 =
+    Restate.runAsync("fetch-order-history", OrderHistory.class, () -> fetchOrderHistory(123));
+var call3 =
+    Restate.serviceHandle(AnalyticsService.class).call(AnalyticsService::calculateMetric, 123);
 
 // Now wait for results as needed
 UserData user = call1.await();
@@ -25,9 +27,9 @@ OrderHistory orders = call2.await();
 Integer metric = call3.await();
 ```
     ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/JournalingResults.kt#parallel"} 
-val call1 = ctx.runAsync<UserData> { fetchUserData(123) }
-val call2 = ctx.runAsync<OrderHistory> { fetchOrderHistory(123) }
-val call3 = AnalyticsServiceClient.fromContext(ctx).calculateMetric(123)
+val call1 = runAsync<UserData> { fetchUserData(123) }
+val call2 = runAsync<OrderHistory> { fetchOrderHistory(123) }
+val call3 = toService<AnalyticsService>().request { calculateMetric(123) }.call()
 
 // Now wait for results as needed
 val user: UserData = call1.await()

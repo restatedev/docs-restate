@@ -6,37 +6,37 @@ package develop
 import dev.restate.sdk.kotlin.*
 
 class State {
-  suspend fun getState(ctx: ObjectContext) {
+  suspend fun getState() {
     // <start_statekeys>
-    val keys = ctx.stateKeys()
+    val keys = state().keys()
     // <end_statekeys>
 
     // <start_get>
     // Getting String value
     val STRING_STATE_KEY = stateKey<String>("my-key")
-    val stringState: String? = ctx.get(STRING_STATE_KEY)
+    val stringState: String? = state().get(STRING_STATE_KEY)
 
     // Getting integer value
     val INT_STATE_KEY = stateKey<Int>("my-key")
-    val intState: Int? = ctx.get(INT_STATE_KEY)
+    val intState: Int? = state().get(INT_STATE_KEY)
     // <end_get>
   }
 
-  suspend fun setState(ctx: ObjectContext) {
+  suspend fun setState() {
     // <start_set>
     val STRING_STATE_KEY = stateKey<String>("my-key")
-    ctx.set(STRING_STATE_KEY, "my-new-value")
+    state().set(STRING_STATE_KEY, "my-new-value")
     // <end_set>
   }
 
-  suspend fun clearState(ctx: ObjectContext) {
+  suspend fun clearState() {
     // <start_clear>
     val STRING_STATE_KEY = stateKey<String>("my-key")
-    ctx.clear(STRING_STATE_KEY)
+    state().clear(STRING_STATE_KEY)
     // <end_clear>
 
     // <start_clear_all>
-    ctx.clearAll()
+    state().clearAll()
     // <end_clear_all>
   }
 }

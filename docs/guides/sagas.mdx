@@ -471,22 +471,23 @@ await ctx.run_typed("confirm", flight_client.confirm, booking_id=booking_id)
 ```
 
 ```java Java {"CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#twostep"} 
-String bookingId = ctx.run(String.class, () -> FlightClient.reserve(flight));
-compensations.add(() -> ctx.run(() -> FlightClient.cancel(bookingId)));
+String bookingId =
+    Restate.run("reserve-flight", String.class, () -> FlightClient.reserve(flight));
+compensations.add(() -> Restate.run("cancel-flight", () -> FlightClient.cancel(bookingId)));
 
 // ... do other work, like reserving a car, etc. ...
 
-ctx.run(() -> FlightClient.confirm(bookingId));
+Restate.run("confirm-flight", () -> FlightClient.confirm(bookingId));
 ```
 
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#twostep"} 
 // For each action, we register a compensation that will be executed on failures
-val bookingId = ctx.runBlock { reserveFlight(customerId, flight) }
-compensations.add { ctx.runBlock { cancelFlight(bookingId) } }
+val bookingId = runBlock { reserveFlight(customerId, flight) }
+compensations.add { runBlock { cancelFlight(bookingId) } }
 
 // ... do other work, like reserving a car, etc. ...
 
-compensations.add { ctx.runBlock { confirmFlight(bookingId) } }
+compensations.add { runBlock { confirmFlight(bookingId) } }
 ```
 
 ```go Go {"CODE_LOAD::go/guides/sagas/bookingworkflow.go#twostep"} 
@@ -533,15 +534,15 @@ await ctx.run_typed(
 ```
 
 ```java Java {"CODE_LOAD::java/src/main/java/guides/sagas/BookingWorkflow.java#idempotency"} 
-String paymentId = ctx.random().nextUUID().toString();
-compensations.add(() -> ctx.run(() -> PaymentClient.refund(paymentId)));
-ctx.run(() -> PaymentClient.charge(paymentInfo, paymentId));
+String paymentId = Restate.random().nextUUID().toString();
+compensations.add(() -> Restate.run("refund-payment", () -> PaymentClient.refund(paymentId)));
+Restate.run("charge-payment", () -> PaymentClient.charge(paymentInfo, paymentId));
 ```
 
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/sagas/BookingWorkflow.kt#idempotency"} 
-val paymentId = ctx.random().nextUUID().toString()
-compensations.add { ctx.runBlock { refund(paymentId) } }
-ctx.runBlock { charge(paymentInfo, paymentId) }
+val paymentId = random().nextUUID().toString()
+compensations.add { runBlock { refund(paymentId) } }
+runBlock { charge(paymentInfo, paymentId) }
 ```
 
 ```go Go {"CODE_LOAD::go/guides/sagas/bookingworkflow.go#idempotency"} 

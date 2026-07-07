@@ -13,17 +13,21 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // To call a service
-    val svcResponse = MyServiceClient.fromClient(restateClient).myHandler("Hi")
+    val svcResponse = restateClient.service<MyService>().myHandler("Hi")
 
     // To call a virtual object
-    val objResponse = MyObjectClient.fromClient(restateClient, "Mary").myHandler("Hi")
+    val objResponse = restateClient.virtualObject<MyObject>("Mary").myHandler("Hi")
 
     // To submit a workflow
     val wfResponse =
-        MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi").attach().response()
+        restateClient
+            .toWorkflow<MyWorkflow>("Mary")
+            .request { run("Hi") }
+            .send()
+            .attachSuspend()
+            .response()
     // To interact with a workflow
-    val status =
-        MyWorkflowClient.fromClient(restateClient, "Mary").interactWithWorkflow("my signal")
+    val status = restateClient.workflow<MyWorkflow>("Mary").interactWithWorkflow("my signal")
     // <end_rpc>
   }
 
@@ -32,13 +36,13 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // To message a service
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi")
+    restateClient.toService<MyService>().request { myHandler("Hi") }.send()
 
     // To message a virtual object
-    MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi")
+    restateClient.toVirtualObject<MyObject>("Mary").request { myHandler("Hi") }.send()
 
     // To submit a workflow without waiting for the result
-    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi")
+    restateClient.toWorkflow<MyWorkflow>("Mary").request { run("Hi") }.send()
     // <end_one_way_call>
   }
 
@@ -47,17 +51,21 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // To message a service with a delay
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi", 5.days)
+    restateClient.toService<MyService>().request { myHandler("Hi") }.send(5.days)
 
     // To message a virtual object with a delay
-    MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi", 5.days)
+    restateClient.toVirtualObject<MyObject>("Mary").request { myHandler("Hi") }.send(5.days)
     // <end_delayed_call>
   }
 
   suspend fun idempotentInvoke() {
     // <start_service_idempotent>
     val restateClient = Client.connect("http://localhost:8080")
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi") { idempotencyKey = "abc" }
+    restateClient
+        .toService<MyService>()
+        .request { myHandler("Hi") }
+        .options { idempotencyKey = "abc" }
+        .send()
     // <end_service_idempotent>
   }
 
@@ -67,18 +75,20 @@ class IngressClient {
 
     // The call to which we want to attach later
     val handle =
-        MyServiceClient.fromClient(restateClient).send().myHandler("Hi") {
-          idempotencyKey = "my-idempotency-key"
-        }
+        restateClient
+            .toService<MyService>()
+            .request { myHandler("Hi") }
+            .options { idempotencyKey = "my-idempotency-key" }
+            .send()
 
     // ... do something else ...
 
     // ---------------------------------
     // OPTION 1: With the handle returned by the call
     // - Attach
-    val result1 = handle.attach().response()
+    val result1 = handle.attachSuspend().response()
     // - Peek
-    val output = handle.getOutput().response()
+    val output = handle.getOutputSuspend().response()
     if (output.isReady()) {
       val result2 = output.getValue()
     }
@@ -106,16 +116,16 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // The workflow to which we want to attach later
-    val wfHandle = MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi")
+    val wfHandle = restateClient.toWorkflow<MyWorkflow>("Mary").request { run("Hi") }.send()
 
     // ... do something else ...
 
     // ---------------------------------
     // OPTION 1: With the handle returned by the workflow submission
     // - Attach
-    val result = wfHandle.attach().response()
+    val result = wfHandle.attachSuspend().response()
     // - Peek
-    val output = wfHandle.getOutput().response()
+    val output = wfHandle.getOutputSuspend().response()
     if (output.isReady()) {
       val result2 = output.getValue()
     }

@@ -1,7 +1,6 @@
 package usecases.eventprocessing.eventenrichment;
 
-import dev.restate.sdk.ObjectContext;
-import dev.restate.sdk.SharedObjectContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.VirtualObject;
@@ -16,21 +15,26 @@ public class DeliveryTracker {
   private static final StateKey<Delivery> DELIVERY = StateKey.of("delivery", Delivery.class);
 
   @Handler
-  public void register(ObjectContext ctx, Delivery packageInfo) {
-    ctx.set(DELIVERY, packageInfo);
+  public void register(Delivery packageInfo) {
+    Restate.state().set(DELIVERY, packageInfo);
   }
 
   @Handler
-  public void setLocation(ObjectContext ctx, Location location) {
-    var delivery = ctx.get(DELIVERY).orElseThrow(() -> new TerminalException("Delivery not found"));
+  public void setLocation(Location location) {
+    var delivery =
+        Restate.state()
+            .get(DELIVERY)
+            .orElseThrow(() -> new TerminalException("Delivery not found"));
 
     delivery.addLocation(location);
-    ctx.set(DELIVERY, delivery);
+    Restate.state().set(DELIVERY, delivery);
   }
 
   @Shared
-  public Delivery getDelivery(SharedObjectContext ctx) {
-    return ctx.get(DELIVERY).orElseThrow(() -> new TerminalException("Delivery not found"));
+  public Delivery getDelivery() {
+    return Restate.state()
+        .get(DELIVERY)
+        .orElseThrow(() -> new TerminalException("Delivery not found"));
   }
 }
 // <end_here>

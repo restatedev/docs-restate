@@ -3,8 +3,7 @@ package foundations.services;
 import static foundations.services.WorkflowHelpers.createUserEntry;
 import static foundations.services.WorkflowHelpers.sendVerificationEmail;
 
-import dev.restate.sdk.SharedWorkflowContext;
-import dev.restate.sdk.WorkflowContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.common.DurablePromiseKey;
@@ -31,22 +30,22 @@ public class SignupWorkflow {
       DurablePromiseKey.of("email-link-clicked", String.class);
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
+  public boolean run(User user) {
     // workflow ID = user ID; workflow runs once per user
-    String userId = ctx.key();
+    String userId = Restate.key();
 
-    ctx.run(() -> createUserEntry(userId, user));
+    Restate.run("createUserEntry", () -> createUserEntry(userId, user));
 
-    String secret = ctx.random().nextUUID().toString();
-    ctx.run(() -> sendVerificationEmail(user, secret));
+    String secret = Restate.random().nextUUID().toString();
+    Restate.run("sendVerificationEmail", () -> sendVerificationEmail(user, secret));
 
-    String clickSecret = ctx.promise(EMAIL_LINK_CLICKED).future().await();
+    String clickSecret = Restate.promise(EMAIL_LINK_CLICKED).future().await();
     return clickSecret.equals(secret);
   }
 
   @Shared
-  public void click(SharedWorkflowContext ctx, ClickRequest request) {
-    ctx.promiseHandle(EMAIL_LINK_CLICKED).resolve(request.secret());
+  public void click(ClickRequest request) {
+    Restate.promiseHandle(EMAIL_LINK_CLICKED).resolve(request.secret());
   }
 }
 // <end_here>

@@ -3,7 +3,6 @@ package develop
 import dev.restate.sdk.annotation.Handler
 import dev.restate.sdk.annotation.Service
 import dev.restate.sdk.common.TerminalException
-import dev.restate.sdk.kotlin.Context
 import dev.restate.sdk.kotlin.RetryPolicy
 import dev.restate.sdk.kotlin.runBlock
 import kotlin.time.Duration.Companion.minutes
@@ -13,7 +12,7 @@ import kotlin.time.Duration.Companion.seconds
 class RetryRunService {
 
   @Handler
-  suspend fun retryRun(ctx: Context, greeting: String): String {
+  suspend fun retryRun(greeting: String): String {
 
     // <start_here>
     try {
@@ -24,7 +23,7 @@ class RetryRunService {
               maxDelay = 60.seconds,
               maxAttempts = 10,
               maxDuration = 5.minutes)
-      ctx.runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
+      runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
     } catch (e: TerminalException) {
       // Handle the terminal error after retries exhausted
       // For example, undo previous actions (see sagas guide) and
