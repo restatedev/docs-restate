@@ -1,19 +1,21 @@
 ---
 title: "Migrating Snapshot Storage Backend"
 description: "Move a multi-node Restate cluster from one snapshot destination to another."
-tags: ["deployment", "snapshots", "migration"]
+tags: ["deployment"]
 ---
 
 This guide describes how to migrate a multi-node Restate cluster from one snapshot storage backend to another (for example, between different buckets/prefixes, or from MinIO to GCS).
 
 The migration temporarily increases partition replication to ensure every node hosts every partition before snapshots are disabled. This prevents trim-gap failures during rolling restarts. The migration leverages Restate's `worker.durability-mode` configuration option to prevent any log trimming during the transition, ensuring no data loss even if the old snapshots become unavailable before new ones are created.
 
+<Info>
 **Prerequisites:**
 - Restate server version **1.6 or later** (required for `worker.durability-mode` configuration)
 - Rolling restart capability for your cluster
 - Access to both old and new snapshot storage backends during migration
 - Capacity to temporarily run each partition on every worker node (partition replication = cluster size)
 - [`restatectl`](/server/clusters#controlling-clusters-with-restatectl) CLI configured to communicate with your cluster
+</Info>
 
 <Steps>
 <Step title="Record current replication settings">
@@ -37,9 +39,11 @@ restatectl config set --partition-replication N
 
 Do **not** use `--replication` here unless you also want to increase log replication.
 
-:::note[Why increase partition replication?]
-Without this step, when the cluster controller reconfigures partition replica sets during rolling restarts, some nodes may be unable to serve a given partition depending on their prior local partition store state, the log trim point, and available snapshots. With partition replication matching cluster size, every node will maintain a warm replica of every partition and is able to resume without the need for a new snapshot on restart, provided the log was not trimmed during its downtime.
-:::
+<Info>
+    **Why increase partition replication?**
+
+    Without this step, when the cluster controller reconfigures partition replica sets during rolling restarts, some nodes may be unable to serve a given partition depending on their prior local partition store state, the log trim point, and available snapshots. With partition replication matching cluster size, every node will maintain a warm replica of every partition and is able to resume without the need for a new snapshot on restart, provided the log was not trimmed during its downtime.
+</Info>
 
 </Step>
 <Step title="Wait for replicas to catch up">
@@ -76,9 +80,11 @@ This effectively disables both snapshotting and log trimming. The system will lo
 
 Perform a rolling restart of all cluster nodes with the new configuration. Restart one node at a time, waiting for it to rejoin and partitions to become active before proceeding to the next node.
 
-:::tip[Live traffic during migration]
+<Tip>
+**Live traffic during migration**
+
 With partition replication matching cluster size, rolling restarts have minimal impact on incoming ingress requests. Make sure to use [idempotency keys](/foundations/invocations#idempotency) with incoming requests to make retries safe and reduce error rates further.
-:::
+</Tip>
 
 </Step>
 <Step title="Verify that log trimming has stopped">
