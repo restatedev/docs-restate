@@ -106,10 +106,11 @@ To learn how to access the introspection interface, check out the [introspection
 | `partition_key` | `UInt64` | Internal column that is used for partitioning. Can be ignored. |
 | `id` | `Utf8` | Identifier of the scheduled vqueue (vq_...). |
 | `num_inbox` | `UInt64` | Number of entries currently waiting in the inbox stage. |
-| `status` | `Utf8` | High-level scheduler state (Dormant, Ready, BlockedOn, ...). |
+| `status` | `Utf8` | High-level scheduler state (dormant, blocked, scheduled, ...). |
 | `head_entry_id` | `Utf8` | Identifier of the head entry if the scheduler has already advanced to it. Null when the head has not yet been materialized |
 | `scheduled_at` | `TimestampMillisecond` | Earliest time when the head entry becomes runnable. Set only when status is `Scheduled`. |
-| `blocked_on` | `Utf8` | Detailed blocking resource when status is `BlockedOn`. |
+| `blocked_on` | `Utf8` | The current resource blocking the queue from dequeuing. |
+| `blocked_on_json` | `Utf8` | Detailed blocking resource when status is `blocked`. |
 | `invoker_concurrency_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on global invoker concurrency. |
 | `throttling_rules_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on user-defined per-vqueue throttling rules. |
 | `invoker_throttling_block_duration` | `DurationMillisecond` | Time the head entry spent waiting on node-level invoker throttling. |
@@ -145,6 +146,50 @@ To learn how to access the introspection interface, check out the [introspection
 | `value_utf8` | `Utf8` | Only contains meaningful values when a service stores state as `utf8`. This is the case for services that serialize state using JSON (default for Typescript SDK, Java/Kotlin SDK if using JsonSerdes). |
 | `value` | `Binary` | A binary, uninterpreted representation of the value. You can use the more specific column `value_utf8` if the value is a string. |
 | `value_length` | `UInt64` | The byte length of the value. If you are writing a query that only needs to know the length, reading this field will be much more efficient than reading length(value). |
+
+## Table: `sys_vqueue_entry_status`
+
+
+
+| Column name | Type | Description |
+|-------------|------|-------------|
+| `partition_key` | `UInt64` | Internal column that is used for partitioning. Can be ignored. |
+| `entry_id` | `Utf8` | Identifier of the entry. Due to quirks in DataFusion, this should remain `LargeUtf8` to match `id` in `sys_invocation_status` for dynamic filter pushdown. |
+| `vqueue_id` | `Utf8` | The VQueue Identifier (vq_...). |
+| `stage` | `Utf8` | The stage this entry currently belongs to. Choices are 'inbox', 'running', 'paused', 'suspended', and 'finished'. |
+| `status` | `Utf8` | The entry processing status. Examples are `new`, `scheduled`, `started`, `backing-off`, `yielded`, `killed`, `cancelled`, `failed`, and `succeeded`. |
+| `has_lock` | `Boolean` | Whether this entry currently holds a lock. |
+| `next_at` | `TimestampMillisecond` | The next timestamp at which this entry is scheduled for the next transition. |
+| `sequence_number` | `UInt64` | Sequence number encoded in the entry ordering key. |
+| `entry_kind` | `Utf8` | Entry kind (`invocation` or `state-mutation`). |
+| `created_at` | `TimestampMillisecond` | Creation timestamp of the entry. |
+| `transitioned_at` | `TimestampMillisecond` | Timestamp of the latest stage transition. |
+| `num_attempts` | `UInt32` | Number of times this entry has been moved to the run queue. |
+| `num_errors` | `UInt32` | Number of times this entry has yielded execution due to transient errors. |
+| `num_pauses` | `UInt32` | Number of times this entry has been moved to the paused stage. |
+| `num_suspensions` | `UInt32` | Number of times this entry has been moved to the suspended stage. |
+| `num_yields` | `UInt32` | Number of times this entry has yielded execution. |
+| `first_attempt_at` | `TimestampMillisecond` | Timestamp of the first attempt to run this entry. |
+| `latest_attempt_at` | `TimestampMillisecond` | Timestamp of the latest attempt to run this entry. |
+| `first_runnable_at` | `TimestampMillisecond` | The realistic earliest time at which this entry can run its first attempt. |
+| `deployment` | `Utf8` | If set, the entry's pinned deployment identifier. |
+| `needed_memory` | `UInt64` | If set, the amount of memory in bytes the invocation seems to require on the invoker side. |
+| `retry_attempts` | `UInt32` | Number of retry attempts recorded in the entry metadata. |
+| `retry_count_since_last_stored_command` | `UInt32` | Number of retries since the latest stored command. |
+| `latest_attempt_blocked_on_invoker_concurrency` | `DurationMillisecond` | Time the latest attempt spent waiting on global invoker capacity. |
+| `latest_attempt_blocked_on_throttling_rules` | `DurationMillisecond` | Time the latest attempt spent blocked on user-defined per-vqueue throttling rules. |
+| `latest_attempt_blocked_on_invoker_throttling` | `DurationMillisecond` | Time the latest attempt spent blocked on node-level invoker throttling. |
+| `latest_attempt_blocked_on_invoker_memory` | `DurationMillisecond` | Time the latest attempt spent waiting on the invoker memory pool. |
+| `latest_attempt_blocked_on_concurrency_rules` | `DurationMillisecond` | Time the latest attempt spent waiting on user-defined concurrency limits. |
+| `latest_attempt_blocked_on_lock` | `DurationMillisecond` | Time the latest attempt spent waiting to acquire a virtual object lock. |
+| `latest_attempt_blocked_on_deployment_concurrency` | `DurationMillisecond` | Time the latest attempt spent blocked on deployment concurrency capacity. |
+| `total_blocked_on_invoker_concurrency` | `DurationMillisecond` | Total time spent waiting on global invoker capacity across all attempts. |
+| `total_blocked_on_throttling_rules` | `DurationMillisecond` | Total time spent blocked on user-defined per-vqueue throttling rules across all attempts. |
+| `total_blocked_on_invoker_throttling` | `DurationMillisecond` | Total time spent blocked on node-level invoker throttling across all attempts. |
+| `total_blocked_on_invoker_memory` | `DurationMillisecond` | Total time spent waiting on the invoker memory pool across all attempts. |
+| `total_blocked_on_concurrency_rules` | `DurationMillisecond` | Total time spent waiting on user-defined concurrency limits across all attempts. |
+| `total_blocked_on_lock` | `DurationMillisecond` | Total time spent waiting to acquire a virtual object lock across all attempts. |
+| `total_blocked_on_deployment_concurrency` | `DurationMillisecond` | Total time spent blocked on deployment concurrency capacity across all attempts. |
 
 ## Table: `sys_vqueue_meta`
 
@@ -193,7 +238,7 @@ To learn how to access the introspection interface, check out the [introspection
 | `has_lock` | `Boolean` | Whether this entry currently holds a lock. |
 | `run_at` | `TimestampMillisecond` | The entry will be eligible to run after this timestamp. Only present for entries that are in the stage=inbox. |
 | `sequence_number` | `UInt64` | Sequence number encoded in the queue ordering key. |
-| `entry_id` | `Utf8` | Identifier of the entry. |
+| `entry_id` | `Utf8` | Identifier of the entry. Due to quirks in DataFusion, this should remain `LargeUtf8` to match `id` in `sys_invocation_status` for dynamic filter pushdown. |
 | `entry_kind` | `Utf8` | Entry kind (`invocation` or `state-mutation`). |
 | `created_at` | `TimestampMillisecond` | Creation timestamp of the entry. |
 | `transitioned_at` | `TimestampMillisecond` | Timestamp of the latest stage transition. |
@@ -205,7 +250,7 @@ To learn how to access the introspection interface, check out the [introspection
 | `first_attempt_at` | `TimestampMillisecond` | Timestamp of the first attempt to run this entry. |
 | `latest_attempt_at` | `TimestampMillisecond` | Timestamp of the latest attempt to run this entry. |
 | `first_runnable_at` | `TimestampMillisecond` | The realistic earliest time at which this entry can run its first attempt. |
-| `deployment` | `Utf8` | If set, the entry's pinned deployment identifier. |
+| `deployment` | `Utf8` | If set, the entry's pinned deployment identifier. Due to quirks in DataFusion, this should remain `LargeUtf8` to match `id` in `sys_deployment` for dynamic filter pushdown. |
 
 ## Table: `sys_invocation`
 

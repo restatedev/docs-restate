@@ -128,6 +128,32 @@ will create a socket file under the data directory.
 
                 </ResponseField>
 
+                <ResponseField name="rate-limiting" type="object | null" post={[]}>
+                    Query rate limiting: Per-node rate limiting options for datafusion query execution. When exceeded,
+the query will fail with TOO_MANY_REQUESTS. If unset, no rate limiting is applied.
+
+Since v1.7.1
+
+                    Throttling options: Token-bucket throttling options.
+                    
+                    <Expandable title="Properties">
+                        <ResponseField name="capacity" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_ADMIN__QUERY_ENGINE__RATE_LIMITING__CAPACITY']}>
+                            Burst capacity: The maximum number of tokens the bucket can hold.
+Default to the rate value if not specified.
+
+                        </ResponseField>
+
+                        <ResponseField name="rate" type="string" required post={['env: RESTATE_ADMIN__QUERY_ENGINE__RATE_LIMITING__RATE']}>
+                            Refill rate: The rate at which the tokens are replenished.
+
+Syntax: `&lt;rate&gt;/&lt;unit&gt;` where `&lt;unit&gt;` is `s|sec|second`, `m|min|minute`, or `h|hr|hour`.
+unit defaults to per second if not specified.
+
+                        </ResponseField>
+
+                    </Expandable>
+                </ResponseField>
+
                 <ResponseField name="tmp-dir" type="string | null" post={['env: RESTATE_ADMIN__QUERY_ENGINE__TMP_DIR']} default="null">
                     Temp folder to use for spill: The path to spill to
 
@@ -689,11 +715,28 @@ If not set, it defaults to the number of CPU cores.
 
 </ResponseField>
 
+<ResponseField name="default-thread-stack-size" type="string | null" post={['env: RESTATE_DEFAULT_THREAD_STACK_SIZE']}>
+    Default async runtime thread stack size: Stack size of the worker threads of the default async runtime.
+If not set, it defaults to tokio's default stack size.
+
+Since v1.7.1
+
+    Non-zero human-readable bytes
+</ResponseField>
+
 <ResponseField name="default-workflow-completion-retention" type="string" post={['minLength: 1','env: RESTATE_DEFAULT_WORKFLOW_COMPLETION_RETENTION']}>
     Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+
+</ResponseField>
+
+<ResponseField name="disable-config-sql-table" type="boolean" post={['env: RESTATE_DISABLE_CONFIG_SQL_TABLE']}>
+    Disable the config table: Disables the `config` SQL table, which exposes the node's running
+configuration via SQL queries.
+
+Since v1.7.1
 
 </ResponseField>
 
@@ -942,20 +985,12 @@ Examples:
                 </ResponseField>
 
                 <ResponseField name="inflight-memory-budget" type="string" required post={['minLength: 1','env: RESTATE_INGRESS__INGESTION__INFLIGHT_MEMORY_BUDGET']}>
-                    Inflight Memory Budget: Maximum total size of in-flight ingestion requests in bytes.
-Tune this to your workload so there are enough unpersisted
-requests for efficient batching without exhausting memory.
-
-Defaults to 1 MiB.
+                    Non-zero human-readable bytes
 
                 </ResponseField>
 
                 <ResponseField name="request-batch-size" type="string" required post={['minLength: 1','env: RESTATE_INGRESS__INGESTION__REQUEST_BATCH_SIZE']}>
-                    Request Batch Size: Maximum size of a single ingestion request batch.
-Tune to keep enough requests per batch for
-throughput; overly large batches can increase tail latency.
-
-Defaults to 50 KiB.
+                    Non-zero human-readable bytes
 
                 </ResponseField>
 
@@ -2610,7 +2645,7 @@ providing a global rate limit for the entire node rather than per-partition limi
 When `unset`, no throttling is applied and actions are processed
 without throttling.
 
-                    Throttling options per invoker.
+                    Throttling options: Token-bucket throttling options.
                     
                     <Expandable title="Properties">
                         <ResponseField name="capacity" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__INVOKER__ACTION_THROTTLING__CAPACITY']}>
@@ -2787,7 +2822,7 @@ providing a global rate limit for the entire node rather than per-partition limi
 When `unset`, no throttling is applied and invocations are processed
 without throttling.
 
-                    Throttling options per invoker.
+                    Throttling options: Token-bucket throttling options.
                     
                     <Expandable title="Properties">
                         <ResponseField name="capacity" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__INVOKER__INVOCATION_THROTTLING__CAPACITY']}>
@@ -2891,9 +2926,14 @@ If empty, the system temporary directory will be used instead.
             </Expandable>
         </ResponseField>
 
+        <ResponseField name="max-command-batch-bytes" type="string" post={['minLength: 1','env: RESTATE_WORKER__MAX_COMMAND_BATCH_BYTES']} default="1.0 MiB">
+            Non-zero human-readable bytes
+
+        </ResponseField>
+
         <ResponseField name="max-command-batch-size" type="integer" post={['format: uint','minimum: 1','env: RESTATE_WORKER__MAX_COMMAND_BATCH_SIZE']} default="32">
-            Maximum command batch size for partition processors: The maximum number of commands a partition processor will apply in a batch. The larger this
-value is, the higher the throughput and latency are.
+            Maximum command batch size (count) for partition processors: The maximum number of Bifrost log records a partition processor will process opportunistically
+in a single batch. The larger this value is, the higher the throughput and latency are.
 
         </ResponseField>
 
@@ -2993,20 +3033,12 @@ Examples:
                 </ResponseField>
 
                 <ResponseField name="inflight-memory-budget" type="string" required post={['minLength: 1','env: RESTATE_WORKER__SHUFFLE__INFLIGHT_MEMORY_BUDGET']}>
-                    Inflight Memory Budget: Maximum total size of in-flight ingestion requests in bytes.
-Tune this to your workload so there are enough unpersisted
-requests for efficient batching without exhausting memory.
-
-Defaults to 1 MiB.
+                    Non-zero human-readable bytes
 
                 </ResponseField>
 
                 <ResponseField name="request-batch-size" type="string" required post={['minLength: 1','env: RESTATE_WORKER__SHUFFLE__REQUEST_BATCH_SIZE']}>
-                    Request Batch Size: Maximum size of a single ingestion request batch.
-Tune to keep enough requests per batch for
-throughput; overly large batches can increase tail latency.
-
-Defaults to 50 KiB.
+                    Non-zero human-readable bytes
 
                 </ResponseField>
 
