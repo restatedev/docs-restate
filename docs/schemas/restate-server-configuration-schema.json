@@ -171,10 +171,27 @@
       "default": null,
       "minimum": 0
     },
+    "default-thread-stack-size": {
+      "title": "Default async runtime thread stack size",
+      "description": "Stack size of the worker threads of the default async runtime.\nIf not set, it defaults to tokio's default stack size.\n\nSince v1.7.1",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NonZeroHumanBytes"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "default-workflow-completion-retention": {
       "title": "Default workflow completion retention",
       "description": "Default workflow completion retention for all workflow invocations.\n\nThis default is used when neither the workflow service nor the handler configures a workflow completion retention,\nand can be overridden per service/handler using the respective SDK APIs.\n\nSince v1.7.0",
       "$ref": "#/$defs/FriendlyDuration"
+    },
+    "disable-config-sql-table": {
+      "title": "Disable the config table",
+      "description": "Disables the `config` SQL table, which exposes the node's running\nconfiguration via SQL queries.\n\nSince v1.7.1",
+      "type": "boolean"
     },
     "disable-prometheus": {
       "description": "Disable prometheus metric recording and reporting. Default is `false`.",
@@ -745,6 +762,7 @@
           "request-identity-private-key-pem-file": null,
           "tmp-dir": null
         },
+        "max-command-batch-bytes": "1.0 MiB",
         "max-command-batch-size": 32,
         "num-timers-in-memory-limit": null,
         "rule-book-poll-interval": "30s",
@@ -2374,6 +2392,18 @@
           "default": null,
           "minimum": 1
         },
+        "rate-limiting": {
+          "title": "Query rate limiting",
+          "description": "Per-node rate limiting options for datafusion query execution. When exceeded,\nthe query will fail with TOO_MANY_REQUESTS. If unset, no rate limiting is applied.\n\nSince v1.7.1",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThrottlingOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "tmp-dir": {
           "title": "Temp folder to use for spill",
           "description": "The path to spill to",
@@ -2976,7 +3006,7 @@
     },
     "ThrottlingOptions": {
       "title": "Throttling options",
-      "description": "Throttling options per invoker.",
+      "description": "Token-bucket throttling options.",
       "type": "object",
       "properties": {
         "capacity": {
@@ -3065,9 +3095,15 @@
             "tmp-dir": null
           }
         },
+        "max-command-batch-bytes": {
+          "title": "Maximum command batch size (in bytes) for partition processors",
+          "description": "Caps the total bytes of Bifrost log records processed opportunistically by the partition processor in\na single iteration. This works in conjunction with `max-command-batch-size` which caps the\nnumber of records. The processor will process the batch when whichever limit is hit first.\n\nDefault: 1 MiB\n\nSince v1.7.1",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "1.0 MiB"
+        },
         "max-command-batch-size": {
-          "title": "Maximum command batch size for partition processors",
-          "description": "The maximum number of commands a partition processor will apply in a batch. The larger this\nvalue is, the higher the throughput and latency are.",
+          "title": "Maximum command batch size (count) for partition processors",
+          "description": "The maximum number of Bifrost log records a partition processor will process opportunistically\nin a single batch. The larger this value is, the higher the throughput and latency are.",
           "type": "integer",
           "format": "uint",
           "default": 32,
