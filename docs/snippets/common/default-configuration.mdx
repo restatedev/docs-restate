@@ -26,12 +26,10 @@ tracing-filter = "info"
 log-filter = "warn,restate=info"
 log-format = "pretty"
 log-disable-ansi-codes = false
-connect-timeout = "10s"
-request-compression-threshold = "4.0 MiB"
 disable-prometheus = false
+rocksdb-max-write-rate-per-second = "7.0 GiB"
 rocksdb-total-memory-size = "2.0 GiB"
 rocksdb-total-memtables-ratio = 0.85
-rocksdb-high-priority-bg-threads = 2
 rocksdb-perf-level = "enable-count"
 metadata-update-interval = "10s"
 metadata-fetch-from-peer-timeout = "3s"
@@ -46,9 +44,9 @@ gossip-loneliness-threshold = 30
 gossip-extras-exchange-frequency = 10
 gossip-time-skew-threshold = "1s"
 hlc-max-drift = "5s"
-experimental-kafka-batch-ingestion = false
-experimental-shuffler-batch-ingestion = false
 default-journal-retention = "1d"
+default-idempotency-retention = "1d"
+default-workflow-completion-retention = "1d"
 
 [metadata-client]
 type = "replicated"
@@ -63,10 +61,6 @@ initial-interval = "100ms"
 factor = 1.4
 max-attempts = 10
 max-interval = "1s"
-
-[http-keep-alive-options]
-interval = "40s"
-timeout = "20s"
 
 [network-error-retry-policy]
 type = "exponential"
@@ -86,11 +80,15 @@ max-interval = "1m"
 internal-queue-length = 1000
 cleanup-interval = "1h"
 max-command-batch-size = 32
+max-command-batch-bytes = "1.0 MiB"
 trim-delay-interval = "10m"
+data-service-memory-limit = "256.0 MiB"
+rule-book-poll-interval = "30s"
 
 [worker.storage]
-rocksdb-disable-wal = true
 rocksdb-memory-ratio = 0.49
+rocksdb-disable-auto-memory-reclaimer = false
+rocksdb-max-file-size = "64.0 MiB"
 
 [worker.invoker]
 inactivity-timeout = "1m"
@@ -98,8 +96,22 @@ abort-timeout = "10m"
 message-size-warning = "10.0 MiB"
 in-memory-queue-length-limit = 66049
 concurrent-invocations-limit = 1000
+memory-limit = "1.5 GiB"
+per-invocation-initial-memory = "32.0 KiB"
+http2-keep-alive-interval = "40s"
+http2-keep-alive-timeout = "20s"
+http2-keep-alive-jitter = 0.2
+connect-timeout = "10s"
+http2-streams-per-connection-limit = 128
+http2-idle-connection-timeout = "5m"
+http2-initial-stream-window-size = "2.0 MiB"
+http2-initial-connection-window-size = "5.0 MiB"
+http2-max-frame-size = "16.0 KiB"
+request-compression-threshold = "4.0 MiB"
+request-identity-expiration = "1m"
 
 [worker.snapshots]
+num-retained = 1
 enable-cleanup = true
 
 [worker.snapshots.object-store-retry-policy]
@@ -115,9 +127,9 @@ request-batch-size = "50.0 KiB"
 
 [worker.shuffle.connection-retry-policy]
 type = "exponential"
-initial-interval = "10ms"
+initial-interval = "250ms"
 factor = 2.0
-max-interval = "1s"
+max-interval = "3s"
 
 [admin]
 heartbeat-interval = "1s 500ms"
@@ -136,9 +148,9 @@ request-batch-size = "50.0 KiB"
 
 [ingress.ingestion.connection-retry-policy]
 type = "exponential"
-initial-interval = "10ms"
+initial-interval = "250ms"
 factor = 2.0
-max-interval = "2s"
+max-interval = "3s"
 
 [bifrost]
 default-provider = "replicated"
@@ -150,32 +162,20 @@ record-cache-memory-size = "250.0 MiB"
 disable-auto-improvement = false
 
 [bifrost.local]
-rocksdb-disable-wal = false
 rocksdb-memory-ratio = 0.5
+rocksdb-disable-wal = false
 rocksdb-disable-wal-fsync = false
 writer-batch-commit-count = 5000
 writer-batch-commit-duration = "0s"
 
 [bifrost.replicated-loglet]
 maximum-inflight-records = 1000
+rpc-timeout = "250ms..1m"
+store-timeout = "2s..1m"
 sequencer-inactivity-timeout = "15s"
-log-server-rpc-timeout = "2s"
 readahead-records = 20
 read-batch-size = "32.0 KiB"
 readahead-trigger-ratio = 0.5
-
-[bifrost.replicated-loglet.sequencer-retry-policy]
-type = "exponential"
-initial-interval = "250ms"
-factor = 2.0
-max-interval = "5s"
-
-[bifrost.replicated-loglet.log-server-retry-policy]
-type = "exponential"
-initial-interval = "250ms"
-factor = 2.0
-max-attempts = 3
-max-interval = "2s"
 
 [bifrost.read-retry-policy]
 type = "exponential"
@@ -187,7 +187,6 @@ max-interval = "1s"
 [metadata-server]
 request-queue-length = 32
 rocksdb-memory-ratio = 0.01
-rocksdb-disable-wal = false
 raft-election-tick = 10
 raft-heartbeat-tick = 2
 raft-tick-interval = "100ms"
@@ -212,12 +211,11 @@ max-attempts = 10
 max-interval = "3s"
 
 [log-server]
-rocksdb-disable-wal = false
 rocksdb-memory-ratio = 0.5
 rocksdb-disable-wal-fsync = false
-rocksdb-max-sub-compactions = 0
-writer-batch-commit-count = 5000
-incoming-network-queue-length = 1000
+rocksdb-max-sub-compactions = 1
+rocksdb-enable-blob-separation = false
+rocksdb-max-file-size = "128.0 MiB"
 ```
 
 ## Configuration Reference
