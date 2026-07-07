@@ -28,6 +28,7 @@ This eases the management of compute instances and persistent volumes. See the d
 - Sign requests using private keys from Secrets or [CSI Secret Store](https://secrets-store-csi-driver.sigs.k8s.io/)
 - Online volume expansion: dynamically increase the size of persistent volumes used by Restate clusters
 - [Custom pod annotations and labels](#custom-pod-annotations-and-labels) for GKE ComputeClass, Vault injection, Prometheus scraping, and more
+- [Pod lifecycle hooks, sidecars, and extra volumes](#pod-lifecycle-hooks-sidecars-and-extra-volumes) for graceful-shutdown scripts, companion containers, and configurable termination grace periods
 - For AWS EKS: Manage credentials using [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) and security groups using [Security Groups for Pods](https://docs.aws.amazon.com/eks/latest/userguide/security-groups-for-pods.html)
 
 ### Custom Resource Definitions
@@ -153,6 +154,116 @@ You can attach custom annotations and labels to the Restate pods managed by the 
 Both fields are propagated to the `StatefulSet` pod template and are merged with any annotations or labels the operator manages internally. If there is a conflict, operator-managed values take precedence.
 
 This is useful for integrations that rely on pod-level metadata, such as GKE ComputeClass scheduling (cloud.google.com/compute-class), Vault agent injection, Datadog, Prometheus scraping, and custom scheduling constraints.
+
+### Pod lifecycle hooks, sidecars, and extra volumes
+
+You can customize the Restate pod's lifecycle and attach companion containers using fields in `spec.compute` on `RestateCluster`.
+
+#### Lifecycle hooks
+
+Use `spec.compute.lifecycle` to run scripts before Restate shuts down (via a `preStop` hook) or immediately after it starts (via `postStart`). This is useful for draining connections or signaling external systems.
+
+```yaml
+spec:
+  compute:
+    lifecycle:
+      preStop:
+        exec:
+          command: ["/bin/sh", "/hooks/pre-stop.sh"]
+```
+
+<Warning>
+Kubernetes runs `postStart` concurrently with the container entrypoint. It is **not** a reliable pre-start hook. For strict pre-start ordering, wrap the entrypoint using `command`/`args`.
+</Warning>
+
+#### Termination grace period
+
+`spec.compute.terminationGracePeriodSeconds` overrides the pod termination grace period (previously fixed at 60 seconds). Set it to match the time your `preStop` hook needs to complete.
+
+```yaml
+spec:
+  compute:
+    terminationGracePeriodSeconds: 120
+```
+
+<Note>
+Setting `terminationGracePeriodSeconds: 0` terminates the pod immediately via SIGKILL, skipping any `preStop` hook.
+</Note>
+
+#### Extra volumes and volume mounts
+
+Use `spec.compute.extraVolumes` and `spec.compute.extraVolumeMounts` to mount additional content (such as ConfigMaps containing hook scripts) into the Restate container.
+
+```yaml
+spec:
+  compute:
+    extraVolumes:
+      - name: hooks
+        configMap:
+          name: node-state-control
+          defaultMode: 0755
+    extraVolumeMounts:
+      - name: hooks
+        mountPath: /hooks
+        readOnly: true
+```
+
+Volume names must not collide with operator-managed volumes (`storage`, `tmp`, `config`, trusted-CA volumes, or request-signing volumes). The operator validates this up front and returns a clear error if a conflict is detected.
+
+#### Native sidecars
+
+Use `spec.compute.sidecars` to run companion containers (log shippers, proxies, metrics exporters) alongside Restate. Sidecars start before the Restate container and are terminated after it. The operator sets `restartPolicy: Always` automatically so they behave as native sidecars.
+
+```yaml
+spec:
+  compute:
+    sidecars:
+      - name: log-shipper
+        image: log-shipper:latest
+        volumeMounts:
+          - name: hooks
+            mountPath: /hooks
+```
+
+<Note>
+Native sidecars require Kubernetes 1.29+. They became generally available in Kubernetes 1.33.
+</Note>
+
+#### Full example
+
+This example shows lifecycle hooks, extra volumes, and a sidecar working together:
+
+```yaml restate-cluster.yaml
+apiVersion: restate.dev/v1
+kind: RestateCluster
+metadata:
+  name: restate-test
+spec:
+  compute:
+    image: restatedev/restate:1.5
+    terminationGracePeriodSeconds: 120
+    extraVolumes:
+      - name: hooks
+        configMap:
+          name: node-state-control
+          defaultMode: 0755
+    extraVolumeMounts:
+      - name: hooks
+        mountPath: /hooks
+        readOnly: true
+    lifecycle:
+      preStop:
+        exec:
+          command: ["/bin/sh", "/hooks/pre-stop.sh"]
+    sidecars:
+      - name: log-shipper
+        image: log-shipper:latest
+        volumeMounts:
+          - name: hooks
+            mountPath: /hooks
+  storage:
+    storageRequestBytes: 2147483648
+```
 
 ## Helm Chart
 
