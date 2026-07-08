@@ -13,18 +13,20 @@ class ServiceCommunication {
     val workflowId = ""
 
     // <start_request_response>
+    // --- Simple client: awaits inline and returns the result directly ---
     // To call a Service:
-    val svcResponse = toService<MyService>().request { myHandler(request) }.call().await()
-
+    val svcResponse = service<MyService>().myHandler(request)
     // To call a Virtual Object:
-    val objResponse =
-        toVirtualObject<MyObject>(objectKey).request { myHandler(request) }.call().await()
-
+    val objResponse = virtualObject<MyObject>(objectKey).myHandler(request)
     // To call a Workflow:
-    // `run` handler — can only be called once per workflow ID
-    val wfResponse = toWorkflow<MyWorkflow>(workflowId).request { run(request) }.call().await()
-    // Other handlers can be called anytime within workflow retention
-    toWorkflow<MyWorkflow>(workflowId).request { interactWithWorkflow(request) }.call().await()
+    val wfResponse = workflow<MyWorkflow>(workflowId).run(request)
+
+    // --- Handle-based client: returns a DurableFuture to await explicitly ---
+    // Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+    val svcResult = toService<MyService>().request { myHandler(request) }.call().await()
+    val objResult =
+        toVirtualObject<MyObject>(objectKey).request { myHandler(request) }.call().await()
+    val wfResult = toWorkflow<MyWorkflow>(workflowId).request { run(request) }.call().await()
     // <end_request_response>
   }
 

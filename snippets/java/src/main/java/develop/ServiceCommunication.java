@@ -15,25 +15,24 @@ public class ServiceCommunication {
     String objectKey = "";
 
     // <start_request_response>
+    // --- Simple client: awaits inline and returns the result directly ---
     // To call a Service:
-    String svcResponse =
-        Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
-
+    String svcResponse = Restate.service(MyService.class).myHandler(request);
     // To call a Virtual Object:
-    String objResponse =
+    String objResponse = Restate.virtualObject(MyObject.class, objectKey).myHandler(request);
+    // To call a Workflow:
+    String wfResponse = Restate.workflow(MyWorkflow.class, workflowId).run(request);
+
+    // --- Handle-based client: returns a DurableFuture to await explicitly ---
+    // Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+    String svcResult =
+        Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
+    String objResult =
         Restate.virtualObjectHandle(MyObject.class, objectKey)
             .call(MyObject::myHandler, request)
             .await();
-
-    // To call a Workflow:
-    // `run` handler — can only be called once per workflow ID
-    String wfResponse =
+    String wfResult =
         Restate.workflowHandle(MyWorkflow.class, workflowId).call(MyWorkflow::run, request).await();
-    // Other handlers can be called anytime within workflow retention
-    String status =
-        Restate.workflowHandle(MyWorkflow.class, workflowId)
-            .call(MyWorkflow::interactWithWorkflow, request)
-            .await();
     // <end_request_response>
   }
 

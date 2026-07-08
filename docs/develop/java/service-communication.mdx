@@ -20,43 +20,47 @@ Your Restate handler can call other handlers in three ways:
 
 ## Request-response calls
 
-To call a Restate handler and wait for its result, use the `Restate` static methods (Java) or the top-level functions in `dev.restate.sdk.kotlin` (Kotlin) with a method reference to the target handler:
+To call a Restate handler and wait for its result, use one of two client styles:
+
+- **Simple client** (`Restate.service(...)` / `Restate.virtualObject(...)` / `Restate.workflow(...)` in Java; `service<T>()` / `virtualObject<T>(key)` / `workflow<T>(key)` in Kotlin): the call is awaited inline and returns the result directly. Use it for straightforward request-response.
+- **Handle-based client** (`Restate.serviceHandle(...)` etc. in Java; `toService<T>()` etc. in Kotlin, called with a method reference): returns a `DurableFuture` you await explicitly. Use it for invocation options (e.g. idempotency keys), timeouts, or concurrency.
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#request_response"} 
+// --- Simple client: awaits inline and returns the result directly ---
 // To call a Service:
-String svcResponse =
-    Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
-
+String svcResponse = Restate.service(MyService.class).myHandler(request);
 // To call a Virtual Object:
-String objResponse =
+String objResponse = Restate.virtualObject(MyObject.class, objectKey).myHandler(request);
+// To call a Workflow:
+String wfResponse = Restate.workflow(MyWorkflow.class, workflowId).run(request);
+
+// --- Handle-based client: returns a DurableFuture to await explicitly ---
+// Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+String svcResult =
+    Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
+String objResult =
     Restate.virtualObjectHandle(MyObject.class, objectKey)
         .call(MyObject::myHandler, request)
         .await();
-
-// To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-String wfResponse =
+String wfResult =
     Restate.workflowHandle(MyWorkflow.class, workflowId).call(MyWorkflow::run, request).await();
-// Other handlers can be called anytime within workflow retention
-String status =
-    Restate.workflowHandle(MyWorkflow.class, workflowId)
-        .call(MyWorkflow::interactWithWorkflow, request)
-        .await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#request_response"} 
+// --- Simple client: awaits inline and returns the result directly ---
 // To call a Service:
-val svcResponse = toService<MyService>().request { myHandler(request) }.call().await()
-
+val svcResponse = service<MyService>().myHandler(request)
 // To call a Virtual Object:
-val objResponse =
-    toVirtualObject<MyObject>(objectKey).request { myHandler(request) }.call().await()
-
+val objResponse = virtualObject<MyObject>(objectKey).myHandler(request)
 // To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-val wfResponse = toWorkflow<MyWorkflow>(workflowId).request { run(request) }.call().await()
-// Other handlers can be called anytime within workflow retention
-toWorkflow<MyWorkflow>(workflowId).request { interactWithWorkflow(request) }.call().await()
+val wfResponse = workflow<MyWorkflow>(workflowId).run(request)
+
+// --- Handle-based client: returns a DurableFuture to await explicitly ---
+// Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+val svcResult = toService<MyService>().request { myHandler(request) }.call().await()
+val objResult =
+    toVirtualObject<MyObject>(objectKey).request { myHandler(request) }.call().await()
+val wfResult = toWorkflow<MyWorkflow>(workflowId).request { run(request) }.call().await()
 ```
 </CodeGroup>
 
