@@ -98,6 +98,123 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
 -d 'Review rejected: insufficient documentation'
 ```
 
+## Signals
+
+**Best for:** Direct invocation-to-invocation communication where one handler waits for another to send a named signal.
+
+**Key differences from awakeables:**
+- No ID management — use string names
+- Any handler that knows the target invocation's ID can resolve or reject the signal
+- Scoped to an invocation's lifetime (not a workflow)
+
+Use signals when:
+- An invocation needs to pause and wait for an explicit trigger from another handler
+- You want to send a cancel/approve/reject event to a running invocation by its ID
+- You need lightweight coordination between concurrent invocations
+
+### Waiting for a signal
+
+Inside the invocation that wants to wait, declare a signal by name and await it:
+
+<CodeGroup>
+```java Java
+// Wait for a signal named "approved"
+boolean approved = Restate.signal("approved", Boolean.class).await();
+```
+```kotlin Kotlin
+// Wait for a signal named "approved"
+val approved = signal<Boolean>("approved").await()
+```
+</CodeGroup>
+
+### Resolving or rejecting a signal
+
+From any handler that has the target invocation's ID, obtain an `InvocationHandle` and resolve or reject the signal:
+
+<CodeGroup>
+```java Java
+// Resolve: wake the waiter with a value
+InvocationHandle<?> target = Restate.invocationHandle(targetInvocationId);
+target.signal("approved").resolve(Boolean.class, true);
+
+// Reject: wake the waiter with a terminal error
+target.signal("approved").reject("Request denied");
+```
+```kotlin Kotlin
+// Resolve: wake the waiter with a value
+val target = invocationHandle(targetInvocationId)
+target.signal("approved").resolve(true)
+
+// Reject: wake the waiter with a terminal error
+target.signal("approved").reject("Request denied")
+```
+</CodeGroup>
+
+`InvocationHandle` also lets you `cancel()` the target invocation or `attach()` to wait for its result.
+
+<Info>
+The target invocation's ID is available in the response header `x-restate-id` when the invocation is submitted, and from within the invocation itself via `Restate.invocationId()` (Java) or `invocationId()` (Kotlin).
+</Info>
+
+### Complete example
+
+<CodeGroup>
+```java Java expandable
+@Service
+public class ApprovalService {
+
+  @Handler
+  public String requestApproval(String requestId) {
+    // Notify a reviewer (e.g. send an email with the invocation ID so they can approve/reject)
+    String invocationId = Restate.invocationId();
+    Restate.run("notify-reviewer", () -> notifyReviewer(requestId, invocationId));
+
+    // Suspend until the reviewer resolves the "approved" signal
+    boolean approved = Restate.signal("approved", Boolean.class).await();
+
+    return approved ? "Approved: " + requestId : "Rejected: " + requestId;
+  }
+
+  @Handler
+  public void approve(String targetInvocationId) {
+    Restate.invocationHandle(targetInvocationId).signal("approved").resolve(Boolean.class, true);
+  }
+
+  @Handler
+  public void reject(String targetInvocationId) {
+    Restate.invocationHandle(targetInvocationId).signal("approved").reject("Request denied");
+  }
+}
+```
+```kotlin Kotlin expandable
+@Service
+class ApprovalService {
+
+  @Handler
+  suspend fun requestApproval(requestId: String): String {
+    // Notify a reviewer with the invocation ID so they can approve/reject
+    val currentInvocationId = invocationId()
+    runBlock { notifyReviewer(requestId, currentInvocationId) }
+
+    // Suspend until the reviewer resolves the "approved" signal
+    val approved = signal<Boolean>("approved").await()
+
+    return if (approved) "Approved: $requestId" else "Rejected: $requestId"
+  }
+
+  @Handler
+  suspend fun approve(targetInvocationId: String) {
+    invocationHandle(targetInvocationId).signal("approved").resolve(true)
+  }
+
+  @Handler
+  suspend fun reject(targetInvocationId: String) {
+    invocationHandle(targetInvocationId).signal("approved").reject("Request denied")
+  }
+}
+```
+</CodeGroup>
+
 ## Durable Promises
 
 **Best for:** Workflows where you need to signal between different workflow handlers.

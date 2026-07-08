@@ -107,9 +107,80 @@ restate rules delete "checkout"
 
 Run `restate rules --help` for the full set of options.
 
-## Applying concurrency limits
+## Applying concurrency limits from the SDK
 
-To make an invocation count against a scope's concurrency limit, send it through a scoped ingress endpoint under the reserved `/restate/scope/` prefix:
+In addition to the HTTP ingress endpoints (described below), you can attach scope and limit keys directly in your Java/Kotlin code using the SDK.
+
+<Note title="Preview feature">
+    The SDK scope/limit key API is in preview. To use it, enable the flow control and protocol v7 experimental features on your Restate server:
+    ```shell
+    RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true
+    RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true
+    ```
+    For Virtual Objects, also set `RESTATE_EXPERIMENTAL_ENABLE_VQUEUE_VIRTUAL_OBJECTS=true`.
+</Note>
+
+### Service-to-service calls with a scope
+
+Use `Restate.scope(scopeKey)` to route an outgoing call into a named scope. This causes the invocation to draw from that scope's concurrency budget.
+
+<CodeGroup>
+```java Java
+// Route a call into the "tenant-123" scope
+Restate.scope("tenant-123").service(MyService.class).process(payload);
+
+// Route a Virtual Object call
+Restate.scope("tenant-123").virtualObjectHandle(MyObject.class, objectKey)
+    .send(MyObject::process, payload);
+```
+```kotlin Kotlin
+// Route a call into the "tenant-123" scope
+scope("tenant-123").service<MyService>().process(payload)
+
+// Route a Virtual Object call
+scope("tenant-123").toVirtualObject<MyObject>(objectKey)
+    .request { process(payload) }
+    .send()
+```
+</CodeGroup>
+
+### Adding a limit key
+
+A **limit key** is a secondary key within a scope that enables hierarchical concurrency. For example, you can scope by `tenant` and then limit per `api-key` within that tenant.
+
+<CodeGroup>
+```java Java
+// Add a limit key for hierarchical concurrency within the scope
+Restate.scope("tenant-123").workflowHandle(MyWorkflow.class, "wf-key")
+    .call(MyWorkflow::run, input, InvocationOptions.limitKey("api-key/user42").build())
+    .await();
+```
+```kotlin Kotlin
+scope("tenant-123").toWorkflow<MyWorkflow>("wf-key")
+    .request { run(input) }
+    .options { limitKey = "api-key/user42" }
+    .call()
+    .await()
+```
+</CodeGroup>
+
+### Using a scope from the ingress client
+
+The same scope API is available on the `Client` for invocations from outside a handler:
+
+<CodeGroup>
+```java Java
+// From an ingress client (e.g. in tests or external callers)
+client.scope("tenant-123").service(MyService.class).process(payload);
+```
+```kotlin Kotlin
+client.scope("tenant-123").service<MyService>().process(payload)
+```
+</CodeGroup>
+
+### Via HTTP ingress
+
+To make an invocation count against a scope's concurrency limit without using the SDK, send it through a scoped ingress endpoint under the reserved `/restate/scope/` prefix:
 
 ```
 # Scoped service calls
