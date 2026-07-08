@@ -75,54 +75,65 @@ The foundation is the only layer you deploy manually. It creates the networking,
   </Tab>
 
   <Tab title="GCP">
-    Restate provides the foundation as a Terraform module and a generated `install.tfvars` for your install. You apply it into your own GCP project, using a Cloud Storage bucket you control for Terraform state.
+    Restate provides the foundation as a Terraform module ([`nuonco/install-stacks`](https://github.com/nuonco/install-stacks), the `gcp/` directory) plus a generated `install.tfvars` and `backend.tf` for your install. You apply it into your own GCP project, using a Cloud Storage bucket you control for Terraform state. The deployment agent it creates then brings up everything else.
 
     <Steps>
-      <Step title="Get your configuration">
-        Restate provides the foundation Terraform module, a generated `install.tfvars` for your install, and a runner API token. Export the token as an environment variable so it is never written to disk:
+      <Step title="Prerequisites">
+        In the target GCP project, before you apply:
 
-        ```bash
-        export TF_VAR_runner_api_token="<token provided by Restate>"
-        ```
+        - **Run as a project admin.** Authenticate the identity that will run Terraform and set it as your application-default credentials: `gcloud auth application-default login`. It needs to create VPC networking, GKE, service accounts and IAM bindings, Secret Manager secrets, Cloud DNS, and Artifact Registry, and to enable services.
+        - **Enable the required APIs:** Compute Engine, Kubernetes Engine, Secret Manager, Cloud Resource Manager, Cloud DNS, and Artifact Registry.
+        - **Attach a billing account** to the project.
+        - **Create a Cloud Storage bucket you control** for Terraform state (private, with versioning enabled). Keep the state — while it is reconstructable, it is your record of the install.
+        - **Check your organization policies.** Policies such as *"no public IPs on VMs"* or a *deny-egress* rule will block GKE and firewall provisioning. If one blocks the apply, override it at the project level (or coordinate with Restate) and retry.
       </Step>
 
-      <Step title="Configure state and project">
-        Point Terraform at a Cloud Storage bucket you control for state:
+      <Step title="Get your configuration">
+        Clone the foundation module and drop in the two files Restate sends you:
+
+        ```bash
+        git clone https://github.com/nuonco/install-stacks.git
+        cd install-stacks/gcp
+        # copy the install.tfvars and backend.tf Restate provided into this directory
+        ```
+
+        `install.tfvars` contains a `runner_api_token` that authenticates the deployment agent with Restate. Treat the file as a secret: transfer it over a secure channel and don't commit it (it ends up in Terraform state, which is why the state bucket must be private).
+      </Step>
+
+      <Step title="Configure state">
+        Edit `backend.tf` to point at your state bucket. The `prefix` is already set to your install id — leave it:
 
         ```hcl
-        # backend.tf
         terraform {
           backend "gcs" {
             bucket = "<your-state-bucket>"
-            prefix = "<your-install>"
+            prefix = "nuon/<your-install-id>"
           }
         }
         ```
+      </Step>
 
-        You'll be prompted for `gcp_project_id` and `gcp_region` at apply time.
+      <Step title="Set the region-token placeholder">
+        `install.tfvars` includes a required `restatecloudregiontoken_<your-install-id>` secret that ships **empty**. Set it to any non-empty placeholder before applying — if you leave it empty, `terraform apply` fails with `Field [payload] is required`:
+
+        ```hcl
+        # in install.tfvars
+        value = "placeholder"
+        ```
+
+        You do **not** put the real token here. Once the deployment agent is running, Restate injects the real region token into this secret automatically.
       </Step>
 
       <Step title="Deploy the foundation">
         ```bash
         terraform init
-        terraform plan
         terraform apply -var-file=install.tfvars
+        # you'll be prompted for gcp_project_id and gcp_region
         ```
 
-        This creates the VPC and networking, IAM, the region-token secret, and the deployment agent (a Compute Engine runner instance).
+        This creates only the foundation: VPC and networking, IAM, the region-token secret, and the deployment agent (a Compute Engine runner). The runner then phones home to Restate, which provisions the GKE cluster and all Restate components automatically — you do not run any further Terraform.
 
-        You deploy only this foundation stack. The deployment agent it creates then pulls and applies the GKE cluster and Restate components automatically — you do not run any further Terraform.
-      </Step>
-
-      <Step title="Provide the region token">
-        After `terraform apply`, add the **region token** Restate provided to the secret the foundation created:
-
-        ```bash
-        printf %s '<region-token-from-restate>' | \
-          gcloud secrets versions add restatecloudregiontoken_<your-install-id> --data-file=-
-        ```
-
-        The deployment agent then brings up the GKE cluster and Restate components, and your region activates.
+        Your `apply` finishing is the handoff point, not the end: bringing up the cluster and components takes roughly **30 minutes**. A follow-up `terraform plan` that shows only drift on the runner's `phone_home` trigger is expected and harmless.
       </Step>
     </Steps>
 
