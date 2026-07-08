@@ -109,6 +109,45 @@ Run `restate rules --help` for the full set of options.
 
 ## Applying concurrency limits
 
+### From the TypeScript SDK
+
+<Note title="Preview">
+  `ctx.scope(...)` and `ingress.scope(...)` are in preview. Enable them in the server with
+  `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true`, `RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true`, and
+  `RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true` (for virtual object clients only).
+</Note>
+
+Use `ctx.scope(scopeKey)` inside a handler to route a call into a scope:
+
+```typescript
+// Services
+await ctx.scope("tenant-123").serviceClient(MyService).process(payload);
+
+// Virtual Objects (requires RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true)
+await ctx.scope("tenant-123").objectClient(MyObject, "obj-key").update(payload);
+ctx.scope("tenant-123").objectSendClient(MyObject, "obj-key").update(payload);
+
+// Workflows
+await ctx.scope("tenant-123").workflowClient(MyWorkflow, "wf-key")
+  .run(input, rpc.opts({ limitKey: "api-key/user42" }));
+```
+
+Use `ingress.scope(scopeKey)` on the ingress client to apply a scope from outside a handler:
+
+```typescript
+import { connect } from "@restatedev/restate-sdk-clients";
+
+const ingress = connect({ url: "http://localhost:8080" });
+
+// Services
+await ingress.scope("checkout").serviceClient(MyService).checkout(request);
+
+// Virtual Objects (requires RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true)
+ingress.scope("tenant-123").objectSendClient(MyObject, "obj-key").update(payload);
+```
+
+### Via HTTP
+
 To make an invocation count against a scope's concurrency limit, send it through a scoped ingress endpoint under the reserved `/restate/scope/` prefix:
 
 ```

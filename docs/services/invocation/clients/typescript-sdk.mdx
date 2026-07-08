@@ -174,6 +174,46 @@ if (peekOutput.ready) {
 }
 ```
 
+## Automatic retries for ingress calls
+
+The ingress client can automatically retry failed calls with exponential backoff and full jitter. Retries only fire when the call carries an `idempotencyKey` — Restate then deduplicates on that key, so a retry attaches to the in-flight or completed invocation rather than creating a duplicate.
+
+Pass `retry: true` to enable the built-in policy (retries on network errors, HTTP `429`, and HTTP `5xx`):
+
+```typescript
+import { connect } from "@restatedev/restate-sdk-clients";
+
+const restateClient = connect({ url: "http://localhost:8080", retry: true });
+
+// Retry fires only because the call has an idempotency key.
+await restateClient
+  .serviceSendClient<MyService>({ name: "MyService" })
+  .greet(request, clients.rpc.sendOpts({ idempotencyKey: "req-1" }));
+```
+
+Pass an object to tune the policy. Use `shouldRetry` to extend (not replace) the built-in rule by composing with `defaultShouldRetry`:
+
+```typescript
+import { connect, defaultShouldRetry } from "@restatedev/restate-sdk-clients";
+
+const restateClient = connect({
+  url: "http://localhost:8080",
+  retry: {
+    maxAttempts: 4,                 // initial attempt + up to 3 retries (default: 6)
+    initialInterval: 200,           // milliseconds or Duration object (default: 100ms)
+    maxInterval: { seconds: 5 },    // milliseconds or Duration object (default: 2000ms)
+    exponentiationFactor: 2,        // default: 2
+    shouldRetry: (failure, attempt) =>
+      defaultShouldRetry(failure) ||
+      (failure.kind === "response" && failure.status === 409),
+  },
+});
+```
+
+<Info>
+  Without an `idempotencyKey`, no retry is attempted regardless of the `retry` setting.
+</Info>
+
 ## Advanced: sharing service type definitions
 
 Have a look at the options listed in the [Service Communication docs](/develop/ts/service-communication#advanced%3A-sharing-service-type-definitions). These are also valid for the SDK clients.
