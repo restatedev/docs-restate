@@ -1,6 +1,6 @@
 package guides.sagas;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import dev.restate.sdk.common.TerminalException;
@@ -21,24 +21,25 @@ public class BookingWorkflow {
       PaymentClient.PaymentInfo paymentInfo) {}
 
   @Handler
-  public void run(Context ctx, BookingRequest req) throws TerminalException {
+  public void run(BookingRequest req) throws TerminalException {
     var flight = req.flight;
     var paymentInfo = req.paymentInfo;
     List<Runnable> compensations = new ArrayList<>();
 
     // <start_twostep>
-    String bookingId = ctx.run(String.class, () -> FlightClient.reserve(flight));
-    compensations.add(() -> ctx.run(() -> FlightClient.cancel(bookingId)));
+    String bookingId =
+        Restate.run("reserve-flight", String.class, () -> FlightClient.reserve(flight));
+    compensations.add(() -> Restate.run("cancel-flight", () -> FlightClient.cancel(bookingId)));
 
     // ... do other work, like reserving a car, etc. ...
 
-    ctx.run(() -> FlightClient.confirm(bookingId));
+    Restate.run("confirm-flight", () -> FlightClient.confirm(bookingId));
     // <end_twostep>
 
     // <start_idempotency>
-    String paymentId = ctx.random().nextUUID().toString();
-    compensations.add(() -> ctx.run(() -> PaymentClient.refund(paymentId)));
-    ctx.run(() -> PaymentClient.charge(paymentInfo, paymentId));
+    String paymentId = Restate.random().nextUUID().toString();
+    compensations.add(() -> Restate.run("refund-payment", () -> PaymentClient.refund(paymentId)));
+    Restate.run("charge-payment", () -> PaymentClient.charge(paymentInfo, paymentId));
     // <end_idempotency>
   }
 

@@ -70,14 +70,15 @@ restate.serve({
 public class FanOutWorker {
 
   @Handler
-  public Result run(Context ctx, Task task) {
+  public Result run(Task task) {
     // Split the task in subtasks
-    var subTasks = ctx.run(new TypeRef<>() {}, () -> split(task));
+    var subTasks = Restate.run("split", new TypeRef<List<SubTask>>() {}, () -> split(task));
 
     // Fan out the subtasks - run them in parallel
     List<DurableFuture<?>> resultFutures = new ArrayList<>();
     for (SubTask subTask : subTasks) {
-      resultFutures.add(FanOutWorkerClient.fromContext(ctx).runSubtask(subTask));
+      resultFutures.add(
+          Restate.serviceHandle(FanOutWorker.class).call(FanOutWorker::runSubtask, subTask));
     }
 
     DurableFuture.all(resultFutures).await();
@@ -89,10 +90,10 @@ public class FanOutWorker {
 
   // Can also run on FaaS
   @Handler
-  public SubTaskResult runSubtask(Context ctx, SubTask subTask) {
+  public SubTaskResult runSubtask(SubTask subTask) {
     // Processing logic goes here ...
     // Can be moved to a separate service to scale independently
-    return executeSubtask(ctx, subTask);
+    return executeSubtask(subTask);
   }
 
   public static void main(String[] args) {
@@ -105,22 +106,25 @@ public class FanOutWorker {
 @Service
 class FanOutWorker {
   @Handler
-  suspend fun run(ctx: Context, task: Task): TaskResult {
+  suspend fun run(task: Task): TaskResult {
     // Split the task in subtasks
-    val subTasks = ctx.runBlock { task.split() }
+    val subTasks = runBlock { task.split() }
 
     // Fan out the subtasks - run them in parallel
     // Fan in - Await all results and aggregate
-    val results = subTasks.map { FanOutWorkerClient.fromContext(ctx).runSubtask(it) }.awaitAll()
+    val results =
+        subTasks
+            .map { subTask -> toService<FanOutWorker>().request { runSubtask(subTask) }.call() }
+            .awaitAll()
 
     return results.aggregate()
   }
 
   @Handler
-  suspend fun runSubtask(ctx: Context, subTask: SubTask): SubTaskResult {
+  suspend fun runSubtask(subTask: SubTask): SubTaskResult {
     // Processing logic goes here ...
     // Can be moved to a separate service to scale independently
-    return subTask.execute(ctx)
+    return subTask.execute()
   }
 }
 

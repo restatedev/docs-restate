@@ -1,16 +1,10 @@
 plugins {
     java
     application
-    id("com.diffplug.spotless") version "7.2.1"
+    id("com.diffplug.spotless") version "8.8.0"
 }
 
 repositories {
-  // Snapshots repo
-  maven {
-    name = "Central Portal Snapshots"
-    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
-  }
-
   // Maven local for local testing
   //  mavenLocal()
 
@@ -19,7 +13,6 @@ repositories {
 
 dependencies {
     // Restate SDK
-    annotationProcessor(libs.restate.sdk.api.gen)
     implementation(libs.restate.sdk.http)
     implementation(libs.restate.sdk.lambda)
     implementation(libs.restate.sdk.request.identity)
@@ -39,8 +32,13 @@ dependencies {
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
+}
+
+application {
+    // Enable native access to avoid the JDK native-access warning printed at startup on JDK 23+
+    applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
 
 spotless {

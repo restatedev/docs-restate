@@ -1,19 +1,18 @@
 plugins {
   application
-  kotlin("jvm") version "2.2.10"
-  kotlin("plugin.serialization") version "2.2.10"
+  kotlin("jvm") version "2.4.0"
+  kotlin("plugin.serialization") version "2.4.0"
+  kotlin("plugin.allopen") version "2.4.0"
+  id("com.diffplug.spotless") version "8.8.0"
+}
 
-  id("com.google.devtools.ksp") version "2.2.10-2.0.2"
-  id("com.diffplug.spotless") version "7.2.1"
+allOpen {
+  annotation("dev.restate.sdk.annotation.Service")
+  annotation("dev.restate.sdk.annotation.VirtualObject")
+  annotation("dev.restate.sdk.annotation.Workflow")
 }
 
 repositories {
-  // Snapshots repo
-  maven {
-    name = "Central Portal Snapshots"
-    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
-  }
-
   // Maven local for local testing
   //  mavenLocal()
 
@@ -21,9 +20,6 @@ repositories {
 }
 
 dependencies {
-  // Annotation processor
-  ksp(libs.restate.sdk.api.kotlin.gen)
-
   // Restate SDK
   implementation(libs.restate.sdk.http.kotlin)
   implementation(libs.restate.sdk.lambda.kotlin)
@@ -42,10 +38,13 @@ dependencies {
   implementation(libs.log4j.core)
 }
 
-kotlin { jvmToolchain(21) }
+kotlin { jvmToolchain(25) }
 
 // Set main class
 application {
+  // Enable native access to avoid the JDK native-access warning printed at startup on JDK 23+
+  applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
+
   if (project.hasProperty("mainClass")) {
     mainClass.set(project.property("mainClass") as String)
   } else {

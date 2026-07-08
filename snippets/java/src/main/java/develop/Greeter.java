@@ -12,13 +12,13 @@ public class Greeter {
   private static final StateKey<Integer> COUNT = StateKey.of("count", Integer.class);
 
   @Handler
-  public String greet(ObjectContext ctx, String greeting) {
+  public String greet(String greeting) {
     // Get the count and increment it
-    int count = ctx.get(COUNT).orElse(1);
-    ctx.set(COUNT, count + 1);
+    int count = Restate.state().get(COUNT).orElse(1);
+    Restate.state().set(COUNT, count + 1);
 
     // Send the response back
-    return greeting + " " + ctx.key() + ", for the " + count + " time!";
+    return greeting + " " + Restate.key() + ", for the " + count + " time!";
   }
 
   public static void main(String[] args) {

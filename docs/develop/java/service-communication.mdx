@@ -18,58 +18,68 @@ Your Restate handler can call other handlers in three ways:
 <Tip>[Why use Restate for service communication?](/foundations/key-concepts#resilient-communication)</Tip>
 
 
-## Generating service clients
-The Restate Java SDK automatically generates clients for each of your services when you build the project.
-
-If you don't see the generated clients, make sure you [added the code generator](develop/java/overview#getting-started) and have built the project with `./gradlew build` or `mvn compile exec:java`.
-
 ## Request-response calls
 
-To call a Restate handler, use the generated clients and wait for its result:
+To call a Restate handler and wait for its result, use one of two client styles:
+
+- **Simple client** (`Restate.service(...)` / `Restate.virtualObject(...)` / `Restate.workflow(...)` in Java; `service<T>()` / `virtualObject<T>(key)` / `workflow<T>(key)` in Kotlin): the call is awaited inline and returns the result directly. Use it for straightforward request-response.
+- **Handle-based client** (`Restate.serviceHandle(...)` etc. in Java; `toService<T>()` etc. in Kotlin, called with a method reference): returns a `DurableFuture` you await explicitly. Use it for invocation options (e.g. idempotency keys), timeouts, or concurrency.
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#request_response"} 
+// --- Simple client: awaits inline and returns the result directly ---
 // To call a Service:
-String svcResponse = MyServiceClient.fromContext(ctx).myHandler(request).await();
-
+String svcResponse = Restate.service(MyService.class).myHandler(request);
 // To call a Virtual Object:
-String objResponse = MyObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
-
+String objResponse = Restate.virtualObject(MyObject.class, objectKey).myHandler(request);
 // To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-String wfResponse = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await();
-// Other handlers can be called anytime within workflow retention
-String status =
-    MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await();
+String wfResponse = Restate.workflow(MyWorkflow.class, workflowId).run(request);
+
+// --- Handle-based client: returns a DurableFuture to await explicitly ---
+// Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+String svcResult =
+    Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
+String objResult =
+    Restate.virtualObjectHandle(MyObject.class, objectKey)
+        .call(MyObject::myHandler, request)
+        .await();
+String wfResult =
+    Restate.workflowHandle(MyWorkflow.class, workflowId).call(MyWorkflow::run, request).await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#request_response"} 
+// --- Simple client: awaits inline and returns the result directly ---
 // To call a Service:
-val svcResponse = MyServiceClient.fromContext(ctx).myHandler(request).await()
-
+val svcResponse = service<MyService>().myHandler(request)
 // To call a Virtual Object:
-val objResponse = MyObjectClient.fromContext(ctx, objectKey).myHandler(request).await()
-
+val objResponse = virtualObject<MyObject>(objectKey).myHandler(request)
 // To call a Workflow:
-// `run` handler — can only be called once per workflow ID
-val wfResponse = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await()
-// Other handlers can be called anytime within workflow retention
-MyWorkflowClient.fromContext(ctx, workflowId).interactWithWorkflow(request).await()
+val wfResponse = workflow<MyWorkflow>(workflowId).run(request)
+
+// --- Handle-based client: returns a DurableFuture to await explicitly ---
+// Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+val svcResult = toService<MyService>().request { myHandler(request) }.call().await()
+val objResult =
+    toVirtualObject<MyObject>(objectKey).request { myHandler(request) }.call().await()
+val wfResult = toWorkflow<MyWorkflow>(workflowId).request { run(request) }.call().await()
 ```
 </CodeGroup>
 
-Use the generic clients when you don't have access to typed clients or need dynamic service names:
+Use a generic call when you don't have the typed interface, or need dynamic service/handler names:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#request_response_generic"} 
 Target target = Target.service("MyService", "myHandler"); // or virtualObject or workflow
 String response =
-    ctx.call(Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request))
+    Restate.call(
+            Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request))
         .await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#request_response_generic"} 
 val target = Target.service("MyService", "myHandler")
 val response =
-    ctx.call(Request.of(target, typeTag<String>(), typeTag<String>(), request)).await()
+    prepareRequest(Request.of(target, typeTag<String>(), typeTag<String>(), request))
+        .call()
+        .await()
 ```
 </CodeGroup>
 
@@ -92,25 +102,25 @@ To send a message to another Restate handler without waiting for a response:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#one_way"} 
-MyServiceClient.fromContext(ctx).send().myHandler(request);
+Restate.serviceHandle(MyService.class).send(MyService::myHandler, request);
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#one_way"} 
-MyServiceClient.fromContext(ctx).send().myHandler(request)
+toService<MyService>().request { myHandler(request) }.send()
 ```
 </CodeGroup>
 
 Restate handles message delivery and retries, so the handler can complete and return without waiting for the message to be processed.
 
-Use generic clients when you don't have the service definition:
+Use a generic send when you don't have the typed interface:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#one_way_generic"} 
 Target target = Target.service("MyService", "myHandler"); // or virtualObject or workflow
-ctx.send(Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request));
+Restate.send(Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#one_way_generic"} 
 val target = Target.service("MyService", "myHandler")
-ctx.send(Request.of(target, typeTag<String>(), typeTag<String>(), request))
+prepareRequest(Request.of(target, typeTag<String>(), typeTag<String>(), request)).send()
 ```
 </CodeGroup>
 
@@ -119,8 +129,8 @@ ctx.send(Request.of(target, typeTag<String>(), typeTag<String>(), request))
     Example:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#ordering"} 
-MyObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call A");
-MyObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call B");
+Restate.virtualObjectHandle(MyObject.class, objectKey).send(MyObject::myHandler, "I'm call A");
+Restate.virtualObjectHandle(MyObject.class, objectKey).send(MyObject::myHandler, "I'm call B");
 ```
 
     Call A is guaranteed to execute before B. However, other invocations may interleave between A and B.
@@ -128,29 +138,30 @@ MyObjectClient.fromContext(ctx, objectKey).send().myHandler("I'm call B");
 
 ## Delayed messages
 
-To send a message after a delay, use the generated clients with `.send()` and the `Duration` as second parameter:
+To send a message after a delay, use `.send()` with the `Duration` as an additional parameter:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#delayed"} 
-MyServiceClient.fromContext(ctx).send().myHandler(request, Duration.ofDays(5));
+Restate.serviceHandle(MyService.class).send(MyService::myHandler, request, Duration.ofDays(5));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#delayed"} 
-MyServiceClient.fromContext(ctx).send().myHandler(request, 5.days)
+toService<MyService>().request { myHandler(request) }.send(5.days)
 ```
 </CodeGroup>
 
-Or with the generic clients:
+Or with a generic send:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#delayed_generic"} 
 Target target = Target.service("MyService", "myHandler"); // or virtualObject or workflow
-ctx.send(
+Restate.send(
     Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request),
     Duration.ofDays(5));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#delayed_generic"} 
 val target = Target.service("MyService", "myHandler")
-Request.of(target, typeTag<String>(), typeTag<String>(), request).send(ctx, 5.days)
+prepareRequest(Request.of(target, typeTag<String>(), typeTag<String>(), request))
+    .send(delay = 5.days)
 ```
 </CodeGroup>
 
@@ -165,15 +176,23 @@ To prevent duplicate executions of the same call, add an idempotency key:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#idempotency_key"} 
 // For a request-response call
-MyServiceClient.fromContext(ctx).myHandler(request, req -> req.idempotencyKey("abc123"));
+Restate.serviceHandle(MyService.class)
+    .call(MyService::myHandler, request, InvocationOptions.idempotencyKey("abc123"));
 // For a message
-MyServiceClient.fromContext(ctx).send().myHandler(request, req -> req.idempotencyKey("abc123"));
+Restate.serviceHandle(MyService.class)
+    .send(MyService::myHandler, request, InvocationOptions.idempotencyKey("abc123"));
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#idempotency_key"} 
 // For a regular call
-MyServiceClient.fromContext(ctx).myHandler(request) { idempotencyKey = "abc123" }
+toService<MyService>()
+    .request { myHandler(request) }
+    .options { idempotencyKey = "abc123" }
+    .call()
 // For a one way call
-MyServiceClient.fromContext(ctx).send().myHandler(request) { idempotencyKey = "abc123" }
+toService<MyService>()
+    .request { myHandler(request) }
+    .options { idempotencyKey = "abc123" }
+    .send()
 ```
 </CodeGroup>
 
@@ -186,14 +205,16 @@ To wait for or get the result of a previously sent message:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#attach"} 
 var handle =
-    MyServiceClient.fromContext(ctx)
-        .send()
-        .myHandler(request, req -> req.idempotencyKey("abc123"));
+    Restate.serviceHandle(MyService.class)
+        .send(MyService::myHandler, request, InvocationOptions.idempotencyKey("abc123"));
 var response = handle.attach().await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#attach"} 
 val handle =
-    MyServiceClient.fromContext(ctx).send().myHandler(request) { idempotencyKey = "abc123" }
+    toService<MyService>()
+        .request { myHandler(request) }
+        .options { idempotencyKey = "abc123" }
+        .send()
 val response = handle.attach().await()
 ```
 </CodeGroup>
@@ -208,11 +229,11 @@ To cancel a running handler:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ServiceCommunication.java#cancel"} 
-var handle = MyServiceClient.fromContext(ctx).send().myHandler(request);
+var handle = Restate.serviceHandle(MyService.class).send(MyService::myHandler, request);
 handle.cancel();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ServiceCommunication.kt#cancel"} 
-val handle = MyServiceClient.fromContext(ctx).send().myHandler(request)
+val handle = toService<MyService>().request { myHandler(request) }.send()
 handle.cancel()
 ```
 </CodeGroup>

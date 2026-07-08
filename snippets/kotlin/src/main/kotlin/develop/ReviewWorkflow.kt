@@ -15,13 +15,13 @@ class ReviewWorkflow {
   }
 
   @Workflow
-  suspend fun run(ctx: WorkflowContext, documentId: String): String {
+  suspend fun run(documentId: String): String {
     // Send document for review
-    ctx.runBlock { askReview(documentId) }
+    runBlock { askReview(documentId) }
 
     // Wait for external review submission
     // <start_promise>
-    val review: String = ctx.promise(REVIEW_PROMISE).future().await()
+    val review: String = promise(REVIEW_PROMISE).future().await()
     // <end_promise>
 
     // Process the review result
@@ -29,10 +29,10 @@ class ReviewWorkflow {
   }
 
   @Shared
-  suspend fun submitReview(ctx: SharedWorkflowContext, review: String) {
+  suspend fun submitReview(review: String) {
     // Signal the waiting run handler
     // <start_resolve_promise>
-    ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
+    promiseHandle(REVIEW_PROMISE).resolve(review)
     // <end_resolve_promise>
   }
 }

@@ -31,13 +31,15 @@ const id = ctx.rand.uuidv4();
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#durable_steps"} 
 // External API call
-String apiResult = ctx.run(String.class, () -> fetchData("https://api.example.com/data"));
+String apiResult =
+    Restate.run("fetchData", String.class, () -> fetchData("https://api.example.com/data"));
 
 // Database operation
-boolean dbResult = ctx.run(Boolean.class, () -> updateUserDatabase(userId, user));
+boolean dbResult =
+    Restate.run("updateUserDatabase", Boolean.class, () -> updateUserDatabase(userId, user));
 
 // Idempotency key generation
-String id = ctx.random().nextUUID().toString();
+String id = Restate.random().nextUUID().toString();
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#durable_steps"} 
@@ -99,9 +101,9 @@ const cart = (await ctx.get<ShoppingCart>("cart")) ?? [];
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_get"} 
 // Get with type and default value
-UserProfile profile = ctx.get(PROFILE).orElse(null);
-int count = ctx.get(COUNT).orElse(0);
-ShoppingCart cart = ctx.get(CART).orElse(new ShoppingCart());
+UserProfile profile = Restate.state().get(PROFILE).orElse(null);
+int count = Restate.state().get(COUNT).orElse(0);
+ShoppingCart cart = Restate.state().get(CART).orElse(new ShoppingCart());
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_get"} 
@@ -151,11 +153,11 @@ ctx.set("profile", {
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_set"} 
 // Store simple values
-ctx.set(COUNT, count + 1);
-ctx.set(LAST_LOGIN, request.date());
+Restate.state().set(COUNT, count + 1);
+Restate.state().set(LAST_LOGIN, request.date());
 
 // Store complex objects
-ctx.set(PROFILE, new UserProfile("John Doe", "john@example.com"));
+Restate.state().set(PROFILE, new UserProfile("John Doe", "john@example.com"));
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_set"} 
@@ -201,11 +203,11 @@ ctx.clearAll();
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/StateExample.java#state_clear"} 
 // Clear specific keys
-ctx.clear(StateKey.of("shoppingCart", ShoppingCart.class));
-ctx.clear(StateKey.of("sessionToken", String.class));
+Restate.state().clear(StateKey.of("shoppingCart", ShoppingCart.class));
+Restate.state().clear(StateKey.of("sessionToken", String.class));
 
 // Clear all user data
-ctx.clearAll();
+Restate.state().clearAll();
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#state_clear"} 
@@ -245,13 +247,22 @@ const result = await ctx
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#service_calls"} 
 // Call another service
-var validation = ValidationServiceClient.fromContext(ctx).validateOrder(req.order()).await();
+var validation =
+    Restate.serviceHandle(ValidationService.class)
+        .call(ValidationService::validateOrder, req.order())
+        .await();
 
 // Call Virtual Object function
-var profile = UserAccountClient.fromContext(ctx, req.userId()).getProfile().await();
+var profile =
+    Restate.virtualObjectHandle(UserAccount.class, req.userId())
+        .call(UserAccount::getProfile)
+        .await();
 
 // Submit Workflow
-var result = OrderWorkflowClient.fromContext(ctx, req.orderId()).run(req.order()).await();
+var result =
+    Restate.workflowHandle(OrderWorkflow.class, req.orderId())
+        .call(OrderWorkflow::run, req.order())
+        .await();
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#service_calls"} 
@@ -316,15 +327,15 @@ ctx.objectSendClient(ShoppingCartObject, userId).emtpyExpiredCart();
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#sending_messages"} 
 // Fire-and-forget notification
-NotificationServiceClient.fromContext(ctx)
-    .send()
-    .sendEmail(new EmailRequest(userId, "Welcome!"));
+Restate.serviceHandle(NotificationService.class)
+    .send(NotificationService::sendEmail, new EmailRequest(userId, "Welcome!"));
 
 // Background analytics
-AnalyticsServiceClient.fromContext(ctx).send().recordEvent(event);
+Restate.serviceHandle(AnalyticsService.class).send(AnalyticsService::recordEvent, event);
 
 // Cleanup task
-ShoppingCartObjectClient.fromContext(ctx, userId).send().emptyExpiredCart();
+Restate.virtualObjectHandle(ShoppingCartObject.class, userId)
+    .send(ShoppingCartObject::emptyExpiredCart);
 ```
 
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#sending_messages"} 
@@ -373,7 +384,8 @@ ctx.serviceSendClient(ReminderService).sendReminder(
 ```
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#delayed_messages"} 
 // Schedule reminder for tomorrow
-ReminderServiceClient.fromContext(ctx).send().sendReminder(reminderRequest, Duration.ofDays(1));
+Restate.serviceHandle(ReminderService.class)
+    .send(ReminderService::sendReminder, reminderRequest, Duration.ofDays(1));
 ```
 ```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#delayed_messages"} 
 # Schedule reminder for tomorrow
@@ -414,12 +426,12 @@ const result = await ctx
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/Actions.java#durable_timers"} 
 // Sleep for specific duration
-ctx.sleep(Duration.ofMinutes(5)); // 5 minutes
+Restate.sleep(Duration.ofMinutes(5)); // 5 minutes
 
 // Wait for action or timeout
 try {
-  OrderWorkflowClient.fromContext(ctx, req.orderId())
-      .run(req.order())
+  Restate.workflowHandle(OrderWorkflow.class, req.orderId())
+      .call(OrderWorkflow::run, req.order())
       .await(Duration.ofMinutes(5));
 } catch (TimeoutException e) {
   // Handle timeout
@@ -502,14 +514,14 @@ const [payment, inventory] = await RestatePromise.all([
 
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#workflow_promises"} 
 // Wait for external event
-PaymentResult paymentResult = ctx.promise(PAYMENT_COMPLETED).future().await();
+PaymentResult paymentResult = Restate.promise(PAYMENT_COMPLETED).future().await();
 
 // Wait for human approval
-Boolean approved = ctx.promise(MANAGER_APPROVAL).future().await();
+Boolean approved = Restate.promise(MANAGER_APPROVAL).future().await();
 
 // Wait for multiple events
-var paymentFuture = ctx.promise(PAYMENT).future();
-var inventoryFuture = ctx.promise(INVENTORY).future();
+var paymentFuture = Restate.promise(PAYMENT).future();
+var inventoryFuture = Restate.promise(INVENTORY).future();
 PaymentResult payment = paymentFuture.await();
 InventoryResult inventory = inventoryFuture.await();
 ```
@@ -581,14 +593,14 @@ approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
 ```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#signal_functions"} 
 // In a signal function
 @Shared
-public void confirmPayment(SharedWorkflowContext ctx, PaymentResult result) {
-  ctx.promiseHandle(PAYMENT_COMPLETED).resolve(result);
+public void confirmPayment(PaymentResult result) {
+  Restate.promiseHandle(PAYMENT_COMPLETED).resolve(result);
 }
 
 // In a signal function
 @Shared
-public void approveRequest(SharedWorkflowContext ctx, Boolean approved) {
-  ctx.promiseHandle(MANAGER_APPROVAL).resolve(approved);
+public void approveRequest(Boolean approved) {
+  Restate.promiseHandle(MANAGER_APPROVAL).resolve(approved);
 }
 ```
 

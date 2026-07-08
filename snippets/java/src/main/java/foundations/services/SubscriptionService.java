@@ -3,7 +3,7 @@ package foundations.services;
 import static foundations.services.BasicServiceHelpers.createRecurringPayment;
 import static foundations.services.BasicServiceHelpers.createSubscription;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import java.util.UUID;
@@ -24,14 +24,15 @@ class BasicServiceHelpers {
 public class SubscriptionService {
 
   @Handler
-  public void add(Context ctx, SubscriptionRequest req) {
-    var paymentId = ctx.random().nextUUID().toString();
+  public void add(SubscriptionRequest req) {
+    var paymentId = Restate.random().nextUUID().toString();
 
     String payRef =
-        ctx.run("pay", String.class, () -> createRecurringPayment(req.creditCard(), paymentId));
+        Restate.run("pay", String.class, () -> createRecurringPayment(req.creditCard(), paymentId));
 
     for (String subscription : req.subscriptions()) {
-      ctx.run("add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
+      Restate.run(
+          "add-" + subscription, () -> createSubscription(req.userId(), subscription, payRef));
     }
   }
 }

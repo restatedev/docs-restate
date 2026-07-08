@@ -1,6 +1,6 @@
 package tour.microservices;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 import dev.restate.sdk.common.RetryPolicy;
@@ -13,14 +13,14 @@ record SubscriptionRequest(String userId, String creditCard, String[] subscripti
 public class Retries {
 
   @Handler
-  public String myHandler(Context ctx, SubscriptionRequest req) {
-    var paymentId = ctx.random().nextUUID().toString();
+  public String myHandler(SubscriptionRequest req) {
+    var paymentId = Restate.random().nextUUID().toString();
 
     // <start_here>
     RetryPolicy myRunRetryPolicy =
         RetryPolicy.defaultPolicy().setInitialDelay(Duration.ofSeconds(1)).setMaxAttempts(3);
     String payRef =
-        ctx.run(
+        Restate.run(
             "pay",
             String.class,
             myRunRetryPolicy,

@@ -118,7 +118,7 @@ RetryPolicy myRunRetryPolicy =
         .setMaxDelay(Duration.ofSeconds(10))
         .setMaxAttempts(10)
         .setMaxDuration(Duration.ofMinutes(5));
-ctx.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
+Restate.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
 ```
 
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/RetryRunService.kt#here"} 
@@ -129,7 +129,7 @@ val myRunRetryPolicy = retryPolicy {
   maxAttempts = 10
   maxDuration = 5.minutes
 }
-ctx.runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
+runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
 ```
 
 ```go Go {"CODE_LOAD::go/guides/retries.go#here"} 
@@ -283,7 +283,8 @@ except TerminalError as err:
 ```java Java {"CODE_LOAD::java/src/main/java/guides/RetryRunService.java#catch"} 
 try {
   // Fails with a terminal error after 3 attempts or if the function throws one
-  ctx.run("my-run", RetryPolicy.defaultPolicy().setMaxAttempts(3), () -> writeToOtherSystem());
+  Restate.run(
+      "my-run", RetryPolicy.defaultPolicy().setMaxAttempts(3), () -> writeToOtherSystem());
 } catch (TerminalException e) {
   // Handle the terminal error: undo previous actions and
   // propagate the error back to the caller
@@ -294,12 +295,16 @@ try {
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/RetryRunService.kt#catch"} 
 try {
   // Fails with a terminal error after 3 attempts or if the function throws one
-  ctx.runBlock(
+  runBlock(
       "write",
       RetryPolicy(
-          initialDelay = 500.milliseconds, maxAttempts = 3, exponentiationFactor = 2.0f)) {
-        writeToOtherSystem()
-      }
+          initialDelay = 500.milliseconds,
+          maxAttempts = 3,
+          exponentiationFactor = 2.0f,
+      ),
+  ) {
+    writeToOtherSystem()
+  }
 } catch (e: TerminalException) {
   // Handle the terminal error: undo previous actions and
   // propagate the error back to the caller
@@ -464,7 +469,7 @@ async def my_handler(ctx: Context):
 
     ```java Java {"CODE_LOAD::java/src/main/java/guides/RetryRunService.java#raw"} 
 @Handler
-public void myHandler(Context ctx, @Accept("*/*") @Raw byte[] request) {
+public void myHandler(@Accept("*/*") @Raw byte[] request) {
   try {
     var decodedRequest = decodeRequest(request);
 
@@ -478,7 +483,7 @@ public void myHandler(Context ctx, @Accept("*/*") @Raw byte[] request) {
 
     ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/RetryRunService.kt#raw"} 
 @Handler
-suspend fun myHandler(ctx: Context, @Accept("*/*") @Raw request: ByteArray) {
+suspend fun myHandler(@Accept("*/*") @Raw request: ByteArray) {
   try {
     val decodedRequest = decodeRequest(request)
 
@@ -564,9 +569,11 @@ match await restate.select(
 try {
   // If the timeout hits first, it throws a `TimeoutError`.
   // If you do not catch it, it will lead to a retry.
-  MyServiceClient.fromContext(ctx).myHandler("Hello").await(Duration.ofSeconds(5));
+  Restate.serviceHandle(MyService.class)
+      .call(MyService::myHandler, "Hello")
+      .await(Duration.ofSeconds(5));
 
-  var awakeable = ctx.awakeable(Boolean.class);
+  var awakeable = Restate.awakeable(Boolean.class);
   // ...Do something that will trigger the awakeable
   awakeable.await(Duration.ofSeconds(5));
 
@@ -577,7 +584,7 @@ try {
 
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/guides/RetryRunService.kt#timeout"} 
 try {
-  ctx.awakeable<String>().withTimeout(5.seconds).await()
+  awakeable<String>().withTimeout(5.seconds).await()
 } catch (e: TimeoutException) {
   // Handle the timeout
 }

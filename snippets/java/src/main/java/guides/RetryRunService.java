@@ -1,6 +1,6 @@
 package guides;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Accept;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Raw;
@@ -10,14 +10,14 @@ import dev.restate.sdk.common.TerminalException;
 import dev.restate.sdk.common.TimeoutException;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
-import develop.MyServiceClient;
+import develop.MyService;
 import java.time.Duration;
 
 @Service
 public class RetryRunService {
 
   @Handler
-  public String myRunHandler(Context ctx, String greeting) {
+  public String myRunHandler(String greeting) {
 
     // <start_here>
     RetryPolicy myRunRetryPolicy =
@@ -25,13 +25,14 @@ public class RetryRunService {
             .setMaxDelay(Duration.ofSeconds(10))
             .setMaxAttempts(10)
             .setMaxDuration(Duration.ofMinutes(5));
-    ctx.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
+    Restate.run("my-run", myRunRetryPolicy, () -> writeToOtherSystem());
     // <end_here>
 
     // <start_catch>
     try {
       // Fails with a terminal error after 3 attempts or if the function throws one
-      ctx.run("my-run", RetryPolicy.defaultPolicy().setMaxAttempts(3), () -> writeToOtherSystem());
+      Restate.run(
+          "my-run", RetryPolicy.defaultPolicy().setMaxAttempts(3), () -> writeToOtherSystem());
     } catch (TerminalException e) {
       // Handle the terminal error: undo previous actions and
       // propagate the error back to the caller
@@ -44,7 +45,7 @@ public class RetryRunService {
 
   // <start_raw>
   @Handler
-  public void myHandler(Context ctx, @Accept("*/*") @Raw byte[] request) {
+  public void myHandler(@Accept("*/*") @Raw byte[] request) {
     try {
       var decodedRequest = decodeRequest(request);
 
@@ -58,14 +59,16 @@ public class RetryRunService {
   // <end_raw>
 
   @Handler
-  public void timeoutHandler(Context ctx) {
+  public void timeoutHandler() {
     // <start_timeout>
     try {
       // If the timeout hits first, it throws a `TimeoutError`.
       // If you do not catch it, it will lead to a retry.
-      MyServiceClient.fromContext(ctx).myHandler("Hello").await(Duration.ofSeconds(5));
+      Restate.serviceHandle(MyService.class)
+          .call(MyService::myHandler, "Hello")
+          .await(Duration.ofSeconds(5));
 
-      var awakeable = ctx.awakeable(Boolean.class);
+      var awakeable = Restate.awakeable(Boolean.class);
       // ...Do something that will trigger the awakeable
       awakeable.await(Duration.ofSeconds(5));
 

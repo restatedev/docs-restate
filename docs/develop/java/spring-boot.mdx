@@ -1,0 +1,180 @@
+---
+title: "Spring Boot"
+description: "Run Restate services inside a Spring Boot application with dependency injection."
+icon: "leaf"
+---
+
+The Java/Kotlin SDK provides an integration module with Spring Boot: your Restate services become Spring beans, so you can use dependency injection, configuration properties, and the rest of the Spring ecosystem.
+
+<Tip>
+    Get started from a template with the [Java](/quickstart#java) (Maven + Spring Boot) or [Kotlin](/quickstart#kotlin) (Gradle + Spring Boot) Quickstart.
+</Tip>
+
+## Dependencies
+
+Use the Spring Boot starter instead of the plain HTTP SDK dependency. It pulls in the SDK and auto-configures the Restate endpoint and client.
+
+<CodeGroup>
+```xml Java/Maven
+<properties>
+    <restate.version>2.9.0</restate.version>
+</properties>
+<dependencies>
+    <dependency>
+        <groupId>dev.restate</groupId>
+        <artifactId>sdk-spring-boot-starter</artifactId>
+        <version>${restate.version}</version>
+    </dependency>
+</dependencies>
+```
+```kt Kotlin/Gradle
+implementation("dev.restate:sdk-spring-boot-kotlin-starter:2.9.0")
+```
+</CodeGroup>
+
+## Enabling Restate
+
+Add [`@EnableRestate`](https://docs.restate.dev/javadocs/dev/restate/sdk/springboot/EnableRestate.html) to your Spring Boot application:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven-spring-boot/src/main/java/com/example/restatestarter/RestateStarterApplication.java"} 
+package com.example.restatestarter;
+
+import dev.restate.sdk.springboot.EnableRestate;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+@EnableRestate
+public class RestateStarterApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(RestateStarterApplication.class, args);
+	}
+
+}
+```
+```kotlin Kotlin {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/kotlin/templates/kotlin-gradle-spring-boot/src/main/kotlin/com/example/restatestarter/RestateStarterApplication.kt"} 
+package com.example.restatestarter
+
+import dev.restate.sdk.springboot.EnableRestate
+import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.runApplication
+
+@SpringBootApplication
+@EnableRestate
+class RestateStarterApplication
+
+fun main(args: Array<String>) {
+	runApplication<RestateStarterApplication>(*args)
+}
+```
+</CodeGroup>
+
+## Defining services
+
+Annotate your service class with [`@RestateComponent`](https://docs.restate.dev/javadocs/dev/restate/sdk/springboot/RestateComponent.html) **in addition to** the usual `@Service`, `@VirtualObject`, or `@Workflow` annotation.
+
+Unlike the [standalone setup](/develop/java/serving), the service has no `main`: Spring Boot binds and serves it.
+
+`@RestateComponent` is like any other Spring's `@Component`: inject configuration and other beans as usual (`@Value`, constructor injection, ...).
+
+<CodeGroup>
+```java Java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven-spring-boot/src/main/java/com/example/restatestarter/Greeter.java?collapse_prequel"} 
+@RestateComponent
+@Service
+public class Greeter {
+
+  @Value("${greetingPrefix}")
+  private String greetingPrefix;
+
+  public record Greeting(String name) {}
+  public record GreetingResponse(String message) {}
+
+  @Handler
+  public GreetingResponse greet(Greeting req) {
+    // Durably execute a set of steps; resilient against failures
+    String greetingId = Restate.random().nextUUID().toString();
+    Restate.run("Notification", () -> sendNotification(greetingId, req.name));
+    Restate.sleep(Duration.ofSeconds(1));
+    Restate.run("Reminder", () -> sendReminder(greetingId, req.name));
+
+    // Respond to caller
+    return new GreetingResponse("You said " + greetingPrefix + " to " + req.name + "!");
+  }
+}
+```
+```kotlin Kotlin {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/kotlin/templates/kotlin-gradle-spring-boot/src/main/kotlin/com/example/restatestarter/Greeter.kt?collapse_prequel"} 
+@RestateComponent
+@Service
+class Greeter {
+
+  @Value("\${greetingPrefix}")
+  lateinit var greetingPrefix: String
+
+  @Serializable
+  data class Greeting(val name: String)
+  @Serializable
+  data class GreetingResponse(val message: String)
+
+  @Handler
+  suspend fun greet(req: Greeting): GreetingResponse {
+    // Durably execute a set of steps; resilient against failures
+    val greetingId = random().nextUUID().toString()
+    runBlock("Notification") { sendNotification(greetingId, req.name) }
+    sleep(1.seconds)
+    runBlock("Reminder") { sendReminder(greetingId, req.name) }
+
+    // Respond to caller
+    return GreetingResponse("You said $greetingPrefix to ${req.name}!")
+  }
+}
+```
+</CodeGroup>
+
+Everything inside the handler works exactly as in the standalone SDK: use the `Restate` static methods (Java) or the top-level functions in `dev.restate.sdk.kotlin` (Kotlin) for state, calls, side effects, and timers.
+
+## Calling Restate from Spring
+
+The starter registers a [`Client`](https://docs.restate.dev/javadocs/dev/restate/client/Client.html) bean. Inject it into any Spring component (controllers, scheduled tasks, ...) to invoke your handlers from outside a Restate context:
+
+```java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/templates/java-maven-spring-boot/src/main/java/com/example/restatestarter/HelloController.java"} 
+package com.example.restatestarter;
+
+import com.example.restatestarter.Greeter.Greeting;
+import dev.restate.client.Client;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class HelloController {
+
+	private final Client restateClient;
+
+    public HelloController(Client restateClient) {
+        this.restateClient = restateClient;
+    }
+
+    @GetMapping("/")
+	public String index() {
+		return restateClient.service(Greeter.class).greet(new Greeting("Alice")) + " from Spring Boot!";
+	}
+
+}
+```
+
+In Kotlin, inject the same `Client` bean through the constructor.
+
+## Configuration
+
+Configure the SDK endpoint and the injected client via `application.properties` (or `application.yml`):
+
+```properties
+# Port where the Restate SDK endpoint is exposed (default 9080)
+restate.sdk.http.port=9080
+
+# Base URI of the Restate ingress, used by the injected Client
+restate.client.base-uri=http://localhost:8080
+```
+
+Service- and handler-level options (retention, timeouts, retry policies, ...) are set with `restate.components.<ServiceName>.*` properties. See [service configuration](/services/configuration#service-level-configuration) for the full list.

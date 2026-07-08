@@ -1,7 +1,6 @@
 package foundations.actions;
 
-import dev.restate.sdk.SharedWorkflowContext;
-import dev.restate.sdk.WorkflowContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.common.DurablePromiseKey;
@@ -19,17 +18,17 @@ public class WorkflowExample {
       DurablePromiseKey.of("inventory", InventoryResult.class);
 
   @Workflow
-  public void run(WorkflowContext ctx) {
+  public void run() {
     // <start_workflow_promises>
     // Wait for external event
-    PaymentResult paymentResult = ctx.promise(PAYMENT_COMPLETED).future().await();
+    PaymentResult paymentResult = Restate.promise(PAYMENT_COMPLETED).future().await();
 
     // Wait for human approval
-    Boolean approved = ctx.promise(MANAGER_APPROVAL).future().await();
+    Boolean approved = Restate.promise(MANAGER_APPROVAL).future().await();
 
     // Wait for multiple events
-    var paymentFuture = ctx.promise(PAYMENT).future();
-    var inventoryFuture = ctx.promise(INVENTORY).future();
+    var paymentFuture = Restate.promise(PAYMENT).future();
+    var inventoryFuture = Restate.promise(INVENTORY).future();
     PaymentResult payment = paymentFuture.await();
     InventoryResult inventory = inventoryFuture.await();
     // <end_workflow_promises>
@@ -38,14 +37,14 @@ public class WorkflowExample {
   // <start_signal_functions>
   // In a signal function
   @Shared
-  public void confirmPayment(SharedWorkflowContext ctx, PaymentResult result) {
-    ctx.promiseHandle(PAYMENT_COMPLETED).resolve(result);
+  public void confirmPayment(PaymentResult result) {
+    Restate.promiseHandle(PAYMENT_COMPLETED).resolve(result);
   }
 
   // In a signal function
   @Shared
-  public void approveRequest(SharedWorkflowContext ctx, Boolean approved) {
-    ctx.promiseHandle(MANAGER_APPROVAL).resolve(approved);
+  public void approveRequest(Boolean approved) {
+    Restate.promiseHandle(MANAGER_APPROVAL).resolve(approved);
   }
   // <end_signal_functions>
 }

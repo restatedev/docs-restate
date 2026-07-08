@@ -17,7 +17,7 @@ import kotlin.time.Duration.Companion.seconds
 class RetryRunService {
 
   @Handler
-  suspend fun retryRun(ctx: Context, greeting: String): String {
+  suspend fun retryRun(greeting: String): String {
 
     // <start_here>
     val myRunRetryPolicy = retryPolicy {
@@ -27,18 +27,22 @@ class RetryRunService {
       maxAttempts = 10
       maxDuration = 5.minutes
     }
-    ctx.runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
+    runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
     // <end_here>
 
     // <start_catch>
     try {
       // Fails with a terminal error after 3 attempts or if the function throws one
-      ctx.runBlock(
+      runBlock(
           "write",
           RetryPolicy(
-              initialDelay = 500.milliseconds, maxAttempts = 3, exponentiationFactor = 2.0f)) {
-            writeToOtherSystem()
-          }
+              initialDelay = 500.milliseconds,
+              maxAttempts = 3,
+              exponentiationFactor = 2.0f,
+          ),
+      ) {
+        writeToOtherSystem()
+      }
     } catch (e: TerminalException) {
       // Handle the terminal error: undo previous actions and
       // propagate the error back to the caller
@@ -51,7 +55,7 @@ class RetryRunService {
 
   // <start_raw>
   @Handler
-  suspend fun myHandler(ctx: Context, @Accept("*/*") @Raw request: ByteArray) {
+  suspend fun myHandler(@Accept("*/*") @Raw request: ByteArray) {
     try {
       val decodedRequest = decodeRequest(request)
 
@@ -66,10 +70,10 @@ class RetryRunService {
   // <end_raw>
 
   @Handler
-  suspend fun myTimeoutHandler(ctx: Context) {
+  suspend fun myTimeoutHandler() {
     // <start_timeout>
     try {
-      ctx.awakeable<String>().withTimeout(5.seconds).await()
+      awakeable<String>().withTimeout(5.seconds).await()
     } catch (e: TimeoutException) {
       // Handle the timeout
     }

@@ -5,27 +5,27 @@ import dev.restate.sdk.annotation.Service
 import dev.restate.sdk.kotlin.*
 
 internal class SideEffects {
-  suspend fun sideEffect(ctx: Context) {
+  suspend fun sideEffect() {
     // <start_side_effect>
-    val output = ctx.runBlock { doDbRequest() }
+    val output = runBlock { doDbRequest() }
     // <end_side_effect>
 
     // <start_async_side_effect>
-    val myRunFuture = ctx.runAsync { doSomethingSlow() }
+    val myRunFuture = runAsync { doSomethingSlow() }
     // <end_async_side_effect>
 
     val paymentClient = PaymentClient()
     val txId = ""
     val amount = 1
 
-    val a1 = ctx.awakeable<Boolean>()
-    val a2 = ctx.awakeable<Boolean>()
-    val a3 = ctx.awakeable<Boolean>()
+    val a1 = awakeable<Boolean>()
+    val a2 = awakeable<Boolean>()
+    val a3 = awakeable<Boolean>()
 
     // <start_parallel>
-    val call1 = ctx.runAsync<UserData> { fetchUserData(123) }
-    val call2 = ctx.runAsync<OrderHistory> { fetchOrderHistory(123) }
-    val call3 = AnalyticsServiceClient.fromContext(ctx).calculateMetric(123)
+    val call1 = runAsync<UserData> { fetchUserData(123) }
+    val call2 = runAsync<OrderHistory> { fetchOrderHistory(123) }
+    val call3 = toService<AnalyticsService>().request { calculateMetric(123) }.call()
 
     // Now wait for results as needed
     val user: UserData = call1.await()
@@ -48,11 +48,11 @@ internal class SideEffects {
     // <end_combine_any>
 
     // <start_uuid>
-    val uuid = ctx.random().nextUUID()
+    val uuid = random().nextUUID()
     // <end_uuid>
 
     // <start_random_nb>
-    val value = ctx.random().nextInt()
+    val value = random().nextInt()
     // <end_random_nb>
   }
 
@@ -88,7 +88,7 @@ internal class PaymentClient {
 @Service
 class AnalyticsService {
   @Handler
-  suspend fun calculateMetric(ctx: Context, metric: Int): Int {
+  suspend fun calculateMetric(metric: Int): Int {
     return 500
   }
 }

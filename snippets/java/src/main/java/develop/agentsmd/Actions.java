@@ -1,72 +1,81 @@
 package develop.agentsmd;
 
+import dev.restate.common.InvocationOptions;
 import dev.restate.common.Request;
 import dev.restate.common.Target;
 import dev.restate.sdk.*;
 import dev.restate.sdk.common.DurablePromiseKey;
 import dev.restate.sdk.common.StateKey;
 import dev.restate.serde.TypeTag;
-import develop.MyObjectClient;
-import develop.MyServiceClient;
-import develop.MyWorkflowClient;
+import develop.MyObject;
+import develop.MyService;
+import develop.MyWorkflow;
 import java.time.Duration;
 import java.util.Collection;
 
 public class Actions {
 
-  public void stateOperations(ObjectContext ctx) {
+  public void stateOperations() {
     // <start_state>
+    var state = Restate.state();
+
     // Get state keys
-    Collection<String> keys = ctx.stateKeys();
+    Collection<String> keys = state.getAllKeys();
 
     // Get state
     StateKey<String> STRING_STATE_KEY = StateKey.of("my-key", String.class);
-    String stringState = ctx.get(STRING_STATE_KEY).orElse("my-default");
+    String stringState = state.get(STRING_STATE_KEY).orElse("my-default");
 
     StateKey<Integer> INT_STATE_KEY = StateKey.of("count", Integer.class);
-    int count = ctx.get(INT_STATE_KEY).orElse(0);
+    int count = state.get(INT_STATE_KEY).orElse(0);
 
     // Set state
-    ctx.set(STRING_STATE_KEY, "my-new-value");
-    ctx.set(INT_STATE_KEY, count + 1);
+    state.set(STRING_STATE_KEY, "my-new-value");
+    state.set(INT_STATE_KEY, count + 1);
 
     // Clear state
-    ctx.clear(STRING_STATE_KEY);
-    ctx.clearAll();
+    state.clear(STRING_STATE_KEY);
+    state.clearAll();
     // <end_state>
   }
 
-  public void serviceCommunication(Context ctx) {
+  public void serviceCommunication() {
     String request = "Hi";
     String objectKey = "object-key";
     String workflowId = "wf-id";
 
     // <start_service_calls>
     // Call a Service
-    String svcResponse = MyServiceClient.fromContext(ctx).myHandler(request).await();
+    String svcResponse =
+        Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
 
     // Call a Virtual Object
-    String objResponse = MyObjectClient.fromContext(ctx, objectKey).myHandler(request).await();
+    String objResponse =
+        Restate.virtualObjectHandle(MyObject.class, objectKey)
+            .call(MyObject::myHandler, request)
+            .await();
 
     // Call a Workflow
-    String wfResponse = MyWorkflowClient.fromContext(ctx, workflowId).run(request).await();
+    String wfResponse =
+        Restate.workflowHandle(MyWorkflow.class, workflowId).call(MyWorkflow::run, request).await();
     // <end_service_calls>
   }
 
-  public void genericServiceCalls(Context ctx) {
+  public void genericServiceCalls() {
     String request = "Hi";
 
     // <start_generic_calls>
     // Generic service call
     Target target = Target.service("MyService", "myHandler");
     String response =
-        ctx.call(Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request))
+        Restate.call(
+                Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), request))
             .await();
 
     // Generic object call
     Target objectTarget = Target.virtualObject("MyObject", "object-key", "myHandler");
     String objResponse =
-        ctx.call(
+        Restate.call(
                 Request.of(
                     objectTarget, TypeTag.of(String.class), TypeTag.of(String.class), request))
             .await();
@@ -74,99 +83,98 @@ public class Actions {
     // Generic workflow call
     Target workflowTarget = Target.workflow("MyWorkflow", "wf-id", "run");
     String wfResponse =
-        ctx.call(
+        Restate.call(
                 Request.of(
                     workflowTarget, TypeTag.of(String.class), TypeTag.of(String.class), request))
             .await();
     // <end_generic_calls>
   }
 
-  public void oneWayMessages(Context ctx) {
+  public void oneWayMessages() {
     String request = "Hi";
     String objectKey = "Hi";
     String workflowId = "Hi";
 
     // <start_sending_messages>
     // Call a Service
-    MyServiceClient.fromContext(ctx).send().myHandler(request);
+    Restate.serviceHandle(MyService.class).send(MyService::myHandler, request);
 
     // Call a Virtual Object
-    MyObjectClient.fromContext(ctx, objectKey).send().myHandler(request);
+    Restate.virtualObjectHandle(MyObject.class, objectKey).send(MyObject::myHandler, request);
 
     // Call a Workflow
-    MyWorkflowClient.fromContext(ctx, workflowId).send().run(request);
+    Restate.workflowHandle(MyWorkflow.class, workflowId).send(MyWorkflow::run, request);
     // <end_sending_messages>
   }
 
-  public void delayedMessages(Context ctx) {
+  public void delayedMessages() {
     String request = "Hi";
 
     // <start_delayed_messages>
-    MyServiceClient.fromContext(ctx).send().myHandler(request, Duration.ofDays(5));
+    Restate.serviceHandle(MyService.class).send(MyService::myHandler, request, Duration.ofDays(5));
     // <end_delayed_messages>
   }
 
-  public void durableSteps(Context ctx) {
+  public void durableSteps() {
     // <start_durable_steps>
-    // Wrap non-deterministic code in ctx.run
-    String result = ctx.run("call external API", String.class, () -> callExternalAPI());
+    // Wrap non-deterministic code in Restate.run
+    String result = Restate.run("call external API", String.class, () -> callExternalAPI());
 
     // Wrap with name for better tracing
-    String namedResult = ctx.run("my-side-effect", String.class, () -> callExternalAPI());
+    String namedResult = Restate.run("my-side-effect", String.class, () -> callExternalAPI());
     // <end_durable_steps>
   }
 
-  public void durableTimers(Context ctx) {
+  public void durableTimers() {
     // <start_durable_timers>
     // Sleep
-    ctx.sleep(Duration.ofSeconds(30));
+    Restate.sleep(Duration.ofSeconds(30));
 
     // Schedule delayed call (different from sleep + send)
-    Target target = Target.service("MyService", "myHandler");
-    ctx.send(
-        Request.of(target, TypeTag.of(String.class), TypeTag.of(String.class), "Hi"),
-        Duration.ofHours(5));
+    Restate.serviceHandle(MyService.class).send(MyService::myHandler, "Hi", Duration.ofHours(5));
     // <end_durable_timers>
   }
 
-  public void awakeables(ObjectContext ctx) {
+  public void awakeables() {
     String name = "Pete";
 
     // <start_awakeables>
     // Create awakeable
-    Awakeable<String> awakeable = ctx.awakeable(String.class);
+    Awakeable<String> awakeable = Restate.awakeable(String.class);
     String awakeableId = awakeable.id();
 
     // Send ID to external system
-    ctx.run(() -> requestHumanReview(name, awakeableId));
+    Restate.run("request-human-review", () -> requestHumanReview(name, awakeableId));
 
     // Wait for result
     String review = awakeable.await();
 
     // Resolve from another handler
-    ctx.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
+    Restate.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
 
     // Reject from another handler
-    ctx.awakeableHandle(awakeableId).reject("Cannot be reviewed");
+    Restate.awakeableHandle(awakeableId).reject("Cannot be reviewed");
     // <end_awakeables>
   }
 
-  public void workflowPromises(WorkflowContext ctx) {
+  public void workflowPromises() {
     // <start_workflow_promises>
     DurablePromiseKey<String> REVIEW_PROMISE = DurablePromiseKey.of("review", String.class);
     // Wait for promise
-    String review = ctx.promise(REVIEW_PROMISE).future().await();
+    String review = Restate.promise(REVIEW_PROMISE).future().await();
 
     // Resolve promise from another handler
-    ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
+    Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
     // <end_workflow_promises>
   }
 
-  public void concurrency(Context ctx) {
+  public void concurrency() {
     // <start_combine_all>
     // Wait for all to complete
-    DurableFuture<String> call1 = MyServiceClient.fromContext(ctx).myHandler("request1");
-    DurableFuture<String> call2 = MyServiceClient.fromContext(ctx).myHandler("request2");
+    DurableFuture<String> call1 =
+        Restate.serviceHandle(MyService.class).call(MyService::myHandler, "request1");
+    DurableFuture<String> call2 =
+        Restate.serviceHandle(MyService.class).call(MyService::myHandler, "request2");
 
     DurableFuture.all(call1, call2).await();
     // <end_combine_all>
@@ -177,14 +185,13 @@ public class Actions {
     // <end_combine_any>
   }
 
-  public void invocationManagement(Context ctx) {
+  public void invocationManagement() {
     var request = "";
 
     // <start_cancel>
     var handle =
-        MyServiceClient.fromContext(ctx)
-            .send()
-            .myHandler(request, req -> req.idempotencyKey("abc123"));
+        Restate.serviceHandle(MyService.class)
+            .send(MyService::myHandler, request, InvocationOptions.idempotencyKey("abc123"));
     var response = handle.attach().await();
     // Cancel invocation
     handle.cancel();

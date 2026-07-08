@@ -57,18 +57,18 @@ export const signupWorkflow = restate.workflow({
 public class SignupWorkflow {
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key(); // workflow ID = user ID
+  public boolean run(User user) {
+    String userId = Restate.key(); // workflow ID = user ID
 
     // Write to database
-    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    boolean success = Restate.run("create", Boolean.class, () -> createUser(userId, user));
     if (!success) {
       return false;
     }
 
     // Call APIs
-    ctx.run("activate", () -> activateUser(userId));
-    ctx.run("welcome", () -> sendWelcomeEmail(user));
+    Restate.run("activate", () -> activateUser(userId));
+    Restate.run("welcome", () -> sendWelcomeEmail(user));
 
     return true;
   }
@@ -320,7 +320,11 @@ You can invoke a workflow programmatically with the Restate SDK:
 Client restateClient = Client.connect("http://localhost:8080");
 
 boolean result =
-    SignupWorkflowClient.fromClient(restateClient, "user-123").submit(user).attach().response();
+    restateClient
+        .workflowHandle(SignupWorkflow.class, "user-123")
+        .send(SignupWorkflow::run, user)
+        .attach()
+        .response();
 ```
 
 The workflow gets submitted and afterwards you can retrieve the result by attaching to it.
@@ -560,15 +564,15 @@ await ctx.run("welcome", () => sendWelcomeEmail(user));
 ```java SignupWithActivitiesWorkflow.java {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithActivitiesWorkflow.java#activities"} 
 // Move user DB interaction to dedicated service
 boolean success = true;
-UserServiceClient.fromContext(ctx).createUser(new CreateUserRequest(userId, user)).await();
+Restate.service(UserService.class).createUser(new CreateUserRequest(userId, user));
 
 if (!success) {
   return false;
 }
 
 // Execute other steps inline
-ctx.run("activate", () -> activateUser(userId));
-ctx.run("welcome", () -> sendWelcomeEmail(user));
+Restate.run("activate", () -> activateUser(userId));
+Restate.run("welcome", () -> sendWelcomeEmail(user));
 ```
 
 <GitHubLink url="https://github.com/restatedev/examples/blob/main/java/tutorials/tour-of-workflows-java/src/main/java/my/example/workflows/SignupWithActivitiesWorkflow.java" />
@@ -729,27 +733,29 @@ public class SignupWithQueriesWorkflow {
   private static final StateKey<String> STATUS = StateKey.of("status", String.class);
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key();
+  public boolean run(User user) {
+    String userId = Restate.key();
+    var state = Restate.state();
 
-    ctx.set(USER, user);
-    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    state.set(USER, user);
+    boolean success = Restate.run("create", Boolean.class, () -> createUser(userId, user));
     if (!success) {
-      ctx.set(STATUS, "failed");
+      state.set(STATUS, "failed");
       return false;
     }
-    ctx.set(STATUS, "created");
+    state.set(STATUS, "created");
 
-    ctx.run("activate", () -> activateUser(userId));
-    ctx.run("welcome", () -> sendWelcomeEmail(user));
+    Restate.run("activate", () -> activateUser(userId));
+    Restate.run("welcome", () -> sendWelcomeEmail(user));
 
     return true;
   }
 
   @Shared
-  public StatusResponse getStatus(SharedWorkflowContext ctx) {
-    String status = ctx.get(STATUS).orElse("unknown");
-    User user = ctx.get(USER).orElse(null);
+  public StatusResponse getStatus() {
+    var state = Restate.state();
+    String status = state.get(STATUS).orElse("unknown");
+    User user = state.get(USER).orElse(null);
     return new StatusResponse(status, user);
   }
 }
@@ -934,21 +940,21 @@ public class SignupWithSignalsWorkflow {
       DurablePromiseKey.of("email-verified", String.class);
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key();
+  public boolean run(User user) {
+    String userId = Restate.key();
 
     // Generate verification secret and send email
-    String secret = ctx.random().nextUUID().toString();
-    ctx.run("verify", () -> sendVerificationEmail(userId, user, secret));
+    String secret = Restate.random().nextUUID().toString();
+    Restate.run("verify", () -> sendVerificationEmail(userId, user, secret));
 
     // Wait for user to click verification link
-    String clickedSecret = ctx.promise(EMAIL_VERIFIED_PROMISE).future().await();
+    String clickedSecret = Restate.promise(EMAIL_VERIFIED_PROMISE).future().await();
     return secret.equals(clickedSecret);
   }
 
   @Shared
-  public void verifyEmail(SharedWorkflowContext ctx, VerifyEmailRequest req) {
-    ctx.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
+  public void verifyEmail(VerifyEmailRequest req) {
+    Restate.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
   }
 }
 ```
@@ -1154,26 +1160,26 @@ public class SignupWithEventsWorkflow {
       DurablePromiseKey.of("user-created", String.class);
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key();
+  public boolean run(User user) {
+    String userId = Restate.key();
 
-    boolean success = ctx.run("create", Boolean.class, () -> createUser(userId, user));
+    boolean success = Restate.run("create", Boolean.class, () -> createUser(userId, user));
     if (!success) {
-      ctx.promiseHandle(USER_CREATED_PROMISE).reject("Creation failed.");
+      Restate.promiseHandle(USER_CREATED_PROMISE).reject("Creation failed.");
       return false;
     }
 
-    ctx.promiseHandle(USER_CREATED_PROMISE).resolve("User created.");
+    Restate.promiseHandle(USER_CREATED_PROMISE).resolve("User created.");
 
-    ctx.run("activate", () -> activateUser(userId));
-    ctx.run("welcome", () -> sendWelcomeEmail(user));
+    Restate.run("activate", () -> activateUser(userId));
+    Restate.run("welcome", () -> sendWelcomeEmail(user));
 
     return true;
   }
 
   @Shared
-  public String waitForUserCreation(SharedWorkflowContext ctx) {
-    return ctx.promise(USER_CREATED_PROMISE).future().await();
+  public String waitForUserCreation() {
+    return Restate.promise(USER_CREATED_PROMISE).future().await();
   }
 }
 ```
@@ -1390,17 +1396,17 @@ public class SignupWithTimersWorkflow {
       DurablePromiseKey.of("email-verified", String.class);
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key();
+  public boolean run(User user) {
+    String userId = Restate.key();
 
-    var confirmationFuture = ctx.promise(EMAIL_VERIFIED_PROMISE).future();
-    var secret = ctx.random().nextUUID().toString();
-    ctx.run("verify", () -> sendVerificationEmail(userId, user, secret));
+    var confirmationFuture = Restate.promise(EMAIL_VERIFIED_PROMISE).future();
+    var secret = Restate.random().nextUUID().toString();
+    Restate.run("verify", () -> sendVerificationEmail(userId, user, secret));
 
-    var verificationTimeout = ctx.timer(Duration.ofDays(1));
+    var verificationTimeout = Restate.timer(Duration.ofDays(1));
 
     while (true) {
-      var reminderTimer = ctx.timer(Duration.ofSeconds(10));
+      var reminderTimer = Restate.timer(Duration.ofSeconds(10));
 
       var selected =
           Select.<String>select()
@@ -1414,7 +1420,7 @@ public class SignupWithTimersWorkflow {
           var clickedSecret = confirmationFuture.await();
           return secret.equals(clickedSecret);
         case "reminder":
-          ctx.run("send reminder", () -> sendReminderEmail(userId, user, secret));
+          Restate.run("send reminder", () -> sendReminderEmail(userId, user, secret));
           break;
         case "timeout":
           throw new TerminalException("Verification timed out");
@@ -1423,8 +1429,8 @@ public class SignupWithTimersWorkflow {
   }
 
   @Shared
-  public void verifyEmail(SharedWorkflowContext ctx, VerifyEmailRequest req) {
-    ctx.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
+  public void verifyEmail(VerifyEmailRequest req) {
+    Restate.promiseHandle(EMAIL_VERIFIED_PROMISE).resolve(req.secret());
   }
 }
 ```
@@ -1720,7 +1726,7 @@ try {
           .setMaxAttempts(3)
           .setMaxDuration(Duration.ofSeconds(30));
 
-  ctx.run("welcome", myRunRetryPolicy, () -> sendWelcomeEmail(user));
+  Restate.run("welcome", myRunRetryPolicy, () -> sendWelcomeEmail(user));
 } catch (TerminalException error) {
   // This gets hit on retry exhaustion with a terminal error
   // Log and continue; without letting the workflow fail
@@ -1898,19 +1904,19 @@ export const signupWithSagas = restate.workflow({
 public class SignupWithSagasWorkflow {
 
   @Workflow
-  public boolean run(WorkflowContext ctx, User user) {
-    String userId = ctx.key();
+  public boolean run(User user) {
+    String userId = Restate.key();
     List<Runnable> compensations = new ArrayList<>();
 
     try {
-      compensations.add(() -> ctx.run("delete", () -> deleteUser(userId)));
-      ctx.run("create", () -> createUser(userId, user));
+      compensations.add(() -> Restate.run("delete", () -> deleteUser(userId)));
+      Restate.run("create", () -> createUser(userId, user));
 
-      compensations.add(() -> ctx.run("deactivate", () -> deactivateUser(userId)));
-      ctx.run("activate", () -> activateUser(userId));
+      compensations.add(() -> Restate.run("deactivate", () -> deactivateUser(userId)));
+      Restate.run("activate", () -> activateUser(userId));
 
-      compensations.add(() -> ctx.run("unsubscribe", () -> cancelSubscription(user)));
-      ctx.run("subscribe", () -> subscribeToPaidPlan(user));
+      compensations.add(() -> Restate.run("unsubscribe", () -> cancelSubscription(user)));
+      Restate.run("subscribe", () -> subscribeToPaidPlan(user));
 
     } catch (TerminalException e) {
       // Run compensations in reverse order

@@ -1,7 +1,6 @@
 package foundations.services;
 
-import dev.restate.sdk.ObjectContext;
-import dev.restate.sdk.SharedObjectContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.VirtualObject;
@@ -34,16 +33,16 @@ public class ShoppingCartObject {
   private static final StateKey<Cart> CART = StateKey.of("cart", Cart.class);
 
   @Handler
-  public Cart addItem(ObjectContext ctx, Item item) {
-    var cart = ctx.get(CART).orElse(new Cart());
+  public Cart addItem(Item item) {
+    var cart = Restate.state().get(CART).orElse(new Cart());
     var newCart = cart.addItem(item);
-    ctx.set(CART, newCart);
+    Restate.state().set(CART, newCart);
     return cart;
   }
 
   @Shared
-  public double getTotal(SharedObjectContext ctx) {
-    var cart = ctx.get(CART).orElse(new Cart());
+  public double getTotal() {
+    var cart = Restate.state().get(CART).orElse(new Cart());
     return cart.getTotalPrice();
   }
 }

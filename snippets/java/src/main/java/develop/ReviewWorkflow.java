@@ -3,8 +3,7 @@ package develop;
 import static develop.utils.Utils.askReview;
 import static develop.utils.Utils.processReview;
 
-import dev.restate.sdk.SharedWorkflowContext;
-import dev.restate.sdk.WorkflowContext;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 import dev.restate.sdk.common.DurablePromiseKey;
@@ -19,13 +18,13 @@ public class ReviewWorkflow {
   // <end_promise_key>
 
   @Workflow
-  public String run(WorkflowContext ctx, String documentId) {
+  public String run(String documentId) {
     // Send document for review
-    ctx.run(() -> askReview(documentId));
+    Restate.run("ask-review", () -> askReview(documentId));
 
     // Wait for external review submission
     // <start_promise>
-    String review = ctx.promise(REVIEW_PROMISE).future().await();
+    String review = Restate.promise(REVIEW_PROMISE).future().await();
     // <end_promise>
 
     // Process the review result
@@ -33,10 +32,10 @@ public class ReviewWorkflow {
   }
 
   @Shared
-  public void submitReview(SharedWorkflowContext ctx, String review) {
+  public void submitReview(String review) {
     // Signal the waiting run handler
     // <start_resolve_promise>
-    ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
+    Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
     // <end_resolve_promise>
   }
 }

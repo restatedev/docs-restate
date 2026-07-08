@@ -1,6 +1,7 @@
 package develop;
 
 import dev.restate.client.Client;
+import dev.restate.common.InvocationOptions;
 import dev.restate.common.Output;
 import dev.restate.common.Target;
 import java.time.Duration;
@@ -12,17 +13,21 @@ public class IngressClient {
     Client restateClient = Client.connect("http://localhost:8080");
 
     // To call a service
-    String svcResponse = MyServiceClient.fromClient(restateClient).myHandler("Hi");
+    String svcResponse = restateClient.service(MyService.class).myHandler("Hi");
 
     // To call a virtual object
-    String objResponse = MyObjectClient.fromClient(restateClient, "Mary").myHandler("Hi");
+    String objResponse = restateClient.virtualObject(MyObject.class, "Mary").myHandler("Hi");
 
     // To submit a workflow
     String wfResponse =
-        MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi").attach().response();
+        restateClient
+            .workflowHandle(MyWorkflow.class, "Mary")
+            .send(MyWorkflow::run, "Hi")
+            .attach()
+            .response();
     // To interact with a workflow
     String status =
-        MyWorkflowClient.fromClient(restateClient, "Mary").interactWithWorkflow("my signal");
+        restateClient.workflow(MyWorkflow.class, "Mary").interactWithWorkflow("my signal");
     // <end_rpc>
   }
 
@@ -32,13 +37,13 @@ public class IngressClient {
     Client restateClient = Client.connect("http://localhost:8080");
 
     // To message a service
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi");
+    restateClient.serviceHandle(MyService.class).send(MyService::myHandler, "Hi");
 
     // To message a virtual object
-    MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi");
+    restateClient.virtualObjectHandle(MyObject.class, "Mary").send(MyObject::myHandler, "Hi");
 
     // To submit a workflow without waiting for the result
-    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi");
+    restateClient.workflowHandle(MyWorkflow.class, "Mary").send(MyWorkflow::run, "Hi");
     // <end_one_way_call>
   }
 
@@ -47,13 +52,19 @@ public class IngressClient {
     Client restateClient = Client.connect("http://localhost:8080");
 
     // To message a service with a delay
-    MyServiceClient.fromClient(restateClient).send().myHandler("Hi", Duration.ofDays(5));
+    restateClient
+        .serviceHandle(MyService.class)
+        .send(MyService::myHandler, "Hi", Duration.ofDays(5));
 
     // To message a virtual object with a delay
-    MyObjectClient.fromClient(restateClient, "Mary").send().myHandler("Hi", Duration.ofDays(5));
+    restateClient
+        .virtualObjectHandle(MyObject.class, "Mary")
+        .send(MyObject::myHandler, "Hi", Duration.ofDays(5));
 
     // To submit a workflow with a delay
-    MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi", Duration.ofDays(5));
+    restateClient
+        .workflowHandle(MyWorkflow.class, "Mary")
+        .send(MyWorkflow::run, "Hi", Duration.ofDays(5));
     // <end_delayed_call>
 
   }
@@ -61,9 +72,9 @@ public class IngressClient {
   public void idempotentInvoke() {
     // <start_service_idempotent>
     Client restateClient = Client.connect("http://localhost:8080");
-    MyObjectClient.fromClient(restateClient, "Mary")
-        .send()
-        .myHandler("Hi", opt -> opt.idempotencyKey("abc"));
+    restateClient
+        .virtualObjectHandle(MyObject.class, "Mary")
+        .send(MyObject::myHandler, "Hi", InvocationOptions.idempotencyKey("abc"));
     // <end_service_idempotent>
   }
 
@@ -74,9 +85,10 @@ public class IngressClient {
 
     // The call to which we want to attach later
     var handle =
-        MyServiceClient.fromClient(restateClient)
-            .send()
-            .myHandler("Hi", opt -> opt.idempotencyKey("my-idempotency-key"));
+        restateClient
+            .serviceHandle(MyService.class)
+            .send(
+                MyService::myHandler, "Hi", InvocationOptions.idempotencyKey("my-idempotency-key"));
 
     // ... do something else ...
 
@@ -114,7 +126,8 @@ public class IngressClient {
     Client restateClient = Client.connect("http://localhost:8080");
 
     // The workflow to which we want to attach later
-    var wfHandle = MyWorkflowClient.fromClient(restateClient, "Mary").submit("Hi");
+    var wfHandle =
+        restateClient.workflowHandle(MyWorkflow.class, "Mary").send(MyWorkflow::run, "Hi");
 
     // ... do something else ...
 

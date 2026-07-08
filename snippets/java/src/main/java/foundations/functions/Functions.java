@@ -1,6 +1,6 @@
 package foundations.functions;
 
-import dev.restate.sdk.Context;
+import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
 
@@ -16,8 +16,8 @@ class Functions {
 
   // <start_here>
   @Handler
-  public ProcessingResult myHandler(Context ctx, MyInput myInput) {
-    return ctx.run(ProcessingResult.class, () -> processData(myInput));
+  public ProcessingResult myHandler(MyInput myInput) {
+    return Restate.run("processData", ProcessingResult.class, () -> processData(myInput));
   }
   // <end_here>
 }

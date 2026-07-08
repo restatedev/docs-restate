@@ -1,13 +1,14 @@
 package foundations.invocations;
 
 import dev.restate.client.Client;
+import dev.restate.common.InvocationOptions;
 import dev.restate.sdk.*;
 import dev.restate.sdk.annotation.*;
 
 @Service
 class MyService {
   @Handler
-  public String myHandler(Context ctx, String greeting) {
+  public String myHandler(String greeting) {
     return greeting + "!";
   }
 }
@@ -15,22 +16,21 @@ class MyService {
 @Service
 class GreeterService {
   @Handler
-  public String greet(Context ctx) {
+  public String greet() {
     // <start_attach>
     var handle =
-        MyServiceClient.fromContext(ctx)
-            .send()
-            .myHandler("Hi", opt -> opt.idempotencyKey("my-key"));
+        Restate.serviceHandle(MyService.class)
+            .send(MyService::myHandler, "Hi", InvocationOptions.idempotencyKey("my-key"));
     var response = handle.attach().await();
     // <end_attach>
     return "Hi!";
   }
 
   @Handler
-  public void cancel(Context ctx) {
+  public void cancel() {
 
     // <start_cancel>
-    var handle = MyServiceClient.fromContext(ctx).send().myHandler("Hi");
+    var handle = Restate.serviceHandle(MyService.class).send(MyService::myHandler, "Hi");
 
     // Cancel the invocation
     handle.cancel();
@@ -45,7 +45,7 @@ class MyClient {
     var restate = Client.connect("http://localhost:8080");
 
     // To call a service:
-    MyServiceClient.fromClient(restate).myHandler(req);
+    restate.service(MyService.class).myHandler(req);
     // <end_here>
   }
 }

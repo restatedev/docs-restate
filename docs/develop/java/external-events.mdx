@@ -17,22 +17,22 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Awakeables.java#here"} 
 // Create awakeable and get unique ID
-Awakeable<String> awakeable = ctx.awakeable(String.class);
+Awakeable<String> awakeable = Restate.awakeable(String.class);
 String awakeableId = awakeable.id();
 
 // Send ID to external system (email, queue, webhook, etc.)
-ctx.run(() -> requestHumanReview(name, awakeableId));
+Restate.run("request-human-review", () -> requestHumanReview(name, awakeableId));
 
 // Handler suspends here until external completion
 String review = awakeable.await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Awakeables.kt#here"} 
 // Create awakeable and get unique ID
-val awakeable = ctx.awakeable<String>()
+val awakeable = awakeable<String>()
 val awakeableId = awakeable.id
 
 // Send ID to external system (email, queue, webhook, etc.)
-ctx.runBlock { requestHumanReview(awakeableId) }
+runBlock { requestHumanReview(awakeableId) }
 
 // Handler suspends here until external completion
 val review = awakeable.await()
@@ -61,11 +61,11 @@ External processes complete awakeables in two ways:
 <CodeGroup>
     ```java Java {"CODE_LOAD::java/src/main/java/develop/Awakeables.java#resolve"} 
 // Complete with success data
-ctx.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
+Restate.awakeableHandle(awakeableId).resolve(String.class, "Looks good!");
 ```
     ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Awakeables.kt#resolve"} 
 // Complete with success data
-ctx.awakeableHandle(awakeableId).resolve("Looks good!")
+awakeableHandle(awakeableId).resolve("Looks good!")
 ```
 </CodeGroup>
 
@@ -73,11 +73,11 @@ ctx.awakeableHandle(awakeableId).resolve("Looks good!")
 <CodeGroup>
     ```java Java {"CODE_LOAD::java/src/main/java/develop/Awakeables.java#reject"} 
 // Complete with error
-ctx.awakeableHandle(awakeableId).reject("This cannot be reviewed.");
+Restate.awakeableHandle(awakeableId).reject("This cannot be reviewed.");
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Awakeables.kt#reject"} 
 // Complete with error
-ctx.awakeableHandle(awakeableId).reject("This cannot be reviewed.")
+awakeableHandle(awakeableId).reject("This cannot be reviewed.")
 ```
 </CodeGroup>
 
@@ -131,10 +131,10 @@ val REVIEW_PROMISE = durablePromiseKey<String>("review")
 Wait for a promise by name:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#promise"} 
-String review = ctx.promise(REVIEW_PROMISE).future().await();
+String review = Restate.promise(REVIEW_PROMISE).future().await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ReviewWorkflow.kt#promise"} 
-val review: String = ctx.promise(REVIEW_PROMISE).future().await()
+val review: String = promise(REVIEW_PROMISE).future().await()
 ```
 </CodeGroup>
 
@@ -144,10 +144,10 @@ Your workflow can [suspend](/foundations/key-concepts#suspensions-on-faas) until
 Resolve/reject from any workflow handler:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#resolve_promise"} 
-ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
+Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/ReviewWorkflow.kt#resolve_promise"} 
-ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
+promiseHandle(REVIEW_PROMISE).resolve(review)
 ```
 </CodeGroup>
 
@@ -163,21 +163,21 @@ public class ReviewWorkflow {
 
 
   @Workflow
-  public String run(WorkflowContext ctx, String documentId) {
+  public String run(String documentId) {
     // Send document for review
-    ctx.run(() -> askReview(documentId));
+    Restate.run("ask-review", () -> askReview(documentId));
 
     // Wait for external review submission
-    String review = ctx.promise(REVIEW_PROMISE).future().await();
+    String review = Restate.promise(REVIEW_PROMISE).future().await();
 
     // Process the review result
     return processReview(documentId, review);
   }
 
   @Shared
-  public void submitReview(SharedWorkflowContext ctx, String review) {
+  public void submitReview(String review) {
     // Signal the waiting run handler
-    ctx.promiseHandle(REVIEW_PROMISE).resolve(review);
+    Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
   }
 }
 ```
@@ -190,21 +190,21 @@ class ReviewWorkflow {
   }
 
   @Workflow
-  suspend fun run(ctx: WorkflowContext, documentId: String): String {
+  suspend fun run(documentId: String): String {
     // Send document for review
-    ctx.runBlock { askReview(documentId) }
+    runBlock { askReview(documentId) }
 
     // Wait for external review submission
-    val review: String = ctx.promise(REVIEW_PROMISE).future().await()
+    val review: String = promise(REVIEW_PROMISE).future().await()
 
     // Process the review result
     return processReview(documentId, review)
   }
 
   @Shared
-  suspend fun submitReview(ctx: SharedWorkflowContext, review: String) {
+  suspend fun submitReview(review: String) {
     // Signal the waiting run handler
-    ctx.promiseHandle(REVIEW_PROMISE).resolve(review)
+    promiseHandle(REVIEW_PROMISE).resolve(review)
   }
 }
 ```
