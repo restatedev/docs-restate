@@ -21,11 +21,11 @@ const LANGUAGE_SYMBOLS = {
     },
     java: {
         commentSymbol: "//",
-        serviceSymbol: ["@Service", "@VirtualObject", "@Workflow", "@RestateService", "@RestateVirtualObject", "@RestateWorkflow"],
+        serviceSymbol: ["@RestateComponent", "@Service", "@VirtualObject", "@Workflow", "@RestateService", "@RestateVirtualObject", "@RestateWorkflow"],
     },
     kotlin: {
         commentSymbol: "//",
-        serviceSymbol: ["@Service", "@VirtualObject", "@Workflow", "@RestateService", "@RestateVirtualObject", "@RestateWorkflow"],
+        serviceSymbol: ["@RestateComponent", "@Service", "@VirtualObject", "@Workflow", "@RestateService", "@RestateVirtualObject", "@RestateWorkflow"],
     },
     python: {
         commentSymbol: "#",

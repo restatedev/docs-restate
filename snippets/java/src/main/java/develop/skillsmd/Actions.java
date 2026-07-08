@@ -43,14 +43,17 @@ public class Actions {
     String workflowId = "wf-id";
 
     // <start_service_calls>
-    String svcResponse =
+    // Simple client: the call is awaited inline and returns the result directly.
+    // Use this for straightforward request-response calls.
+    String svcResponse = Restate.service(MyService.class).myHandler(request);
+    String objResponse = Restate.virtualObject(MyObject.class, objectKey).myHandler(request);
+    String wfResponse = Restate.workflow(MyWorkflow.class, workflowId).run(request);
+
+    // Handle-based client: returns a DurableFuture that you await explicitly.
+    // Use it for invocation options (e.g. an idempotency key), timeouts, or concurrency.
+    // (virtualObjectHandle(...) / workflowHandle(...) work the same way.)
+    String svcResult =
         Restate.serviceHandle(MyService.class).call(MyService::myHandler, request).await();
-    String objResponse =
-        Restate.virtualObjectHandle(MyObject.class, objectKey)
-            .call(MyObject::myHandler, request)
-            .await();
-    String wfResponse =
-        Restate.workflowHandle(MyWorkflow.class, workflowId).call(MyWorkflow::run, request).await();
     // <end_service_calls>
   }
 

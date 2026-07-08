@@ -70,18 +70,21 @@ public class BookingWorkflow {
       String customerId, FlightRequest flight, CarRequest car, HotelRequest hotel) {}
 
   @Handler
-  public void run(Context ctx, BookingRequest req) throws TerminalException {
+  public void run(BookingRequest req) throws TerminalException {
     List<Runnable> compensations = new ArrayList<>();
 
     try {
-      compensations.add(() -> ctx.run("Cancel flight", () -> FlightClient.cancel(req.customerId)));
-      ctx.run("Book flight", () -> FlightClient.book(req.customerId, req.flight()));
+      compensations.add(
+          () -> Restate.run("Cancel flight", () -> FlightClient.cancel(req.customerId)));
+      Restate.run("Book flight", () -> FlightClient.book(req.customerId, req.flight()));
 
-      compensations.add(() -> ctx.run("Cancel car", () -> CarRentalClient.cancel(req.customerId)));
-      ctx.run("Book car", () -> CarRentalClient.book(req.customerId, req.car()));
+      compensations.add(
+          () -> Restate.run("Cancel car", () -> CarRentalClient.cancel(req.customerId)));
+      Restate.run("Book car", () -> CarRentalClient.book(req.customerId, req.car()));
 
-      compensations.add(() -> ctx.run("Cancel hotel", () -> HotelClient.cancel(req.customerId)));
-      ctx.run("Book hotel", () -> HotelClient.book(req.customerId, req.hotel()));
+      compensations.add(
+          () -> Restate.run("Cancel hotel", () -> HotelClient.cancel(req.customerId)));
+      Restate.run("Book hotel", () -> HotelClient.book(req.customerId, req.hotel()));
     }
     catch (TerminalException e) {
       for (Runnable compensation : compensations) {
@@ -101,19 +104,19 @@ public class BookingWorkflow {
 class BookingWorkflow {
 
   @Handler
-  suspend fun run(ctx: Context, req: BookingRequest) {
+  suspend fun run(req: BookingRequest) {
 
     val compensations = mutableListOf<suspend () -> Unit>()
 
     try {
-      compensations.add { ctx.runBlock("Cancel flight") { cancelFlight(req.customerId) } }
-      ctx.runBlock("Book flight") { bookFlight(req.customerId, req.flight) }
+      compensations.add { runBlock("Cancel flight") { cancelFlight(req.customerId) } }
+      runBlock("Book flight") { bookFlight(req.customerId, req.flight) }
 
-      compensations.add { ctx.runBlock("Cancel car") { cancelCar(req.customerId) } }
-      ctx.runBlock("Book car") { bookCar(req.customerId, req.car) }
+      compensations.add { runBlock("Cancel car") { cancelCar(req.customerId) } }
+      runBlock("Book car") { bookCar(req.customerId, req.car) }
 
-      compensations.add { ctx.runBlock("Cancel hotel") { cancelHotel(req.customerId) } }
-      ctx.runBlock("Book hotel") { bookHotel(req.customerId, req.hotel) }
+      compensations.add { runBlock("Cancel hotel") { cancelHotel(req.customerId) } }
+      runBlock("Book hotel") { bookHotel(req.customerId, req.hotel) }
     }
     catch (e: TerminalException) {
       compensations.reversed().forEach { it() }

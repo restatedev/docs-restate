@@ -31,19 +31,16 @@ docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
 
 **Gradle (build.gradle.kts):**
 ```kt
-// Annotation processor
-annotationProcessor("dev.restate:sdk-api-gen:2.4.1")
-
 // For deploying as HTTP service
-implementation("dev.restate:sdk-java-http:2.4.1")
+implementation("dev.restate:sdk-java-http:2.9.0")
 // Or for deploying using AWS Lambda
-implementation("dev.restate:sdk-java-lambda:2.4.1")
+implementation("dev.restate:sdk-java-lambda:2.9.0")
 ```
 
 **Maven**: 
 ```xml Java/Maven
 <properties>
-    <restate.version>2.4.1</restate.version>
+    <restate.version>2.9.0</restate.version>
 </properties>
 <dependencies>
     <!-- For deploying as HTTP service -->
@@ -52,32 +49,16 @@ implementation("dev.restate:sdk-java-lambda:2.4.1")
         <artifactId>sdk-java-http</artifactId>
         <version>${restate.version}</version>
     </dependency>
-    <!-- For deploying using AWS Lambda -->
+    <!-- Or for deploying using AWS Lambda -->
     <dependency>
         <groupId>dev.restate</groupId>
         <artifactId>sdk-java-lambda</artifactId>
         <version>${restate.version}</version>
     </dependency>
 </dependencies>
-<build>
-    <plugins>
-        <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-compiler-plugin</artifactId>
-            <configuration>
-                <annotationProcessorPaths>
-                    <!-- Setup annotation processor -->
-                    <path>
-                        <groupId>dev.restate</groupId>
-                        <artifactId>sdk-api-gen</artifactId>
-                        <version>${restate.version}</version>
-                    </path>
-                </annotationProcessorPaths>
-            </configuration>
-        </plugin>
-    </plugins>
-</build>
 ```
+
+On JDK 23+, pass `--enable-native-access=ALL-UNNAMED` as a JVM argument (or set `Enable-Native-Access: ALL-UNNAMED` in the JAR manifest) to silence the native-access warning printed at startup.
 
 ### Minimal Scaffold
 
@@ -98,9 +79,9 @@ curl localhost:8080/MyService/greet --json '"World"'
 ## Core Concepts
 
 - Restate provides durable execution: if a handler crashes or the process restarts, Restate replays the handler from the last completed step, not from scratch.
-- All handlers receive a Context object (`ctx`) as their first parameter. Use ctx methods for all I/O and side effects.
+- Access all Restate functionality (state, calls, side effects, timers, ...) through the static methods on the `Restate` class (e.g. `Restate.state()`, `Restate.run(...)`, `Restate.sleep(...)`).
 - Handlers take one optional JSON-serializable input parameter and return one JSON-serializable output.
-- Code generation produces typed client classes (e.g., `MyServiceClient`) from annotated service definitions.
+- Call other services through `Restate.service(...)` / `Restate.serviceHandle(...)` (and the virtual-object/workflow variants) with a method reference.
 
 ---
 
@@ -115,8 +96,8 @@ See minimal scaffold above.
 ```java {"CODE_LOAD::java/src/main/java/develop/MyObject.java#here"}
 ```
 
-- **Exclusive handlers** (`@Handler`): only one executes at a time per key. Use for writes.  Receive `ObjectContext`.
-- **Shared handlers** (`@Shared`): run concurrently per key. Use for reads.  Receive `SharedObjectContext`.
+- **Exclusive handlers** (`@Handler`): only one executes at a time per key. Use for writes. Have read/write state access via `Restate.state()`.
+- **Shared handlers** (`@Shared`): run concurrently per key. Use for reads. Have read-only state access.
 
 ### Workflow
 
@@ -130,7 +111,7 @@ See minimal scaffold above.
 
 ## State Management
 
-Never use global variables for state -- it is not durable across restarts. Use `StateKey` with `ctx.get`/`ctx.set` instead (available on `ObjectContext` and `WorkflowContext`):
+Never use global variables for state -- it is not durable across restarts. Use `StateKey` with `Restate.state().get`/`Restate.state().set` instead:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#state"}
 ```
@@ -146,7 +127,10 @@ For generic types, use `TypeRef`:
 
 ### Request-Response Calls
 
-Code generation creates typed client classes from annotated service definitions:
+Two client styles are available:
+
+- **Simple client** (`Restate.service(...)` / `Restate.virtualObject(...)` / `Restate.workflow(...)`): the call is awaited inline and returns the result directly. Use for straightforward request-response.
+- **Handle-based client** (`Restate.serviceHandle(...)` / `Restate.virtualObjectHandle(...)` / `Restate.workflowHandle(...)`, called with a method reference): returns a `DurableFuture` you await explicitly. Use it for invocation options (e.g. idempotency keys), timeouts, or concurrency.
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#service_calls"}
 ```
@@ -170,9 +154,9 @@ Use when the target service type is not available at compile time:
 
 ---
 
-## Side Effects / ctx.run
+## Side Effects / Restate.run
 
-Never call external APIs, databases, or non-deterministic functions directly in a handler. Wrap them in `ctx.run`:
+Never call external APIs, databases, or non-deterministic functions directly in a handler. Wrap them in `Restate.run`:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#durable_steps"}
 ```
@@ -186,7 +170,7 @@ Never call external APIs, databases, or non-deterministic functions directly in 
 
 ## Deterministic Helpers
 
-Never use `Math.random()`, `System.currentTimeMillis()`, or `new Date()` directly -- they break deterministic replay. Use ctx helpers instead:
+Never use `Math.random()`, `System.currentTimeMillis()`, or `new Date()` directly -- they break deterministic replay. Use `Restate.random()` / `Restate.instantNow()` instead:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#deterministic_helpers"}
 ```
@@ -195,7 +179,7 @@ Never use `Math.random()`, `System.currentTimeMillis()`, or `new Date()` directl
 
 ## Durable Timers
 
-Never use `Thread.sleep`. Use `ctx.sleep` for durable delays that survive crashes and restarts:
+Never use `Thread.sleep`. Use `Restate.sleep` for durable delays that survive crashes and restarts:
 
 ```java {"CODE_LOAD::java/src/main/java/develop/skillsmd/Actions.java#durable_timers"}
 ```
@@ -273,7 +257,7 @@ All handler inputs/outputs and state values use Jackson JSON serialization by de
 
 ### Custom Serde
 
-Implement `Serde<T>` for custom serialization when Jackson defaults are not sufficient (binary payloads, non-JSON formats, or types with custom encoding). Pass the serde when declaring a `StateKey`, `DurablePromiseKey`, awakeable, or `ctx.run` call.
+Implement `Serde<T>` for custom serialization when Jackson defaults are not sufficient (binary payloads, non-JSON formats, or types with custom encoding). Pass the serde when declaring a `StateKey`, `DurablePromiseKey`, awakeable, or `Restate.run` call.
 
 ---
 
@@ -313,9 +297,8 @@ Use `Client` to call Restate handlers from outside a Restate context (e.g., from
 
 ## Java-Specific Pitfalls
 
-- **Code generation creates typed client classes** (e.g., `MyServiceClient`) from `@Service`/`@VirtualObject`/`@Workflow` annotations. Use these for type-safe calls.
 - **Use Restate's future combinators, NOT `CompletableFuture`.** Native Java futures break deterministic replay.
-- **Never use `Thread.sleep`, `Math.random()`, or `System.currentTimeMillis()`** -- use Restate context actions instead.
+- **Never use `Thread.sleep`, `Math.random()`, or `System.currentTimeMillis()`** -- use `Restate` SDK actions instead.
 - **Never use global mutable variables for state** -- use Restate's K/V store for durable state.
 - **For detailed API reference:** use the MCP server or JavaDocs.
 
