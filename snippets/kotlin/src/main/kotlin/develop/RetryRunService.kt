@@ -22,7 +22,8 @@ class RetryRunService {
               exponentiationFactor = 2.0f,
               maxDelay = 60.seconds,
               maxAttempts = 10,
-              maxDuration = 5.minutes)
+              maxDuration = 5.minutes,
+          )
       runBlock("write", myRunRetryPolicy) { writeToOtherSystem() }
     } catch (e: TerminalException) {
       // Handle the terminal error after retries exhausted

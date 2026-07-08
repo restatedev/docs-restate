@@ -1,12 +1,9 @@
 plugins {
   application
-  kotlin("jvm") version "2.2.10"
-  kotlin("plugin.serialization") version "2.2.10"
-
-  // The reflection-based API creates proxies for your services, which requires non-final classes.
-  // The all-open plugin makes classes annotated with the Restate annotations open.
-  kotlin("plugin.allopen") version "2.2.10"
-  id("com.diffplug.spotless") version "7.2.1"
+  kotlin("jvm") version "2.4.0"
+  kotlin("plugin.serialization") version "2.4.0"
+  kotlin("plugin.allopen") version "2.4.0"
+  id("com.diffplug.spotless") version "8.8.0"
 }
 
 allOpen {
@@ -16,12 +13,6 @@ allOpen {
 }
 
 repositories {
-  // Snapshots repo
-  maven {
-    name = "Central Portal Snapshots"
-    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
-  }
-
   // Maven local for local testing
   //  mavenLocal()
 
@@ -47,9 +38,6 @@ dependencies {
   implementation(libs.log4j.core)
 }
 
-// Provision and run on JDK 25 (via the foojay toolchain resolver).
-// Kotlin 2.2 cannot emit JVM 25 bytecode yet, so it falls back to JVM 24 bytecode (which runs fine
-// on JDK 25). The Java/Kotlin target-mismatch check is demoted to a warning in gradle.properties.
 kotlin { jvmToolchain(25) }
 
 // Set main class

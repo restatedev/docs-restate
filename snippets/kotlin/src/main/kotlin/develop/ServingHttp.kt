@@ -10,6 +10,7 @@ fun main() {
         bind(MyService())
         bind(MyObject())
         bind(MyWorkflow())
-      })
+      }
+  )
 }
 // <end_here>

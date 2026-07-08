@@ -36,9 +36,13 @@ class RetryRunService {
       runBlock(
           "write",
           RetryPolicy(
-              initialDelay = 500.milliseconds, maxAttempts = 3, exponentiationFactor = 2.0f)) {
-            writeToOtherSystem()
-          }
+              initialDelay = 500.milliseconds,
+              maxAttempts = 3,
+              exponentiationFactor = 2.0f,
+          ),
+      ) {
+        writeToOtherSystem()
+      }
     } catch (e: TerminalException) {
       // Handle the terminal error: undo previous actions and
       // propagate the error back to the caller

@@ -13,6 +13,7 @@ fun main() {
             RestateRequestIdentityVerifier.fromKeys(
                 "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f",
             )
-      })
+      }
+  )
 }
 // <end_here>

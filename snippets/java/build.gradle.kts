@@ -1,16 +1,10 @@
 plugins {
     java
     application
-    id("com.diffplug.spotless") version "7.2.1"
+    id("com.diffplug.spotless") version "8.8.0"
 }
 
 repositories {
-  // Snapshots repo
-  maven {
-    name = "Central Portal Snapshots"
-    url = uri("https://central.sonatype.com/repository/maven-snapshots/")
-  }
-
   // Maven local for local testing
   //  mavenLocal()
 
