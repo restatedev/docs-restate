@@ -214,6 +214,22 @@ restate rules set "*/admins" --unlimited          # admin teams: no limit (overr
 restate rules set "*/*/*"    --concurrency 10      # each individual user (also individual admin users)
 ```
 
+To run an invocation for a user, pass the organization as the scope and `team/user` as the limit key:
+
+```shell
+# alice on the "growth" team in the "acme" org
+curl "localhost:8080/restate/scope/acme/call/Inference/run?limit-key=growth/alice" \
+  --json '{"prompt": "..."}'
+```
+
+This invocation draws from three budgets at once and is admitted only when all have a free slot:
+
+- **acme** (scope): 10000, shared by the whole organization.
+- **growth** (L1): 1000, shared by everyone on the team.
+- **alice** (L2): 10, hers alone.
+
+Her effective limit is the strictest of these, so alice runs at most 10 concurrently. If she were on the `admins` team instead (`limit-key=admins/alice`), the L1 budget would be unlimited, but she would still be capped at 10 by the `*/*/*` rule.
+
 ## Observing flow control
 
 When flow control is enabled, several SQL system tables let you inspect the scheduler, queues, and concurrency limits directly:
