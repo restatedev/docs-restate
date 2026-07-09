@@ -42,6 +42,35 @@ You choose what a scope represents. For example, you might scope by:
 
 You attach a scope to an invocation by sending it through a [scoped ingress endpoint](#applying-concurrency-limits), and you define limits per scope through the [rule book](#configuring-concurrency-limits).
 
+A scope value follows a restricted format: only the characters `[a-zA-Z0-9_.-]`, non-empty, and at most 36 characters long.
+
+<Tip title="Choose scopes with enough cardinality">
+    A scope doubles as a **sharding key**: Restate shards an invocation's flow-control state under a hash of its scope.
+    A scope with very low cardinality (a single constant, or a handful of distinct values) concentrates all of that traffic and scheduling onto a few partitions, which can create a hot spot.
+</Tip>
+
+## Limit keys
+
+Within a scope, a **limit key** gives you a finer, hierarchical level of concurrency control.
+Where a scope is a single namespace, a limit key subdivides that namespace into up to two nested levels, so you can cap concurrency per subgroup without creating a separate scope for each one.
+
+A limit key has one or two levels separated by `/`:
+
+- `tenant1` targets a single level (L1) under the scope.
+- `tenant1/user42` targets two levels (L1 and L2) under the scope.
+
+An invocation that carries a limit key counts against *every* level it touches at the same time.
+A `tenant1/user42` invocation draws from the scope budget, the `tenant1` (L1) budget, and the `tenant1/user42` (L2) budget simultaneously, and is admitted only once all of them have a free slot.
+The effective limit is therefore the strictest of the matching rules.
+
+A limit key always requires a scope. Restate rejects an invocation that carries a limit key but no scope.
+
+<Note title="Limit keys don't change invocation identity">
+    A limit key only influences concurrency. It is **not** part of an invocation's identity: two calls to the same target with the same scope and object key but different limit keys still address the *same* resource instance (for example, the same Virtual Object). The limit key never routes to a different object.
+</Note>
+
+Each level of a limit key follows the same restricted value format as a scope: only the characters `[a-zA-Z0-9_.-]`, non-empty, and at most 36 characters long.
+
 ## Enabling flow control
 
 Flow control is disabled by default. Enable it in your server configuration:
@@ -70,12 +99,24 @@ Concurrency limits are defined in a cluster-wide **rule book**.
 A rule pairs a *pattern*, which selects the scopes it applies to, with a set of *limits*.
 The only limit available today is `concurrency`: the maximum number of invocations that may run concurrently for a matching scope.
 
-A pattern is either an exact scope or the wildcard `*`:
+A pattern is a `/`-separated path that mirrors the scope and [limit key](#limit-keys) hierarchy: `scope`, `scope/l1`, or `scope/l1/l2`.
+Each component is either an exact value or the wildcard `*`:
 
-- `*` matches every scope and acts as a default for scopes without their own rule.
-- `checkout` matches a single, specific scope.
+| Pattern | Matches |
+| --- | --- |
+| `*` | Any scope. Acts as a default for scopes without their own rule. |
+| `checkout` | One specific scope. |
+| `checkout/*` | Any L1 limit key under the `checkout` scope. |
+| `checkout/premium` | The L1 limit key `premium` under `checkout`. |
+| `checkout/premium/*` | Any L2 limit key under `checkout/premium`. |
+| `*/premium` | The L1 limit key `premium` under any scope. |
 
-When both a wildcard and an exact-scope pattern match an invocation, the more specific exact-scope rule wins.
+A rule only applies to invocations at its own depth: a `scope/l1` rule limits the L1 counter, and a `scope/l1/l2` rule limits the L2 counter.
+An invocation carrying a two-level limit key is checked against all three levels at once, each against its own most specific matching rule.
+
+When several patterns match the same level, the most specific one wins.
+An exact component beats a wildcard, and specificity is ranked from the scope down: scope first, then L1, then L2.
+So `checkout/premium` takes precedence over `checkout/*`, which takes precedence over `*/premium`.
 
 <Warning title="A `*` limit is not a global pool">
     A concurrency limit always applies **per scope**, never globally, including for the `*` wildcard.
@@ -92,6 +133,11 @@ Manage rules dynamically with the `restate rules` CLI commands.
 # 50-concurrency cap for the "checkout" scope.
 restate rules set "*" --concurrency 1000 --description "global default"
 restate rules set "checkout" --concurrency 50
+
+# Cap each L1 limit key under "checkout" at 5 concurrent invocations,
+# and give any L2 key its own budget of 2.
+restate rules set "checkout/*" --concurrency 5
+restate rules set "checkout/*/*" --concurrency 2
 
 # Inspect what's configured
 restate rules list                # one row per rule
@@ -130,10 +176,59 @@ curl localhost:8080/restate/scope/checkout/call/OrderService/checkout \
 
 Matching invocations are throttled to the configured `concurrency` and held in their queue until a slot frees up.
 
+### Adding a limit key
+
+To also place an invocation under a [limit key](#limit-keys), pass it with the `limit-key` query parameter or the `x-restate-limit-key` header.
+Separate the two levels with `/`:
+
+<CodeGroup>
+
+    ```shell Query parameter
+    curl "localhost:8080/restate/scope/checkout/call/OrderService/checkout?limit-key=premium/order-123" \
+      --json '{"orderId": "order-123"}'
+    ```
+
+    ```shell Header
+    curl localhost:8080/restate/scope/checkout/call/OrderService/checkout \
+      -H 'x-restate-limit-key: premium/order-123' \
+      --json '{"orderId": "order-123"}'
+    ```
+
+</CodeGroup>
+
+A limit key always requires a scope: sending one without a `scope/{scopeKey}` segment is rejected.
+
 <Info>
     Invocations sent through the non-scoped endpoints (`/restate/call/...` and `/restate/send/...`) are not subject to any scope-based limit.
     See [HTTP invocation](/services/invocation/http) for the full set of ingress endpoints.
 </Info>
+
+## Example: a multi-tenant inference platform
+
+Say the **scope** is an organization, **L1** is a team, and **L2** is a user. One rule book covers every organization through wildcards:
+
+```bash
+restate rules set "*"        --concurrency 10000  # each organization
+restate rules set "*/*"      --concurrency 1000   # each team in any org
+restate rules set "*/admins" --unlimited          # admin teams: no limit (overrules "*/*")
+restate rules set "*/*/*"    --concurrency 10      # each individual user (also individual admin users)
+```
+
+To run an invocation for a user, pass the organization as the scope and `team/user` as the limit key:
+
+```shell
+# alice on the "growth" team in the "acme" org
+curl "localhost:8080/restate/scope/acme/call/Inference/run?limit-key=growth/alice" \
+  --json '{"prompt": "..."}'
+```
+
+This invocation draws from three budgets at once and is admitted only when all have a free slot:
+
+- **acme** (scope): 10000, shared by the whole organization.
+- **growth** (L1): 1000, shared by everyone on the team.
+- **alice** (L2): 10, hers alone.
+
+Her effective limit is the strictest of these, so alice runs at most 10 concurrently. If she were on the `admins` team instead (`limit-key=admins/alice`), the L1 budget would be unlimited, but she would still be capped at 10 by the `*/*/*` rule. If we want individual admins to have higher limits (say 100), we can add a rule on `*/admins/*`.
 
 ## Observing flow control
 
@@ -142,7 +237,7 @@ When flow control is enabled, several SQL system tables let you inspect the sche
 | Table | What it shows |
 | --- | --- |
 | `sys_rules` | The configured rule book: one row per rule with its pattern, concurrency limit, description, disabled flag, version, and last-modified time. |
-| `sys_user_limits` | Per-scope concurrency counters: current usage, configured limit, available capacity, and the matching rule pattern. |
+| `sys_user_limits` | Concurrency counters at every level (scope, L1, and L2): the scope and limit-key components, the hierarchy level, current usage, configured limit, available capacity, and the matching rule pattern. |
 | `sys_vqueues` | One row per entry across all queue stages, with its status, attempt counters, and lifecycle timestamps. |
 | `sys_vqueue_meta` | Aggregate statistics per queue: scope, service name, per-stage entry counts, and timing averages. |
 | `sys_scheduler` | Real-time scheduler state for each queue's head entry: queue depth, scheduler status, and what it is blocked on. |
