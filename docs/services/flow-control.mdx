@@ -47,9 +47,6 @@ A scope value follows a restricted format: only the characters `[a-zA-Z0-9_.-]`,
 <Tip title="Choose scopes with enough cardinality">
     A scope doubles as a **sharding key**: Restate shards an invocation's flow-control state under a hash of its scope.
     A scope with very low cardinality (a single constant, or a handful of distinct values) concentrates all of that traffic and scheduling onto a few partitions, which can create a hot spot.
-
-    Prefer scopes that spread across many values, such as a tenant or customer ID.
-    When you need a coarse grouping together with a finer per-subgroup limit, reach for a well-distributed scope plus a [limit key](#limit-keys) rather than a single low-cardinality scope.
 </Tip>
 
 ## Limit keys
@@ -205,6 +202,17 @@ A limit key always requires a scope: sending one without a `scope/{scopeKey}` se
     Invocations sent through the non-scoped endpoints (`/restate/call/...` and `/restate/send/...`) are not subject to any scope-based limit.
     See [HTTP invocation](/services/invocation/http) for the full set of ingress endpoints.
 </Info>
+
+## Example: a multi-tenant inference platform
+
+Say the **scope** is an organization, **L1** is a team, and **L2** is a user. One rule book covers every organization through wildcards:
+
+```bash
+restate rules set "*"        --concurrency 10000  # each organization
+restate rules set "*/*"      --concurrency 1000   # each team in any org
+restate rules set "*/admins" --unlimited          # admin teams: no limit (overrules "*/*")
+restate rules set "*/*/*"    --concurrency 10      # each individual user (also individual admin users)
+```
 
 ## Observing flow control
 
