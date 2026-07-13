@@ -82,10 +82,30 @@ The foundation is the only layer you deploy manually. It creates the networking,
         In the target GCP project, before you apply:
 
         - **Run as a project admin.** Authenticate the identity that will run Terraform and set it as your application-default credentials: `gcloud auth application-default login`. It needs to create VPC networking, GKE, service accounts and IAM bindings, Secret Manager secrets, Cloud DNS, and Artifact Registry, and to enable services.
-        - **Enable the required APIs:** Compute Engine, Kubernetes Engine, Secret Manager, Cloud Resource Manager, Cloud DNS, and Artifact Registry.
         - **Attach a billing account** to the project.
         - **Create a Cloud Storage bucket you control** for Terraform state (private, with versioning enabled). Keep the state — while it is reconstructable, it is your record of the install.
-        - **Check your organization policies.** Policies such as *"no public IPs on VMs"* or a *deny-egress* rule will block GKE and firewall provisioning. If one blocks the apply, override it at the project level (or coordinate with Restate) and retry.
+        - **Enable the required APIs.** Enable them all up front — the apply fails fast on the first disabled API, so enabling one at a time means repeated failures:
+
+          ```bash
+          gcloud services enable \
+            compute.googleapis.com \
+            container.googleapis.com \
+            iam.googleapis.com \
+            secretmanager.googleapis.com \
+            cloudresourcemanager.googleapis.com \
+            dns.googleapis.com \
+            artifactregistry.googleapis.com \
+            --project <your-project-id>
+          ```
+
+        - **Allow the required egress.** The deployment agent has no public IP and reaches out through Cloud NAT. If you enforce a deny-egress policy, allow outbound `443` to Google APIs (`*.googleapis.com`), the image hosts (`*.pkg.dev`, `*.gcr.io`), Let's Encrypt (ACME), DNS (`8.8.8.8`/`1.1.1.1` on `53`), and Restate's control plane and metrics endpoints. Without egress the agent never connects and provisioning stalls.
+        - **Check your organization policies** — the most common first-install blocker. List what's enforced on the project and share it with Restate before you apply:
+
+          ```bash
+          gcloud org-policies list --project <your-project-id>
+          ```
+
+          Known blockers: *no public IPs on VMs* and *deny-egress* (covered above), and the GKE managed set (`constraints/container.managed.*`) — in particular `disableRBACSystemBindings`, which rejects the cluster unless the insecure default RBAC bindings are turned off. Where a policy blocks provisioning, override it for the project (or coordinate with Restate) and retry.
       </Step>
 
       <Step title="Get your configuration">

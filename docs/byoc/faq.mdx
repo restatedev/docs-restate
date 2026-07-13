@@ -26,6 +26,34 @@ description: "Frequently asked questions about Restate Cloud BYOC architecture, 
   Not currently. Restate's ability to offer SLAs on availability and patching relies on having complete control over the infrastructure configuration. An enterprise distribution for self-managed Kubernetes may come in the future.
 </Accordion>
 
+## Installation (GCP)
+
+<Accordion title="`terraform apply` fails with `Error 403: ... API ... has not been used in project ... or it is disabled`">
+  A required Google API isn't enabled in your project. Enable the full set up front — the apply fails on the first disabled API, so enabling them one at a time means repeated failures:
+
+  ```bash
+  gcloud services enable \
+    compute.googleapis.com container.googleapis.com iam.googleapis.com \
+    secretmanager.googleapis.com cloudresourcemanager.googleapis.com \
+    dns.googleapis.com artifactregistry.googleapis.com \
+    --project <your-project-id>
+  ```
+
+  Wait a minute or two for propagation, then re-run.
+</Accordion>
+
+<Accordion title="`terraform apply` fails with `Operation denied by org policy` / `CUSTOM_ORG_POLICY_DENIED`">
+  An organization policy is blocking a resource — most often the GKE cluster. Common cases: *no public IPs on VMs*, *deny-egress*, and the GKE managed set (`constraints/container.managed.*`, e.g. `disableRBACSystemBindings`). List what's enforced on the project, then either exempt the project for the named constraint or coordinate with Restate:
+
+  ```bash
+  gcloud org-policies list --project <your-project-id>
+  ```
+</Accordion>
+
+<Accordion title="The foundation applied, but my region never activates">
+  Your `terraform apply` only creates the foundation (networking, IAM, the deployment agent). The agent then phones home and Restate provisions the cluster and components — this takes roughly 30 minutes. If it stalls, the most common cause is egress: the agent has no public IP and must reach Google APIs, the image registry, and Restate's control plane through Cloud NAT. Confirm your egress policy allows it (see the Installation guide), then contact Restate.
+</Accordion>
+
 ## Security
 
 <Accordion title="How do you prevent lateral movement if the control plane is compromised?">
