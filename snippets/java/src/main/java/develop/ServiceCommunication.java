@@ -117,6 +117,35 @@ public class ServiceCommunication {
     // <end_delayed>
   }
 
+  private void scope() {
+    String request = "";
+    String workflowId = "";
+    String objectKey = "";
+
+    // <start_scope>
+    // Route a call into a named scope
+    String svcResponse = Restate.scope("tenant-123").service(MyService.class).myHandler(request);
+
+    // Add a limit key for hierarchical concurrency limits within the scope
+    String wfResponse =
+        Restate.scope("tenant-123")
+            .workflowHandle(MyWorkflow.class, workflowId)
+            .call(MyWorkflow::run, request, InvocationOptions.limitKey("premium/user42"))
+            .await();
+
+    // Scoped Virtual Object calls need
+    // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+    String objResponse =
+        Restate.scope("tenant-123").virtualObject(MyObject.class, objectKey).myHandler(request);
+    // <end_scope>
+
+    // <start_scope_request>
+    // The scope and limit key the invocation was submitted with
+    String scope = Restate.request().scope();
+    String limitKey = Restate.request().limitKey();
+    // <end_scope_request>
+  }
+
   private void orderingGuarantees() {
     String objectKey = "";
     // <start_ordering>

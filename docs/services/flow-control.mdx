@@ -31,7 +31,7 @@ Planned follow-ups include throttling and rate limits, invocation priorities, an
 
 ## Scopes
 
-A **scope** is a namespace for concurrency control.
+A **scope** is a namespace that Restate applies concurrency limits over, and that also namespaces the **identity** of everything inside it.
 Every invocation can carry a scope, and concurrency limits are applied per scope: all invocations sharing the same scope draw from the same concurrency budget.
 
 You choose what a scope represents. For example, you might scope by:
@@ -39,6 +39,11 @@ You choose what a scope represents. For example, you might scope by:
 - A tenant or customer, to give each one a fair share of capacity.
 - A downstream dependency, to bound how many invocations hit it at once.
 - A class of work, such as `checkout` or `ai-agent`, to cap how much of it runs concurrently.
+
+A scope is more than a concurrency bucket. It becomes **part of the identity of every invocation and resource inside it**, so the same thing addressed under two different scopes is isolated:
+
+- **Idempotency is tracked per scope.** The same idempotency key deduplicates only within one scope. Reused under a different scope, it starts a separate invocation.
+- **Virtual Object and Workflow keys are per scope.** A `Cart` object with key `"a"` under scope `bob` is a different instance, with its own state and queue, from `Cart` `"a"` under scope `joe`. (Routing scoped calls to Virtual Objects requires the [extra opt-in](#enabling-flow-control).)
 
 You attach a scope to an invocation by sending it through a [scoped ingress endpoint](#applying-concurrency-limits), and you define limits per scope through the [rule book](#configuring-concurrency-limits).
 
@@ -78,6 +83,8 @@ Flow control is disabled by default. Enable it in your server configuration:
 ```toml restate.toml
 experimental-enable-protocol-v7 = true
 experimental-enable-vqueues = true
+# Only to route scoped calls to Virtual Objects
+experimental-enable-scoped-virtual-objects = true
 ```
 
 Or via the environment variable:
@@ -85,6 +92,8 @@ Or via the environment variable:
 ```shell
 RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true
 RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true
+# Only to route scoped calls to Virtual Objects
+RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true
 ```
 
 <Warning title="Enable only on fresh clusters">
@@ -202,6 +211,16 @@ A limit key always requires a scope: sending one without a `scope/{scopeKey}` se
     Invocations sent through the non-scoped endpoints (`/restate/call/...` and `/restate/send/...`) are not subject to any scope-based limit.
     See [HTTP invocation](/services/invocation/http) for the full set of ingress endpoints.
 </Info>
+
+### From an SDK handler
+
+Service-to-service calls made from a handler can carry a scope and limit key too, so the invocations they trigger count against the same rule book.
+Each SDK exposes a scoped client for this:
+
+- [TypeScript](/develop/ts/service-communication#flow-control-scope-and-limit-key)
+- [Python](/develop/python/service-communication#flow-control-scope-and-limit-key)
+- [Java / Kotlin](/develop/java/service-communication#flow-control-scope-and-limit-key)
+- [Go](/develop/go/service-communication#flow-control-scope-and-limit-key)
 
 ## Example: a multi-tenant inference platform
 

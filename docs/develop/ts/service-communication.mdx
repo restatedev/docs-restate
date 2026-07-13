@@ -172,6 +172,51 @@ ctx.serviceSendClient(myService).myHandler(
 Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
 However, if multiple handlers might call the same service independently, you can use an idempotency key to ensure deduplication across those calls.
 
+## Flow control: scope and limit key
+
+<Note title="Preview feature">
+    Scope and limit key are a preview feature and require restate-server 1.7 with [flow control enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+[Flow control](/services/flow-control) caps how many invocations run concurrently within a **scope**, with optional hierarchical **limit keys**.
+Route a call into a scope with `ctx.scope(...)`, and add a `limitKey` for a finer, per subgroup limit within that scope:
+
+```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#scope"} 
+// Route a call into a named scope
+const svcResponse = await ctx
+  .scope("tenant-123")
+  .serviceClient(myService)
+  .myHandler("Hi");
+
+// Add a limit key for hierarchical concurrency limits within the scope
+const wfResponse = await ctx
+  .scope("tenant-123")
+  .workflowClient(myWorkflow, "wf-id")
+  .run("Hi", restate.rpc.opts({ limitKey: "premium/user42" }));
+
+// Scoped Virtual Object calls need
+// RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+const objResponse = await ctx
+  .scope("tenant-123")
+  .objectClient(myObject, "Mary")
+  .myHandler("Hi");
+
+// Fire-and-forget sends can be scoped too
+ctx.scope("tenant-123").serviceSendClient(myService).myHandler("Hi");
+```
+
+You can read the scope and limit key an invocation was submitted with from the request:
+
+```ts {"CODE_LOAD::ts/src/develop/service_communication.ts#scope_request"} 
+// The scope and limit key the invocation was submitted with
+const scope = ctx.request().scope;
+const limitKey = ctx.request().limitKey;
+```
+
+The same scoping is available on the [SDK clients](/services/invocation/clients/typescript-sdk) for calls from outside Restate, via `connect({ url }).scope("tenant-123")`.
+
+See [Flow control](/services/flow-control) for how scopes, limit keys, and the concurrency rule book work.
+
 ## Attach to an invocation
 
 To wait for or get the result of a previously sent message:

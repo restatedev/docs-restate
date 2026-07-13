@@ -77,6 +77,36 @@ class ServiceCommunication {
     // <end_cancel>
   }
 
+  suspend fun scope() {
+    val request = ""
+    val objectKey = ""
+    val workflowId = ""
+
+    // <start_scope>
+    // Route a call into a named scope
+    val svcResponse = scope("tenant-123").service<MyService>().myHandler(request)
+
+    // Add a limit key for hierarchical concurrency limits within the scope
+    val wfResponse =
+        scope("tenant-123")
+            .toWorkflow<MyWorkflow>(workflowId)
+            .request { run(request) }
+            .options { limitKey = "premium/user42" }
+            .call()
+            .await()
+
+    // Scoped Virtual Object calls need
+    // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+    val objResponse = scope("tenant-123").virtualObject<MyObject>(objectKey).myHandler(request)
+    // <end_scope>
+
+    // <start_scope_request>
+    // The scope and limit key the invocation was submitted with
+    val invocationScope = request().scope
+    val invocationLimitKey = request().limitKey
+    // <end_scope_request>
+  }
+
   suspend fun generic() {
     val request = ""
 

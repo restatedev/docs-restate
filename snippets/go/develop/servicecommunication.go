@@ -111,6 +111,43 @@ func (Router) Greet3(ctx restate.Context, name string) error {
 	return nil
 }
 
+func (Router) GreetScoped(ctx restate.Context, name string) error {
+	// <start_scope>
+	// Route a call into a named scope with WithScope (a client option)
+	svcResponse, err := restate.Service[string](ctx, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+		Request("Hi")
+
+	// Add a limit key for hierarchical concurrency limits within the scope
+	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run", restate.WithScope("tenant-123")).
+		Request("Hi", restate.WithLimitKey("premium/user42"))
+
+	// Scoped Virtual Object calls need
+	// RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler", restate.WithScope("tenant-123")).
+		Request("Hi")
+
+	// Fire-and-forget sends can be scoped too
+	restate.ServiceSend(ctx, "MyService", "MyHandler", restate.WithScope("tenant-123")).Send("Hi")
+	// <end_scope>
+
+	// <start_scope_request>
+	if err != nil {
+		return err
+	}
+
+	// The scope and limit key the invocation was submitted with
+	scope := ctx.Request().Scope
+	limitKey := ctx.Request().LimitKey
+	// <end_scope_request>
+
+	_ = svcResponse
+	_ = wfResponse
+	_ = objResponse
+	_ = scope
+	_ = limitKey
+	return nil
+}
+
 func (Router) Greet4(ctx restate.Context, name string) error {
 	// <start_cancel>
 	// Execute the request and retrieve the invocation id

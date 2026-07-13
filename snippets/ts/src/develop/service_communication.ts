@@ -134,6 +134,37 @@ const service = restate.service({
       ctx.cancel(invocationId);
       // <end_cancel>
     },
+    greetScoped: async (ctx: restate.Context) => {
+      // <start_scope>
+      // Route a call into a named scope
+      const svcResponse = await ctx
+        .scope("tenant-123")
+        .serviceClient(myService)
+        .myHandler("Hi");
+
+      // Add a limit key for hierarchical concurrency limits within the scope
+      const wfResponse = await ctx
+        .scope("tenant-123")
+        .workflowClient(myWorkflow, "wf-id")
+        .run("Hi", restate.rpc.opts({ limitKey: "premium/user42" }));
+
+      // Scoped Virtual Object calls need
+      // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+      const objResponse = await ctx
+        .scope("tenant-123")
+        .objectClient(myObject, "Mary")
+        .myHandler("Hi");
+
+      // Fire-and-forget sends can be scoped too
+      ctx.scope("tenant-123").serviceSendClient(myService).myHandler("Hi");
+      // <end_scope>
+
+      // <start_scope_request>
+      // The scope and limit key the invocation was submitted with
+      const scope = ctx.request().scope;
+      const limitKey = ctx.request().limitKey;
+      // <end_scope_request>
+    },
     greet6: async (ctx: restate.Context) => {
       // <start_export_definition>
       const response = await ctx
