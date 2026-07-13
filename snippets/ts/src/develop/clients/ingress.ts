@@ -77,6 +77,31 @@ const myPlainTSFunction3 = async () => {
   // <end_delayed_call_node>
 };
 
+const scopedClient = async () => {
+  const request = { greeting: "Hi" };
+  // <start_scope>
+  const restateClient = clients.connect({ url: "http://localhost:8080" });
+
+  // Route a call into a named scope
+  const greet = await restateClient
+    .scope("tenant-123")
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(request);
+
+  // Add a limit key for a hierarchical concurrency limit within the scope
+  const count = await restateClient
+    .scope("tenant-123")
+    .objectClient<MyObject>({ name: "MyObject" }, "Mary")
+    .greet(request, clients.rpc.opts({ limitKey: "premium/user42" }));
+
+  // Fire-and-forget sends can be scoped too
+  await restateClient
+    .scope("tenant-123")
+    .serviceSendClient<MyService>({ name: "MyService" })
+    .greet(request);
+  // <end_scope>
+};
+
 const servicesIdempotent = async () => {
   const request = { greeting: "Hi" };
   const restateClient = clients.connect({ url: "http://localhost:8080" });

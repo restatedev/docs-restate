@@ -179,6 +179,35 @@ func (c *IngressClient) workflowAttach() error {
 	return nil
 }
 
+func (c *IngressClient) scopedClient() error {
+	var input MyInput
+	input.Name = "Hi"
+
+	// <start_scope>
+	restateClient := restateingress.NewClient("http://localhost:8080")
+
+	// Route a call into a named scope with WithScope (a client option)
+	svcResponse, err := restateingress.Service[*MyInput, *MyOutput](
+		restateClient, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+		Request(context.Background(), &input)
+
+	// Add a limit key for a hierarchical concurrency limit within the scope
+	objResponse, err := restateingress.Object[*MyInput, *MyOutput](
+		restateClient, "MyObject", "Mary", "MyHandler", restate.WithScope("tenant-123")).
+		Request(context.Background(), &input, restate.WithLimitKey("premium/user42"))
+
+	// Fire-and-forget sends can be scoped too
+	_, err = restateingress.ServiceSend[*MyInput](
+		restateClient, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+		Send(context.Background(), &input)
+	// <end_scope>
+
+	_ = svcResponse
+	_ = objResponse
+	_ = err
+	return nil
+}
+
 // Mock data structures
 type MyInput struct {
 	Name string

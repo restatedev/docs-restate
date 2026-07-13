@@ -147,4 +147,28 @@ public class IngressClient {
     // use it to attach or peek (see above)
     // <end_workflow_attach>
   }
+
+  public void scopedClient() {
+    // <start_scope>
+    Client restateClient = Client.connect("http://localhost:8080");
+
+    // Route a call into a named scope
+    String svcResponse =
+        restateClient.scope("tenant-123").service(MyService.class).myHandler("Hi");
+
+    // Add a limit key for a hierarchical concurrency limit within the scope
+    String objResponse =
+        restateClient
+            .scope("tenant-123")
+            .virtualObjectHandle(MyObject.class, "Mary")
+            .call(MyObject::myHandler, "Hi", InvocationOptions.limitKey("premium/user42"))
+            .response();
+
+    // Fire-and-forget sends can be scoped too
+    restateClient
+        .scope("tenant-123")
+        .serviceHandle(MyService.class)
+        .send(MyService::myHandler, "Hi");
+    // <end_scope>
+  }
 }

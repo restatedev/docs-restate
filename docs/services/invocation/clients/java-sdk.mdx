@@ -175,6 +175,60 @@ The call options, with which we set the idempotency key, also let you add other 
     Check out the [service configuration docs](/services/configuration) to tune the retention time.
 </Info>
 
+## Flow control: scope and limit key
+
+<Note title="Preview feature">
+    Scope and limit key are a preview feature and require restate-server 1.7 with [flow control enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+[Flow control](/services/flow-control) caps how many invocations run concurrently within a **scope**, with optional hierarchical **limit keys**.
+Route a call into a scope with `.scope(...)` on the client, and add a limit key via `InvocationOptions.limitKey(...)` (Java) or `.options { limitKey = ... }` (Kotlin) for a finer, per subgroup limit within that scope:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/IngressClient.java#scope"} 
+Client restateClient = Client.connect("http://localhost:8080");
+
+// Route a call into a named scope
+String svcResponse =
+    restateClient.scope("tenant-123").service(MyService.class).myHandler("Hi");
+
+// Add a limit key for a hierarchical concurrency limit within the scope
+String objResponse =
+    restateClient
+        .scope("tenant-123")
+        .virtualObjectHandle(MyObject.class, "Mary")
+        .call(MyObject::myHandler, "Hi", InvocationOptions.limitKey("premium/user42"))
+        .response();
+
+// Fire-and-forget sends can be scoped too
+restateClient
+    .scope("tenant-123")
+    .serviceHandle(MyService.class)
+    .send(MyService::myHandler, "Hi");
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/IngressClient.kt#scope"} 
+val restateClient = Client.connect("http://localhost:8080")
+
+// Route a call into a named scope
+val svcResponse = restateClient.scope("tenant-123").service<MyService>().myHandler("Hi")
+
+// Add a limit key for a hierarchical concurrency limit within the scope
+val objResponse =
+    restateClient
+        .scope("tenant-123")
+        .toVirtualObject<MyObject>("Mary")
+        .request { myHandler("Hi") }
+        .options { limitKey = "premium/user42" }
+        .call()
+        .response()
+
+// Fire-and-forget sends can be scoped too
+restateClient.scope("tenant-123").toService<MyService>().request { myHandler("Hi") }.send()
+```
+</CodeGroup>
+
+See [Flow control](/services/flow-control) for how scopes, limit keys, and the concurrency rule book work.
+
 ## Retrieve result of invocations and workflows
 
 You can use the client library to retrieve the results of invocations **with an idempotency key** or workflows.
