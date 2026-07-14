@@ -16,6 +16,7 @@ You can connect your services to Restate Cloud in several ways, depending on whe
 - Connect [serverless functions (Vercel, Cloudflare Workers, Deno Deploy, etc.) or other public endpoints](/cloud/connecting-services#serverless-functions-and-other-public-endpoints), by signing requests with your cloud environment's public key.
 - Connect [AWS Lambda functions](#aws-lambda-functions), by granting Restate Cloud permission to assume a role in your AWS account.
 - Connect [services in private environments](#services-in-private-environments), by setting up a tunnel.
+- Connect [Go services with an in-process tunnel](#in-process-tunnel-for-go-services), by embedding the tunnel client directly in your Go binary.
 
 If you prefer a video walkthrough, check out this webinar on getting started with cloud:
 
@@ -370,6 +371,96 @@ You can now invoke your service as usual.
 
 <img src="/img/cloud/tunnel_deployment.png" alt="Invocation overview" />
 
+
+## In-process tunnel for Go services
+
+<Note>
+  This feature requires `github.com/restatedev/sdk-go/x/tunnel` v0.1.0 or later and `github.com/restatedev/sdk-go` v1.0.1 or later.
+</Note>
+
+Go services can connect to Restate Cloud without running a separate tunnel container by embedding the tunnel client directly in the process. Instead of calling `server.Restate.Start` (which listens for inbound HTTP connections), you wrap the server with `tunnel.NewTunnel` and call `Start`. The SDK dials out to Restate Cloud over TLS and receives invocations over the same outbound connection — no inbound port required.
+
+This is the Go equivalent of the TypeScript [`@restatedev/restate-sdk-tunnel`](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-tunnel) package.
+
+### Install
+
+```bash
+go get github.com/restatedev/sdk-go/x/tunnel@v0.1.1
+```
+
+### Usage
+
+```go {\"CODE_LOAD::go/develop/tunnel.go#tunnel\"}
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+
+	restate "github.com/restatedev/sdk-go"
+	"github.com/restatedev/sdk-go/server"
+	"github.com/restatedev/sdk-go/x/tunnel"
+)
+
+type Greeter struct{}
+
+func (Greeter) Greet(ctx restate.Context, name string) (string, error) {
+	return "You said hi to " + name + "!", nil
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	srv := server.NewRestate().
+		Bind(restate.Reflect(Greeter{}))
+
+	err := tunnel.NewTunnel(srv,
+		// Config can be set via options or environment variables (see godoc).
+		tunnel.WithRegion("us"),
+		tunnel.WithEnvironment("env_...", "publickeyv1_..."),
+		tunnel.WithAuthToken(os.Getenv("RESTATE_AUTH_TOKEN")),
+		tunnel.WithTunnelName("greeter-v1"),
+	).Start(ctx) // blocks until ctx is cancelled, then drains and closes
+
+	if err != nil {
+		slog.Error("tunnel exited with error", "err", err.Error())
+		os.Exit(1)
+	}
+}
+```
+
+Once started, the tunnel logs the deployment URL on connect. Register it with Restate:
+
+```bash
+restate deployments register <deployment-url>
+```
+
+### Options and environment variables
+
+All options can be provided either in code (via `tunnel.With*` functions) or via environment variables. See the [godoc](https://pkg.go.dev/github.com/restatedev/sdk-go/x/tunnel) for the full list.
+
+| Option | Environment variable | Description |
+| ------ | -------------------- | ----------- |
+| `WithRegion` | `RESTATE_INPROC_CLOUD_REGION` | Restate Cloud region (`us`, `eu`, or a BYOC region) |
+| `WithEnvironment` | `RESTATE_INPROC_ENVIRONMENT_ID` / `RESTATE_INPROC_SIGNING_PUBLIC_KEY` | Environment ID (`env_...`) and signing public key (`publickeyv1_...`) |
+| `WithAuthToken` | `RESTATE_INPROC_AUTH_TOKEN` / `RESTATE_INPROC_AUTH_TOKEN_FILE` | Cloud API key with `Full` role |
+| `WithTunnelName` | `RESTATE_INPROC_TUNNEL_NAME` | Unique name for this deployment (used in the tunnel URL) |
+
+### Zero-config under the Restate Operator
+
+When running on Kubernetes with `tunnelMode: in-process` set on a `RestateDeployment`, the operator injects the `RESTATE_INPROC_*` environment variables automatically. Your code only needs:
+
+```go
+err := tunnel.NewTunnel(srv).Start(ctx)
+```
+
+Mount your API key secret and point `RESTATE_INPROC_AUTH_TOKEN_FILE` at the token file. The operator handles registration and per-revision drain automatically.
+
+See the [Kubernetes Operator changelog](/references/changelog/operator#tunnelmode-in-process-for-restate-cloud-deployments) for full details on `tunnelMode: in-process`.
 
 ## Advanced topics
 
