@@ -13,32 +13,23 @@ func (Router) Greet(ctx restate.Context, name string) error {
 	// To call a Service:
 	svcResponse, err := restate.Service[string](ctx, "MyService", "MyHandler").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 
 	// To call a Virtual Object:
 	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 
 	// To call a Workflow:
 	// `run` handler — can only be called once per workflow ID
 	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 	// Other handlers can be called anytime within workflow retention
 	status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
 		Request("Hi again")
+	// <end_request_response>
+
 	if err != nil {
 		return err
 	}
-	// <end_request_response>
-
 	_ = svcResponse
 	_ = objResponse
 	_ = wfResponse
@@ -130,11 +121,11 @@ func (Router) GreetScoped(ctx restate.Context, name string) error {
 	restate.ServiceSend(ctx, "MyService", "MyHandler", restate.WithScope("tenant-123")).Send("Hi")
 	// <end_scope>
 
-	// <start_scope_request>
 	if err != nil {
 		return err
 	}
 
+	// <start_scope_request>
 	// The scope and limit key the invocation was submitted with
 	scope := ctx.Request().Scope
 	limitKey := ctx.Request().LimitKey
