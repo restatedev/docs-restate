@@ -122,6 +122,36 @@ The call options, with which we set the idempotency key, also let you add other 
     Check out the [service configuration docs](/services/configuration) to tune the retention time.
 </Info>
 
+## Flow control: scope and limit key
+
+<Note title="Preview feature">
+    Scope and limit key are a preview feature and require restate-server 1.7 with [flow control enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+[Flow control](/services/flow-control) caps how many invocations run concurrently within a **scope**, with optional hierarchical **limit keys**.
+Route a call into a scope with the `restate.WithScope(...)` client option, and add a `restate.WithLimitKey(...)` request option for a finer, per subgroup limit within that scope:
+
+```go {"CODE_LOAD::go/develop/ingressclients.go#scope"} 
+restateClient := restateingress.NewClient("http://localhost:8080")
+
+// Route a call into a named scope with WithScope (a client option)
+svcResponse, err := restateingress.Service[*MyInput, *MyOutput](
+  restateClient, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+  Request(context.Background(), &input)
+
+// Add a limit key for a hierarchical concurrency limit within the scope
+objResponse, err := restateingress.Object[*MyInput, *MyOutput](
+  restateClient, "MyObject", "Mary", "MyHandler", restate.WithScope("tenant-123")).
+  Request(context.Background(), &input, restate.WithLimitKey("premium/user42"))
+
+// Fire-and-forget sends can be scoped too
+_, err = restateingress.ServiceSend[*MyInput](
+  restateClient, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+  Send(context.Background(), &input)
+```
+
+See [Flow control](/services/flow-control) for how scopes, limit keys, and the concurrency rule book work.
+
 ## Retrieve result of invocations and workflows
 
 You can use the client library to retrieve the results of invocations **with an idempotency key** or workflows.

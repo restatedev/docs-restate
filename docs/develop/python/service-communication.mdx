@@ -148,6 +148,38 @@ await ctx.service_call(
 Restate automatically deduplicates calls made during the same handler execution, so there's no need to provide an idempotency key in that case.
 However, if multiple handlers might call the same service independently, you can use an idempotency key to ensure deduplication across those calls.
 
+## Flow control: scope and limit key
+
+<Note title="Preview feature">
+    Scope and limit key are a preview feature and require restate-server 1.7 with [flow control enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+[Flow control](/services/flow-control) caps how many invocations run concurrently within a **scope**, with optional hierarchical **limit keys**.
+Route a call into a scope with `ctx.scope(...)`, and add a `limit_key` for a finer, per subgroup limit within that scope:
+
+```python {"CODE_LOAD::python/src/develop/service_communication.py#scope"} 
+# Route a call into a named scope
+response = await ctx.scope("tenant-123").service_call(my_service_handler, arg="Hi")
+
+# Add a limit key for hierarchical concurrency limits within the scope
+response = await ctx.scope("tenant-123").workflow_call(
+    run, key="my_workflow_id", arg="Hi", limit_key="premium/user42"
+)
+
+# Fire-and-forget sends can be scoped too
+ctx.scope("tenant-123").service_send(my_service_handler, arg="Hi")
+```
+
+You can read the scope and limit key an invocation was submitted with from the request:
+
+```python {"CODE_LOAD::python/src/develop/service_communication.py#scope_request"} 
+# The scope and limit key the invocation was submitted with
+scope = ctx.request().scope
+limit_key = ctx.request().limit_key
+```
+
+See [Flow control](/services/flow-control) for how scopes, limit keys, and the concurrency rule book work.
+
 ## Attach to an invocation
 
 To wait for or get the result of a previously sent message:

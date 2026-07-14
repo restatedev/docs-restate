@@ -136,4 +136,26 @@ class IngressClient {
     // use it to attach or peek (see above)
     // <end_workflow_attach>
   }
+
+  suspend fun scopedClient() {
+    // <start_scope>
+    val restateClient = Client.connect("http://localhost:8080")
+
+    // Route a call into a named scope
+    val svcResponse = restateClient.scope("tenant-123").service<MyService>().myHandler("Hi")
+
+    // Add a limit key for a hierarchical concurrency limit within the scope
+    val objResponse =
+        restateClient
+            .scope("tenant-123")
+            .toVirtualObject<MyObject>("Mary")
+            .request { myHandler("Hi") }
+            .options { limitKey = "premium/user42" }
+            .call()
+            .response()
+
+    // Fire-and-forget sends can be scoped too
+    restateClient.scope("tenant-123").toService<MyService>().request { myHandler("Hi") }.send()
+    // <end_scope>
+  }
 }

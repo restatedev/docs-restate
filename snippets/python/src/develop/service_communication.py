@@ -90,6 +90,25 @@ async def calling_handler(ctx: Context, arg):
     )
     # <end_idempotency_key>
 
+    # <start_scope>
+    # Route a call into a named scope
+    response = await ctx.scope("tenant-123").service_call(my_service_handler, arg="Hi")
+
+    # Add a limit key for hierarchical concurrency limits within the scope
+    response = await ctx.scope("tenant-123").workflow_call(
+        run, key="my_workflow_id", arg="Hi", limit_key="premium/user42"
+    )
+
+    # Fire-and-forget sends can be scoped too
+    ctx.scope("tenant-123").service_send(my_service_handler, arg="Hi")
+    # <end_scope>
+
+    # <start_scope_request>
+    # The scope and limit key the invocation was submitted with
+    scope = ctx.request().scope
+    limit_key = ctx.request().limit_key
+    # <end_scope_request>
+
     # <start_attach>
     # Send a request, get the invocation id
     handle = ctx.service_send(

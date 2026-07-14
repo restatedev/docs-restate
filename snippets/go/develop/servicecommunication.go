@@ -13,32 +13,23 @@ func (Router) Greet(ctx restate.Context, name string) error {
 	// To call a Service:
 	svcResponse, err := restate.Service[string](ctx, "MyService", "MyHandler").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 
 	// To call a Virtual Object:
 	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 
 	// To call a Workflow:
 	// `run` handler — can only be called once per workflow ID
 	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run").
 		Request("Hi")
-	if err != nil {
-		return err
-	}
 	// Other handlers can be called anytime within workflow retention
 	status, err := restate.Workflow[restate.Void](ctx, "MyWorkflow", "my-workflow-id", "GetStatus").
 		Request("Hi again")
+	// <end_request_response>
+
 	if err != nil {
 		return err
 	}
-	// <end_request_response>
-
 	_ = svcResponse
 	_ = objResponse
 	_ = wfResponse
@@ -108,6 +99,43 @@ func (Router) Greet3(ctx restate.Context, name string) error {
 
 	_ = response
 	_ = err
+	return nil
+}
+
+func (Router) GreetScoped(ctx restate.Context, name string) error {
+	// <start_scope>
+	// Route a call into a named scope with WithScope (a client option)
+	svcResponse, err := restate.Service[string](ctx, "MyService", "MyHandler", restate.WithScope("tenant-123")).
+		Request("Hi")
+
+	// Add a limit key for hierarchical concurrency limits within the scope
+	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run", restate.WithScope("tenant-123")).
+		Request("Hi", restate.WithLimitKey("premium/user42"))
+
+	// Scoped Virtual Object calls need
+	// RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
+	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler", restate.WithScope("tenant-123")).
+		Request("Hi")
+
+	// Fire-and-forget sends can be scoped too
+	restate.ServiceSend(ctx, "MyService", "MyHandler", restate.WithScope("tenant-123")).Send("Hi")
+	// <end_scope>
+
+	if err != nil {
+		return err
+	}
+
+	// <start_scope_request>
+	// The scope and limit key the invocation was submitted with
+	scope := ctx.Request().Scope
+	limitKey := ctx.Request().LimitKey
+	// <end_scope_request>
+
+	_ = svcResponse
+	_ = wfResponse
+	_ = objResponse
+	_ = scope
+	_ = limitKey
 	return nil
 }
 
