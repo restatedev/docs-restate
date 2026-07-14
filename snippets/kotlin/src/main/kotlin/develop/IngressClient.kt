@@ -2,6 +2,7 @@ package develop
 
 import dev.restate.client.Client
 import dev.restate.client.kotlin.*
+import dev.restate.client.kotlin.scope as scopeKt
 import dev.restate.common.Target
 import dev.restate.serde.kotlinx.*
 import kotlin.time.Duration.Companion.days
@@ -142,12 +143,13 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // Route a call into a named scope
-    val svcResponse = restateClient.scope("tenant-123").service<MyService>().myHandler("Hi")
+    // import dev.restate.client.kotlin.scope as scopeKt
+    val svcResponse = restateClient.scopeKt("tenant-123").service<MyService>().myHandler("Hi")
 
     // Add a limit key for a hierarchical concurrency limit within the scope
     val objResponse =
         restateClient
-            .scope("tenant-123")
+            .scopeKt("tenant-123")
             .toVirtualObject<MyObject>("Mary")
             .request { myHandler("Hi") }
             .options { limitKey = "premium/user42" }
@@ -155,7 +157,7 @@ class IngressClient {
             .response()
 
     // Fire-and-forget sends can be scoped too
-    restateClient.scope("tenant-123").toService<MyService>().request { myHandler("Hi") }.send()
+    restateClient.scopeKt("tenant-123").toService<MyService>().request { myHandler("Hi") }.send()
     // <end_scope>
   }
 }

@@ -153,8 +153,7 @@ public class IngressClient {
     Client restateClient = Client.connect("http://localhost:8080");
 
     // Route a call into a named scope
-    String svcResponse =
-        restateClient.scope("tenant-123").service(MyService.class).myHandler("Hi");
+    String svcResponse = restateClient.scope("tenant-123").service(MyService.class).myHandler("Hi");
 
     // Add a limit key for a hierarchical concurrency limit within the scope
     String objResponse =
