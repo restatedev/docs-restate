@@ -142,7 +142,6 @@ class IngressClient {
     val restateClient = Client.connect("http://localhost:8080")
 
     // Route a call into a named scope
-    // import dev.restate.client.kotlin.scope as scopeKt
     val svcResponse = restateClient.scope("tenant-123").service<MyService>().myHandler("Hi")
 
     // Add a limit key for a hierarchical concurrency limit within the scope
