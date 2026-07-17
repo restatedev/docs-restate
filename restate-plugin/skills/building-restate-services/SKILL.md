@@ -29,7 +29,7 @@ Scan the project to determine the SDK and context:
 
 2. **Detect existing Restate code**: Grep for `@restatedev`, `restate-sdk`, `dev.restate.sdk`, `github.com/restatedev`
 
-3. **Detect AI frameworks**: `@ai-sdk/`, `openai-agents`, `google-adk`, `pydantic-ai`
+3. **Detect AI frameworks**: `@ai-sdk/`, `openai-agents`, `google-adk`, `pydantic-ai`, `langchain`, `langgraph`
 
 4. **Detect workflow orchestrators**: `temporalio`, `@temporalio`, `aws-cdk/aws-stepfunctions`, etc.
 
@@ -47,10 +47,12 @@ After detecting the SDK, always load the SDK reference:
 | Add concurrency limits, multi-tenant fairness, cost controls, scopes, or limit keys | `references/flow-control-and-scopes.md` |
 | Convert from a workflow orchestrator or existing app | `references/translate-to-restate.md` |
 | Invoking services, interacting with invocations (cancel, attach, idempotency, sends, Kafka) | `references/invocation-lifecycle.md` |
+| Design an AI agent, choose a durability boundary, or use an unsupported LLM / agent SDK | `references/ai-agents.md` |
 | Build AI agent with Vercel AI SDK | `references/ts/restate-vercel-ai-agents.md` |
 | Build AI agent with OpenAI Agents SDK | `references/python/restate-openai-agents-agents.md` |
 | Build AI agent with Google ADK | `references/python/restate-google-adk-agents.md` |
 | Build AI agent with Pydantic AI | `references/python/restate-pydantic-ai-agents.md` |
+| Build AI agent with LangChain or LangGraph | `references/python/restate-langchain-agents.md` |
 | Debug errors, stuck invocations, journal mismatches | `references/debug-applications.md` |
 | Testing, deployment, server config, Kafka, advanced topics | Use the bundled **restate-docs** MCP server |
 | Code examples and templates | `github.com/restatedev/examples`, `github.com/restatedev/ai-examples` |
@@ -66,7 +68,7 @@ Before designing any Restate service architecture, check:
 | Non-Restate orchestrator in the project?                          | `references/translate-to-restate.md` |
 | Invoking, cancelling, deduplicating, or attaching to invocations? | `references/invocation-lifecycle.md` |
 | Error handling, compensation, sagas?                              | [Error handling guide](https://docs.restate.dev/guides/error-handling), [Sagas guide](https://docs.restate.dev/guides/sagas) |
-| AI agent or LLM calls?                                            | The relevant agent integration reference |
+| AI agent or LLM calls?                                            | `references/ai-agents.md`, then the relevant framework reference |
 
 ## Always verify before finishing
 
@@ -78,7 +80,7 @@ Before designing any Restate service architecture, check:
 - [ ] No ctx operations inside `ctx.run()`
 - [ ] `TerminalError` raised for non-retryable failures
 - [ ] Python: no bare `except:`
-- [ ] AI agents: set a retry policy for LLM calls
+- [ ] AI agents: load `references/ai-agents.md`, journal every LLM call and tool side effect, and set bounded retry policies
 - [ ] Virtual Objects: no deadlock cycles
 - [ ] Service registered and invoked via curl or the UI
 

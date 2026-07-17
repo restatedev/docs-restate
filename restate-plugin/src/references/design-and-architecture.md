@@ -169,8 +169,10 @@ Use a **Virtual Object** keyed by session ID. Store conversation history in K/V 
 ### Framework selection
 
 - **TypeScript**: Vercel AI SDK with `@restatedev/restate-ai` (load `references/ts/restate-vercel-ai-agents.md`)
-- **Python**: OpenAI Agents SDK, Google ADK, or Pydantic AI with Restate wrappers (load the corresponding `references/python/` file)
+- **Python**: OpenAI Agents SDK, Google ADK, Pydantic AI, or LangChain with Restate wrappers (load the corresponding `references/python/` file)
 - **Any language**: Raw Restate SDK with manual LLM API calls wrapped in `ctx.run()`
+
+Load `references/ai-agents.md` for the framework-neutral architecture, durability, cost, state, and testing checklist.
 
 ### Durability requirement
 
