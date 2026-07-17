@@ -1,0 +1,160 @@
+---
+title: "Python SDK Clients"
+sidebarTitle: "Python"
+icon: "/img/languages/python.svg"
+description: "Invoke services from any Python code."
+---
+
+An invocation is a request to execute a handler.
+The Python SDK client lets you invoke Restate handlers from anywhere in your application.
+Use it in applications that do not have access to a Restate Context.
+
+<Info>
+    Each invocation has its own unique ID and lifecycle.
+    See [managing invocations](/services/invocation/managing-invocations) to learn how to manage the lifecycle of an invocation.
+</Info>
+
+<Info>
+    Always [invoke handlers via the context](/develop/python/service-communication) when you have access to it.
+    Restate then links the invocation to its parent invocation.
+</Info>
+
+## Prerequisites
+
+Install the Python SDK, which includes the client:
+
+```shell
+pip install restate-sdk
+```
+
+Then [register the service](/services/versioning) you want to invoke.
+
+The client uses the handler definitions from your service to serialize requests and responses.
+The examples below assume that you import `restate`, `timedelta` from `datetime`, and your handler definitions into the application that creates the client.
+
+## Request response invocations
+
+To invoke a handler and wait for its response:
+
+```python {"CODE_LOAD::python/src/develop/ingress_client.py#request_response"} 
+async with restate.create_client("http://localhost:8080") as client:
+    # Call a service
+    service_response = await client.service_call(my_service_handler, arg="Hi")
+
+    # Call a Virtual Object
+    object_response = await client.object_call(
+        my_object_handler, key="Mary", arg="Hi"
+    )
+
+    # Start a Workflow
+    workflow_response = await client.workflow_call(
+        run, key="my_workflow_id", arg="Hi"
+    )
+
+    # Call another Workflow handler
+    workflow_status = await client.workflow_call(
+        interact_with_workflow, key="my_workflow_id", arg="Hi"
+    )
+```
+
+Use `restate.create_client` as an async context manager so the underlying HTTP client closes after use.
+
+## One way invocations
+
+To send a message without waiting for a response:
+
+```python {"CODE_LOAD::python/src/develop/ingress_client.py#one_way"} 
+async with restate.create_client("http://localhost:8080") as client:
+    # Send a message to a service
+    await client.service_send(my_service_handler, arg="Hi")
+
+    # Send a message to a Virtual Object
+    await client.object_send(my_object_handler, key="Mary", arg="Hi")
+
+    # Start a Workflow without waiting for the result
+    await client.workflow_send(run, key="my_workflow_id", arg="Hi")
+```
+
+Each send returns a handle containing the invocation ID.
+
+## Delayed invocations
+
+To schedule an invocation for a later point in time:
+
+```python {"CODE_LOAD::python/src/develop/ingress_client.py#delayed"} 
+async with restate.create_client("http://localhost:8080") as client:
+    # Send a delayed message to a service
+    await client.service_send(
+        my_service_handler, arg="Hi", send_delay=timedelta(hours=5)
+    )
+
+    # Send a delayed message to a Virtual Object
+    await client.object_send(
+        my_object_handler,
+        key="Mary",
+        arg="Hi",
+        send_delay=timedelta(hours=5),
+    )
+
+    # Start a Workflow after a delay
+    await client.workflow_send(
+        run,
+        key="my_workflow_id",
+        arg="Hi",
+        send_delay=timedelta(hours=5),
+    )
+```
+
+## Invoke a handler idempotently
+
+Add an idempotency key to prevent retries of the same request from executing the handler more than once:
+
+```python {"CODE_LOAD::python/src/develop/ingress_client.py#idempotent"} 
+async with restate.create_client("http://localhost:8080") as client:
+    response = await client.service_call(
+        my_service_handler,
+        arg="Hi",
+        idempotency_key="abcde",
+    )
+```
+
+After the invocation completes, Restate retains its response for the configured idempotency retention period.
+If you invoke the same handler with the same idempotency key during that period, Restate returns the stored response without executing the handler again.
+
+You can also pass custom request headers with the `headers` argument.
+
+<Info>
+    See [service configuration](/services/configuration) to configure the idempotency retention period.
+</Info>
+
+## Flow control: scope and limit key
+
+<Note title="Preview feature">
+    Scope and limit key are a preview feature and require Restate Server 1.7 with [flow control enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+[Flow control](/services/flow-control) limits how many invocations run concurrently within a scope, with optional hierarchical limit keys.
+Create a scoped client with `client.scope(...)`, then pass a `limit_key` for a more specific concurrency limit within that scope:
+
+```python {"CODE_LOAD::python/src/develop/ingress_client.py#scope"} 
+async with restate.create_client("http://localhost:8080") as client:
+    scoped_client = client.scope("tenant-123")
+
+    # Route a call into a named scope
+    service_response = await scoped_client.service_call(
+        my_service_handler, arg="Hi"
+    )
+
+    # Add a limit key for a hierarchical concurrency limit
+    workflow_response = await scoped_client.workflow_call(
+        run,
+        key="my_workflow_id",
+        arg="Hi",
+        limit_key="premium/user42",
+    )
+
+    # Fire and forget sends can be scoped too
+    await scoped_client.service_send(my_service_handler, arg="Hi")
+```
+
+See [Flow control](/services/flow-control) for details about scopes, limit keys, and concurrency rules.
