@@ -16,7 +16,7 @@ app = restate.app(services=[greeter])
 # <start_testing>
 import restate
 
-with restate.test_harness(app) as harness:
-    restate_client = harness.ingress_client()
-    print(restate_client.post("/greeter/greet", json="Alice").json())
+async def test_greet() -> None:
+    async with restate.create_test_harness(app, always_replay=True) as env:
+        result = await env.client.service_call(greet, arg="Alice")
 # <end_testing>

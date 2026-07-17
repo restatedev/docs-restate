@@ -2,6 +2,8 @@
 
 ## Setup
 
+The Go SDK 1.x requires Go 1.25 or newer.
+
 ### Restate Server
 
 Install the Restate Server via one of:
@@ -33,8 +35,16 @@ docker run -it docker.restate.dev/restatedev/restate-cli:latest invocations ls
 ### SDK installation
 
 ```shell
-go get github.com/restatedev/sdk-go
+go get github.com/restatedev/sdk-go@latest
 ```
+
+The testing utilities are a separately versioned module:
+
+```shell
+go get github.com/restatedev/sdk-go/testing@latest
+```
+
+Experimental modules such as `x/mocks` and `x/protoc-gen-go-restate` are versioned independently from the stable SDK module.
 
 ### Minimal scaffold
 
@@ -118,6 +128,10 @@ Use `restate.Get[*string]` (pointer) when distinguishing "not set" (nil) from "s
 
 ```go {"CODE_LOAD::go/develop/skillsmd/actions.go#delayed_messages"}
 ```
+
+### Scopes and limit keys
+
+For Restate 1.7 scope-based concurrency limits, load `references/flow-control-and-scopes.md`. Go SDK 1.0 uses `restate.WithScope(...)` on the client and `restate.WithLimitKey(...)` on the request or send.
 
 ## Side effects (restate.Run)
 
@@ -226,12 +240,23 @@ This returns the invocation ID.
 
 ## Error handling
 
+Go SDK 1.0 uses explicit error types:
+
+- `restate.TerminalError` completes the invocation or `Run` with a failure. It carries a code, message, and optional metadata.
+- `restate.RetryableError` ends the current attempt and lets Restate retry. It carries a code and message.
+
+Operations that can fail only terminally, including `Get`, `Keys`, `Sleep`, `Wait`, and `WaitFirst`, return `restate.TerminalError` instead of a generic `error`. `TerminalError` still implements `error`.
+
 ### Terminal errors (no retry)
 
 ```go {"CODE_LOAD::go/develop/errorhandling.go#here"}
 ```
 
-`restate.TerminalError` is a function that wraps an error with an optional HTTP status code. Any other returned error will be retried infinitely with exponential backoff.
+`TerminalError` is a type, not a constructor. Create one with `restate.ToTerminalError(err, options...)` or `restate.TerminalErrorf(...)`. The pre-1.0 `restate.TerminalError(err)` constructor no longer exists.
+
+Use `restate.WithErrorCode(...)` and `restate.WithMetadata(...)` when converting an error. Use `restate.IsTerminalError(...)` or `restate.AsTerminalError(...)` when inspecting a returned error.
+
+Create retryable errors with `restate.ToRetryableError(...)` or `restate.RetryableErrorf(...)`. Other non-terminal failures are retried with exponential backoff by default.
 
 Catch terminal errors from `restate.Run` to handle permanent failures and execute compensations (see sagas guide).
 
@@ -250,9 +275,9 @@ Call Restate services from outside of a Restate handler:
 
 Restate operations are NOT methods on ctx. Always use `restate.Run(ctx, ...)`, `restate.Get[T](ctx, ...)`, `restate.Set(ctx, ...)`, `restate.Sleep(ctx, ...)`, etc.
 
-### 2. Always handle errors
+### 2. Always handle returned errors
 
-Every Restate operation returns an error. Never use `_` to discard errors from Restate operations. Always check `err != nil`.
+Never use `_` to discard an error from a Restate operation. Check `err != nil` and propagate or handle the `TerminalError`. State writes such as `restate.Set` and `restate.Clear` do not return errors.
 
 ### 3. restate.Reflect() discovers handlers from struct methods
 
@@ -270,11 +295,26 @@ Use `restate.WaitFirst` / `restate.Wait` instead. Goroutines and channels are sa
 
 The Go SDK supports defining handlers and types via Protocol Buffers for stronger type safety.
 
+### 7. Go SDK 1.0 migration checks
+
+When upgrading a 0.x project, apply the official migration guide and verify all of these changes:
+
+- Replace `restate.TerminalError(err)` with `restate.ToTerminalError(err)`.
+- Replace `restate.Rand(ctx).UUID()` with `restate.UUID(ctx)`.
+- Treat `restate.Rand(ctx)` as a deterministic `*math/rand/v2.Rand`.
+- Replace `WithPayloadCodec` with `WithCodec`. Use `WithInputCodec` and `WithOutputCodec` when the directions differ.
+- Update invocation retry option names, including `WithMaxRetryAttempts`, `WithInitialRetryInterval`, `WithMaxRetryInterval`, and `WithRetryIntervalFactor`.
+- Import ingress options such as `WithHttpClient` and `WithAuthKey` from `github.com/restatedev/sdk-go/ingress`.
+- Add `github.com/restatedev/sdk-go/testing` explicitly because it is no longer part of the core module's dependency graph.
+- Update moved optional imports to `x/mocks`, `logging`, and `x/protoc-gen-go-restate` when used.
+
+Migration guide: https://github.com/restatedev/sdk-go/blob/main/MIGRATION.md
+
 ---
 
 ## Testing
 
-Package: `github.com/restatedev/sdk-go/testing` (Testcontainers-based)
+Package: `github.com/restatedev/sdk-go/testing` (a separate, Testcontainers-based Go module)
 
 Tests run against a real Restate Server in Docker. 
 

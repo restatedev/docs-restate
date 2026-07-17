@@ -44,6 +44,7 @@ After detecting the SDK, always load the SDK reference:
 | Context | Reference |
 |---------|-----------|
 | Design a new application, choose service types | `references/design-and-architecture.md` |
+| Add concurrency limits, multi-tenant fairness, cost controls, scopes, or limit keys | `references/flow-control-and-scopes.md` |
 | Convert from a workflow orchestrator or existing app | `references/translate-to-restate.md` |
 | Invoking services, interacting with invocations (cancel, attach, idempotency, sends, Kafka) | `references/invocation-lifecycle.md` |
 | Build AI agent with Vercel AI SDK | `references/ts/restate-vercel-ai-agents.md` |
@@ -61,6 +62,7 @@ Before designing any Restate service architecture, check:
 | Question                                                          | Consult |
 |-------------------------------------------------------------------|---------|
 | Restate service types, stateful entities, keying, concurrency?    | `references/design-and-architecture.md` |
+| Concurrency limits, tenant isolation, or downstream protection?  | `references/flow-control-and-scopes.md` |
 | Non-Restate orchestrator in the project?                          | `references/translate-to-restate.md` |
 | Invoking, cancelling, deduplicating, or attaching to invocations? | `references/invocation-lifecycle.md` |
 | Error handling, compensation, sagas?                              | [Error handling guide](https://docs.restate.dev/guides/error-handling), [Sagas guide](https://docs.restate.dev/guides/sagas) |
@@ -85,7 +87,7 @@ Before designing any Restate service architecture, check:
 Any change to handler business logic (new `ctx` operations, reordered steps, new `ctx.run()` blocks, new branches) must be covered by a Testcontainers test with **always-replay** enabled, and that test must pass before declaring the work done. Always-replay forces every journaled step to replay on every invocation, so non-determinism fails the test instead of failing in production on retry.
 
 - TypeScript: `alwaysReplay: true` in `RestateTestEnvironment.start`
-- Python: `always_replay=True` in `restate.test_harness`
+- Python: `always_replay=True` in `restate.create_test_harness`
 - Java / Go: `RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT=0m` on the Restate container
 
 See the Testing section of `references/<sdk>/api-and-pitfalls.md` for the working scaffold.
