@@ -174,6 +174,47 @@ if (peekOutput.ready) {
 }
 ```
 
+## Auto-retry for ingress calls
+
+The ingress client can automatically retry network failures, HTTP `429`, and HTTP `5xx` responses with exponential backoff and full jitter.
+
+Retries are **opt-in** and only fire when the call carries an **idempotency key**. Restate deduplicates on the key, so a retry safely attaches to the in-flight or completed invocation instead of starting a duplicate.
+
+Enable the built-in retry policy by passing `retry: true` to `connect`:
+
+```typescript
+import { connect } from "@restatedev/restate-sdk-clients";
+
+const restateClient = connect({ url: "http://localhost:8080", retry: true });
+
+// A retry fires only because the call carries an idempotency key.
+await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(request, clients.rpc.opts({ idempotencyKey: "req-1" }));
+```
+
+To tune the retry behavior, pass a policy object instead of `true`:
+
+```typescript
+import { connect, defaultShouldRetry } from "@restatedev/restate-sdk-clients";
+
+const restateClient = connect({
+  url: "http://localhost:8080",
+  retry: {
+    maxAttempts: 4,               // initial attempt + up to 3 retries (default: 6)
+    initialInterval: 200,         // milliseconds or Duration (default: 100ms)
+    maxInterval: { seconds: 5 },  // milliseconds or Duration (default: 2000ms)
+    exponentiationFactor: 2,      // default: 2
+    // Extend the built-in rule instead of replacing it
+    shouldRetry: (failure, attempt) =>
+      defaultShouldRetry(failure) ||
+      (failure.kind === "response" && failure.status === 409),
+  },
+});
+```
+
+`RetryPolicy`, `RetryFailure`, `defaultShouldRetry`, and `HttpCallError` are exported from `@restatedev/restate-sdk-clients`.
+
 ## Flow control: scope and limit key
 
 <Note title="Preview feature">

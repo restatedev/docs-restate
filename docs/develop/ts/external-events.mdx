@@ -147,3 +147,54 @@ restate.workflow({
 ```
 
 <AwakeablesOutro/>
+
+## Signals
+
+<Note title="Requires restate-server 1.7">
+Signals require restate-server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
+Signals let invocations communicate directly with each other without going through awakeables or durable promises.
+One invocation waits on a named signal, and any other handler that knows the target invocation's ID can resolve or reject it.
+
+Use signals when:
+- You want a handler to pause until a specific external event, identified by a logical name, occurs
+- You need cross-invocation communication without scoping it to a single workflow execution
+
+### Waiting on a signal
+
+Inside the handler that wants to wait, call `ctx.signal` with a name and await it:
+
+```typescript
+const approved = await ctx.signal<boolean>("approved");
+```
+
+The handler suspends until the signal is resolved or rejected by another invocation.
+
+### Resolving or rejecting a signal
+
+From any other handler, obtain an `InvocationReference` using the target invocation's ID, then resolve or reject the signal:
+
+```typescript
+// Obtain a reference to the target invocation
+const target = ctx.invocation(targetInvocationId);
+
+// Resolve — the waiting handler receives `true`
+target.signal<boolean>("approved").resolve(true);
+
+// Or reject — the waiting handler gets a terminal error
+target.signal("approved").reject("Request denied");
+```
+
+The invocation ID is available from:
+- The `x-restate-id` response header when submitting an invocation
+- `ctx.request().id` inside a handler
+- The `invocationId` property on send handles (e.g. `await ctx.serviceSendClient(...).myHandler(...).invocationId`)
+
+### InvocationReference
+
+`ctx.invocation(invocationId)` returns an `InvocationReference`, which exposes three operations:
+
+- **`signal(name).resolve(value)`** / **`signal(name).reject(reason)`** — wake a waiting signal
+- **`cancel()`** — cancel the target invocation
+- **`attach()`** — wait for the target invocation's result from another handler (equivalent to `ctx.attach(invocationId)`)

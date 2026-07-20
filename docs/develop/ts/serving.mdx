@@ -108,6 +108,45 @@ CLI flag.
     Then most likely you have enabled minification when deploying. Disable it with `minify = false` in your `workers.toml` file.
 </Accordion>
 
+## Tunnel deployment (preview)
+
+<Note title="Preview feature">
+`@restatedev/restate-sdk-tunnel` is a preview package. Its API may change in future releases.
+</Note>
+
+`@restatedev/restate-sdk-tunnel` is a drop-in alternative to `restate.serve(...)` for services running in private networks. Instead of binding an inbound HTTP listener, it holds an **outbound** connection to Restate Cloud — no public IP or inbound networking required.
+
+Install the package:
+
+```shell
+npm install @restatedev/restate-sdk-tunnel
+```
+
+Then replace `restate.serve(...)` with `connectTunnel`:
+
+```typescript
+import * as restate from "@restatedev/restate-sdk";
+import { connectTunnel } from "@restatedev/restate-sdk-tunnel";
+
+const greeter = restate.service({
+  name: "greeter",
+  handlers: { greet: async (_ctx, name: string) => `Hello ${name}!` },
+});
+
+const connection = connectTunnel({
+  region: "us",                                 // Restate Cloud region
+  environmentId: "env_...",                     // your environment ID
+  authToken: process.env.RESTATE_AUTH_TOKEN!,   // Cloud API key with Full role
+  signingPublicKey: "publickeyv1_...",           // your environment's request-identity key
+  tunnelName: "greeter-v1",                     // the deployment's identity
+  services: [greeter],
+});
+
+await connection.ready;
+```
+
+See the [package README](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-tunnel) for Kubernetes setup and registration details.
+
 ## Validating request identity
 
 SDKs can validate that incoming requests come from a particular Restate

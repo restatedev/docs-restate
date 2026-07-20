@@ -65,6 +65,64 @@ throw RetryableError.from(cause, {
     Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. You can combine it with `maxRetryAttempts` and `maxRetryDuration` in the run options.
 </Note>
 
+## TerminalError metadata
+
+`TerminalError` accepts an optional `metadata` map for attaching structured, machine-readable context to a terminal failure. The metadata is propagated alongside the error message and status code.
+
+```typescript
+throw new TerminalError("Payment failed", {
+  errorCode: 402,
+  metadata: {
+    "x-payment-provider-code": "INSUFFICIENT_FUNDS",
+    "x-retry-after": "3600",
+  },
+});
+```
+
+## Pausing invocations
+
+<Note title="Requires restate-server 1.7">
+`PauseError` and `onJournalMismatchErrors` require restate-server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
+A **paused** invocation stops retrying and waits for a manual [resume](/services/invocation/managing-invocations#resume). Use this for situations where retrying automatically makes no sense — for example, a configuration problem that must be fixed first.
+
+### PauseError
+
+Throw `PauseError` inside a `ctx.run` closure to pause the invocation on demand:
+
+```typescript
+await ctx.run("charge-card", async () => {
+  if (!isPaymentProviderConfigured()) {
+    throw new restate.PauseError("Payment provider not configured yet");
+  }
+  return chargeCard();
+});
+```
+
+When Restate receives a `PauseError`, it pauses the invocation instead of scheduling a retry. You can then fix the underlying problem and [resume](/services/invocation/managing-invocations#resume) the invocation from the UI or CLI.
+
+### Journal mismatch handling
+
+When the SDK detects a [non-determinism error](/operate/versioning) (a journal mismatch), it retries the invocation by default. You can change this behavior per service or per handler with `onJournalMismatchErrors`:
+
+```typescript
+const myService = restate.service({
+  name: "MyService",
+  handlers: { /* ... */ },
+  options: {
+    // "retry" (default) | "pause" | "fail"
+    onJournalMismatchErrors: "pause",
+  },
+});
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"retry"` | Invocation follows the normal retry policy (default). |
+| `"pause"` | Invocation is paused instead of retried. |
+| `"fail"` | Invocation fails terminally instead of retried. |
+
 ## Mapping errors to `TerminalError`
 
 If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.
