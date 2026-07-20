@@ -303,7 +303,7 @@ Tests run against a real Restate Server in Docker via Testcontainers. Use the as
 ```python {"CODE_LOAD::python/src/develop/skillsmd/testing.py#here"}
 ```
 
-The returned `HarnessEnvironment` provides:
+The returned harness (`HarnessEnvironment`) provides:
 
 - `harness.client`: typed asynchronous Service, Virtual Object, and Workflow calls
 - `harness.ingress_url`: raw HTTP ingress tests

@@ -55,10 +55,8 @@ Do not call an unsupported agent framework directly from replayable handler code
 ## Test and operate
 
 - Add an always-replay Testcontainers test for every handler-logic change.
-- Test a crash after the model call and after each side-effecting tool. Verify neither is repeated.
 - Test concurrent calls to the same session and separate session keys.
 - Test retry exhaustion, terminal tool failures, cancellation, and human-approval timeouts.
-- Inspect the Restate journal to confirm model calls, tools, agent-to-agent calls, and waits are separate observable steps.
 
 Implementation guides:
 

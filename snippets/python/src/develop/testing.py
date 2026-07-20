@@ -20,8 +20,8 @@ import restate
 
 
 async def test_greet() -> None:
-    async with restate.create_test_harness(app, always_replay=True) as env:
-        result = await env.client.service_call(greet, arg="Alice")
+    async with restate.create_test_harness(app, always_replay=True) as harness:
+        result = await harness.client.service_call(greet, arg="Alice")
         assert result == "Hello Alice!"
 
 
