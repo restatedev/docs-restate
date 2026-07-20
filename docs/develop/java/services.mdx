@@ -10,7 +10,7 @@ The Restate SDK lets you implement **handlers**. Handlers can be part of a **[Ba
 
 ## Prerequisites
 
-- [JDK](https://whichjdk.com/) >= 17 (JDK >= 23 recommended, required for the latest Restate features)
+- [JDK](https://whichjdk.com/) >= 17. JDK >= 23 is recommended and required for the latest Restate features (see [native core](#native-core-jdk-23) below).
 
 ## Getting started
 <Tip>
@@ -56,7 +56,7 @@ implementation("dev.restate:sdk-kotlin-lambda:2.9.0")
 </CodeGroup>
 
 <Note>
-    The SDK uses a native library on JDK 23+. To silence the native-access warning printed at startup, enable native access by passing `--enable-native-access=ALL-UNNAMED` as a JVM argument, or by setting `Enable-Native-Access: ALL-UNNAMED` in your JAR manifest.
+    The SDK uses a native library on JDK 23+. To silence the native-access warning printed at startup, pass `--enable-native-access=ALL-UNNAMED` as a JVM argument, or add `Enable-Native-Access: ALL-UNNAMED` to your JAR manifest. See [Native core](#native-core-jdk-23) below for details.
 </Note>
 
 <Accordion title="Kotlin: apply the all-open compiler plugin">
@@ -229,6 +229,41 @@ fun main() {
   * Resubmission of the same workflow will fail with "Previously accepted". The invocation ID can be found in the request header `x-restate-id`.
   * Use `Restate.key()` (Java) or `workflowKey()` (Kotlin) to access the workflow's unique ID
 * Additional handlers use the [`@Shared`](http://docs.restate.dev/javadocs/dev/restate/sdk/annotation/Shared.html) annotation and can signal or query the workflow. They can run concurrently with the `run` handler and until the retention time expires.
+
+## Migrating from the codegen API
+
+Prior to SDK 2.5 (Java) and 2.6 (Kotlin), the SDK required an annotation processor (`sdk-api-gen` / `sdk-api-kotlin-gen`) to generate client code and context parameters. This **codegen API is now deprecated** and will be removed in a future release.
+
+The current API works without any code generator. Handlers drop the `Context` parameter and use the static `Restate` methods (Java) or top-level functions in `dev.restate.sdk.kotlin` (Kotlin) instead:
+
+<CodeGroup>
+```java Before (codegen API)
+@Handler
+public void add(ObjectContext ctx, long value) {
+  long current = ctx.get(TOTAL).orElse(0L);
+  ctx.set(TOTAL, current + value);
+}
+```
+```java After (current API)
+@Handler
+public void add(long value) {
+  var state = Restate.state();
+  long current = state.get(TOTAL).orElse(0L);
+  state.set(TOTAL, current + value);
+}
+```
+</CodeGroup>
+
+The two styles coexist, so you can migrate one service at a time. See the [SDK migration guide](https://github.com/restatedev/sdk-java/blob/main/MIGRATION.md) for the full mapping.
+
+## Native core (JDK 23+)
+
+On JDK >= 23, the SDK uses a native shared-core library via Panama/FFM for the protocol state machine, providing all the latest Restate features.
+
+- **JDK >= 23 (recommended):** no action required, native core is used automatically.
+- **JDK 17–22:** the SDK falls back to a pure-Java state machine, which is deprecated. Upgrading to JDK >= 25 is recommended.
+
+To silence the native-access warning printed at startup on JDK 23+, pass `--enable-native-access=ALL-UNNAMED` as a JVM argument, or add `Enable-Native-Access: ALL-UNNAMED` to your JAR manifest.
 
 ## Configuring services
 Check out the [service configuration docs](/services/configuration) to learn how to configure service behavior, including timeouts and retention policies.

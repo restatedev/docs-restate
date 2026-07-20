@@ -210,4 +210,90 @@ class ReviewWorkflow {
 ```
 </CodeGroup>
 
+## Signals
+
+Signals let invocations communicate directly with each other: one invocation waits for a named signal, and any other handler resolves or rejects it by referencing the target invocation's ID.
+
+Unlike [awakeables](#creating-and-waiting-for-awakeables) (which require managing opaque IDs) and [durable promises](#durable-promises) (which are scoped to a workflow's lifetime), signals let any invocation reach any other invocation by its invocation ID.
+
+**Use signals when:**
+- You need an invocation to wait for a specific external event to be approved or rejected by another handler.
+- You want to signal a long-running invocation from another service without using workflow promises.
+
+### Waiting for a signal
+
+Inside the invocation that wants to wait, call `Restate.signal(name, type)` (Java) or `signal<T>(name)` (Kotlin) and then await it:
+
+<CodeGroup>
+```java Java
+// Inside the invocation that wants to wait
+boolean approved = Restate.signal("approved", Boolean.class).await();
+```
+```kotlin Kotlin
+// Inside the invocation that wants to wait
+val approved: Boolean = signal<Boolean>("approved").await()
+```
+</CodeGroup>
+
+Retrieve the current invocation's ID to pass it to the handler that will signal you:
+
+<CodeGroup>
+```java Java
+String invocationId = Restate.invocationId();
+```
+```kotlin Kotlin
+val invocationId: String = invocationId()
+```
+</CodeGroup>
+
+### Resolving or rejecting a signal
+
+From any other handler that knows the target invocation's ID, use `Restate.invocationHandle(id)` (Java) or `invocationHandle(id)` (Kotlin):
+
+<CodeGroup>
+```java Java
+// Resolve the signal with a value
+InvocationHandle<?> target = Restate.invocationHandle(targetInvocationId);
+target.signal("approved").resolve(Boolean.class, true);
+
+// Or reject it with a terminal error
+target.signal("approved").reject("Request denied");
+```
+```kotlin Kotlin
+// Resolve the signal with a value
+val target = invocationHandle(targetInvocationId)
+target.signal("approved").resolve(true)
+
+// Or reject it with a terminal error
+target.signal("approved").reject("Request denied")
+```
+</CodeGroup>
+
+When rejected, the awaiting invocation receives a `TerminalException` with the message you provide.
+
+### Cancel or attach to an invocation
+
+`InvocationHandle` also lets you cancel a running invocation or attach to it and wait for its result:
+
+<CodeGroup>
+```java Java
+InvocationHandle<?> handle = Restate.invocationHandle(invocationId);
+
+// Cancel the invocation
+handle.cancel();
+
+// Or attach and wait for its result
+var result = handle.attach().await();
+```
+```kotlin Kotlin
+val handle = invocationHandle(invocationId)
+
+// Cancel the invocation
+handle.cancel()
+
+// Or attach and wait for its result
+val result = handle.attach().await()
+```
+</CodeGroup>
+
 <AwakeablesOutro/>

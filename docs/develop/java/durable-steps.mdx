@@ -141,3 +141,37 @@ val value = random().nextInt()
 
 This behaves like the standard library `Random` class but is deterministically replayable.
 You can use any of the methods of [`java.util.Random`](https://docs.oracle.com/en/java/javase/11/docs/api/java.base/java/util/Random.html) to generate random numbers: for example, `nextBoolean()`, `nextLong()`, `nextFloat()`, etc.
+
+## Deterministic time
+
+`Restate.instantNow()` (Java) / `Clock.Restate.now()` (Kotlin) returns a timestamp that is stable across retries and replays.
+
+Use this instead of `Instant.now()` or `System.currentTimeMillis()` when you need the current time inside a handler. Calling the system clock directly would return a different value on each retry, which can cause non-deterministic behavior.
+
+<CodeGroup>
+```java Java
+import java.time.Instant;
+
+@Handler
+public String myHandler() {
+    Instant now = Restate.instantNow();
+    return "Current time: " + now;
+}
+```
+```kotlin Kotlin
+import kotlin.time.Clock
+import kotlin.time.ExperimentalTime
+import dev.restate.sdk.kotlin.*
+
+@OptIn(ExperimentalTime::class)
+@Handler
+suspend fun myHandler(): String {
+    val now = Clock.Restate.now()
+    return "Current time: $now"
+}
+```
+</CodeGroup>
+
+<Note>
+    The Kotlin `Clock.Restate` API requires opting in to the [Kotlin experimental time APIs](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.time/-experimental-time/).
+</Note>
