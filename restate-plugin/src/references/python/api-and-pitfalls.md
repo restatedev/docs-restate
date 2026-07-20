@@ -298,12 +298,25 @@ Use Pydantic models or custom serializers for complex types.
 
 Install: `pip install restate-sdk[harness]`
 
-Tests run against a real Restate Server in Docker via Testcontainers. 
+Tests run against a real Restate Server in Docker via Testcontainers. Use the asynchronous `create_test_harness` API. The older synchronous `test_harness` API is deprecated.
 
 ```python {"CODE_LOAD::python/src/develop/skillsmd/testing.py#here"}
 ```
 
-Use tests also to catch non-determinism bugs that unit tests miss: if handler code is non-deterministic, replay produces different results and the test fails.
+The returned harness (`HarnessEnvironment`) provides:
+
+- `harness.client`: typed asynchronous Service, Virtual Object, and Workflow calls
+- `harness.ingress_url`: raw HTTP ingress tests
+- `harness.admin_api_url`: deployment and introspection assertions
+
+Useful options:
+
+- `always_replay=True`: force replay at suspension points to expose non-deterministic handler logic
+- `disable_retries=True`: return retryable failures immediately for focused failure tests
+- `follow_logs=True`: stream Restate Server logs while debugging
+- `restate_image="docker.io/restatedev/restate:<version>"`: pin the server version for reproducible compatibility tests
+
+Any handler business-logic change that adds, removes, reorders, or branches around Restate operations must have an `always_replay=True` test. Use `disable_retries=True` separately when testing retryable failure behavior.
 
 ---
 
