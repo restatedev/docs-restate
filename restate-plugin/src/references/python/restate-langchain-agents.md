@@ -22,7 +22,7 @@ pip install "restate-sdk[serde]>=1.0,<2" "langchain>=1,<2" "langgraph>=1,<2" lan
 
 Attach `RestateMiddleware()` to a `create_agent` agent and invoke the agent from inside a Restate handler. Inside tools, obtain the active context with `restate_context()` and wrap side effects in `run_typed()`.
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/template/agent.py"} 
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/template/agent.py"}
 ```
 
 ## What the middleware guarantees
@@ -38,7 +38,7 @@ Do not add native `asyncio.gather()` around tool or model calls. Use Restate con
 
 Use `RunOptions` on the middleware to bound model-call retries. Configure expensive or fragile tool steps separately:
 
-```python {"CODE_LOAD::python/src/develop/skillsmd/langchain.py#retry_policy"}
+```python {"CODE_LOAD::python/src/develop/skillsmd/langchain_agent.py#retry_policy"}
 ```
 
 When a context action exhausts its retries, let `restate.TerminalError` propagate out of the tool and agent unless the handler has an explicit fallback. Do not convert Restate suspension or terminal failures into ordinary messages for the model.
@@ -47,7 +47,7 @@ When a context action exhausts its retries, let `restate.TerminalError` propagat
 
 Use a Virtual Object keyed by conversation ID and store typed LangChain messages in Restate state:
 
-```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/chat_agent.py#here"} 
+```python {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/chat_agent.py#here"}
 ```
 
 Preserve the full LangChain message types and tool-call metadata when storing history. Bound long-running histories with a durable summarization or archival step.

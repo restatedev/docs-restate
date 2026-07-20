@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 from langchain_core.tools import tool
 
 
