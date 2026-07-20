@@ -154,6 +154,78 @@ Both fields are propagated to the `StatefulSet` pod template and are merged with
 
 This is useful for integrations that rely on pod-level metadata, such as GKE ComputeClass scheduling (cloud.google.com/compute-class), Vault agent injection, Datadog, Prometheus scraping, and custom scheduling constraints.
 
+### Pod lifecycle hooks, sidecars, and extra volumes
+
+`RestateCluster` `spec.compute` supports several optional fields for advanced pod configuration:
+
+- `lifecycle` — container lifecycle hooks (`postStart` / `preStop`) for the Restate container.
+- `sidecars` — native sidecar containers that start before and stop after the Restate container (requires Kubernetes 1.29+).
+- `terminationGracePeriodSeconds` — overrides the pod termination grace period (default: 60s).
+- `extraVolumes` — additional pod volumes mounted alongside operator-managed volumes.
+- `extraVolumeMounts` — additional volume mounts on the Restate container.
+
+These fields are useful for running log shippers, metrics exporters, or proxies alongside Restate, and for wiring graceful-shutdown scripts:
+
+```yaml
+spec:
+  compute:
+    image: docker.restate.dev/restatedev/restate:latest
+    terminationGracePeriodSeconds: 120
+    extraVolumes:
+      - name: hooks
+        configMap:
+          name: node-state-control
+          defaultMode: 0755
+    extraVolumeMounts:
+      - name: hooks
+        mountPath: /node-state-control
+        readOnly: true
+    lifecycle:
+      preStop:
+        exec:
+          command: ["/bin/sh", "/node-state-control/pre-stop.sh"]
+    sidecars:
+      - name: log-shipper
+        image: log-shipper:latest
+        volumeMounts:
+          - name: hooks
+            mountPath: /node-state-control
+```
+
+All five fields are optional. Volume and mount names that conflict with operator-managed resources are rejected at reconcile time with a clear error.
+
+### Automatic cluster provisioning
+
+Set `spec.cluster.autoProvision: true` to have the operator automatically provision the Restate cluster once the pods are running. This calls the gRPC `ProvisionCluster` API and tracks the result in `status.provisioned` to prevent repeated calls.
+
+```yaml
+spec:
+  cluster:
+    autoProvision: true
+  config: |
+    # when using autoProvision, disable Restate's own auto-provision to avoid split brain
+    auto-provision = false
+    # ... rest of your config
+```
+
+<Warning>
+When `cluster.autoProvision: true` is set, you must also set `auto-provision = false` in your Restate config to avoid a split-brain situation where both the operator and Restate try to provision the cluster simultaneously.
+</Warning>
+
+### Trusted CA certificates
+
+When Restate needs to call services that use a private certificate authority, you can configure custom trusted CA certificates via `spec.security.trustedCaCerts`:
+
+```yaml
+spec:
+  security:
+    trustedCaCerts:
+      - secretName: internal-ca
+        key: ca.pem
+```
+
+The operator adds an init container that merges your custom CAs with the system CA bundle and sets `SSL_CERT_FILE` on the Restate container.
+
 ## Helm Chart
 
 For a more bare-bone deployment of a Restate cluster, you can use the Helm chart.

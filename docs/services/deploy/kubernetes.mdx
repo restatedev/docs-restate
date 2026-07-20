@@ -75,7 +75,31 @@ The Restate Operator can help you connect your services to Restate Cloud by mana
     Or check out the [Restate Cloud documentation](/cloud/connecting-services#kubernetes-services) for more information.
 </Info>
 
-### Automatic Service Versioning
+### In-process tunnel mode
+
+For services running in private networks that need to connect to a Restate Cloud environment without inbound networking, set `spec.restate.tunnelMode: in-process`. With this mode, your pods hold their own outbound tunnel connections to Restate Cloud — for example using the `@restatedev/restate-sdk-tunnel` npm package — instead of being reached through the tunnel-client sidecar and each version's Service.
+
+```yaml
+spec:
+  restate:
+    register:
+      cloud: my-cloud-environment
+    tunnelMode: in-process
+```
+
+When `tunnelMode: in-process` is set, the operator injects these environment variables into every container:
+- `RESTATE_INPROC_TUNNEL_NAME` — the versioned name of the revision
+- `RESTATE_INPROC_ENVIRONMENT_ID` — the Restate Cloud environment ID
+- `RESTATE_INPROC_CLOUD_REGION` — the cloud region
+- `RESTATE_INPROC_SIGNING_PUBLIC_KEY` — for request verification
+
+Mount your API key Secret and point `RESTATE_INPROC_AUTH_TOKEN_FILE` at it — this variable is reserved for your own Secret mount and is not injected by the operator.
+
+<Note>
+In-process tunnel mode is not supported with Knative deployments.
+</Note>
+
+### Automatic service versioning
 Versioning gets handled automatically by the operator by keeping old ReplicaSets around with an associated Service object so that in-flight invocations can drain against the old code versions.
 
 Have a look at the [versioning documentation](/services/versioning#automatic-versioning-with-kubernetes-operator) to learn more.
@@ -151,9 +175,49 @@ Note that there is no need for routing to be sticky, because each invocation is 
 No context is assumed to be sticky on the node.
 However, if you wish to do so, you can do sticky routing via the invocation ID in your request headers (`x-restate-invocation-id`).
 
-## Knative Deployment
+## Knative deployment
 
-Restate supports Knative services. Knative allows scaling to zero when there are no in-flight invocations and automatically configures an L7 load balancer. There are no special requirements to deploy a service deployment container with Knative:
+Restate supports Knative Serving as a deployment target. Knative enables scale-to-zero when there are no in-flight invocations and automatically configures an L7 load balancer.
+
+### Knative with the Restate Operator (recommended)
+
+The Restate Operator supports Knative Serving as an alternative to ReplicaSet mode. This gives you the operator's automatic registration and versioning on top of Knative's autoscaling capabilities.
+
+Set `spec.serving.knative: true` in your `RestateDeployment`:
+
+```yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateDeployment
+metadata:
+  name: service
+spec:
+  serving:
+    knative: true
+  restate:
+    register:
+      cluster: restate
+  template:
+    spec:
+      containers:
+        - name: service
+          image: path.to/yourrepo:yourtag
+          ports:
+            - containerPort: 9080
+              name: h2c
+```
+
+**Tag-based versioning**: use the `tag` field to control whether a pod template change creates a new versioned revision or updates in place:
+- **Same tag**: updates are applied in-place (no new version, no drain cycle).
+- **Changed tag**: treated as a new version — old revision drains while new revision handles new requests.
+- **No tag**: auto-versioning (every pod template change creates a new version).
+
+<Note>
+Knative Serving must be installed on the cluster. In-process tunnel mode (`tunnelMode: in-process`) is not supported with Knative deployments.
+</Note>
+
+### Knative without the operator
+
+There are no special requirements to deploy a Restate service container with Knative directly:
 
 ```shell
 kn service create service-name --port h2c:9080 --image path.to/yourrepo:yourtag
@@ -176,9 +240,9 @@ spec:
               containerPort: 9080
 ```
 
-The service will be accessible at `http://<service-name>.<namespace>` but to handle [versioning](/services/configuration), it is preferable to register the new revision url like `http://<service-name>-0001.<namespace>` as part of your deployment workflow.
+The service will be accessible at `http://<service-name>.<namespace>`. To handle [versioning](/services/versioning), register the revision-specific URL (e.g. `http://<service-name>-0001.<namespace>`) as part of your deployment workflow.
 
-By default Knative exposes the service through the Ingress. This is not required by Restate, and you can disable this behavior adding the argument `--cluster-local` to the aforementioned creation command.
+By default Knative exposes the service through the Ingress. This is not required by Restate, and you can disable this behavior by adding the `--cluster-local` argument to the creation command.
 
 <Info>
     Learn more about deploying Restate services with Knative by reading this [blog post](https://www.restate.dev/blog/building-stateful-serverless-applications-with-knative-and-restate) and the [Golang example](https://github.com/restatedev/examples/tree/main/go/integrations/knative-go).

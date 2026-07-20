@@ -62,6 +62,30 @@ The operator handles the complete versioning lifecycle:
 
 For complete examples and specifications, see [Restate Operator git repo](https://github.com/restatedev/restate-operator).
 
+### Per-version autoscaling during drain
+
+By default, draining versions hold their full replica count for the entire drain window, which can last hours for long-running workflows. To reduce compute cost during drains, add a `spec.autoscaling` block to your `RestateDeployment`. The operator creates a `HorizontalPodAutoscaler` per non-latest version while it is still active, and removes it once the version is fully drained.
+
+```yaml
+spec:
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 10
+    metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 70
+```
+
+The `spec.autoscaling` block is optional. When omitted, draining versions stay at their full `replicas` count as before. The **latest** version is not covered here — use a separate HPA targeting the `RestateDeployment` scale subresource for the latest version.
+
+<Note>
+Per-version autoscaling is only available in ReplicaSet mode. It is not supported in Knative mode, where Knative's own autoscaler manages scaling.
+</Note>
+
 ## Manual versioning
 
 For non-FaaS deployments, you can use either the UI or the CLI to manage deployments. The typical update flow looks like this:
