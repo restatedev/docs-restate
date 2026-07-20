@@ -1,0 +1,103 @@
+---
+title: "Service Communication"
+sidebarTitle: "Communication"
+description: "Call other services from your handler."
+icon: "comment"
+---
+
+Your Restate handler can call other handlers in three ways:
+
+- **[Request-response calls](#request-response-calls)**: Call and wait for a response
+- **[One-way messages](#sending-messages)**: Send a message and continue
+- **[Delayed messages](#delayed-messages)**: Send a message after a delay
+
+<Info>
+To call a service from an external application, see the [HTTP](/services/invocation/http), [Kafka](/services/invocation/kafka), or [SDK Clients](/services/invocation/clients) documentation.
+</Info>
+
+## Generated clients
+
+The `#[restate_sdk::service]`, `#[restate_sdk::object]`, and `#[restate_sdk::workflow]` macros automatically generate typed client structs (e.g., `GreeterClient`, `MyObjectClient`) that you use to call handlers.
+
+## Request-response calls
+
+To call a Restate handler and wait for its result:
+
+```rust
+// Call a Service
+let greeter_client = ctx.service_client::<GreeterClient>();
+let response = greeter_client.greet("Mary".to_string()).call().await?;
+
+// Call a Virtual Object (provide the key)
+let obj_client = ctx.object_client::<MyObjectClient>("Mary");
+let response = obj_client.my_handler("Hi".to_string()).call().await?;
+
+// Call a Workflow run handler (once per workflow ID)
+let wf_client = ctx.workflow_client::<MyWorkflowClient>("my-workflow-id");
+let response = wf_client.run("request".to_string()).call().await?;
+```
+
+<Info>
+Request-response calls between exclusive handlers of the same Virtual Object may lead to deadlocks. Use the UI or CLI to [cancel](/services/invocation/managing-invocations#cancel) blocked invocations.
+</Info>
+
+## Sending messages
+
+To send a message to another Restate handler without waiting for a response:
+
+```rust
+// Send to a Service without waiting for response
+let greeter_client = ctx.service_client::<GreeterClient>();
+greeter_client.greet("Mary".to_string()).send().await?;
+
+// Send to a Virtual Object
+let obj_client = ctx.object_client::<MyObjectClient>("Mary");
+obj_client.my_handler("Hi".to_string()).send().await?;
+```
+
+## Delayed messages
+
+To send a message after a delay:
+
+```rust
+use std::time::Duration;
+
+let greeter_client = ctx.service_client::<GreeterClient>();
+greeter_client
+    .greet("Mary".to_string())
+    .send_after(Duration::from_secs(5 * 3600))
+    .await?;
+```
+
+<Info>
+Learn [how this differs](/develop/rust/durable-timers#scheduling-async-tasks) from sleeping and then sending a message.
+</Info>
+
+## Attach to an invocation
+
+To wait for or retrieve the result of a previously sent message:
+
+```rust
+// Send a message and retrieve the invocation handle
+let handle = greeter_client.greet("Mary".to_string()).send().await?;
+
+// Later, attach to the invocation to get its result
+let response = ctx.attach_invocation(handle).await?;
+```
+
+## Cancel an invocation
+
+To cancel a running handler:
+
+```rust
+let handle = greeter_client.greet("Mary".to_string()).send().await?;
+
+// Cancel the invocation when it is no longer needed
+ctx.cancel_invocation(handle).await?;
+```
+
+## See also
+
+- **[Error Handling](/develop/rust/error-handling)**: Handle failures in service calls
+- **[Durable Timers](/develop/rust/durable-timers)**: Implement timeouts for your service calls
+- **[Sagas](/guides/sagas)**: Roll back or compensate for canceled service calls

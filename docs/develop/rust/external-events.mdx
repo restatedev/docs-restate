@@ -1,0 +1,128 @@
+---
+title: "External Events"
+description: "Handle external events and human-in-the-loop patterns with durable waiting primitives."
+icon: "hourglass-start"
+---
+
+import AwakeablesIntro from "/snippets/sdk/awakeables-intro.mdx";
+import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
+
+<AwakeablesIntro/>
+
+### Creating and waiting for awakeables
+
+1. **Create an awakeable** — Get a unique ID and a future
+2. **Send the ID externally** — Pass it to your external system
+3. **Wait for result** — Your handler [suspends](/foundations/key-concepts#suspensions-on-faas) until the external system responds
+
+```rust
+async fn my_handler(
+    &self,
+    ctx: Context<'_>,
+    _: (),
+) -> Result<String, HandlerError> {
+    let (id, awakeable) = ctx.awakeable::<String>();
+
+    // Send the ID to an external system
+    ctx.run(|| async move {
+        request_external_task(id).await
+    })
+    .await?;
+
+    // Suspend until the external system resolves the awakeable
+    let result = awakeable.await?;
+    Ok(result)
+}
+```
+
+<Info>
+    If you wait for an awakeable in an [exclusive handler](/foundations/handlers#handler-behavior) in a Virtual Object, all other calls to this object will be queued.
+</Info>
+
+### Resolving and rejecting awakeables
+
+External processes complete awakeables in two ways:
+
+- **Resolve** with success data → handler continues normally
+- **Reject** with error reason → throws a [terminal error](/develop/rust/error-handling) in the waiting handler
+
+#### Via SDK (from other handlers)
+
+**Resolve:**
+```rust
+ctx.resolve_awakeable(&awakeable_id, "Looks good!".to_string());
+```
+
+**Reject:**
+```rust
+use restate_sdk::errors::TerminalError;
+
+ctx.reject_awakeable(&awakeable_id, TerminalError::new("Cannot process review"));
+```
+
+#### Via HTTP API
+
+External systems can complete awakeables using Restate's HTTP API:
+
+**Resolve with data:**
+```shell
+curl localhost:8080/restate/awakeables/sign_1PePOqp/resolve \
+  --json '"Looks good!"'
+```
+
+**Reject with error:**
+```shell
+curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
+  -H 'content-type: text/plain' \
+  -d 'Review rejected: insufficient documentation'
+```
+
+## Durable promises
+
+**Best for:** Workflows where you need to signal between different workflow handlers.
+
+**Key differences from awakeables:**
+- No ID management — use logical names instead
+- Scoped to the workflow execution lifetime
+
+### Creating and waiting for promises
+
+Wait for a promise by name inside the workflow run handler:
+
+```rust
+// In the workflow run handler
+async fn run(
+    &self,
+    ctx: WorkflowContext<'_>,
+    document_id: String,
+) -> Result<String, HandlerError> {
+    ctx.run(|| async move { ask_review(document_id.clone()).await }).await?;
+
+    // Suspend until the review promise is resolved
+    let review: String = ctx.promise("review").await?;
+    Ok(review)
+}
+```
+
+### Resolving promises
+
+Resolve from any shared workflow handler:
+
+```rust
+async fn submit_review(
+    &self,
+    ctx: SharedWorkflowContext<'_>,
+    review: String,
+) -> Result<(), HandlerError> {
+    ctx.resolve_promise("review", review);
+    Ok(())
+}
+```
+
+<Info>
+After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
+The results of resolved Durable Promises remain available during this time.
+Update the retention time via the [service configuration](/services/configuration).
+</Info>
+
+<AwakeablesOutro/>

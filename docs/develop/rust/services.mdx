@@ -1,0 +1,179 @@
+---
+title: "Services"
+description: "Implementing Restate services with the Rust SDK."
+icon: "brackets-curly"
+---
+
+The Restate Rust SDK is open source and available on [GitHub](https://github.com/restatedev/sdk-rust).
+
+The Restate SDK lets you implement **handlers**. Handlers can be part of a **[Basic Service](/foundations/services#basic-service)**, a **[Virtual Object](/foundations/services#virtual-object)**, or a **[Workflow](/foundations/services#workflow)**. This page shows how to define them with the Rust SDK.
+
+## Prerequisites
+
+- Rust toolchain >= 1.90.0 (install via [rustup](https://rustup.rs/))
+- Tokio async runtime
+
+## Getting started
+
+<Tip>
+    Get started quickly with the [Quickstart](/quickstart).
+</Tip>
+
+Add the Restate SDK and Tokio to your `Cargo.toml`:
+
+```toml
+[dependencies]
+restate-sdk = "0.10"
+tokio = { version = "1", features = ["full"] }
+```
+
+## Basic services
+
+[Basic Services](/foundations/services) group related **handlers** and expose them as callable endpoints:
+
+```rust
+use restate_sdk::prelude::*;
+
+#[restate_sdk::service]
+trait MyService {
+    async fn my_handler(greeting: String) -> Result<String, HandlerError>;
+}
+
+struct MyServiceImpl;
+
+impl MyService for MyServiceImpl {
+    async fn my_handler(
+        &self,
+        _ctx: Context<'_>,
+        greeting: String,
+    ) -> Result<String, HandlerError> {
+        Ok(format!("{greeting}!"))
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    HttpServer::new(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+- Annotate a trait with `#[restate_sdk::service]` to define a service.
+- Create a trait with the service handlers. Handlers take zero or one input and return `Result<T, HandlerError>`.
+- Implement the trait on a concrete struct.
+- The first argument after `&self` is always a context — `Context<'_>` for basic services.
+- The SDK stores actions you perform on the context in the Restate journal to make them durable.
+- Serve the service over HTTP (port `9080` by default). The handler is reachable at `<RESTATE_INGRESS_URL>/MyService/myHandler`.
+
+<Note>
+    Handler names are derived from the trait method name converted to `camelCase`. Override with `#[name = "customName"]` on the trait method.
+</Note>
+
+## Virtual objects
+
+[Virtual Objects](/foundations/services) are services that are stateful and key-addressable — each object instance has a unique ID and persistent state.
+
+```rust
+use restate_sdk::prelude::*;
+
+#[restate_sdk::object]
+pub trait MyObject {
+    async fn my_handler(name: String) -> Result<String, HandlerError>;
+    #[shared]
+    async fn my_concurrent_handler(name: String) -> Result<String, HandlerError>;
+}
+
+pub struct MyObjectImpl;
+
+impl MyObject for MyObjectImpl {
+    async fn my_handler(
+        &self,
+        ctx: ObjectContext<'_>,
+        greeting: String,
+    ) -> Result<String, HandlerError> {
+        Ok(format!("{} {}!", greeting, ctx.key()))
+    }
+
+    async fn my_concurrent_handler(
+        &self,
+        ctx: SharedObjectContext<'_>,
+        greeting: String,
+    ) -> Result<String, HandlerError> {
+        Ok(format!("{} {}!", greeting, ctx.key()))
+    }
+}
+```
+
+- Annotate with `#[restate_sdk::object]`.
+- Exclusive handlers use `ObjectContext<'_>` and have read/write access to object state. Only one exclusive handler can run per object at a time.
+- Add `#[shared]` to a handler to make it concurrent — it uses `SharedObjectContext<'_>` and runs in parallel with other handlers.
+- Access the object key via `ctx.key()`.
+
+## Workflows
+
+[Workflows](/foundations/services) are long-lived processes with a defined lifecycle. They run once per key and are ideal for orchestrating multi-step operations.
+
+```rust
+use restate_sdk::prelude::*;
+
+#[restate_sdk::workflow]
+pub trait MyWorkflow {
+    async fn run(req: String) -> Result<String, HandlerError>;
+    #[shared]
+    async fn interact_with_workflow() -> Result<(), HandlerError>;
+}
+
+pub struct MyWorkflowImpl;
+
+impl MyWorkflow for MyWorkflowImpl {
+    async fn run(
+        &self,
+        _ctx: WorkflowContext<'_>,
+        req: String,
+    ) -> Result<String, HandlerError> {
+        // implement workflow logic here
+        Ok(String::from("success"))
+    }
+
+    async fn interact_with_workflow(
+        &self,
+        _ctx: SharedWorkflowContext<'_>,
+    ) -> Result<(), HandlerError> {
+        // interact with the workflow from outside
+        Ok(())
+    }
+}
+```
+
+- Annotate with `#[restate_sdk::workflow]`.
+- The workflow must have a `run` handler using `WorkflowContext<'_>`. It executes exactly once per workflow ID.
+- Additional handlers use `SharedWorkflowContext<'_>` and can signal or query the workflow concurrently.
+
+## Accessing the invocation ID
+
+All context types expose `invocation_id()` to access the current Restate invocation ID:
+
+```rust
+impl MyService for MyServiceImpl {
+    async fn my_handler(
+        &self,
+        ctx: Context<'_>,
+        name: String,
+    ) -> Result<String, HandlerError> {
+        let id = ctx.invocation_id();
+        tracing::info!("Handling invocation {id} for {name}");
+        Ok(format!("Greetings {name}"))
+    }
+}
+```
+
+Available on `Context`, `ObjectContext`, `SharedObjectContext`, `WorkflowContext`, and `SharedWorkflowContext`.
+
+## Configuring services
+
+Check out the [service configuration docs](/services/configuration) to learn how to configure service behavior, including timeouts and retention policies.

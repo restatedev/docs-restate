@@ -1,0 +1,88 @@
+---
+title: "Concurrent Tasks"
+description: "Execute multiple tasks concurrently and gather results."
+icon: "merge"
+---
+
+import ConcurrentTaskIntro from "/snippets/sdk/concurrent-tasks-intro.mdx";
+
+<ConcurrentTaskIntro/>
+
+## Parallelizing tasks
+
+Start multiple durable operations concurrently by launching them without immediately awaiting:
+
+```rust
+// Start operations concurrently
+let call1 = ctx.run(|| async { fetch_user_data(123).await });
+let call2 = ctx.run(|| async { fetch_order_history(123).await });
+let call3 = ctx
+    .service_client::<AnalyticsServiceClient>()
+    .calculate_metrics(123)
+    .call();
+
+// Await all results
+let user = call1.await?;
+let orders = call2.await?;
+let metrics = call3.await?;
+```
+
+Check out the guide on [parallelizing work](/guides/parallelizing-work).
+
+## Race with select!
+
+The `restate_sdk::select!` macro (similar to `tokio::select!`) lets you wait for the first of several durable futures to complete:
+
+```rust
+use std::time::Duration;
+
+let sleep = ctx.sleep(Duration::from_secs(30));
+let call = ctx
+    .service_client::<MyServiceClient>()
+    .my_handler("hi".to_string())
+    .call();
+
+restate_sdk::select! {
+    result = sleep => {
+        result?;
+        return Ok("sleep won".to_string());
+    },
+    result = call => {
+        return Ok(format!("call won with: {}", result?));
+    }
+}
+```
+
+This is the idiomatic way to implement timeouts and race patterns in Restate Rust handlers.
+
+<Warning>
+    **Don't use Tokio select directly** — `tokio::select!` is not safe to use with Restate futures. Use `restate_sdk::select!` instead. Restate tracks completion order deterministically, which regular async combinators cannot guarantee.
+</Warning>
+
+## Consuming a dynamic number of futures
+
+`DurableFuturesUnordered` lets you push a variable number of durable futures and consume them in the order they complete. Each result comes back with the index of the future that completed:
+
+```rust
+use restate_sdk::context::DurableFuturesUnordered;
+use std::time::Duration;
+
+let mut futures = DurableFuturesUnordered::new();
+futures.push(ctx.sleep(Duration::from_secs(1)));
+futures.push(ctx.sleep(Duration::from_secs(2)));
+futures.push(ctx.sleep(Duration::from_secs(3)));
+
+while let Some((index, result)) = futures.next().await? {
+    result?;
+    // `index` tells you which future completed
+}
+```
+
+Use this when:
+- You have a dynamic or runtime-determined set of tasks to wait on
+- You want to process results in completion order rather than submission order
+- You are fanning out to a variable number of service calls
+
+<Note>
+    `DurableFuturesUnordered` was introduced in Rust SDK v0.10.0.
+</Note>

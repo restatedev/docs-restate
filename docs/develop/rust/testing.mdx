@@ -1,0 +1,65 @@
+---
+title: "Testing"
+description: "Utilities to test your handler logic."
+icon: "bug"
+---
+
+The Rust SDK provides integration testing support via [Testcontainers](https://rust.testcontainers.org/), which runs a real Restate Server in a Docker container during tests.
+
+## Setup
+
+Add the testcontainers crate to your dev dependencies:
+
+```toml
+[dev-dependencies]
+restate-sdk-testcontainers = "0.10"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["json"] }
+tracing-subscriber = "0.3"
+```
+
+Docker must be running on your machine.
+
+## Writing integration tests
+
+```rust
+use restate_sdk::prelude::*;
+use restate_sdk_testcontainers::TestContainer;
+
+#[tokio::test]
+async fn test_my_service() {
+    tracing_subscriber::fmt::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    let endpoint = Endpoint::builder()
+        .bind(MyServiceImpl.serve())
+        .build();
+
+    let test_container = TestContainer::builder()
+        // Print Restate Server logs to tracing::info
+        .with_container_logging()
+        .build()
+        .start(endpoint)
+        .await
+        .unwrap();
+
+    let ingress_url = test_container.ingress_url();
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/MyService/myHandler", ingress_url))
+        .header("Content-Type", "application/json")
+        .json(&"World")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+}
+```
+
+The `TestContainer` starts a real Restate Server, registers your services, and gives you the ingress URL to call them. This tests your full handler logic including durable execution behavior.
+
+<Note>
+    You can also use the default configuration with `TestContainer::default().start(endpoint).await`.
+</Note>

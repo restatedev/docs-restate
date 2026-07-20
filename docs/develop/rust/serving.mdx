@@ -1,0 +1,120 @@
+---
+title: "Serving"
+description: "Create an endpoint to serve your services."
+icon: "globe"
+---
+
+Restate Rust services can run as a standalone HTTP/2 server or as an AWS Lambda function.
+
+## Creating an HTTP server
+
+Use `HttpServer` to serve one or more services on port `9080` by default:
+
+```rust
+use restate_sdk::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    HttpServer::new(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .bind(MyObjectImpl.serve())
+            .bind(MyWorkflowImpl.serve())
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+## Creating a Lambda handler
+
+To deploy your service as an AWS Lambda function, enable the `lambda` feature and use `LambdaEndpoint`:
+
+```toml
+# Cargo.toml
+[dependencies]
+restate-sdk = { version = "0.10", features = ["lambda"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+```rust
+use restate_sdk::prelude::*;
+
+#[tokio::main]
+async fn main() {
+    LambdaEndpoint::run(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .build(),
+    )
+    .await
+    .unwrap();
+}
+```
+
+The implementation of your services and handlers remains identical for both deployment options.
+
+Have a look at the [deployment section](/services/deploy/lambda) for guidance on deploying to AWS Lambda.
+
+### Building for Lambda
+
+```bash
+# Install cargo-lambda
+cargo install cargo-lambda
+
+# Build for Lambda (ARM64 recommended)
+cargo lambda build --release --arm64 --output-format zip
+```
+
+Then create a Lambda function with:
+- **Runtime**: Amazon Linux 2023
+- **Architecture**: arm64
+
+## Validating request identity
+
+SDKs can validate that incoming requests come from a particular Restate instance. You can find out more about request identity in the [Security docs](/services/security#locking-down-service-access).
+
+```rust
+#[tokio::main]
+async fn main() {
+    HttpServer::new(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .with_identity_key(
+                "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f",
+            )
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+## Choosing a crypto backend
+
+The SDK uses `jsonwebtoken` for identity verification. You can choose the underlying crypto backend:
+
+```toml
+# Use aws-lc-rs instead of the default rust-crypto
+restate-sdk = { version = "0.10", default-features = false, features = ["http_server", "aws_lc_rs"] }
+```
+
+`rust_crypto` is the default. Disabling both lets you call `jsonwebtoken::crypto::CryptoProvider::install_default()` yourself for full control.
+
+## Custom server integrations
+
+`ProtocolMode`, `HandleOptions`, and `Endpoint::handle_with_options()` are part of the public API, enabling you to build custom server integrations beyond `HttpServer` and `LambdaEndpoint`. This is useful if you want to plug Restate into your own HTTP framework or transport layer.
+
+## Compatibility
+
+| Restate Server | SDK version |
+|----------------|-------------|
+| >= 1.6         | >= 0.4      |
+| >= 1.5         | >= 0.4      |
+| >= 1.4         | >= 0.4      |
+| >= 1.3         | >= 0.4      |
+
+<Note>
+    The `bind_with_options` API (for customizing service and handler configuration) requires Restate Server >= 1.4. The invocation retry policy configuration requires Restate Server >= 1.5.
+</Note>

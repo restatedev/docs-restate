@@ -1,0 +1,73 @@
+---
+title: "Logging"
+description: "Configure logging and tracing for your Rust services."
+icon: "file-lines"
+---
+
+The Restate Rust SDK uses the [tracing](https://docs.rs/tracing) crate for logging and observability.
+
+## Basic setup
+
+Configure a tracing subscriber in your `main` function before starting the server:
+
+```rust
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();
+
+    HttpServer::new(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+## Avoiding duplicate log output during replays
+
+When Restate replays a handler after a failure, log statements will execute again. To avoid printing duplicate logs during replays, use `ReplayAwareFilter`:
+
+```rust
+use restate_sdk::filter::ReplayAwareFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::registry()
+        .with(ReplayAwareFilter)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
+    HttpServer::new(
+        Endpoint::builder()
+            .bind(MyServiceImpl.serve())
+            .build(),
+    )
+    .listen_and_serve("0.0.0.0:9080".parse().unwrap())
+    .await;
+}
+```
+
+`ReplayAwareFilter` suppresses log output while a handler is replaying, so each log line appears exactly once across the full execution lifecycle.
+
+## Including the invocation ID in logs
+
+Use `ctx.invocation_id()` to include the Restate invocation ID in your log output for easier debugging and correlation:
+
+```rust
+impl MyService for MyServiceImpl {
+    async fn my_handler(
+        &self,
+        ctx: Context<'_>,
+        name: String,
+    ) -> Result<String, HandlerError> {
+        let id = ctx.invocation_id();
+        tracing::info!(invocation_id = id, "Handling request for {name}");
+        Ok(format!("Greetings {name}"))
+    }
+}
+```
+
+For more information about configuring tracing subscribers, see the [tracing-subscriber documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html#filtering-events-with-environment-variables).

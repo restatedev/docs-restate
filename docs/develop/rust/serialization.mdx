@@ -1,0 +1,54 @@
+---
+title: "Serialization"
+description: "Serialize handler inputs and outputs."
+icon: "code"
+---
+
+The Restate Rust SDK uses [Serde](https://serde.rs/) with JSON by default to serialize handler inputs and outputs.
+
+## Default serialization
+
+Any type that implements `serde::Serialize` and `serde::Deserialize` can be used as handler input or output:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct OrderRequest {
+    pub order_id: String,
+    pub amount: f64,
+}
+
+#[restate_sdk::service]
+trait OrderService {
+    async fn place_order(req: OrderRequest) -> Result<String, HandlerError>;
+}
+```
+
+## JSON schema generation
+
+By enabling the optional `schemars` feature, the SDK generates and propagates JSON schemas for your handler inputs and outputs. These schemas appear in the generated [OpenAPI output](/invoke/http#openapi-support) and in the Restate Playground.
+
+Enable the feature in `Cargo.toml`:
+
+```toml
+[dependencies]
+restate-sdk = { version = "0.10", features = ["schemars"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+```
+
+Then derive `JsonSchema` on your types:
+
+```rust
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct OrderRequest {
+    pub order_id: String,
+    pub amount: f64,
+}
+```
+
+For details on how to tune schema generation (e.g., custom field names, validation rules), see the [`PayloadMetadata` trait documentation](https://docs.rs/restate-sdk/latest/restate_sdk/serde/trait.PayloadMetadata.html).

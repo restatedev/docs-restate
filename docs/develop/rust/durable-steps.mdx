@@ -1,0 +1,92 @@
+---
+title: "Durable Steps"
+description: "Persist results of operations."
+icon: "list-check"
+---
+
+Restate uses an execution log to replay operations after failures and suspensions. Non-deterministic operations (database calls, HTTP requests, UUID generation) must be wrapped to ensure deterministic replay.
+
+## Run
+
+Use `ctx.run` to safely wrap any non-deterministic operation and have Restate store its result in the execution log.
+
+```rust
+async fn my_handler(
+    &self,
+    ctx: Context<'_>,
+    _: (),
+) -> Result<String, HandlerError> {
+    let result = ctx
+        .run(|| async move { do_db_request().await })
+        .await?;
+    Ok(result)
+}
+```
+
+Inside `ctx.run`, do not call other Restate context methods (no nested `run`, no `sleep`, no calls). The closure only has access to non-Restate async I/O.
+
+<AccordionGroup>
+
+  <Accordion title="Retrying run blocks">
+
+  Failures inside `ctx.run` are treated like any other handler error. Restate retries them with the handler's retry policy unless you throw a `TerminalError`.
+
+  You can customize retry behavior per `run` block:
+
+```rust
+let result = ctx
+    .run(|| async move { do_db_request().await })
+    .retry_policy(
+        RunRetryPolicy::default()
+            // After 10 seconds, stop retrying
+            .max_duration(Duration::from_secs(10))
+            // On the first retry, wait 100ms before next attempt
+            .initial_interval(Duration::from_millis(100))
+            // Grow retry interval with factor 2
+            .factor(2.0),
+    )
+    .await?;
+```
+
+  - Limit retries by duration or count.
+  - When the policy is exhausted, a `TerminalError` is thrown.
+  - See the [Error Handling Guide](/guides/error-handling) and the [Sagas Guide](/guides/sagas) for patterns like compensation.
+
+  </Accordion>
+
+  <Accordion title="Increasing timeouts">
+    If Restate doesn't receive new journal entries from a service for more than one minute (by default), it automatically suspends the invocation and retries it.
+
+    For long-running operations (e.g., an LLM call that takes up to 3 minutes), adjust the service's [inactivity timeout and abort timeout](/services/configuration) settings.
+  </Accordion>
+
+</AccordionGroup>
+
+## Deterministic randoms
+
+The SDK provides deterministic helpers seeded by the invocation ID — they return the **same result on retries**.
+
+### UUIDs
+
+Generate stable UUIDs for idempotency keys and similar uses:
+
+```rust
+let uuid = ctx.rand_uuid();
+```
+
+Do not use this in cryptographic contexts.
+
+### Random numbers
+
+Access a seeded `StdRng` via `ctx.rand()`:
+
+```rust
+use rand::RngExt; // rand 0.10+
+
+let random_number = ctx.rand().random::<u64>();
+let random_in_range = ctx.rand().random_range(0..100);
+```
+
+<Note>
+    As of Rust SDK v0.9.0, the `rand` crate was upgraded to 0.10. The convenience methods trait was renamed from `Rng` to `RngExt`. If you were using `use rand::Rng`, update to `use rand::RngExt`.
+</Note>

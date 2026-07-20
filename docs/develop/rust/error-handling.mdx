@@ -1,0 +1,58 @@
+---
+title: "Error Handling"
+description: "Stop infinite retries with terminal errors."
+icon: "triangle-exclamation"
+---
+
+Restate handles retries for failed invocations.
+
+<Info>
+    Check out the [Error Handling guide](/guides/error-handling) to learn more about how Restate handles transient errors, terminal errors, retries, and timeouts.
+</Info>
+
+## Retry strategies
+
+By default, Restate retries failed invocations indefinitely with an exponential backoff strategy.
+
+Check out the [error handling guide](/guides/error-handling) to learn how to customize this.
+
+## Terminal errors
+
+For failures where you do not want retries — but instead want the invocation to end and the error to propagate back to the caller — throw a `TerminalError`:
+
+```rust
+use restate_sdk::prelude::*;
+use restate_sdk::errors::TerminalError;
+
+async fn my_handler(
+    &self,
+    _ctx: Context<'_>,
+    _: (),
+) -> Result<String, HandlerError> {
+    Err(TerminalError::new("Something went wrong")
+        .with_code(500)
+        .into())
+}
+```
+
+<Info>
+    When you throw a terminal error, you might need to undo earlier actions to keep your system consistent. See the [sagas guide](/guides/sagas) for compensation patterns.
+</Info>
+
+## Using any error type
+
+Handlers return `Result<T, HandlerError>`. Any type that implements `std::error::Error` (including `anyhow::Error`, `std::io::Error`, etc.) can be used with `?` and is automatically converted to `HandlerError`:
+
+```rust
+async fn my_handler(
+    &self,
+    _ctx: Context<'_>,
+    _: (),
+) -> Result<String, HandlerError> {
+    // std::io::Error, anyhow::Error, etc. all work with ?
+    let result = std::fs::read_to_string("file.txt")?;
+    Ok(result)
+}
+```
+
+Non-terminal errors cause Restate to retry the handler. Use `TerminalError` when the error is permanent and retrying will not help.
