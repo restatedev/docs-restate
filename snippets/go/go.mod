@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/aws/aws-lambda-go v1.50.0
 	github.com/google/uuid v1.6.0
-	github.com/restatedev/sdk-go v1.0.1
+	github.com/restatedev/sdk-go v1.0.2
 	github.com/restatedev/sdk-go/testing v1.0.0
 	github.com/restatedev/sdk-go/x/protoc-gen-go-restate v0.26.0
 	github.com/stretchr/testify v1.11.1
