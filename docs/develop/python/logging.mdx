@@ -1,0 +1,68 @@
+---
+title: "Logging"
+description: "Suppress duplicate logs during replays with the Restate logging integration."
+icon: "file-lines"
+---
+
+Restate replays handler execution after failures and suspensions. Any log statements inside your handler will be printed again on each replay, producing duplicate output.
+
+The Python SDK integrates with the standard library [`logging`](https://docs.python.org/3/library/logging.html) module to suppress duplicate log statements during replays.
+
+## Replay-aware logging
+
+Use `restate.getLogger()` to get a logger that automatically suppresses output during replays:
+
+```python
+import restate
+
+logger = restate.getLogger(__name__)
+
+my_service = restate.Service("MyService")
+
+
+@my_service.handler()
+async def my_handler(ctx: restate.Context, name: str) -> str:
+    logger.info("Processing request for %s", name)  # not printed during replays
+    result = await ctx.run_typed("fetch data", fetch_data, name=name)
+    logger.info("Got result: %s", result)  # not printed during replays
+    return result
+```
+
+`restate.getLogger()` accepts the same arguments as `logging.getLogger()`.
+
+## Using RestateLoggingFilter
+
+If you already have a configured logger, attach `restate.RestateLoggingFilter` directly:
+
+```python
+import logging
+import restate
+
+# Attach the filter to an existing logger
+logger = logging.getLogger("my_app")
+logger.addFilter(restate.RestateLoggingFilter())
+```
+
+You can also add the filter to a handler to suppress replay logs only for a specific output destination:
+
+```python
+import logging
+import restate
+
+handler = logging.StreamHandler()
+handler.addFilter(restate.RestateLoggingFilter())
+
+logger = logging.getLogger("my_app")
+logger.addHandler(handler)
+```
+
+## Why duplicate logs happen
+
+When Restate replays a handler after a failure, it re-runs all of the handler's code up to the point of failure.
+Log statements inside the handler run again as part of this replay, so each retry produces another copy of the same log lines.
+
+`RestateLoggingFilter` detects when code is executing during a replay and drops the log record, so your logs show each event only once.
+
+<Note>
+    Log statements inside `ctx.run` blocks are not suppressed during replays because those blocks are not re-executed — their result is loaded from the journal instead.
+</Note>

@@ -108,5 +108,38 @@ app = restate.app([my_workflow])
   * Use `ctx.key()` to access the workflow's unique ID
 * Additional handlers are annotated with `@my_workflow.handler()`. They must use the `WorkflowSharedContext` and can signal or query the workflow. They can run concurrently with the `run` handler and until the retention time expires.
 
+## Invocation context managers
+
+You can attach async context managers to a handler so that they are entered and exited around each invocation attempt. This is useful for managing resources like database connections, tracing spans, or dependency injection that should be set up and torn down per attempt.
+
+To define a context manager, use `@contextvar` and `@asynccontextmanager`, then pass it to the handler's `invocation_context_managers` parameter:
+
+```python
+from contextlib import asynccontextmanager
+from restate import contextvar
+
+@contextvar
+@asynccontextmanager
+async def db_connection():
+    conn = await open_database_connection()
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
+my_service = restate.Service("MyService")
+
+
+@my_service.handler(invocation_context_managers=[db_connection])
+async def my_handler(ctx: restate.Context, name: str) -> str:
+    conn = db_connection.value  # access the value yielded by the context manager
+    return await conn.query(name)
+```
+
+- `@contextvar` makes the context manager's yielded value accessible as `.value` anywhere in the handler code.
+- Context managers run around each invocation attempt, including replays.
+- You can pass multiple context managers; they are entered in order.
+
 ## Configuring services
 Check out the [service configuration docs](/services/configuration) to learn how to configure service behavior, including timeouts and retention policies.

@@ -6,17 +6,20 @@ icon: "bug"
 
 The Python SDK has a testing harness to test your Restate handlers.
 
-This uses [Testcontainers](https://testcontainers.com/) to run a Restate Server in a Docker container and provides a client to let you test your Restate handlers.
+This uses [Testcontainers](https://testcontainers.com/) to run a Restate Server in a Docker container and provides a typed client to let you invoke handlers in tests.
 
 ## Setup
+
 Install the package:
-```bash
+
+```shell
 pip install restate_sdk[harness]
 ```
 
 ## Testing handlers
 
-If you have a service as follows:
+If you have a service defined like this:
+
 ```python {"CODE_LOAD::python/src/develop/testing.py#service"} 
 import restate
 
@@ -31,11 +34,54 @@ async def greet(ctx: restate.Context, name: str) -> str:
 app = restate.app(services=[greeter])
 ```
 
-Then you can test it via:
+### Using the synchronous harness
+
+For simple test scripts, use `restate.test_harness` as a context manager:
+
 ```python {"CODE_LOAD::python/src/develop/testing.py#testing"} 
 import restate
 
 with restate.test_harness(app) as harness:
     restate_client = harness.ingress_client()
     print(restate_client.post("/greeter/greet", json="Alice").json())
+```
+
+### Using a pytest fixture
+
+For pytest-based test suites, use `restate.create_test_harness` as an async context manager.
+This approach starts the Restate container once per test session and lets you use the typed SDK client directly:
+
+```python
+import pytest
+import restate
+from restate.testing import HarnessEnvironment
+
+
+@pytest.fixture(scope="session")
+async def restate_test_harness():
+    app = restate.app([greeter])
+    async with restate.create_test_harness(app) as harness:
+        yield harness
+
+
+async def test_greeter(restate_test_harness: HarnessEnvironment):
+    greeting = await restate_test_harness.client.service_call(greet, arg="Pippo")
+    assert greeting == "Hello Pippo!"
+```
+
+The `harness.client` is the same typed [Python SDK client](/services/invocation/clients/python-sdk) you use in production code.
+It supports `service_call`, `object_call`, `workflow_call`, and the corresponding `_send` variants.
+
+### Test harness options
+
+The test harness accepts two optional flags to control handler behavior during tests:
+
+- `always_replay=True` — forces every handler execution to behave as if it is replaying from a journal, useful for testing replay-specific code paths.
+- `disable_retries=True` — disables Restate's automatic retry policy so tests fail fast on errors instead of waiting for retries.
+
+```python
+async with restate.create_test_harness(
+    app, always_replay=True, disable_retries=True
+) as harness:
+    yield harness
 ```

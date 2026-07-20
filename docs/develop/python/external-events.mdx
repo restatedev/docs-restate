@@ -128,3 +128,74 @@ app = restate.app([review_workflow])
 ```
 
 <AwakeablesOutro/>
+
+## Signals
+
+<Note title="Preview feature">
+    Signals require restate-server 1.7 with [protocol v7 enabled](/services/flow-control#enabling-flow-control).
+</Note>
+
+Signals let any invocation communicate directly with another: one invocation waits on a named signal, and any other handler resolves or rejects it by referencing the target invocation's ID.
+
+**Key differences from awakeables and durable promises:**
+- Not scoped to workflows — any handler can wait for a signal
+- The waiter's invocation ID is the only coordination point; no separate ID to pass around
+- Both the waiter and the resolver need access to the target invocation ID
+
+### Waiting for a signal
+
+Inside the invocation that wants to wait:
+
+```python
+approved = await ctx.signal("approved", type_hint=bool)
+```
+
+The handler suspends until the signal is resolved or rejected. The signal name is scoped to the invocation, so different invocations can use the same name independently.
+
+### Resolving or rejecting a signal
+
+From any other handler that knows the target invocation's ID:
+
+```python
+# Resolve with a value — the waiter continues with this result
+ctx.resolve_signal(target_invocation_id, "approved", True)
+
+# Reject with an error — the waiter gets a TerminalError
+ctx.reject_signal(target_invocation_id, "approved", "Request denied")
+```
+
+You can obtain the target invocation ID from a call handle or from `ctx.request().invocation_id()`.
+
+### Example: approval workflow
+
+```python
+import restate
+
+approval_workflow = restate.Workflow("ApprovalWorkflow")
+
+
+@approval_workflow.main()
+async def run(ctx: restate.WorkflowContext, request: str) -> str:
+    # Wait for an external approval decision
+    approved = await ctx.signal("approved", type_hint=bool)
+    if not approved:
+        raise restate.TerminalError("Request was rejected")
+    return f"Approved: {request}"
+
+
+@approval_workflow.handler()
+async def approve(ctx: restate.WorkflowSharedContext, _: None):
+    invocation_id = ctx.request().invocation_id()
+    # Resolve the signal on the run handler
+    ctx.resolve_signal(invocation_id, "approved", True)
+
+
+@approval_workflow.handler()
+async def reject(ctx: restate.WorkflowSharedContext, reason: str):
+    invocation_id = ctx.request().invocation_id()
+    ctx.reject_signal(invocation_id, "approved", reason)
+```
+
+<Note>
+    Unlike durable promises, signals are not scoped to a single workflow execution. You can use them in any handler, including regular services and virtual objects.
+</Note>
