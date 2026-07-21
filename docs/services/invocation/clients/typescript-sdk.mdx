@@ -174,6 +174,43 @@ if (peekOutput.ready) {
 }
 ```
 
+## Automatic retries
+
+The ingress client can retry network failures, HTTP `429` responses, and HTTP `5xx` responses with exponential backoff and full jitter. Retries are disabled by default.
+
+Retries only run when the call has an idempotency key. Restate deduplicates requests with the same key, so a retry attaches to the existing invocation instead of starting another one.
+
+Pass `retry: true` when you connect to use the default policy:
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#automatic_retries"} 
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  retry: true,
+});
+
+// Retries require an idempotency key.
+await restateClient
+  .serviceClient<MyService>({ name: "MyService" })
+  .greet(request, clients.rpc.opts({ idempotencyKey: "request-1" }));
+```
+
+Pass an object instead of `true` to tune the policy, and use `shouldRetry` to fully replace the built-in network/`429`/`5xx` rule (compose with the exported defaultShouldRetry rather than reimplementing it):
+
+```typescript {"CODE_LOAD::ts/src/develop/clients/ingress.ts#custom_retries"} 
+const restateClient = clients.connect({
+  url: "http://localhost:8080",
+  retry: {
+    maxAttempts: 4,
+    initialInterval: 200,
+    maxInterval: { seconds: 5 },
+    exponentiationFactor: 2,
+    shouldRetry: (failure) =>
+      clients.defaultShouldRetry(failure) ||
+      (failure.kind === "response" && failure.status === 409),
+  },
+});
+```
+
 ## Flow control: scope and limit key
 
 <Note title="Preview feature">

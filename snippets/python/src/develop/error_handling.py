@@ -11,11 +11,45 @@ async def my_handler(ctx: Context, arg):
     # <start_terminal>
     from restate.exceptions import TerminalError
 
-    raise TerminalError("Something went wrong.")
+    raise TerminalError(
+        "Payment declined.",
+        status_code=402,
+        metadata={
+            "reason": "insufficient_funds",
+            "payment_id": "payment-123",
+        },
+    )
     # <end_terminal>
 
 
 from restate.exceptions import TerminalError
+
+billing_service = Service("BillingService")
+
+
+@billing_service.handler()
+async def charge(ctx: Context, payment_id: str):
+    raise TerminalError(
+        "Payment declined.",
+        status_code=402,
+        metadata={"reason": "insufficient_funds", "payment_id": payment_id},
+    )
+
+
+# <start_terminal_metadata_caller>
+async def checkout(ctx: Context, payment_id: str):
+    try:
+        await ctx.service_call(charge, arg=payment_id)
+        return {"status": "charged"}
+    except TerminalError as err:
+        return {
+            "status": "declined",
+            "code": err.status_code,
+            "reason": err.metadata.get("reason") if err.metadata else None,
+        }
+
+
+# <end_terminal_metadata_caller>
 
 
 def undo_transaction():

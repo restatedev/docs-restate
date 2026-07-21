@@ -102,6 +102,38 @@ const scopedClient = async () => {
   // <end_scope>
 };
 
+const clientWithAutomaticRetries = async () => {
+  const request = { greeting: "Hi" };
+  // <start_automatic_retries>
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    retry: true,
+  });
+
+  // Retries require an idempotency key.
+  await restateClient
+    .serviceClient<MyService>({ name: "MyService" })
+    .greet(request, clients.rpc.opts({ idempotencyKey: "request-1" }));
+  // <end_automatic_retries>
+};
+
+const clientWithCustomRetries = async () => {
+  // <start_custom_retries>
+  const restateClient = clients.connect({
+    url: "http://localhost:8080",
+    retry: {
+      maxAttempts: 4,
+      initialInterval: 200,
+      maxInterval: { seconds: 5 },
+      exponentiationFactor: 2,
+      shouldRetry: (failure) =>
+        clients.defaultShouldRetry(failure) ||
+        (failure.kind === "response" && failure.status === 409),
+    },
+  });
+  // <end_custom_retries>
+};
+
 const servicesIdempotent = async () => {
   const request = { greeting: "Hi" };
   const restateClient = clients.connect({ url: "http://localhost:8080" });

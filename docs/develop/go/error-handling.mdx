@@ -15,20 +15,50 @@ By default, Restate does infinite retries with an exponential backoff strategy.
 
 Check out the [error handling guide](/guides/error-handling) to learn how to customize this.
 
-## Terminal Errors
+## Terminal errors
 
-For failures for which you do not want retries, but instead want the invocation to end and the error message
-to be propagated back to the caller, you can throw a **terminal error**.
+For failures that should not be retried, return a terminal error. Restate ends the invocation and propagates the error to the caller.
 
-You can throw a `TerminalError` with an optional HTTP status code and a message anywhere in your handler, as follows:
+`TerminalError` carries an error code, a message, and optional metadata. Use `ToTerminalError` to convert an existing error, or use `TerminalErrorf` to construct one from a formatted message:
+
+<Note title="Migrating to Go SDK 1.0">
+    The `TerminalError(err)` constructor was renamed to `ToTerminalError(err)`. To attach a code, replace `TerminalError(err, code)` with `ToTerminalError(err, WithErrorCode(code))`. The previous `ErrorCode(err)` helper was removed. Use `AsTerminalError` or `AsRetryableError` and check for `nil` before reading the code.
+</Note>
 
 ```go {"CODE_LOAD::go/develop/errorhandling.go#here"} 
 return restate.ToTerminalError(fmt.Errorf("Something went wrong."), restate.WithErrorCode(500))
 ```
 
-You can catch terminal errors, and build your control flow around it.
+Use `AsTerminalError` to check and inspect an error. It also finds a terminal error wrapped by another error:
+
+```go {"CODE_LOAD::go/develop/errorhandling.go#terminal_downcast"} 
+if terminalErr := restate.AsTerminalError(err); terminalErr != nil {
+  return terminalErr.Code()
+}
+```
+
+Operations that can only fail terminally, including state access and durable timers, return `TerminalError` directly. Because it implements the standard `error` interface, you can return it like any other error.
 
 <Info>
-    When you throw a terminal error, you might need to undo the actions you did earlier in your handler to make sure that your system remains in a consistent state.
+    When you return a terminal error, you might need to undo the actions you did earlier in your handler to make sure that your system remains in a consistent state.
     Have a look at our [sagas guide](/guides/sagas) to learn more.
 </Info>
+
+## Retryable errors
+
+Returning a regular Go error already causes Restate to retry. Use `RetryableError` when you also need to attach a status code to the failure:
+
+```go {"CODE_LOAD::go/develop/errorhandling.go#retryable"} 
+return restate.ToRetryableError(
+  fmt.Errorf("rate limited by upstream"),
+  restate.WithErrorCode(429),
+)
+```
+
+`ToRetryableError` wraps the original error, so `errors.Is`, `errors.As`, and `errors.Unwrap` can still inspect its cause. Use `AsRetryableError` to access its Restate status code:
+
+```go {"CODE_LOAD::go/develop/errorhandling.go#retryable_downcast"} 
+if retryableErr := restate.AsRetryableError(err); retryableErr != nil {
+  return retryableErr.Code()
+}
+```
