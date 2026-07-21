@@ -34,6 +34,39 @@ const service = restate.service({
   },
 });
 
+// <start_pause_error>
+async function chargeCard(ctx: restate.Context, paymentId: string) {
+  return ctx.run("charge card", async () => {
+    const providerUrl = process.env.PAYMENT_PROVIDER_URL;
+    if (providerUrl === undefined) {
+      throw new restate.PauseError("Payment provider is not configured");
+    }
+
+    const response = await fetch(`${providerUrl}/payments/${paymentId}`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Payment provider returned HTTP ${response.status}`);
+    }
+    return response.json();
+  });
+}
+// <end_pause_error>
+
+// <start_journal_mismatch>
+const paymentService = restate.service({
+  name: "PaymentService",
+  handlers: {
+    charge: async (_ctx: restate.Context, paymentId: string) => {
+      return `Charged ${paymentId}`;
+    },
+  },
+  options: {
+    onJournalMismatchErrors: "pause",
+  },
+});
+// <end_journal_mismatch>
+
 // <start_as_terminal>
 class MyValidationError extends Error {}
 

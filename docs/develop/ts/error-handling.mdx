@@ -65,6 +65,63 @@ throw RetryableError.from(cause, {
     Unlike `TerminalError` which stops retries permanently, `RetryableError` tells Restate to retry after the specified delay. You can combine it with `maxRetryAttempts` and `maxRetryDuration` in the run options.
 </Note>
 
+## Pausing invocations
+
+<Note title="Preview feature">
+    `PauseError` and `onJournalMismatchErrors` require Restate Server 1.7 with `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true` enabled.
+</Note>
+
+A paused invocation stops retrying until you [resume it](/services/invocation/managing-invocations#resume). This is useful when an operator must fix the underlying problem before another attempt can succeed.
+
+### Pause from a durable step
+
+Throw `PauseError` from a `ctx.run` closure to pause the invocation. If you throw it outside `ctx.run`, Restate ignores the pause request and applies the normal invocation retry policy.
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#pause_error"} 
+async function chargeCard(ctx: restate.Context, paymentId: string) {
+  return ctx.run("charge card", async () => {
+    const providerUrl = process.env.PAYMENT_PROVIDER_URL;
+    if (providerUrl === undefined) {
+      throw new restate.PauseError("Payment provider is not configured");
+    }
+
+    const response = await fetch(`${providerUrl}/payments/${paymentId}`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Payment provider returned HTTP ${response.status}`);
+    }
+    return response.json();
+  });
+}
+```
+
+After you fix the configuration and resume the invocation, Restate retries the `ctx.run` closure.
+
+### Handle journal mismatch errors
+
+A [journal mismatch](/services/versioning#journal-mismatch-errors) happens when replayed code produces different Restate operations from the original execution. By default, Restate applies the invocation retry policy. Set `onJournalMismatchErrors` on a service or handler to choose another outcome.
+
+```typescript {"CODE_LOAD::ts/src/develop/error_handling.ts#journal_mismatch"} 
+const paymentService = restate.service({
+  name: "PaymentService",
+  handlers: {
+    charge: async (_ctx: restate.Context, paymentId: string) => {
+      return `Charged ${paymentId}`;
+    },
+  },
+  options: {
+    onJournalMismatchErrors: "pause",
+  },
+});
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"retry"` | Apply the normal invocation retry policy. This is the default. |
+| `"pause"` | Pause the invocation for inspection and manual recovery. |
+| `"fail"` | End the invocation with a terminal failure. |
+
 ## Mapping errors to `TerminalError`
 
 If you're using external libraries (e.g., for validation), you might want to automatically convert certain error types into terminal errors.
