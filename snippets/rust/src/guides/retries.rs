@@ -6,14 +6,11 @@
 use restate_sdk::prelude::*;
 use std::time::Duration;
 
-#[restate_sdk::service]
-trait MyService {
-    async fn handle() -> Result<(), TerminalError>;
-    async fn my_handler(request: Vec<u8>) -> Result<(), HandlerError>;
-}
+struct MyService;
 
-struct MyServiceImpl;
-impl MyService for MyServiceImpl {
+#[restate_sdk::service]
+impl MyService {
+    #[handler]
     async fn handle(&self, ctx: Context<'_>) -> Result<(), TerminalError> {
         // <start_here>
         let my_run_retry_policy = RunRetryPolicy::default()
@@ -47,6 +44,7 @@ impl MyService for MyServiceImpl {
 
     // <start_raw>
     // Use Vec<u8> to represent a binary request
+    #[handler]
     async fn my_handler(&self, ctx: Context<'_>, request: Vec<u8>) -> Result<(), HandlerError> {
         let decoded_request = decode_request(&request)?;
 
