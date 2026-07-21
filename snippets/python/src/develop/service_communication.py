@@ -100,7 +100,7 @@ async def calling_handler(ctx: Context, arg):
     )
 
     # Fire-and-forget sends can be scoped too
-    ctx.scope("tenant-123").service_send(my_service_handler, arg="Hi")
+    ctx.scope("tenant-123").object_send(my_object_handler, key="Mary", arg="Hi")
     # <end_scope>
 
     # <start_scope_request>

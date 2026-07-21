@@ -5,6 +5,7 @@ import dev.restate.sdk.DurableFuture;
 import dev.restate.sdk.Restate;
 import dev.restate.sdk.Select;
 import develop.utils.AnalyticsService;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -61,6 +62,10 @@ class JournalingResults {
     // <start_random_nb>
     int value = Restate.random().nextInt();
     // <end_random_nb>
+
+    // <start_deterministic_time>
+    Instant now = Restate.instantNow();
+    // <end_deterministic_time>
   }
 
   private OrderHistory fetchOrderHistory(int i) {

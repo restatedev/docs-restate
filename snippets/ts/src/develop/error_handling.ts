@@ -6,7 +6,13 @@ const service = restate.service({
   handlers: {
     greet: async (ctx: restate.Context, name: string) => {
       // <start_terminal>
-      throw new TerminalError("Something went wrong.", { errorCode: 500 });
+      throw new TerminalError("Payment declined.", {
+        errorCode: 402,
+        metadata: {
+          reason: "insufficient_funds",
+          paymentId: "payment-123",
+        },
+      });
       // <end_terminal>
     },
     retryable: async (ctx: restate.Context, name: string) => {
@@ -33,6 +39,36 @@ const service = restate.service({
     },
   },
 });
+
+const billingService = restate.service({
+  name: "BillingService",
+  handlers: {
+    charge: async (_ctx: restate.Context, paymentId: string) => {
+      throw new TerminalError("Payment declined.", {
+        errorCode: 402,
+        metadata: { reason: "insufficient_funds", paymentId },
+      });
+    },
+  },
+});
+
+// <start_terminal_metadata_caller>
+async function checkout(ctx: restate.Context, paymentId: string) {
+  try {
+    await ctx.serviceClient(billingService).charge(paymentId);
+    return { status: "charged" };
+  } catch (error) {
+    if (error instanceof TerminalError) {
+      return {
+        status: "declined",
+        code: error.code,
+        reason: error.metadata?.reason,
+      };
+    }
+    throw error;
+  }
+}
+// <end_terminal_metadata_caller>
 
 // <start_pause_error>
 async function chargeCard(ctx: restate.Context, paymentId: string) {

@@ -1,0 +1,34 @@
+---
+title: "Logging"
+description: "Suppress duplicate Python service logs during replay."
+icon: "file-lines"
+---
+
+Restate may replay a handler after a suspension or retry. Calls to Python's standard logger run again during replay and can produce duplicate log entries.
+
+## Replay-aware logger
+
+Use `restate.getLogger()` inside your service code to create a standard Python logger with `RestateLoggingFilter` already attached:
+
+```python {"CODE_LOAD::python/src/develop/logging.py#restate_logger"} 
+logger = restate.getLogger(__name__)
+
+
+@service.handler()
+async def greet(ctx: restate.Context, name: str) -> str:
+    logger.info("Processing greeting for %s", name)
+    return f"Hello, {name}!"
+```
+
+The filter suppresses records emitted while Restate is replaying the handler. Logs from the first execution attempt and logs emitted outside a Restate invocation are unaffected. Configure handlers, formatters, destinations, and log levels with Python's standard [`logging`](https://docs.python.org/3/library/logging.html) APIs.
+
+## Add the replay filter to an existing logger
+
+If your application or framework already creates its loggers, attach `RestateLoggingFilter` directly:
+
+```python {"CODE_LOAD::python/src/develop/logging.py#logging_filter"} 
+standard_logger = logging.getLogger("my-application")
+standard_logger.addFilter(restate.RestateLoggingFilter())
+```
+
+Add the filter to every logger whose handler logs should be suppressed during replay.
