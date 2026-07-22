@@ -11,8 +11,6 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 ### Wait for a signal
 
-Wait once for a named signal:
-
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#one_shot"}
 public Boolean waitForApproval() {
@@ -26,9 +24,29 @@ suspend fun waitForApproval(): Boolean {
 ```
 </CodeGroup>
 
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#resolve"}
+public void steerInvocation(String invocationId, String text) {
+  InvocationHandle<?> target = Restate.invocationHandle(invocationId);
+  target.signal("steer").resolve(String.class, text);
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#resolve"}
+suspend fun steerInvocation(invocationId: String, text: String) {
+  invocationHandle<Any>(invocationId).signal("steer").resolve(text)
+}
+```
+</CodeGroup>
+
+Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
+
 ### Wait for repeated signals
 
-Call the signal API each time you want to wait for the next resolution of a named signal:
+A signal can be resolved multiple times. Repeatedly call the signal API to wait for the next resolution of a named signal:
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#wait"}
@@ -63,29 +81,6 @@ suspend fun reviseUntilDone(topic: String): String {
 
 A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
 
-### Resolve a signal
-
-To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
-
-<CodeGroup>
-```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#resolve"}
-public void steerInvocation(String invocationId, String text) {
-  InvocationHandle<?> target = Restate.invocationHandle(invocationId);
-  target.signal("steer").resolve(String.class, text);
-}
-```
-```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#resolve"}
-suspend fun steerInvocation(invocationId: String, text: String) {
-  invocationHandle<Any>(invocationId).signal("steer").resolve(text)
-}
-```
-</CodeGroup>
-
-Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
-
-<Info>
-Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
-</Info>
 
 ## Awakeables
 
@@ -184,11 +179,9 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
 
 A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
-Unlike an awakeable, the value belongs to the workflow rather than an individual external task token.
-
-Use this for:
-- Sending data to the run handler
-- Have handlers wait for events emitted by the run handler
+Use this to:
+- Have shared handlers interact with the workflow run handler
+- Have one or multiple handlers wait for events emitted by the run handler
 
 <Info>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).

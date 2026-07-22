@@ -120,6 +120,7 @@ To learn about Mintlify, visit https://www.mintlify.com/docs/llms.txt
 - Use **signal** only for the repeatable primitive addressed by invocation ID and signal name
 - Describe an **awakeable** as a convenient shorthand for a one-shot signal with a generated ID that can be completed through the SDK or Restate HTTP API
 - Use **workflow promise** for the named, workflow-scoped primitive that is resolved once and retrieved multiple times during workflow retention
+- Use **durable promise** as approachable, descriptive language for a promise that survives crashes and restarts. Introduce the exact API name, such as awakeable or workflow promise, when the distinction matters
 - Use **external event**, **callback**, and **task token** for use cases and patterns, not as synonyms for a Restate primitive
 - Call workflow handlers other than `run` **workflow shared handlers**, not signal handlers
 - Do not position signals as a transport or describe them as persistent connections, channels, or streams

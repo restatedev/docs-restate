@@ -14,17 +14,17 @@ import SetupLangChain from '/snippets/tour/ai/setup-langchain.mdx';
 import SetupRestateTS from '/snippets/common/setup-restate-ts.mdx';
 import SetupRestatePy from '/snippets/common/setup-restate-py.mdx';
 
-Some agent actions need human approvals for dangerous actions: deploying code, sending money, modifying user accounts. With Restate, your agent can **pause** execution, wait on an external event, and **resume** exactly where it left off, even if the process restarts in the meantime.
+Some agent actions need human approvals for dangerous actions: deploying code, sending money, modifying user accounts. With Restate, your agent can **pause** execution, wait on a durable approval promise, and **resume** exactly where it left off, even if the process restarts in the meantime.
 
 
 ## How it works
 
-Restate provides **awakeables** that survive crashes and restarts:
+Restate provides **durable promises** that survive crashes and restarts. For this callback pattern, you create one with the awakeable API:
 
-1. The agent creates an awakeable and gets its unique ID
+1. The agent creates a durable promise and gets a unique callback ID
 2. The agent sends this ID to whoever needs to approve (Slack, email, dashboard)
 3. The agent **suspends**, freeing compute resources (no idle billing on serverless)
-4. When the approver responds, they resolve the awakeable through Restate's HTTP API
+4. When the approver responds, they resolve the promise through Restate's HTTP API
 5. The agent **resumes** from the exact point it paused
 
 ## Example: approval tool for an agent
@@ -350,7 +350,7 @@ async function run(ctx: Context, { message }: { message: string }) {
   );
 
   if (toolCalls?.[0]?.toolName === "humanApproval") {
-    // Create a recoverable awakeable for the approval
+    // Create a recoverable approval promise
     const approval = ctx.awakeable<boolean>();
     await ctx.run("request-review", () =>
       requestClaimReview(message, approval.id),
@@ -400,7 +400,7 @@ See in the UI how the workflow resumes and finishes after the approval.
 ```python human_approval_agent.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/tour-of-agents/app/human_approval_agent.py#here"} 
 # TOOL IMPLEMENTATION
 async def request_human_approval(ctx: restate.Context, claim: InsuranceClaim) -> str:
-    # Create a recoverable awakeable for the approval
+    # Create a recoverable approval promise
     approval_id, approval_promise = ctx.awakeable(type_hint=str)
 
     await ctx.run_typed(
@@ -494,7 +494,7 @@ See in the UI how the workflow resumes and finishes after the approval.
 
 ## Adding timeouts
 
-Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the awakeable, so if the service crashes or is restarted, it will continue waiting with the correct remaining time.
+Add a timeout to prevent approval steps from hanging indefinitely. Restate persists both the timer and the approval promise, so if the service crashes or is restarted, it will continue waiting with the correct remaining time.
 
 <div className="hidden-tabs">
 <Tabs>
@@ -643,7 +643,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 </Tab>
 <Tab title="Pydantic AI" icon="/img/languages/python.svg">
 
-Use `restate.select` to race the awakeable result against a sleep timer:
+Use `restate.select` to race the approval promise against a sleep timer:
 
 ```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/pydantic-ai/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
 @agent.tool
@@ -695,7 +695,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 </Tab>
 <Tab title="LangChain" icon="/img/languages/python.svg">
 
-Use `restate.select` to race the awakeable result against a sleep timer:
+Use `restate.select` to race the approval promise against a sleep timer:
 
 ```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/langchain-python/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
 @tool
@@ -743,7 +743,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 </Tab>
 <Tab title="Restate TS" icon="/img/languages/typescript.svg">
 
-Use `orTimeout` on the result returned by the awakeable:
+Use `orTimeout` on the approval promise:
 
 ```typescript
 const approval = ctx.awakeable<string>();
@@ -789,7 +789,7 @@ You can also lower the timeout to a few seconds to see how the timeout path is t
 
 ```python human_approval_agent_with_timeout.py {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/tour-of-agents/app/human_approval_agent_with_timeout.py#here"} 
 async def request_human_approval(ctx: restate.Context, claim: InsuranceClaim) -> str:
-    # Create a recoverable awakeable for the approval
+    # Create a recoverable approval promise
     approval_id, approval_promise = ctx.awakeable(type_hint=str)
 
     await ctx.run_typed(

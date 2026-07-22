@@ -893,7 +893,7 @@ In the UI, look at the state tab and filter on the `SignupWithQueriesWorkflow`.
 
 ### Workflow promises
 
-Pause workflow execution while it waits for an external event using a workflow promise:
+Pause workflow execution while it waits for an external event using a durable promise:
 
 <div className="hidden-tabs">
 <Tabs>
@@ -920,7 +920,7 @@ export const signupWithSignals = restate.workflow({
       ctx: WorkflowSharedContext,
       req: { secret: string },
     ) => {
-      // Resolve the workflow promise to continue the main workflow
+      // Resolve the promise to continue the main workflow
       await ctx.promise<string>("email-verified").resolve(req.secret);
     },
   },
@@ -989,7 +989,7 @@ func (SignupWithSignalsWorkflow) Run(ctx restate.WorkflowContext, user User) (bo
 }
 
 func (SignupWithSignalsWorkflow) VerifyEmail(ctx restate.WorkflowSharedContext, req VerifyEmailRequest) error {
-  // Resolve the workflow promise to continue the main workflow
+  // Resolve the promise to continue the main workflow
   return restate.Promise[string](ctx, "email-verified").Resolve(req.Secret)
 }
 ```
@@ -1024,7 +1024,7 @@ async def run(ctx: WorkflowContext, user: User) -> bool:
 
 @signup_with_signals.handler("verifyEmail")
 async def verify_email(ctx: WorkflowSharedContext, req: VerifyEmailRequest) -> None:
-    # Resolve the workflow promise to continue the main workflow
+    # Resolve the promise to continue the main workflow
     await ctx.promise("email-verified", type_hint=str).resolve(req.secret)
 ```
 
@@ -1035,11 +1035,11 @@ async def verify_email(ctx: WorkflowSharedContext, req: VerifyEmailRequest) -> N
 </div>
 
 
-The workflow promise survives restarts and crashes and can be recovered on another process.
+The promise survives restarts and crashes and can be recovered on another process.
 
-You can use workflow promises to handle asynchronous events without complex message queues or external state management.
+You can use these durable promises to handle asynchronous events without complex message queues or external state management.
 
-Workflow promises can be resolved before the workflow waits for them, avoiding complex synchronization issues.
+Promises can be resolved before the workflow waits for them, avoiding complex synchronization issues.
 
 <Accordion title="Try out workflow promises" icon={"laptop"}>
 Submit the workflow asynchronously with the `send` verb:
@@ -1072,14 +1072,14 @@ Submit the workflow asynchronously with the `send` verb:
 </Tabs>
 </div>
 
-In the UI, you can see the workflow waiting for the `email-verified` workflow promise to be resolved.
+In the UI, you can see the workflow waiting for the `email-verified` promise to be resolved.
 <Frame>
 <img src="/img/tour/workflows/signals.png" alt="Workflow Queries"/>
 </Frame>
 
-Try killing the service and restarting it. The workflow will continue waiting for the workflow promise to be resolved.
+Try killing the service and restarting it. The workflow will continue waiting for the promise to be resolved.
 
-To resolve the workflow promise, **copy over the curl request from the service logs**, which looks like this:
+To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
 <div className="hidden-tabs">
 <Tabs>
     <Tab title="TypeScript">
@@ -1115,7 +1115,7 @@ Now the UI will show the workflow completed successfully.
 
 ### Workflow Events
 
-You can also use workflow promises in the other direction. The run handler resolves a workflow promise, and another handler waits for its result:
+You can also use promises in the other direction: the run handler resolves a promise, and another handler waits for its result:
 
 <div className="hidden-tabs">
 <Tabs>
@@ -1322,7 +1322,7 @@ Submit the workflow asynchronously with the `send` verb:
 </div>
 
 
-You will get a response like `"User created."`. If the workflow promise has not been resolved yet, the request waits until it is.
+You will get a response like `"User created."`. If the promise has not been resolved yet, the request waits until it is.
 </Accordion>
 
 ### Timers and Scheduling
@@ -1599,7 +1599,7 @@ See in the UI how the workflow is waiting for the email verification to be resol
 
 Try killing the service and restarting it. The workflow will continue sending reminders as if it never stopped.
 
-To resolve the workflow promise, **copy over the curl request from the service logs**, which looks like this:
+To resolve the promise, **copy over the curl request from the service logs**, which looks like this:
 <div className="hidden-tabs">
 <Tabs>
     <Tab title="TypeScript">
@@ -1634,7 +1634,7 @@ Now the UI will show the workflow completed successfully.
 
 ### Parallel Execution
 
-The timers example ran three operations in parallel: two timers and a workflow promise.
+The timers example ran three operations in parallel: two timers and awaiting a promise.
 
 Restate supports different ways of waiting for parallel operations to complete and takes care of retries and recovery for you.
 

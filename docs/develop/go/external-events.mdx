@@ -11,17 +11,27 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 ### Wait for a signal
 
-Wait once for a named signal:
-
 ```go {"CODE_LOAD::go/develop/signals.go#one_shot"}
 func waitForApproval(ctx restate.Context) (bool, error) {
   return restate.Signal[bool](ctx, "approval").Result()
 }
 ```
 
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
+
+```go {"CODE_LOAD::go/develop/signals.go#resolve"}
+func steerInvocation(ctx restate.Context, invocationID string, text string) {
+  restate.ResolveSignal(ctx, invocationID, "steer", text)
+}
+```
+
+Use `restate.RejectSignal()` instead of `restate.ResolveSignal()` to deliver a terminal failure to the waiting invocation.
+
 ### Wait for repeated signals
 
-Call `restate.Signal()` each time you want to wait for the next resolution of a named signal:
+A signal can be resolved multiple times. Repeatedly call `restate.Signal()` to wait for the next resolution of a named signal:
 
 ```go {"CODE_LOAD::go/develop/signals.go#wait"}
 func reviseUntilDone(ctx restate.Context, topic string) (string, error) {
@@ -43,21 +53,6 @@ func reviseUntilDone(ctx restate.Context, topic string) (string, error) {
 
 A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
 
-### Resolve a signal
-
-To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
-
-```go {"CODE_LOAD::go/develop/signals.go#resolve"}
-func steerInvocation(ctx restate.Context, invocationID string, text string) {
-  restate.ResolveSignal(ctx, invocationID, "steer", text)
-}
-```
-
-Use `restate.RejectSignal()` instead of `restate.ResolveSignal()` to deliver a terminal failure to the waiting invocation.
-
-<Info>
-Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
-</Info>
 
 ## Awakeables
 
@@ -135,11 +130,9 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
 
 A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
-Unlike an awakeable, the value belongs to the workflow rather than an individual external task token.
-
-Use this for:
-- Sending data to the run handler
-- Have handlers wait for events emitted by the run handler
+Use this to:
+- Have shared handlers interact with the workflow run handler
+- Have one or multiple handlers wait for events emitted by the run handler
 
 <Info>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
