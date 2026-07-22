@@ -2,6 +2,13 @@ package develop
 
 import restate "github.com/restatedev/sdk-go"
 
+// <start_one_shot>
+func waitForApproval(ctx restate.Context) (bool, error) {
+	return restate.Signal[bool](ctx, "approval").Result()
+}
+
+// <end_one_shot>
+
 // <start_wait>
 func reviseUntilDone(ctx restate.Context, topic string) (string, error) {
 	draft := "Research notes for " + topic

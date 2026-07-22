@@ -122,7 +122,7 @@ To learn about Mintlify, visit https://www.mintlify.com/docs/llms.txt
 - Use **workflow promise** for the named, workflow-scoped primitive that is resolved once and retrieved multiple times during workflow retention
 - Use **external event**, **callback**, and **task token** for use cases and patterns, not as synonyms for a Restate primitive
 - Call workflow handlers other than `run` **workflow shared handlers**, not signal handlers
-- Do not position signals as a transport or describe them as persistent connections, channels, or streams. Each resolution is an independent durable notification
+- Do not position signals as a transport or describe them as persistent connections, channels, or streams
 
 ## Do not
 - Skip frontmatter on any MDX file

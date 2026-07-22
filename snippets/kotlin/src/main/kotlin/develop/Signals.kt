@@ -5,6 +5,13 @@ import dev.restate.sdk.kotlin.resolve
 import dev.restate.sdk.kotlin.signal
 
 class Signals {
+  // <start_one_shot>
+  suspend fun waitForApproval(): Boolean {
+    return signal<Boolean>("approval").await()
+  }
+
+  // <end_one_shot>
+
   // <start_wait>
   suspend fun reviseUntilDone(topic: String): String {
     var draft = "Research notes for $topic"

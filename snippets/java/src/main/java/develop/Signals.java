@@ -5,6 +5,13 @@ import dev.restate.sdk.Restate;
 
 public class Signals {
 
+  // <start_one_shot>
+  public Boolean waitForApproval() {
+    return Restate.signal("approval", Boolean.class).await();
+  }
+
+  // <end_one_shot>
+
   // <start_wait>
   public String reviseUntilDone(String topic) {
     String draft = "Research notes for " + topic;

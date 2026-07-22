@@ -1,6 +1,15 @@
 import restate
 
 
+# <start_one_shot>
+async def wait_for_approval(ctx: restate.Context) -> bool:
+    approved = await ctx.signal("approval", type_hint=bool)
+    return approved
+
+
+# <end_one_shot>
+
+
 # <start_wait>
 async def revise_until_done(ctx: restate.Context, topic: str) -> str:
     draft = f"Research notes for {topic}"

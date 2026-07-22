@@ -9,11 +9,33 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 <AwakeablesIntro/>
 
-<Note>Signals require TypeScript SDK 1.15 or newer.</Note>
+### Wait for a signal
+
+```ts {"CODE_LOAD::ts/src/develop/signals.ts#one_shot"}
+async function waitForApproval(ctx: restate.Context) {
+  const approved = await ctx.signal<boolean>("approval");
+  return approved;
+}
+```
+
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from `ctx.request().id` and pass it to the sender.
+
+```ts {"CODE_LOAD::ts/src/develop/signals.ts#resolve"}
+function steerInvocation(ctx: restate.Context, request: SteerRequest) {
+  ctx
+    .invocation(request.invocationId)
+    .signal<string>("steer")
+    .resolve(request.text);
+}
+```
+
+Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
 
 ### Wait for repeated signals
 
-Call `ctx.signal()` each time you want to wait for the next resolution of a named signal:
+A signal can be resolved multiple times. Repeatedly call `ctx.signal()` to wait for the next resolution of a named signal:
 
 ```ts {"CODE_LOAD::ts/src/develop/signals.ts#wait"}
 async function reviseUntilDone(ctx: restate.Context, topic: string) {
@@ -32,28 +54,11 @@ async function reviseUntilDone(ctx: restate.Context, topic: string) {
 
 A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
 
-### Resolve a signal
 
-To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from `ctx.request().id` and pass it to the sender.
-
-```ts {"CODE_LOAD::ts/src/develop/signals.ts#resolve"}
-function steerInvocation(ctx: restate.Context, request: SteerRequest) {
-  ctx
-    .invocation(request.invocationId)
-    .signal<string>("steer")
-    .resolve(request.text);
-}
-```
-
-Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
-
-<Info>
-Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
-</Info>
 
 ## Awakeables
 
-An awakeable is a one-shot coordination primitive with a generated unique ID. Use it when an external system needs a task token that it can resolve or reject through Restate.
+An awakeable is a special type of signal, specialized for one-shot resolution with a generated unique ID. Use it when an external system needs a task token that it can resolve or reject through Restate.
 
 ### Creating and waiting for awakeables
 1. **Create an awakeable** - Get a unique ID and awaitable result
@@ -133,10 +138,7 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
 
 A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
-**Key differences from awakeables:**
-- You address it through a workflow key and promise name instead of a generated ID
-- You can retrieve its result multiple times
-- Its lifetime is tied to the workflow retention period
+Unlike an awakeable, the value belongs to the workflow rather than an individual external task token.
 
 Use this for:
 - Sending data to the run handler

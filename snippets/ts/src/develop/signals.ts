@@ -1,5 +1,12 @@
 import * as restate from "@restatedev/restate-sdk";
 
+// <start_one_shot>
+async function waitForApproval(ctx: restate.Context) {
+  const approved = await ctx.signal<boolean>("approval");
+  return approved;
+}
+// <end_one_shot>
+
 // <start_wait>
 async function reviseUntilDone(ctx: restate.Context, topic: string) {
   let draft = `Research notes for ${topic}`;
@@ -31,3 +38,4 @@ function steerInvocation(ctx: restate.Context, request: SteerRequest) {
 
 void reviseUntilDone;
 void steerInvocation;
+void waitForApproval;
