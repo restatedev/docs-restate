@@ -1,6 +1,6 @@
 ---
-title: "External Events"
-description: "Handle external events and human-in-the-loop patterns with durable waiting primitives."
+title: "Signals and external events"
+description: "Use signals, awakeables, and workflow promises for durable coordination."
 icon: "hourglass-start"
 ---
 
@@ -9,8 +9,75 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 <AwakeablesIntro/>
 
+<Note>Signals require Java/Kotlin SDK 2.9 or newer.</Note>
+
+### Wait for repeated signals
+
+Call the signal API each time you want to wait for the next resolution of a named signal:
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#wait"}
+public String reviseUntilDone(String topic) {
+  String draft = "Research notes for " + topic;
+
+  while (true) {
+    // Each call waits for the next resolution of the named signal.
+    String text = Restate.signal("steer", String.class).await();
+    if (text.equals("done")) {
+      return draft;
+    }
+    draft = draft + "\n" + text;
+  }
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#wait"}
+suspend fun reviseUntilDone(topic: String): String {
+  var draft = "Research notes for $topic"
+
+  while (true) {
+    // Each call waits for the next resolution of the named signal.
+    val text = signal<String>("steer").await()
+    if (text == "done") {
+      return draft
+    }
+    draft = "$draft\n$text"
+  }
+}
+```
+</CodeGroup>
+
+A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
+
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
+
+<CodeGroup>
+```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#resolve"}
+public void steerInvocation(String invocationId, String text) {
+  InvocationHandle<?> target = Restate.invocationHandle(invocationId);
+  target.signal("steer").resolve(String.class, text);
+}
+```
+```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#resolve"}
+suspend fun steerInvocation(invocationId: String, text: String) {
+  invocationHandle<Any>(invocationId).signal("steer").resolve(text)
+}
+```
+</CodeGroup>
+
+Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
+
+<Info>
+Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
+</Info>
+
+## Awakeables
+
+An awakeable is a one-shot coordination primitive with a generated unique ID. Use it when an external system needs a task token that it can resolve or reject through Restate.
+
 ### Creating and waiting for awakeables
-1. **Create an awakeable** - Get a unique ID and Future
+1. **Create an awakeable** - Get a unique ID and awaitable result
 2. **Send the ID externally** - Pass the awakeable ID to your external system
 3. **Wait for result** - Your handler [suspends](/foundations/key-concepts#suspensions-on-faas) until the external system responds
 
@@ -48,7 +115,7 @@ val review = awakeable.await()
     Note that if you wait for an awakeable in an [exclusive handler](/foundations/handlers#handler-behavior) in a Virtual Object, all other calls to this object will be queued.
 </Info>
 
-### Resolving/rejecting Awakeables
+### Resolving or rejecting an awakeable
 
 External processes complete awakeables in two ways:
 
@@ -98,13 +165,14 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
 -d 'Review rejected: insufficient documentation'
 ```
 
-## Durable Promises
+## Workflow promises
 
-**Best for:** Workflows where you need to signal between different workflow handlers.
+A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
 **Key differences from awakeables:**
-- No ID management - use logical names instead
-- Scoped to workflow execution lifetime
+- You address it through a workflow key and promise name instead of a generated ID
+- You can retrieve its result multiple times
+- Its lifetime is tied to the workflow retention period
 
 Use this for:
 - Sending data to the run handler
@@ -112,12 +180,12 @@ Use this for:
 
 <Info>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
-The results of resolved Durable Promises remain available during this time.
+The results of resolved workflow promises remain available during this time.
 Update the retention time via the [service configuration](/services/configuration).
 </Info>
 
-### Creating and waiting for promises
-Create a promise key:
+### Get and wait for a workflow promise
+Create a workflow promise key:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#promise_key"} 
 private static final DurablePromiseKey<String> REVIEW_PROMISE =
@@ -128,7 +196,7 @@ val REVIEW_PROMISE = durablePromiseKey<String>("review")
 ```
 </CodeGroup>
 
-Wait for a promise by name:
+Wait for a workflow promise by name:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#promise"} 
 String review = Restate.promise(REVIEW_PROMISE).future().await();
@@ -138,10 +206,10 @@ val review: String = promise(REVIEW_PROMISE).future().await()
 ```
 </CodeGroup>
 
-Your workflow can [suspend](/foundations/key-concepts#suspensions-on-faas) until the promise is resolved or rejected.
+Your workflow can [suspend](/foundations/key-concepts#suspensions-on-faas) until the workflow promise is resolved or rejected.
 
-### Resolving/rejecting promises
-Resolve/reject from any workflow handler:
+### Resolve or reject a workflow promise
+Resolve or reject it from any handler of the same workflow:
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/ReviewWorkflow.java#resolve_promise"} 
 Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
@@ -176,7 +244,7 @@ public class ReviewWorkflow {
 
   @Shared
   public void submitReview(String review) {
-    // Signal the waiting run handler
+    // Resolve the workflow promise awaited by the run handler
     Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
   }
 }
@@ -203,7 +271,7 @@ class ReviewWorkflow {
 
   @Shared
   suspend fun submitReview(review: String) {
-    // Signal the waiting run handler
+    // Resolve the workflow promise awaited by the run handler
     promiseHandle(REVIEW_PROMISE).resolve(review)
   }
 }

@@ -248,8 +248,8 @@ const WorkflowExampleWorkflow = restate.workflow({
       // <end_workflow_promises>
     },
 
-    // <start_signal_functions>
-    // In a signal function
+    // <start_workflow_promise_handlers>
+    // In a workflow shared handler
     confirmPayment: async (
       ctx: WorkflowSharedContext,
       result: PaymentResult
@@ -257,11 +257,11 @@ const WorkflowExampleWorkflow = restate.workflow({
       await ctx.promise("payment-completed").resolve(result);
     },
 
-    // In a signal function
+    // In a workflow shared handler
     approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
       await ctx.promise("manager-approval").resolve(approved);
     },
-    // <end_signal_functions>
+    // <end_workflow_promise_handlers>
   },
 });
 

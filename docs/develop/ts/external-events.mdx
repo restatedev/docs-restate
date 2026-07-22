@@ -1,6 +1,6 @@
 ---
-title: "External Events"
-description: "Handle external events and human-in-the-loop patterns with durable waiting primitives."
+title: "Signals and external events"
+description: "Use signals, awakeables, and workflow promises for durable coordination."
 icon: "hourglass-start"
 ---
 
@@ -9,8 +9,54 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 <AwakeablesIntro/>
 
+<Note>Signals require TypeScript SDK 1.15 or newer.</Note>
+
+### Wait for repeated signals
+
+Call `ctx.signal()` each time you want to wait for the next resolution of a named signal:
+
+```ts {"CODE_LOAD::ts/src/develop/signals.ts#wait"}
+async function reviseUntilDone(ctx: restate.Context, topic: string) {
+  let draft = `Research notes for ${topic}`;
+
+  while (true) {
+    // Each call waits for the next resolution of the named signal.
+    const text = await ctx.signal<string>("steer");
+    if (text === "done") {
+      return draft;
+    }
+    draft = `${draft}\n${text}`;
+  }
+}
+```
+
+A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
+
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from `ctx.request().id` and pass it to the sender.
+
+```ts {"CODE_LOAD::ts/src/develop/signals.ts#resolve"}
+function steerInvocation(ctx: restate.Context, request: SteerRequest) {
+  ctx
+    .invocation(request.invocationId)
+    .signal<string>("steer")
+    .resolve(request.text);
+}
+```
+
+Use `reject()` instead of `resolve()` to deliver a terminal failure to the waiting invocation.
+
+<Info>
+Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
+</Info>
+
+## Awakeables
+
+An awakeable is a one-shot coordination primitive with a generated unique ID. Use it when an external system needs a task token that it can resolve or reject through Restate.
+
 ### Creating and waiting for awakeables
-1. **Create an awakeable** - Get a unique ID and promise
+1. **Create an awakeable** - Get a unique ID and awaitable result
 2. **Send the ID externally** - Pass the awakeable ID to your external system
 3. **Wait for result** - Your handler [suspends](/foundations/key-concepts#suspensions-on-faas) until the external system responds
 
@@ -26,14 +72,14 @@ const review = await promise;
 ```
 
 <Accordion title="Serialization">
-  Both awakeables and durable promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for (de)serialization. Complex objects are automatically serialized/deserialized. See the [serialization docs](/develop/ts/serialization) for customization options.
+  Signals, awakeables, and workflow promises use built-in [JSON](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON) for serialization and deserialization. Complex objects are handled automatically. See the [serialization docs](/develop/ts/serialization) for customization options.
 </Accordion>
 
 <Info>
     Note that if you wait for an awakeable in an [exclusive handler](/foundations/handlers#handler-behavior) in a Virtual Object, all other calls to this object will be queued.
 </Info>
 
-### Resolving/rejecting Awakeables
+### Resolving or rejecting an awakeable
 
 External processes complete awakeables in two ways:
 
@@ -83,13 +129,14 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
   -d 'Review rejected: insufficient documentation'
 ```
 
-## Durable Promises
+## Workflow promises
 
-**Best for:** Workflows where you need to signal between different workflow handlers.
+A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
 **Key differences from awakeables:**
-- No ID management - use logical names instead
-- Scoped to workflow execution lifetime
+- You address it through a workflow key and promise name instead of a generated ID
+- You can retrieve its result multiple times
+- Its lifetime is tied to the workflow retention period
 
 Use this for:
 - Sending data to the run handler
@@ -97,22 +144,22 @@ Use this for:
 
 <Info>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
-The results of resolved Durable Promises remain available during this time.
+The results of resolved workflow promises remain available during this time.
 Update the retention time via the [service configuration](/services/configuration).
 </Info>
 
-### Creating and waiting for promises
+### Get and wait for a workflow promise
 
-Wait for a promise by name:
+Wait for a workflow promise by name:
 
 ```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#promise"} 
 const review = await ctx.promise<string>("review");
 ```
 
-### Resolving/rejecting promises
+### Resolve or reject a workflow promise
 
-Resolve/reject from any workflow handler:
-```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"} 
+Resolve or reject it from any handler of the same workflow:
+```ts {"CODE_LOAD::../snippets/ts/src/develop/awakeable.ts#resolve_promise"}
 await ctx.promise<string>("review").resolve(review);
 ```
 
@@ -139,7 +186,7 @@ restate.workflow({
       ctx: restate.WorkflowSharedContext,
       review: string
     ) => {
-      // Signal the waiting run handler
+      // Resolve the workflow promise awaited by the run handler
       await ctx.promise<string>("review").resolve(review);
     },
   },

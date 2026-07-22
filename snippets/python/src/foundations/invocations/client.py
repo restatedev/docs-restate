@@ -11,6 +11,13 @@ async def my_handler(ctx: Context, greeting: str) -> str:
     return f"{greeting}!"
 
 
+async def invoke_from_external_application() -> None:
+    # <start_ingress>
+    async with restate.create_client("http://localhost:8080") as client:
+        response = await client.service_call(my_handler, arg="Hi")
+    # <end_ingress>
+
+
 greeter_service = restate.Service("GreeterService")
 
 

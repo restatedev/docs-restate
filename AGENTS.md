@@ -116,6 +116,14 @@ To learn about Mintlify, visit https://www.mintlify.com/docs/llms.txt
 - Relative paths for internal links
 - Don't use dashes
 
+## Durable coordination terminology
+- Use **signal** only for the repeatable primitive addressed by invocation ID and signal name
+- Use **awakeable** only for the one-shot primitive with a generated ID that can be completed through the SDK or Restate HTTP API
+- Use **workflow promise** for the named, workflow-scoped primitive that is resolved once and retrieved multiple times during workflow retention
+- Use **external event**, **callback**, and **task token** for use cases and patterns, not as synonyms for a Restate primitive
+- Call workflow handlers other than `run` **workflow shared handlers**, not signal handlers
+- Do not position signals as a transport or describe them as persistent connections, channels, or streams. Each resolution is an independent durable notification
+
 ## Do not
 - Skip frontmatter on any MDX file
 - Use absolute URLs for internal links

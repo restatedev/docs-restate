@@ -1,6 +1,6 @@
 ---
-title: "External Events"
-description: "Handle external events and human-in-the-loop patterns with durable waiting primitives."
+title: "Signals and external events"
+description: "Use signals, awakeables, and workflow promises for durable coordination."
 icon: "hourglass-start"
 ---
 
@@ -9,8 +9,54 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 <AwakeablesIntro/>
 
+<Note>Signals require Go SDK 1.0 or newer.</Note>
+
+### Wait for repeated signals
+
+Call `restate.Signal()` each time you want to wait for the next resolution of a named signal:
+
+```go {"CODE_LOAD::go/develop/signals.go#wait"}
+func reviseUntilDone(ctx restate.Context, topic string) (string, error) {
+  draft := "Research notes for " + topic
+
+  for {
+    // Each call waits for the next resolution of the named signal.
+    text, err := restate.Signal[string](ctx, "steer").Result()
+    if err != nil {
+      return "", err
+    }
+    if text == "done" {
+      return draft, nil
+    }
+    draft += "\n" + text
+  }
+}
+```
+
+A signal can arrive before or after the invocation starts waiting for it. Restate stores each resolution durably until the invocation receives it.
+
+### Resolve a signal
+
+To resolve a signal, you need the target invocation ID. You can get it from a call or send handle, or read the current invocation's ID from the handler request and pass it to the sender.
+
+```go {"CODE_LOAD::go/develop/signals.go#resolve"}
+func steerInvocation(ctx restate.Context, invocationID string, text string) {
+  restate.ResolveSignal(ctx, invocationID, "steer", text)
+}
+```
+
+Use `restate.RejectSignal()` instead of `restate.ResolveSignal()` to deliver a terminal failure to the waiting invocation.
+
+<Info>
+Resolving a signal interacts with the existing target invocation. It does not start another invocation at that target.
+</Info>
+
+## Awakeables
+
+An awakeable is a one-shot coordination primitive with a generated unique ID. Use it when an external system needs a task token that it can resolve or reject through Restate.
+
 ### Creating and waiting for awakeables
-1. **Create an awakeable** - Get a unique ID and promise
+1. **Create an awakeable** - Get a unique ID and awaitable result
 2. **Send the ID externally** - Pass the awakeable ID to your external system
 3. **Wait for result** - Your handler [suspends](/foundations/key-concepts#suspensions-on-faas) until the external system responds
 
@@ -41,7 +87,7 @@ if err != nil {
     Note that if you wait for an awakeable in an [exclusive handler](/foundations/handlers#handler-behavior) in a Virtual Object, all other calls to this object will be queued.
 </Info>
 
-### Resolving/rejecting Awakeables
+### Resolving or rejecting an awakeable
 
 External processes complete awakeables in two ways:
 
@@ -77,13 +123,14 @@ curl localhost:8080/restate/awakeables/sign_1PePOqp/reject \
   -d 'Review rejected: insufficient documentation'
 ```
 
-## Durable Promises
+## Workflow promises
 
-**Best for:** Workflows where you need to signal between different workflow handlers.
+A workflow promise belongs to a workflow key and has a logical name. It can be resolved or rejected once, and its result can be retrieved multiple times by all handlers of the workflow during the workflow retention period.
 
 **Key differences from awakeables:**
-- No ID management - use logical names instead
-- Scoped to workflow execution lifetime
+- You address it through a workflow key and promise name instead of a generated ID
+- You can retrieve its result multiple times
+- Its lifetime is tied to the workflow retention period
 
 Use this for:
 - Sending data to the run handler
@@ -91,22 +138,22 @@ Use this for:
 
 <Info>
 After a workflow's run handler completes, other handlers can still be called for up to 24 hours (default).
-The results of resolved Durable Promises remain available during this time.
+The results of resolved workflow promises remain available during this time.
 Update the retention time via the [service configuration](/services/configuration).
 </Info>
 
-### Creating and waiting for promises
+### Get and wait for a workflow promise
 
-Wait for a promise by name:
+Wait for a workflow promise by name:
 
 ```go {"CODE_LOAD::go/develop/durablepromise.go#promise"} 
 review, err := restate.Promise[string](ctx, "review").Result()
 ```
 
-### Resolving/rejecting promises
+### Resolve or reject a workflow promise
 
-Resolve/reject from any workflow handler:
-```go {"CODE_LOAD::go/develop/durablepromise.go#resolve_promise"} 
+Resolve or reject it from any handler of the same workflow:
+```go {"CODE_LOAD::go/develop/durablepromise.go#resolve_promise"}
 err := restate.Promise[string](ctx, "review").Resolve(review)
 if err != nil {
   return err
@@ -137,7 +184,7 @@ func (ReviewWorkflow) Run(ctx restate.WorkflowContext, documentId string) (strin
 }
 
 func (ReviewWorkflow) SubmitReview(ctx restate.WorkflowSharedContext, review string) error {
-  // Signal the waiting run handler
+  // Resolve the workflow promise awaited by the run handler
   return restate.Promise[string](ctx, "review").Resolve(review)
 }
 ```

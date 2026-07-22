@@ -34,17 +34,17 @@ public class WorkflowExample {
     // <end_workflow_promises>
   }
 
-  // <start_signal_functions>
-  // In a signal function
+  // <start_workflow_promise_handlers>
+  // In a workflow shared handler
   @Shared
   public void confirmPayment(PaymentResult result) {
     Restate.promiseHandle(PAYMENT_COMPLETED).resolve(result);
   }
 
-  // In a signal function
+  // In a workflow shared handler
   @Shared
   public void approveRequest(Boolean approved) {
     Restate.promiseHandle(MANAGER_APPROVAL).resolve(approved);
   }
-  // <end_signal_functions>
+  // <end_workflow_promise_handlers>
 }

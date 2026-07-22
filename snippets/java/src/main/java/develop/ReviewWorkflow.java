@@ -33,7 +33,7 @@ public class ReviewWorkflow {
 
   @Shared
   public void submitReview(String review) {
-    // Signal the waiting run handler
+    // Resolve the workflow promise awaited by the run handler
     // <start_resolve_promise>
     Restate.promiseHandle(REVIEW_PROMISE).resolve(review);
     // <end_resolve_promise>

@@ -333,8 +333,8 @@ func (WorkflowExample) Run(ctx restate.WorkflowContext) error {
 	return nil
 }
 
-// <start_signal_functions>
-// In a signal function
+// <start_workflow_promise_handlers>
+// In a workflow shared handler
 func (WorkflowExample) ConfirmPayment(ctx restate.WorkflowSharedContext, result PaymentResult) error {
 	if err := restate.Promise[PaymentResult](ctx, "payment-completed").Resolve(result); err != nil {
 		return err
@@ -342,7 +342,7 @@ func (WorkflowExample) ConfirmPayment(ctx restate.WorkflowSharedContext, result 
 	return nil
 }
 
-// In a signal function
+// In a workflow shared handler
 func (WorkflowExample) ApproveRequest(ctx restate.WorkflowSharedContext, approved bool) error {
 	if err := restate.Promise[bool](ctx, "manager-approval").Resolve(approved); err != nil {
 		return err
@@ -350,4 +350,4 @@ func (WorkflowExample) ApproveRequest(ctx restate.WorkflowSharedContext, approve
 	return nil
 }
 
-// <end_signal_functions>
+// <end_workflow_promise_handlers>

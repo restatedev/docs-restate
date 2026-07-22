@@ -20,7 +20,7 @@ async def run(ctx: restate.WorkflowContext, document_id: str):
 
 @review_workflow.handler()
 async def submit_review(ctx: restate.WorkflowSharedContext, review: str):
-    # Signal the waiting run handler
+    # Resolve the workflow promise awaited by the run handler
     # <start_resolve_promise>
     await ctx.promise("review", type_hint=str).resolve(review)
     # <end_resolve_promise>

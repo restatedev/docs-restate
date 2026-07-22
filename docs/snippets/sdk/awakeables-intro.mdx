@@ -1,28 +1,21 @@
-Sometimes your handlers need to pause and wait for external processes to complete. This is common in:
+Handlers sometimes need to receive input after their invocation has started. Restate provides three durable coordination primitives for this:
 
-- **Human-in-the-loop workflows** (approvals, reviews, manual steps)
-- **External system integration** (waiting for webhooks, async APIs)
-- **AI agent patterns** (tool execution, human oversight)
+| Primitive | Address | Resolution | Use for |
+| --- | --- | --- | --- |
+| **Signal** | Invocation ID and signal name | Can be resolved multiple times. Each wait receives the next resolution. | Communication between ongoing invocations, agent steering, and human approvals |
+| **Awakeable** | Generated unique ID | Resolved or rejected once | External callbacks and one-shot task tokens |
+| **Workflow promise** | Workflow key and promise name | Resolved or rejected once. The result can be retrieved multiple times by all handlers of the workflow. | Coordination between handlers of the same workflow |
 
-This pattern is also known as the **callback** or **task token** pattern.
+All three survive retries and process restarts. When an invocation has nothing else to do while waiting, Restate can [suspend it](/foundations/key-concepts#suspensions-on-faas) and resume it when the next result arrives.
 
-## Two Approaches
+<Note>
+Signals require Restate Server 1.7 or newer. On Restate Server 1.7, set `RESTATE_EXPERIMENTAL_ENABLE_PROTOCOL_V7=true`.
+</Note>
 
-Restate provides two primitives for handling external events:
+## Signals
 
-| Primitive | Use Case | Key Feature |
-|-----------|----------|--------------|
-| **Awakeables** | Services & Virtual Objects | Unique ID-based completion |
-| **Durable Promises** | Workflows only | Named promises for simpler signaling |
+Signals deliver durable notifications to an ongoing invocation.
 
-## How it works
+A signal is identified by the target invocation ID and a name. The same named signal can be resolved multiple times. Each `await` of the signal receives the next resolution.
 
-Implementing this pattern in a distributed system is tricky, since you need to ensure that the handler can recover from failures and resume waiting for the external event.
-
-Restate promises are durable and distributed. They survive crashes and can be resolved or rejected by any handler in the workflow.
-
-To save costs on FaaS deployments, Restate lets the handler [suspend](/foundations/key-concepts#suspensions-on-faas) while awaiting the promise, and invokes it again when the result is available.
-
-## Awakeables
-
-**Best for:** Services and Virtual Objects where you need to coordinate with external systems.
+Each signal resolution is an independent durable notification.

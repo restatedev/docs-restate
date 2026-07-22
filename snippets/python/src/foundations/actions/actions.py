@@ -207,17 +207,17 @@ async def run(ctx: WorkflowContext) -> None:
     # <end_workflow_promises>
 
 
-# <start_signal_functions>
-# In a signal function
+# <start_workflow_promise_handlers>
+# In a workflow shared handler
 @workflow_example_workflow.handler()
 async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult) -> None:
     await ctx.promise("payment-completed", type_hint=PaymentResult).resolve(result)
 
 
-# In a signal function
+# In a workflow shared handler
 @workflow_example_workflow.handler()
 async def approve_request(ctx: WorkflowSharedContext, approved: bool) -> None:
     await ctx.promise("manager-approval", type_hint=bool).resolve(approved)
 
 
-# <end_signal_functions>
+# <end_workflow_promise_handlers>
