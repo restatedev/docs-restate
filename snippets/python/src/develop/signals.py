@@ -61,5 +61,3 @@ async def approve(ctx: restate.Context, req: ApproveRequest) -> None:
 async def deny(ctx: restate.Context, req: SteerRequest) -> None:
     ctx.reject_signal(req.invocation_id, "approval", "Request denied")
 
-
-app = restate.app([signals_service])
