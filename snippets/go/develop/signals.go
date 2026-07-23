@@ -2,17 +2,18 @@ package develop
 
 import restate "github.com/restatedev/sdk-go"
 
-type SignalsTestGo struct{}
+type CoordinationService struct{}
 
-// <start_one_shot>
-func (SignalsTestGo) WaitForApproval(ctx restate.Context) (bool, error) {
-	return restate.Signal[bool](ctx, "approval").Result()
+func (CoordinationService) WaitForApproval(ctx restate.Context) (bool, error) {
+	// <start_one_shot>
+	approval, err := restate.Signal[bool](ctx, "approval").Result()
+	// <end_one_shot>
+	return approval, err
 }
 
-// <end_one_shot>
 
 // <start_wait>
-func (SignalsTestGo) ReviseUntilDone(ctx restate.Context, topic string) (string, error) {
+func (CoordinationService) ReviseUntilDone(ctx restate.Context, topic string) (string, error) {
 	draft := "Research notes for " + topic
 	for {
 		text, err := restate.Signal[string](ctx, "steer").Result()
@@ -33,10 +34,10 @@ type SteerRequest struct {
 	Text         string `json:"text"`
 }
 
-// <start_resolve>
-func (SignalsTestGo) SteerInvocation(ctx restate.Context, req SteerRequest) error {
+func (CoordinationService) SteerInvocation(ctx restate.Context, req SteerRequest) error {
+	// <start_resolve>
 	restate.ResolveSignal(ctx, req.InvocationID, "steer", req.Text)
+	// <end_resolve>
 	return nil
 }
 
-// <end_resolve>

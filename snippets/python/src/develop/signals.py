@@ -19,12 +19,12 @@ class ApproveRequest(BaseModel):
 coordination_service = restate.Service("SignalsTestPy")
 
 
-# <start_one_shot>
 @coordination_service.handler()
 async def wait_for_approval(ctx: restate.Context) -> bool:
+    # <start_one_shot>
     approved = await ctx.signal("approval", type_hint=bool)
+    # <end_one_shot>
     return approved
-# <end_one_shot>
 
 
 # <start_wait>
@@ -45,11 +45,11 @@ async def sleep_then_wait(ctx: restate.Context) -> str:
     return await ctx.signal("steer", type_hint=str)
 
 
-# <start_resolve>
 @coordination_service.handler()
 async def steer_invocation(ctx: restate.Context, req: SteerRequest) -> None:
+    # <start_resolve>
     ctx.resolve_signal(req.invocation_id, "steer", req.text)
-# <end_resolve>
+    # <end_resolve>
 
 
 @coordination_service.handler()

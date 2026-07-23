@@ -13,13 +13,14 @@ public class Signals {
 
   public record ApproveRequest(String invocationId, boolean approved) {}
 
-  // <start_one_shot>
   @Handler
   public Boolean waitForApproval() {
-    return Restate.signal("approval", Boolean.class).await();
+    // <start_one_shot>
+    Boolean approval = Restate.signal("approval", Boolean.class).await();
+    // <end_one_shot>
+    return approval;
   }
 
-  // <end_one_shot>
 
   // <start_wait>
   @Handler
@@ -42,13 +43,13 @@ public class Signals {
     return Restate.signal("steer", String.class).await();
   }
 
-  // <start_resolve>
   @Handler
   public void steerInvocation(SteerRequest req) {
+    // <start_resolve>
     Restate.invocationHandle(req.invocationId()).signal("steer").resolve(String.class, req.text());
+    // <end_resolve>
   }
 
-  // <end_resolve>
 
   @Handler
   public void approve(ApproveRequest req) {

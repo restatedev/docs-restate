@@ -15,13 +15,14 @@ import kotlinx.serialization.Serializable
 @Service
 class Signals {
 
-  // <start_one_shot>
   @Handler
   suspend fun waitForApproval(): Boolean {
-    return signal<Boolean>("approval").await()
+    // <start_one_shot>
+    var approval = signal<Boolean>("approval").await()
+    // <end_one_shot>
+    return approval
   }
 
-  // <end_one_shot>
 
   // <start_wait>
   @Handler
@@ -44,13 +45,13 @@ class Signals {
     return signal<String>("steer").await()
   }
 
-  // <start_resolve>
   @Handler
   suspend fun steerInvocation(req: SteerRequest) {
+    // <start_resolve>
     invocationHandle<Unit>(req.invocationId).signal("steer").resolve(req.text)
+    // <end_resolve>
   }
 
-  // <end_resolve>
 
   @Handler
   suspend fun approve(req: ApproveRequest) {

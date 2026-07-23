@@ -1,11 +1,11 @@
 import * as restate from "@restatedev/restate-sdk";
 
-// <start_one_shot>
 async function waitForApproval(ctx: restate.Context) {
+  // <start_one_shot>
   const approved = await ctx.signal<boolean>("approval");
+  // <end_one_shot>
   return approved;
 }
-// <end_one_shot>
 
 // <start_wait>
 async function reviseUntilDone(ctx: restate.Context, topic: string) {
@@ -27,14 +27,14 @@ type SteerRequest = {
   text: string;
 };
 
-// <start_resolve>
 async function steerInvocation(ctx: restate.Context, request: SteerRequest) {
+  // <start_resolve>
   ctx
     .invocation(request.invocationId)
     .signal<string>("steer")
     .resolve(request.text);
+  // <end_resolve>
 }
-// <end_resolve>
 
 void reviseUntilDone;
 void steerInvocation;

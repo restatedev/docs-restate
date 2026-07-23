@@ -13,14 +13,10 @@ import AwakeablesOutro from "/snippets/sdk/awakeables-outro.mdx";
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#one_shot"} 
-public Boolean waitForApproval() {
-  return Restate.signal("approval", Boolean.class).await();
-}
+Boolean approval = Restate.signal("approval", Boolean.class).await();
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#one_shot"} 
-suspend fun waitForApproval(): Boolean {
-  return signal<Boolean>("approval").await()
-}
+var approval = signal<Boolean>("approval").await()
 ```
 </CodeGroup>
 
@@ -30,15 +26,10 @@ To resolve a signal, you need the target invocation ID. You can get it from a ca
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#resolve"} 
-public void steerInvocation(String invocationId, String text) {
-  InvocationHandle<?> target = Restate.invocationHandle(invocationId);
-  target.signal("steer").resolve(String.class, text);
-}
+Restate.invocationHandle(req.invocationId()).signal("steer").resolve(String.class, req.text());
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#resolve"} 
-suspend fun steerInvocation(invocationId: String, text: String) {
-  invocationHandle<Unit>(invocationId).signal("steer").resolve(text)
-}
+invocationHandle<Unit>(req.invocationId).signal("steer").resolve(req.text)
 ```
 </CodeGroup>
 
@@ -50,11 +41,10 @@ A signal can be resolved multiple times. Repeatedly call the signal API to wait 
 
 <CodeGroup>
 ```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#wait"} 
+@Handler
 public String reviseUntilDone(String topic) {
   String draft = "Research notes for " + topic;
-
   while (true) {
-    // Each call waits for the next resolution of the named signal.
     String text = Restate.signal("steer", String.class).await();
     if (text.equals("done")) {
       return draft;
@@ -64,11 +54,10 @@ public String reviseUntilDone(String topic) {
 }
 ```
 ```kotlin Kotlin {"CODE_LOAD::kotlin/src/main/kotlin/develop/Signals.kt#wait"} 
+@Handler
 suspend fun reviseUntilDone(topic: String): String {
   var draft = "Research notes for $topic"
-
   while (true) {
-    // Each call waits for the next resolution of the named signal.
     val text = signal<String>("steer").await()
     if (text == "done") {
       return draft
