@@ -21,7 +21,6 @@ public class Signals {
     return approval;
   }
 
-
   // <start_wait>
   @Handler
   public String reviseUntilDone(String topic) {
@@ -49,7 +48,6 @@ public class Signals {
     Restate.invocationHandle(req.invocationId()).signal("steer").resolve(String.class, req.text());
     // <end_resolve>
   }
-
 
   @Handler
   public void approve(ApproveRequest req) {

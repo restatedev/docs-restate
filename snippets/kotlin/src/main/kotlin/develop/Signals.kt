@@ -23,7 +23,6 @@ class Signals {
     return approval
   }
 
-
   // <start_wait>
   @Handler
   suspend fun reviseUntilDone(topic: String): String {
@@ -51,7 +50,6 @@ class Signals {
     invocationHandle<Unit>(req.invocationId).signal("steer").resolve(req.text)
     // <end_resolve>
   }
-
 
   @Handler
   suspend fun approve(req: ApproveRequest) {
