@@ -28,7 +28,7 @@ type SteerRequest = {
 };
 
 // <start_resolve>
-function steerInvocation(ctx: restate.Context, request: SteerRequest) {
+async function steerInvocation(ctx: restate.Context, request: SteerRequest) {
   ctx
     .invocation(request.invocationId)
     .signal<string>("steer")
