@@ -488,152 +488,36 @@ case callFuture:
 
 Handlers consume no resources while sleeping and resume at exactly the right time, even across restarts ([see suspensions](/foundations/key-concepts#suspensions-on-faas)).
 
-## Workflow events
+## Signals and external events
 
-Use durable promises to wait for external events or human input in your workflows.
+Use these durable coordination primitives when an invocation needs input after it has started:
 
-Create promises that external systems can resolve to send data to your workflow.
+| Primitive | Definition | Example |
+| --- | --- | --- |
+| **Signal** | A durable notification addressed by invocation ID and signal name. The same named signal can be resolved multiple times, and each wait receives the next resolution. | Steer an ongoing agent |
+| **Awakeable** | A convenient shorthand for a one-shot signal. It has a generated unique ID that an external system can resolve or reject through Restate, similar to a task token. | Wait for an external approval callback |
+| **Workflow promise** | A named value scoped to a workflow key. It can be resolved or rejected once, then retrieved multiple times by all handlers of the workflow during workflow retention. | Coordination between workflow handlers |
 
-<CodeGroup>
-
-```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#workflow_promises"} 
-// Wait for external event
-const paymentResult = await ctx.promise<PaymentResult>(
-  "payment-completed"
-);
-
-// Wait for human approval
-const approved = await ctx.promise<boolean>("manager-approval");
-
-// Wait for multiple events
-const [payment, inventory] = await RestatePromise.all([
-  ctx.promise<PaymentResult>("payment").get(),
-  ctx.promise<InventoryResult>("inventory").get(),
-]);
-```
-
-```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#workflow_promises"} 
-// Wait for external event
-PaymentResult paymentResult = Restate.promise(PAYMENT_COMPLETED).future().await();
-
-// Wait for human approval
-Boolean approved = Restate.promise(MANAGER_APPROVAL).future().await();
-
-// Wait for multiple events
-var paymentFuture = Restate.promise(PAYMENT).future();
-var inventoryFuture = Restate.promise(INVENTORY).future();
-PaymentResult payment = paymentFuture.await();
-InventoryResult inventory = inventoryFuture.await();
-```
-
-```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#workflow_promises"} 
-# Wait for external event
-payment_result = await ctx.promise(
-    "payment-completed", type_hint=PaymentResult
-).value()
-
-# Wait for human approval
-approved = await ctx.promise("manager-approval", type_hint=bool).value()
-
-# Wait for multiple events using gather
-payment_promise = ctx.promise("payment", type_hint=PaymentResult)
-inventory_promise = ctx.promise("inventory", type_hint=InventoryConfirmation)
-payment, inventory = await restate.gather(
-    payment_promise.value(), inventory_promise.value()
-)
-```
-
-```go Go {"CODE_LOAD::go/foundations/actions/actions.go#workflow_promises"} 
-// Wait for external event
-paymentResult, err := restate.Promise[PaymentResult](ctx, "payment-completed").Result()
-if err != nil {
-  return err
-}
-
-// Wait for human approval
-approved, err := restate.Promise[bool](ctx, "manager-approval").Result()
-if err != nil {
-  return err
-}
-
-// Wait for multiple events
-paymentFuture := restate.Promise[PaymentResult](ctx, "payment")
-inventoryFuture := restate.Promise[InventoryResult](ctx, "inventory")
-
-payment, err := paymentFuture.Result()
-if err != nil {
-  return err
-}
-
-inventory, err := inventoryFuture.Result()
-if err != nil {
-  return err
-}
-```
-</CodeGroup>
-
-Resolve promises from signal handlers.
+Wait for a named signal:
 
 <CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/foundations/actions/actions.ts#signal_functions"} 
-// In a signal function
-confirmPayment: async (
-  ctx: WorkflowSharedContext,
-  result: PaymentResult
-) => {
-  await ctx.promise("payment-completed").resolve(result);
-},
 
-// In a signal function
-approveRequest: async (ctx: WorkflowSharedContext, approved: boolean) => {
-  await ctx.promise("manager-approval").resolve(approved);
-},
+```typescript TypeScript {"CODE_LOAD::ts/src/develop/signals.ts#one_shot"} 
+const approved = await ctx.signal<boolean>("approval");
 ```
 
-```java Java {"CODE_LOAD::java/src/main/java/foundations/actions/WorkflowExample.java#signal_functions"} 
-// In a signal function
-@Shared
-public void confirmPayment(PaymentResult result) {
-  Restate.promiseHandle(PAYMENT_COMPLETED).resolve(result);
-}
-
-// In a signal function
-@Shared
-public void approveRequest(Boolean approved) {
-  Restate.promiseHandle(MANAGER_APPROVAL).resolve(approved);
-}
+```java Java {"CODE_LOAD::java/src/main/java/develop/Signals.java#one_shot"} 
+Boolean approval = Restate.signal("approval", Boolean.class).await();
 ```
 
-```python Python {"CODE_LOAD::python/src/foundations/actions/actions.py#signal_functions"} 
-# In a signal function
-@workflow_example_workflow.handler()
-async def confirm_payment(ctx: WorkflowSharedContext, result: PaymentResult) -> None:
-    await ctx.promise("payment-completed", type_hint=PaymentResult).resolve(result)
-
-
-# In a signal function
-@workflow_example_workflow.handler()
-async def approve_request(ctx: WorkflowSharedContext, approved: bool) -> None:
-    await ctx.promise("manager-approval", type_hint=bool).resolve(approved)
+```python Python {"CODE_LOAD::python/src/develop/signals.py#one_shot"} 
+approved = await ctx.signal("approval", type_hint=bool)
 ```
 
-```go Go {"CODE_LOAD::go/foundations/actions/actions.go#signal_functions"} 
-// In a signal function
-func (WorkflowExample) ConfirmPayment(ctx restate.WorkflowSharedContext, result PaymentResult) error {
-  if err := restate.Promise[PaymentResult](ctx, "payment-completed").Resolve(result); err != nil {
-    return err
-  }
-  return nil
-}
-
-// In a signal function
-func (WorkflowExample) ApproveRequest(ctx restate.WorkflowSharedContext, approved bool) error {
-  if err := restate.Promise[bool](ctx, "manager-approval").Resolve(approved); err != nil {
-    return err
-  }
-  return nil
-}
+```go Go {"CODE_LOAD::go/develop/signals.go#one_shot"} 
+approval, err := restate.Signal[bool](ctx, "approval").Result()
 ```
+
 </CodeGroup>
 
-<Info>To implement a similar pattern in Basic Services or Virtual Objects, have a look at awakeables ([TS](/develop/ts/external-events)/[Java/Kotlin](/develop/java/external-events)/[Go](/develop/ts/external-events)/[Python](/develop/python/external-events)).</Info>
+See the SDK guides for examples in [TypeScript](/develop/ts/external-events), [Java/Kotlin](/develop/java/external-events), [Go](/develop/go/external-events), and [Python](/develop/python/external-events).

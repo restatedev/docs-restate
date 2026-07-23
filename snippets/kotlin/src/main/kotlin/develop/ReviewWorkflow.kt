@@ -30,7 +30,7 @@ class ReviewWorkflow {
 
   @Shared
   suspend fun submitReview(review: String) {
-    // Signal the waiting run handler
+    // Resolve the workflow promise awaited by the run handler
     // <start_resolve_promise>
     promiseHandle(REVIEW_PROMISE).resolve(review)
     // <end_resolve_promise>

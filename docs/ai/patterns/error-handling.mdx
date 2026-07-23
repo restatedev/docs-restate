@@ -387,22 +387,26 @@ If you want to treat terminal tool errors as permanent failures and stop the age
 **To fail the agent on terminal tool errors**, rethrow the error in `onStepFinish`:
 
 ```typescript errorhandling/fail-on-terminal-tool-agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts#option2"} 
-const { text } = await generateText({
+const { text, steps } = await generateText({
   model,
   tools: {
     getWeather: tool({
       description: "Get the current weather for a given city.",
       inputSchema: z.object({ city: z.string() }),
       execute: async ({ city }) => {
-        return await ctx.run("get weather", () => fetchWeather(city));
+        return await ctx.run("get weather", () => fetchWeather(city), {maxRetryAttempts: 1});
       },
     }),
   },
-  stopWhen: [stepCountIs(5)],
-  onStepFinish: rethrowTerminalToolError,
+  stopWhen: [stepCountIs(5), hasTerminalToolError],
   system: "You are a helpful agent that provides weather updates.",
   messages: [{ role: "user", content: prompt }],
 });
+
+
+for (const step of steps) {
+  rethrowTerminalToolError(step);
+}
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/errorhandling/fail-on-terminal-tool-agent.ts" />
 </Accordion>
@@ -418,7 +422,7 @@ const { steps, text } = await generateText({
       description: "Get the current weather for a given city.",
       inputSchema: z.object({ city: z.string() }),
       execute: async ({ city }) => {
-        return await ctx.run("get weather", () => fetchWeather(city));
+        return await ctx.run("get weather", () => fetchWeather(city), {maxRetryAttempts: 1});
       },
     }),
   },
@@ -430,6 +434,7 @@ const { steps, text } = await generateText({
 const terminalSteps = getTerminalToolSteps(steps);
 if (terminalSteps.length > 0) {
   // Do something with the terminal tool error steps
+  return "There was an error!"
 }
 ```
 <GitHubLink url="https://github.com/restatedev/ai-examples/tree/main/vercel-ai/tour-of-agents/src/errorhandling/stop-on-terminal-tool-agent.ts" />

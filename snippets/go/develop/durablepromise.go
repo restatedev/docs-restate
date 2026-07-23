@@ -29,7 +29,7 @@ func (ReviewWorkflow) Run(ctx restate.WorkflowContext, documentId string) (strin
 }
 
 func (ReviewWorkflow) SubmitReview(ctx restate.WorkflowSharedContext, review string) error {
-	// Signal the waiting run handler
+	// Resolve the workflow promise awaited by the run handler
 	return restate.Promise[string](ctx, "review").Resolve(review)
 }
 
