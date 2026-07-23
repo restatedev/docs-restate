@@ -63,7 +63,3 @@ class Signals {
     invocationHandle<Unit>(req.invocationId).signal("approval").reject("Request denied")
   }
 }
-
-fun main() {
-  RestateHttpServer.listen(endpoint { bind(SignalsTestKt()) }, 9085)
-}

@@ -63,8 +63,4 @@ public class Signals {
   public void deny(SteerRequest req) {
     Restate.invocationHandle(req.invocationId()).signal("approval").reject("Request denied");
   }
-
-  public static void main(String[] args) {
-    RestateHttpServer.listen(Endpoint.bind(new SignalsTestJava()), 9084);
-  }
 }
