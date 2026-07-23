@@ -3,7 +3,6 @@ package develop
 // Demo app for the signals docs examples — run against a local Restate server on port 9085.
 import dev.restate.sdk.annotation.Handler
 import dev.restate.sdk.annotation.Service
-import dev.restate.sdk.http.vertx.RestateHttpServer
 import dev.restate.sdk.kotlin.*
 import dev.restate.sdk.kotlin.endpoint.*
 import kotlin.time.Duration.Companion.seconds

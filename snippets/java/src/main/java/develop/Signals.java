@@ -3,8 +3,6 @@ package develop;
 import dev.restate.sdk.Restate;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Service;
-import dev.restate.sdk.endpoint.Endpoint;
-import dev.restate.sdk.http.vertx.RestateHttpServer;
 import java.time.Duration;
 
 // Demo app for the signals docs examples — run against a local Restate server on port 9084.
