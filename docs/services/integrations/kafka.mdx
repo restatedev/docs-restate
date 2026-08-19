@@ -1,0 +1,247 @@
+---
+title: "Kafka"
+description: "Connect Kafka topics to Restate handlers with the Kafka ingress integration."
+---
+
+The Kafka ingress integration connects Apache Kafka to Restate.
+It consumes records from your topics and turns each one into an invocation, so you can process Kafka events with durable execution, automatic retries, and stateful handlers, without writing any consumer glue code.
+
+The integration runs as its own container and scales independently of the Restate server.
+
+<Info>
+    Each record leads to an invocation, meaning a request to execute a handler. Each invocation has its own unique ID and lifecycle.
+    Have a look at [managing invocations](/services/invocation/managing-invocations) to learn how to manage the lifecycle of an invocation.
+</Info>
+
+<Note>
+    This integration is the recommended way to consume Kafka events and replaces the [old Kafka support](/services/invocation/kafka).
+    If you are already using the old support, see [Migrating from the old Kafka support](#migrating-from-the-old-kafka-support).
+</Note>
+
+## How it works
+
+The integration runs as a container and does the following:
+
+- Consumes the configured topics using a Kafka consumer group.
+- Maps each record to an invocation using a [record mapper](#configuration).
+- Pushes the invocation to the configured Restate.
+
+What you get is:
+
+- **Exactly-once processing.** Restate deduplicates based on consumer group id, topic, partition and offset, so restarts and rebalances never cause duplicate or lost invocations.
+- **Per-partition ordering.** Records from a single partition are always delivered in order.
+
+## Prerequisites
+
+- A running Restate server, and its ingress URL.
+- A Kafka cluster.
+- The service you want to invoke, deployed and registered with Restate.
+
+## Getting started
+
+<Steps>
+
+<Step title="Develop and register an event handler">
+
+You can invoke any handler from a Kafka record.
+The record value is (de)serialized as JSON.
+
+- When invoking **Virtual Object** or **Workflow** handlers, the key of the Kafka record is used to determine the Virtual Object or Workflow key.
+The key needs to be a valid UTF-8 string.
+Records are delivered to the subscribed handler in the order in which they arrived on the topic partition.
+- When invoking **Virtual Object** or **Workflow** _shared_ handlers, the key of the Kafka record is used to determine the Virtual Object or Workflow key.
+The key needs to be a valid UTF-8 string.
+Records are delivered in parallel without ordering guarantees.
+- When invoking **Service** handlers, records are delivered in parallel without ordering guarantees.
+
+Since you can invoke any handler, a single handler can be invoked both by RPC and from Kafka records.
+
+</Step>
+
+<Step title="Run the integration">
+
+Start the integration container, pointing it at your Kafka cluster, your topics, and your Restate ingress:
+
+```bash
+docker run --rm \
+    -e KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
+    -e KAFKA_GROUP_ID=orders-to-restate \
+    -e KAFKA_TOPICS=orders,payments \
+    -e RESTATE_INGRESS_URL=http://restate:8080 \
+    -e RESTATE_RECORD_MAPPER_SERVICE=OrderService \
+    -e RESTATE_RECORD_MAPPER_HANDLER=onKafkaEvent \
+    ghcr.io/restatedev/ingress-integration-kafka:latest
+```
+
+The example above uses the [static record mapper](#configuration), which routes every record on the subscribed topics to the same service and handler.
+
+</Step>
+
+<Step title="Process events">
+
+Once the integration is running, it immediately starts consuming records from the configured topics.
+The handler is invoked for each record, and you can follow the resulting invocations in the [Restate UI](/installation#restate-ui) or with the CLI.
+
+</Step>
+
+</Steps>
+
+## Configuration
+
+Configure the integration with environment variables, or with a `.properties` file referenced by `CONFIG_FILE`. Environment variables take precedence.
+For the full list of options with their defaults, see the [configuration reference](https://github.com/restatedev/ingress-integration-kafka/blob/main/CONFIGURATION.md).
+
+<AccordionGroup>
+
+<Accordion title="Static record mapping">
+
+Routes every record on the subscribed topics to the same service and handler.
+The Kafka record key becomes the Virtual Object or Workflow key, and the record value becomes the request payload.
+
+The example below sends records from the `orders` and `payments` topics to the `OrderService/onKafkaEvent` handler:
+
+```bash
+docker run --rm \
+    -e KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
+    -e KAFKA_GROUP_ID=orders-to-restate \
+    -e KAFKA_TOPICS=orders,payments \
+    -e RESTATE_INGRESS_URL=http://restate:8080 \
+    -e RESTATE_RECORD_MAPPER_SERVICE=OrderService \
+    -e RESTATE_RECORD_MAPPER_HANDLER=onKafkaEvent \
+    ghcr.io/restatedev/ingress-integration-kafka:latest
+```
+
+</Accordion>
+
+<Accordion title="JSON dynamic record mapping">
+
+Derives the target service and handler from each record value using [JSON Pointers](https://datatracker.ietf.org/doc/html/rfc6901). Use it when a single topic carries different event types that need different handlers.
+
+The example below consumes the `orders` topic, picks a handler on the `Order` service from each record's `type` field, keys the invocation by `customerId`, and deduplicates on `eventId`:
+
+```bash
+docker run --rm \
+    -e KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
+    -e KAFKA_GROUP_ID=orders-to-restate \
+    -e KAFKA_TOPICS=orders \
+    -e RESTATE_INGRESS_URL=http://restate:8080 \
+    -e RESTATE_RECORD_MAPPER_CLASS=dev.restate.integration.kafka.mapper.JsonDynamicTargetRecordMapper \
+    -e RESTATE_RECORD_MAPPER_SERVICE_VALUE=Order \
+    -e RESTATE_RECORD_MAPPER_HANDLER_POINTER=/type \
+    -e RESTATE_RECORD_MAPPER_KEY_POINTER=/customerId \
+    -e RESTATE_RECORD_MAPPER_IDEMPOTENCYKEY_POINTER=/eventId \
+    ghcr.io/restatedev/ingress-integration-kafka:latest
+```
+
+</Accordion>
+
+<Accordion title="SASL/SSL authentication">
+
+Any additional `KAFKA_*` environment variable is forwarded to the Kafka consumer, mapping underscores to the [Apache Kafka client](https://kafka.apache.org/documentation/#consumerconfigs).
+
+The example below sends records from the `orders` topic to the `OrderService/onKafkaEvent` handler over a SASL/SSL connection:
+
+```bash
+docker run --rm \
+    -e KAFKA_BOOTSTRAP_SERVERS=my-kafka:9092 \
+    -e KAFKA_GROUP_ID=orders-to-restate \
+    -e KAFKA_TOPICS=orders \
+    -e RESTATE_INGRESS_URL=http://restate:8080 \
+    -e RESTATE_RECORD_MAPPER_SERVICE=OrderService \
+    -e RESTATE_RECORD_MAPPER_HANDLER=onKafkaEvent \
+    -e KAFKA_SECURITY_PROTOCOL=SASL_SSL \
+    -e KAFKA_SASL_MECHANISM=PLAIN \
+    -e KAFKA_SASL_JAAS_CONFIG='org.apache.kafka.common.security.plain.PlainLoginModule required username="user" password="pass";' \
+    ghcr.io/restatedev/ingress-integration-kafka:latest
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Record metadata
+
+When the record mapper attaches Kafka metadata, you can read it in the handler through the request headers map:
+
+<CodeGroup>
+```ts TypeScript {"CODE_LOAD::ts/src/develop/kafka.ts#headers"} 
+ctx.request().headers,
+```
+```java Java {"CODE_LOAD::java/src/main/java/develop/MyKafkaVirtualObject.java#headers"} 
+Restate.request().headers();
+```
+```go Go {"CODE_LOAD::go/develop/kafka.go#headers"} 
+ctx.Request().Headers
+```
+```python Python {"CODE_LOAD::python/src/develop/kafka.py#headers"} 
+ctx.request().headers
+```
+</CodeGroup>
+
+Each record carries within this map the following entries:
+
+* `kafka.topic`: The topic the record was consumed from.
+* `kafka.partition`: The record partition.
+* `kafka.offset`: The record offset.
+* `kafka.timestamp`: The record timestamp.
+
+## Migrating from the old Kafka support
+
+The [old Kafka support](/services/invocation/kafka) runs the consumer inside the Restate server and is configured with the `restate kafka-clusters` and `restate subscriptions` CLI commands.
+This integration runs as a separate container instead, so migrating means moving that configuration into the container and stopping the old subscription.
+
+Kafka tracks committed offsets per consumer group, so if the integration uses the **same `group.id`** as your existing subscription, the new consumer resumes exactly where the old one stopped, with no gap and no reprocessing.
+
+<Steps>
+
+<Step title="Find the group.id of your existing subscription">
+
+Identify the `group.id` your current subscription uses.
+List your subscriptions, then describe the one you want to migrate to see its options, including the `group.id`:
+
+```bash
+# List current subscriptions to find its ID (starts with sub_)
+restate subscriptions list
+# Print the subscription details, including its options
+restate subscriptions describe sub_11XHoawrCiWtv8kzhEyGtsR
+```
+
+You can set the `group.id` explicitly with the `group.id` option when creating a subscription. Otherwise Restate assigns one.
+
+</Step>
+
+<Step title="Stop the old subscription">
+
+Delete the existing subscription so the old consumer stops.
+Its committed offsets remain in Kafka under the group id.
+
+```bash
+restate subscriptions delete sub_11XHoawrCiWtv8kzhEyGtsR
+```
+
+</Step>
+
+<Step title="Start the integration with the same group.id">
+
+Run the integration with `KAFKA_GROUP_ID` set to that same group id, and the same topic and target handler:
+
+```bash
+docker run --rm \
+    -e KAFKA_BOOTSTRAP_SERVERS=broker:9092 \
+    -e KAFKA_GROUP_ID=<your-existing-group-id> \
+    -e KAFKA_TOPICS=my-topic \
+    -e RESTATE_INGRESS_URL=http://restate:8080 \
+    -e RESTATE_RECORD_MAPPER_SERVICE=MyService \
+    -e RESTATE_RECORD_MAPPER_HANDLER=handle \
+    ghcr.io/restatedev/ingress-integration-kafka:latest
+```
+
+</Step>
+
+</Steps>
+
+<Warning>
+    Do not run the old subscription and the integration against the same topic with the same `group.id` at the same time.
+    They would join the same consumer group and split partitions between them, mixing the two delivery semantics.
+    Stop the old subscription before starting the integration.
+</Warning>
