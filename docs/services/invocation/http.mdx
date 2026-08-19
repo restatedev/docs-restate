@@ -16,25 +16,6 @@ Open the UI at port 9070, register your service, click on the service, open the 
     Have a look at [managing invocations](/services/invocation/managing-invocations) to learn how to manage the lifecycle of an invocation.
 </Info>
 
-All ingress endpoints live under the reserved `/restate/` path prefix.
-To invoke a handler, use `/restate/call/...` to wait for the response or `/restate/send/...` to send a message without waiting:
-
-```
-# Request-response
-POST /restate/call/{service}/{handler}
-POST /restate/call/{service}/{key}/{handler}
-
-# Send a message (no response)
-POST /restate/send/{service}/{handler}
-POST /restate/send/{service}/{key}/{handler}
-```
-
-Add the `{key}` segment for Virtual Objects and Workflows; omit it for basic Services.
-
-<Note title="Unversioned paths">
-    The unversioned paths (`/{service}/{handler}`, `/{service}/{key}/{handler}`, and the `/send` suffix) still work for backwards compatibility, but new code should use the `/restate/` paths documented here.
-</Note>
-
 ## Request-response calls
 You can invoke services over HTTP 1.1 or higher.
 Request/response bodies should be encoded as JSON.
@@ -69,6 +50,10 @@ Follow the same pattern for calling the other handlers of the workflow.
     Therefore, `localhost:8080` refers to ingress port of the Restate Server, not the service instance.
 </Note>
 
+<Note title="Restate <= 1.6">
+    Use the path `/{service}/{handler}` or `/{service}/{key}/{handler}` instead.
+</Note>
+
 ## Sending messages
 If you do not want to wait for the response, you can send a message by using `/restate/send/...` instead of `/restate/call/...`:
 
@@ -85,6 +70,10 @@ Example output:
 
 The response contains the [Invocation ID](/services/invocation/managing-invocations#invocation-id).
 You can use this identifier [to cancel](/services/invocation/managing-invocations#cancel) or [kill the invocation](/services/invocation/managing-invocations#kill).
+
+<Note title="Restate <= 1.6">
+    Use the path `/{service}/{handler}/send` or `/{service}/{key}/{handler}/send` instead.
+</Note>
 
 ## Delayed messages
 
@@ -109,6 +98,9 @@ You can **delay the message** by adding a delay request parameter in ISO8601 not
     Workflows can only be scheduled with a delay from within another Restate handler ([TS](/develop/ts/service-communication#delayed-calls)/[Java/Kotlin](/develop/java/service-communication#delayed-calls)).
 </Note>
 
+<Note title="Restate <= 1.6">
+    Use the path `/{service}/{handler}/send` or `/{service}/{key}/{handler}/send` instead.
+</Note>
 
 ## Using an idempotency key
 
@@ -125,18 +117,31 @@ If you re-invoke the service with the same idempotency key within 24 hours, Rest
 
 Check out the [service configuration docs](/services/configuration) to tune the retention time.
 
-<Note title="Automatic idempotency keys at the ingress">
-    When the `controlled-idempotent-sharding` cluster feature is enabled (the default for new clusters), the ingress assigns a random idempotency key to service and virtual object calls that don't send an `Idempotency-Key` header.
-    This lets the ingress safely retry in-flight requests without duplicate execution, and means the completed invocation is retained for the [idempotency retention](/services/configuration#retention-of-completed-invocations) period.
-    It does not deduplicate across different requests, since each call gets a distinct key.
-</Note>
-
-
 <Tip title="Make any service call idempotent with Restate">
     With Restate and an idempotency key, you can make any service call idempotent, without any extra code or setup.
     This is a very powerful feature to ensure that your system stays consistent and doesn't perform the same operation multiple times.
 </Tip>
 
+
+<Note title="Automatic idempotency keys at the ingress">
+    From Restate 1.7, Restate injects automatically idempotency keys inside the ingress, to enable internal safe retries.
+    You can modify the behavior of this feature with the `controlled-idempotent-sharding` cluster feature.
+    These idempotency keys **will not** deduplicate actual requests from ingress, since each call gets a distinct key.
+    To achieve that, you still need to provide the idempotency key yourself in the ingress.
+</Note>
+
+## Retrying ingress requests
+
+A client can safely retry the following requests:
+
+- A `call` or `send` that carries an [idempotency key](#using-an-idempotency-key).
+- An [`attach`](#attach-to-an-invocation) request.
+- An [`output`](#attach-to-an-invocation) request.
+
+On failure, Restate sets the `x-restate-error-source` header, to specify where the error comes from. Its value is one of:
+
+- `invocation`: the error comes from your handler, either by throwing or returning a `TerminalError`/`TerminalException`, or by killing or cancelling the invocation. You usually don't want to retry these errors.
+- `ingress` (or absent): the error comes from the Restate ingress, or from a proxy between Restate and your client. Retry only when the status code signals a transient condition: `408`, `425`, `429`, or any `5xx`. Treat any other `4xx` response, for example `404 Not Found` or `400 Bad Request`, as non-retryable.
 
 ## Scopes
 
