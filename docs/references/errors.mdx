@@ -351,3 +351,23 @@ Each level must be contain only `[a-zA-Z0-9_.-]` characters with maximum length 
 
 Limit key can be used only in combination with scope.
 
+## RT0025
+
+The maximum nesting depth for the futures (promises) an invocation awaits on has been reached.
+
+Restate futures can be composed with combinators (e.g. `all`, `race`), and each level
+of composition adds one level of nesting. This error is raised when an invocation awaits
+on (or suspends on) a future whose nesting depth exceeds the limit configured in
+`worker.invoker.max-awaited-future-depth` (default: `1000`).
+
+This is most likely caused by unbounded or runaway recursion in the service code building
+ever-deeper combinator futures.
+
+When this limit is reached, the invocation is **paused**. You can resume the
+invocation manually after addressing the root cause.
+
+Suggestions:
+
+* Check your service code for recursive or loop-based composition of futures (e.g. repeatedly
+  wrapping futures in `all`/`race` combinators) that grows without a bound.
+
