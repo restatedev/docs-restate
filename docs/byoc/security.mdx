@@ -2,6 +2,7 @@
 title: "Security Model"
 sidebarTitle: "Security"
 description: "How Restate Cloud BYOC secures the control channel, infrastructure, and customer data."
+icon: "shield"
 ---
 
 Restate Cloud BYOC is designed around three principles: **least privilege**, **no standing access to your cloud account**, and **customer ownership of infrastructure**. Restate never holds your cloud provider credentials; management access is limited to your managed Kubernetes API endpoint via a scoped, revocable token.
@@ -165,3 +166,45 @@ All customer data remains in your cloud account:
 | Audit management operations | Yes | Kubernetes audit logs capture all control plane actions |
 | Request emergency patching | Yes | File a priority support ticket; Restate SLA applies |
 | Force node replacement | Yes | File a support ticket; completed within SLA |
+
+## Frequently asked questions
+
+<Accordion title="Does Restate have access to my AWS or Azure credentials?">
+  No. Restate never receives your cloud provider credentials. The deployment agent operates using an IAM role on AWS or a managed identity on Azure within your account that you provision. Restate's control plane authenticates to your Kubernetes cluster using bearer tokens with limited RBAC permissions.
+</Accordion>
+
+<Accordion title="Can I run BYOC in an air gapped environment?">
+  Not with the standard deployment model. The deployment agent requires outbound internet access to poll for jobs, and Restate's control plane requires access to your Kubernetes API. For environments with strict egress requirements, contact Restate to discuss private connectivity options such as AWS PrivateLink or Azure Private Link.
+</Accordion>
+
+<Accordion title="What happens if I revoke Restate's access?">
+  Your Restate environments continue running because they are self contained workloads. However, you lose the ability to create, update, delete, or scale environments through the Restate Cloud console. You can restore management by granting access again.
+</Accordion>
+
+<Accordion title="How do you prevent lateral movement if the control plane is compromised?">
+  Multiple layers of defense limit access:
+
+  1. Kubernetes RBAC limits the control plane to RestateCluster CRD operations and namespace scoped resources.
+  2. Network policies prevent pods from communicating outside their namespace.
+  3. Nodes do not expose SSH access. All management uses the Kubernetes API.
+  4. Pod security contexts enforce non root execution and read only filesystems.
+  5. You retain audit logs of all operations.
+</Accordion>
+
+<Accordion title="How are secrets managed?">
+  Signing keys for request authentication are generated in the cluster and stored as Kubernetes Secrets within the environment's namespace. They never leave your cluster. For your own application secrets, use your existing secrets management solution, such as AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault.
+</Accordion>
+
+<Accordion title="What data does Restate collect from my environments?">
+  Restate collects only the operational metadata required for management, including pod health, resource utilization, non sensitive environment configuration, and cluster metrics used for monitoring and alerting.
+
+  Restate does not collect application payloads, invocation data, stored state, customer secrets, or application logs.
+</Accordion>
+
+<Accordion title="Can I use my own container registry?">
+  Yes. You can mirror Restate images to your private registry and configure the deployment to pull from there. This lets you use your existing vulnerability scanning and policy enforcement tooling.
+</Accordion>
+
+<Accordion title="Do you have SOC 2 certification?">
+  Restate is SOC 2 Type I certified, with a Type II audit underway.
+</Accordion>
