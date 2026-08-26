@@ -3,58 +3,25 @@ title: OSS Roadmap
 description: Upcoming capabilities in Restate Open Source.
 ---
 
-# Near-term (weeks)
+<Note>
+Roadmap items are directional and may change. See the [changelog](/changelog/server) for features that have shipped.
 
-### Virtual Queues and Flow Control
+Contact us on [Discord](https://discord.restate.dev) or [Slack](https://slack.restate.dev) to request other features.
+</Note>
 
-<Info>
-    The first stage has shipped: scope-based **concurrency limits** are now available as an opt-in feature. See the [flow control](/services/flow-control) docs to try them. The capabilities below are the planned follow-ups.
-</Info>
+## Near term
 
-We are making a major change to Restate's invocation scheduler to support more sophisticated flow control. The goal is to make it easier to configure rate- and concurrency limits that protect downstream services from request spikes, and to define limits and quotas that apply to groups of users, principals, or tenants.
+### Additional flow control settings
 
-```ts
-const client = ctx
-  .scope(customerTeamId)   // new: limits exists in scopes (like namespaces)
-  .serviceClient<Agent>({ name: "researchAgentService" });
+Scope based concurrency limits are available as an opt-in feature. See the [flow control documentation](/services/flow-control) to try them.
 
-// userId is the key on which limits apply
-client.runAgent(prompt, rpc.opts({ limitKey: userId}));
-```
+Building on the same Virtual Queues scheduler, we plan to add more ways to shape how invocations are admitted and dispatched:
 
-Internally, Restate applies these limits using *Virtual Queues*, which are similar to *Virtual Objects* in that they do not occupy memory, allowing very many to exist concurrently. This makes it possible to track fine-grained limits and quotas for users, tenants, or agents.
+- **Rate limits** to control how frequently work is dispatched
+- **Invocation priorities** to determine which eligible work runs first
+- **Capacity and backlog limits** to cap queued work and shed excess load
 
-Every invocation is associated with a key (think the virtual queue identity). Invocations with the same queue id pass through the same virtual queue, where the configured flow-control policies are applied.
-
-The types of flow control we are initially adding include:
-
-* Concurrency limits
-* Rate limits
-* Priority events
-
-This work also improves observability by showing where invocations are staged when they are not yet eligible for processing.
-
-The feature will roll out in stages. The first steps are concurrency limiting on virtual queues, as well as concurrency limits on deployment endpoints. These endpoint limits are a separate mechanism from virtual queues, but are enabled by the same scheduler rework.
-
-### Cooperative Suspensions
-
-Suspensions ensure that resources are released when a durable function is not actively doing work.
-
-Today, certain scenarios require a careful tuning of parameters: (1) the *inactivity timeout,* after which suspensions trigger (on low-latency http/2 streaming invocations) and (2) the number of *concurrency slots* in the invoker, which limit the number of ongoing (non-suspended) durable function executions. High inactivity timeouts can block slots for too long, while low timeouts lead to more replays than necessary (higher latency).
-
-With cooperative suspensions, tuning the *inactivity timeout* is no longer necessary, because the runtime and SDK jointly decide when a function is in a suspendable state, and when to pre-emptively suspend for best resource utilization and performance.
-
-### Better Tracing
-
-Restate creates OpenTelemetry traces by default for every invocation and action, and propagates tracing context into service invocations so application code can emit additional traces.
-
-We are improving how retries, suspensions, and resumptions are represented, and adding support for nested traces. The goal is for traces to more accurately reflect the logical execution of durable workflows and services.
-
-### Simpler Kafka Subscriptions
-
-Kafka subscriptions will be fully created and parameterizable in a single place, through the Admin API.
-No settings will be needed in the Restate config file anymore.
-This means new subscriptions to new Kafka Clusters can be created without access to the configuration.
+These settings will support fine grained policies for scopes and limit keys, such as organizations, teams, users, tenants, or agents. We also plan to continue improving the visibility into why an invocation is waiting and which flow control rule is blocking it.
 
 ### Further AI SDK Integrations
 
@@ -62,7 +29,7 @@ Restate has integrated with multiple AI SDKs and is becoming a foundational dura
 
 We are continuing to add support for more SDKs.
 
-# Mid-term (months)
+## Longer term
 
 ### Native Streams
 
