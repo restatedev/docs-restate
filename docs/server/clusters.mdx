@@ -275,9 +275,53 @@ The `restatectl` tool communicates with Restate at the advertised address specif
     ```shell
     restatectl status
     ```
-    Optionally, specify the addresses via `--addresses http://localhost:5122/`:
+
+    Optionally, specify the addresses via `--addresses http://localhost:5122/`.
+
+    Output:
+
+    ```shell
+    Node Configuration (v12)
+     NODE-ID  NAME    UPTIME  METADATA  LEADER  FOLLOWER  NODESET-MEMBER  SEQUENCER  ROLES
+     N1:2     node-1  33s     Member    9       8         24              9          admin | http-ingress | log-server | metadata-server | worker
+     N2:1     node-2  32s     Member    6       8         24              6          admin | http-ingress | log-server | metadata-server | worker
+     N3:1     node-3  31s     Member    9       8         24              9          admin | http-ingress | log-server | metadata-server | worker
+    ```
+
+    This is one row per node, and the four counters in the middle are the quickest way to see
+    whether work is spread evenly across the cluster:
+
+    | Column | Meaning |
+    |--------|---------|
+    | `LEADER` | Partitions for which this node runs the leader partition processor, actively processing invocations |
+    | `FOLLOWER` | Partitions for which this node runs a follower, applying the log as a hot standby |
+    | `NODESET-MEMBER` | Logs whose current nodeset includes this node, meaning it stores log records for them |
+    | `SEQUENCER` | Logs for which this node is the sequencer, accepting all appends |
+
+    In a balanced cluster each node holds roughly the same number of leaders and followers.
+    The distribution is statistical rather than exactly enforced, so the 9 / 6 / 9 leader split
+    above is normal for 24 partitions across 3 nodes and is not something to correct.
+
+    `SEQUENCER` tracks `LEADER` closely because Restate keeps each log's sequencer co-located
+    with that partition's leader.
+
+    <Info>
+    View the full cluster state via
+    
+    ```shell
+    restatectl status --extra
+    ```
+
+    This prints four sections: the node configuration with storage and worker states, the log
+    configuration with each log's sequencer and nodeset, every partition processor with its
+    applied/durable/archived LSNs, and the metadata service members.
+
+    The log section shows only each log's **current** segment. To inspect a log's full segment
+        chain, including historic nodesets, use `restatectl logs describe <LOG_ID>`.
+    </Info>
 
 </Accordion>
+
 <Accordion title="Provisioning clusters">
 Check out the [cluster deployment documentation](/server/clusters)
 </Accordion>
