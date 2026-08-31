@@ -583,6 +583,58 @@ You can expand an existing cluster by adding new nodes after it has been started
     If the update takes longer than expected, check the node logs for errors or warnings.
 
 </Step>
+
+<Step title="Verify the new nodes are being used">
+
+    Check how work is distributed once the new nodes have joined:
+
+    ```shell
+    restatectl status
+    ```
+
+    ```shell
+     NODE-ID  NAME    UPTIME  METADATA  LEADER  FOLLOWER  NODESET-MEMBER  SEQUENCER  ROLES
+     N1:2     node-1  1m 27s  Member    7       7         23              7          admin | http-ingress | log-server | metadata-server | worker
+     N2:1     node-2  1m 26s  Member    5       4         21              5          admin | http-ingress | log-server | metadata-server | worker
+     N3:1     node-3  1m 25s  Member    7       6         23              7          admin | http-ingress | log-server | metadata-server | worker
+     N4:1     node-4  53s     Member    5       7         5               5          admin | http-ingress | log-server | metadata-server | worker
+    ```
+
+    Partition work rebalances on its own: `node-4` has picked up leaders, followers and sequencers
+    with no operator action.
+
+    Log storage does not. A nodeset is fixed for the life of a segment, so `node-4` has only joined
+    the nodesets of the five logs whose sequencer moved onto it, while the original nodes sit at
+    21–23 of 24. The other logs keep writing to the nodes they were already using, so a new node can
+    carry partition work while taking only a small share of the log write traffic. This evens out on
+    its own as segments are reconfigured for other reasons, such as later leadership changes.
+
+    <Accordion title="Eagerly moving logs onto new nodes">
+    If you would rather not wait for that, you can move a log onto the new nodes yourself by
+    reconfiguring it. Pass the nodeset you want explicitly — without `--nodeset` the new segment
+    simply reuses the one it sealed, so nothing changes:
+
+    ```shell
+    restatectl logs reconfigure --log-id 2 --nodeset N2,N3,N4
+    ```
+
+    The nodes you list are a preference rather than an instruction: Restate gives the log's current
+    sequencer top priority and only picks nodes whose storage state is `read-write`. Check the
+    result with `restatectl logs list`.
+
+    <Note>
+        Reconfiguring seals the log's current segment and opens a new one, which briefly pauses
+        appends to that log, so work through the logs in small batches rather than all at once.
+    </Note>
+
+    <Info>
+        This applies only to growing a cluster. When a node is taken out of service by setting its
+        storage state to `read-only`, the cluster controller moves logs off it automatically within
+        seconds, as described under "Removing Nodes & Shrinking Clusters" below.
+    </Info>
+    </Accordion>
+
+</Step>
 </Steps>
 
 ## Managing Replicated Logs
