@@ -7,13 +7,45 @@ const $RefParser = require("@apidevtools/json-schema-ref-parser");
 const schemaPath = "docs/schemas/restate-server-configuration-schema.json";
 const outputPath = "docs/references/server-config.mdx";
 
+// Text an option may declare for itself next to a `$ref`.
+const OWN_DOC_KEYS = ["description", "title", "examples"];
+const ownDocKey = (key) => `x-own-${key}`;
+
+// A property may declare its own `description`/`title`/`examples` next to a
+// `$ref`, e.g. `trim-delay-interval` explaining what the option does while
+// pointing at `FriendlyDuration`, which explains the accepted format. Both are
+// worth keeping, but dereferencing merges the two nodes and the keys collide --
+// and which side wins depends on the dereferencer's cache state, so options
+// silently lost one or the other.
+//
+// Move the option's own text aside first: the merged node then keeps the
+// referenced type's `description`/`title`/`examples`, and the option's own land
+// under `x-own-*`, where `preservedProperties` carries them across untouched.
+function stashOwnDocs(node) {
+    if (Array.isArray(node)) return node.forEach(stashOwnDocs);
+    if (!node || typeof node !== "object") return;
+
+    if (typeof node.$ref === "string") {
+        for (const key of OWN_DOC_KEYS) {
+            if (key in node) {
+                node[ownDocKey(key)] = node[key];
+                delete node[key];
+            }
+        }
+    }
+    Object.values(node).forEach(stashOwnDocs);
+}
+
 async function parseJsonSchema(schemaPath) {
     try {
-        return  await $RefParser.dereference(schemaPath, {
+        const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+        stashOwnDocs(schema);
+        return await $RefParser.dereference(schema, {
             mutateInputSchema: false,
             continueOnError: false,
             dereference: {
-                circular: "ignore"
+                circular: "ignore",
+                preservedProperties: OWN_DOC_KEYS.map(ownDocKey)
             }
         });
     } catch (error) {
@@ -22,18 +54,53 @@ async function parseJsonSchema(schemaPath) {
     }
 }
 
-function formatDescription(description, title, examples) {
-    const titleStr = title ? `${title}: ` : '';
-    
-    if (!description) {
-        // Return title if present, even without description
-        return titleStr;
+// Splits a dereferenced node into the option's own prose and the referenced
+// type's format text. Nodes that never went through a `$ref` carry no `x-own-*`
+// keys and are returned unchanged.
+function resolveDocs(propSchema) {
+    const viaRef = OWN_DOC_KEYS.some(key => ownDocKey(key) in propSchema);
+    if (!viaRef) {
+        return {
+            description: propSchema.description,
+            title: propSchema.title,
+            examples: propSchema.examples,
+            formatHint: null,
+        };
     }
+    return {
+        description: propSchema['x-own-description'],
+        title: propSchema['x-own-title'],
+        // Fall back to the type's examples; most options don't declare their own.
+        examples: propSchema['x-own-examples'] ?? propSchema.examples,
+        formatHint: formatHint(propSchema, propSchema['x-own-description']),
+    };
+}
 
+// The referenced type's own text, introduced by its title the same way an
+// option's description is ("Human-readable duration: Duration string in either
+// jiff ..."). Returns null when the type adds nothing beyond what the option
+// already says: an empty or title-repeating blurb ("Non-zero human-readable
+// bytes"), a composite type whose variants and fields are expanded below anyway
+// ("Definition of a retry policy"), or text the option's description contains.
+function formatHint(typeSchema, ownDescription = '') {
+    const typeDescription = (typeSchema.description || '').trim();
+    const typeTitle = (typeSchema.title || '').trim();
+
+    if (!typeDescription) return null;
+    if (typeDescription === typeTitle) return null;
+    if (!isLeafField(typeSchema, getTypeFromSchema(typeSchema).type)) return null;
+    if ((ownDescription || '').includes(typeDescription)) return null;
+
+    return typeTitle ? `${typeTitle}: ${typeDescription}` : typeDescription;
+}
+
+// Escapes prose for the MDX body: angle brackets would otherwise be read as
+// JSX, and double quotes would terminate a JSX attribute.
+function escapeText(text) {
     // Split by backtick-delimited code blocks, keeping the delimiters
-    const parts = description.split(/(`[^`]+`)/g);
-    
-    const cleanDescription = parts.map(part => {
+    const parts = text.split(/(`[^`]+`)/g);
+
+    return parts.map(part => {
         if (part.startsWith('`') && part.endsWith('`')) {
             // Code block - escape < and > inside
             const inner = part.slice(1, -1);
@@ -47,14 +114,26 @@ function formatDescription(description, title, examples) {
         .replace(/\[(.*?)\]\((.*?)\)/g, '[$1]($2)')
         // Escape quotes for JSX attributes
         .replace(/"/g, '\\"');
+}
 
+function formatDescription(description, title, examples, hint) {
+    const titleStr = title ? `${title}: ` : '';
+    // What the option does, then what its type accepts, then examples of it
+    const hintStr = hint ? `\n\n${escapeText(hint)}` : '';
     const exampleStr = examples && Array.isArray(examples) && examples.length > 0
         ? '\n\nExamples:\n' + examples.map(ex => `${JSON.stringify(ex, null, 2)}`).join(' or ')
         : '';
-    if (title && description.includes(title)) {
-        return `${cleanDescription}${exampleStr}`;
+
+    if (!description) {
+        // Return title if present, even without description. No trailing colon:
+        // there is nothing for it to introduce.
+        return `${title || ''}${hintStr}${exampleStr}`;
     }
-    return `${titleStr}${cleanDescription}${exampleStr}`;
+
+    const cleanDescription = escapeText(description);
+    // Don't repeat the title when the description already contains it
+    const titlePrefix = title && description.includes(title) ? '' : titleStr;
+    return `${titlePrefix}${cleanDescription}${hintStr}${exampleStr}`;
 }
 
 function getTypeFromSchema(propSchema) {
@@ -127,10 +206,20 @@ function buildEnvVar(path) {
     return 'RESTATE_' + path.map(s => s.replace(/-/g, '_').toUpperCase()).join('__');
 }
 
+// `post={['...']}` is a JS expression in MDX, so anything embedded in it has to
+// survive a single-quoted string literal. Regex patterns are full of
+// backslashes, and a raw `\d` is an unknown escape that collapses to `d`.
+function escapeJsString(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 function generatePostAttr(propSchema, envVar) {
     let postTags = []
     if (propSchema.format) {
         postTags.push(`\'format: ${propSchema.format}\'`);
+    }
+    if (propSchema.pattern) {
+        postTags.push(`\'pattern: ${escapeJsString(propSchema.pattern)}\'`);
     }
     if (propSchema.enum) {
         postTags.push(`\'enum: ${propSchema.enum.map(v => (typeof v === 'string' ? `"${v}"` : v)).join(', ')}\'`);
@@ -193,7 +282,8 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     const indent = '    '.repeat(level);
     const { type, optional } = getTypeFromSchema(propSchema);
     const required = isRequired && !optional ? ' required' : '';
-    let description = formatDescription(propSchema.description, propSchema.title, propSchema.examples);
+    const docs = resolveDocs(propSchema);
+    let description = formatDescription(docs.description, docs.title, docs.examples, docs.formatHint);
 
     const envVar = isLeafField(propSchema, type) ? buildEnvVar(path) : null;
     let postAttr = generatePostAttr(propSchema, envVar);
@@ -254,8 +344,14 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             if (description) {
                 output += `${indent}    ${description}\n\n`;
             }
-            if (optionalVariant.description) {
-                output += `${indent}    ${formatDescription(optionalVariant.description, optionalVariant.title, optionalVariant.examples)}\n`
+            // For `Option<T>` the variant *is* the type, so its text describes
+            // the format rather than the option -- same treatment as a `$ref`.
+            const variantFormat = formatDescription(
+                undefined, undefined, optionalVariant.examples,
+                formatHint(optionalVariant, docs.description));
+            if (variantFormat) {
+                // The option's description above already ends with a blank line
+                output += `${indent}    ${variantFormat.replace(/^\n+/, '')}\n`
             }
             if (optionalType.type === 'object' && optionalVariant.properties) {
                 output += `${indent}    \n`;
