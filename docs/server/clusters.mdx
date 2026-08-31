@@ -53,6 +53,49 @@ Restate uses two complementary replication mechanisms to ensure both availabilit
 **What it controls:**
 - How many log-server nodes store copies of each log segment
 
+### Sequencers and Nodesets
+
+There is one log per partition. Each log is a chain of segments over time, called loglets, with
+exactly one active loglet at any moment. Every loglet has two placement properties, both visible
+in `restatectl logs list`:
+
+- **Sequencer** — the single node that accepts all appends for that loglet. Restate keeps the
+  sequencer co-located with the partition's leader, so sequencer placement follows partition
+  leadership automatically.
+- **Nodeset** — the set of log-server nodes eligible to store that loglet's records. The sequencer
+  sends each append to a subset of the nodeset members and acknowledges once enough of them confirm
+  it to satisfy the log replication property.
+
+A nodeset is normally wider than the replication property, so writes can still be acknowledged when
+a member is slow or briefly unavailable. Only nodes whose log-server storage state is `read-write`
+are eligible for a new nodeset.
+
+```shell
+restatectl logs list
+```
+
+```shell
+Logs v15
+└ Logs Provider: replicated
+ ├ Log replication: {node: 2}
+ └ Nodeset size: 0
+ L-ID  SEGMENTS  FROM  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
+ 0     2         3     replicated  0_1        {node: 2}    N3:1       [N1, N2, N3]
+```
+
+`Nodeset size: 0` is the default and means Restate picks a suitable nodeset size from the effective
+replication property whenever it builds a new nodeset. You can override it with
+`restatectl config set --log-default-nodeset-size`, but leaving it at `0` is recommended.
+
+<Info title="Nodesets are chosen per segment, not per cluster">
+    A nodeset is fixed for the life of a segment. Restate only picks a new one when it creates a new
+    segment — which happens when a log is reconfigured, for example because the sequencer moved, a
+    node became ineligible, or an operator asked for it. Existing segments are never rewritten.
+
+    This has a practical consequence when the cluster changes size, covered in
+    [Growing clusters](#growing-clusters) and in the section on removing nodes below.
+</Info>
+
 ### Replication Properties
 
 Both partition and log replication use the same **replication property** format, which can be either:
