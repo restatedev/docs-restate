@@ -262,6 +262,35 @@ Finally, nodes that run the `http-ingress` role will accept external invocation 
     Without it, newly added nodes may not be fully utilized by the system.
 </Info>
 
+### Choosing the number of partitions
+
+Partitions, not nodes, are the unit of parallelism in Restate. Each partition has exactly one
+leader processing invocations at a time, so **the partition count is the ceiling on how far a
+cluster can scale out**: with N partitions, at most N nodes can hold a partition leader. Nodes
+beyond that still serve ingress and can hold log data, but will not process invocations.
+
+<Warning>
+    The number of partitions is fixed when the cluster is provisioned. `restatectl config set`
+    cannot change it, and there is no online resharding yet. Raising it later means provisioning a new
+    cluster and migrating to it, so choose with room to grow.
+</Warning>
+
+The default is 24 partitions, set with `default-num-partitions` in the server configuration or
+`restatectl provision --num-partitions`. Size it against the largest cluster you would ever want to
+run rather than the one you are starting with. Check the current value at any time with:
+
+```shell
+restatectl config get
+```
+
+### Autoscaling
+
+Restate clusters are not designed to be resized by a Kubernetes HorizontalPodAutoscaler or a
+similar autoscaler. Both directions need operator involvement: growing a cluster may require
+[reconfiguring logs](#growing-clusters) so new nodes take a share of log writes, and shrinking one
+requires draining nodes, snapshotting and trimming before they are removed, or the log is left
+under-replicated. An autoscaler doing either automatically can leave the cluster degraded.
+Size the cluster for its expected peak instead, and treat resizing as a deliberate operation.
 
 ## Cluster provisioning
 
