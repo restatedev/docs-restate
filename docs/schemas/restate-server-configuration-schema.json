@@ -340,12 +340,16 @@
       "default": {
         "rocksdb-disable-wal-fsync": false,
         "rocksdb-enable-blob-separation": false,
+        "rocksdb-l0-num-compaction-trigger": 8,
         "rocksdb-log-keep-file-num": null,
         "rocksdb-log-level": null,
         "rocksdb-log-max-file-size": null,
         "rocksdb-max-file-size": "128.0 MiB",
         "rocksdb-max-sub-compactions": 1,
-        "rocksdb-memory-ratio": 0.5
+        "rocksdb-memory-ratio": 0.5,
+        "rocksdb-partition-sst-by-log": true,
+        "rocksdb-partition-sst-by-loglet": false,
+        "rocksdb-writable-file-max-buffer-size": "1.0 MiB"
       }
     },
     "max-idempotency-retention": {
@@ -794,12 +798,14 @@
         },
         "storage": {
           "rocksdb-disable-auto-memory-reclaimer": false,
+          "rocksdb-l0-num-compaction-trigger": 2,
           "rocksdb-log-keep-file-num": null,
           "rocksdb-log-level": null,
           "rocksdb-log-max-file-size": null,
           "rocksdb-max-file-size": "64.0 MiB",
           "rocksdb-max-sub-compactions": 1,
-          "rocksdb-memory-ratio": 0.49000000953674316
+          "rocksdb-memory-ratio": 0.49000000953674316,
+          "rocksdb-writable-file-max-buffer-size": "1.0 MiB"
         },
         "trim-delay-interval": "10m"
       }
@@ -1716,6 +1722,17 @@
           "deprecated": true,
           "minimum": 1
         },
+        "rocksdb-blob-min-size": {
+          "description": "Minimum value size for blob file separation\n\nValues at or above this threshold are stored in separate blob files when\nblob separation is enabled. Smaller values remain inline in SST files.\nLower thresholds reduce write amplification (compactions only rewrite small\nBlobIndex pointers) at the cost of an extra read indirection on cache misses.\n\nOnly takes effect when `rocksdb-enable-blob-separation` is true.\n\n[default] is 512 KiB\n\nSince v1.7.0",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NonZeroHumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rocksdb-block-size": {
           "title": "RocksDB block size",
           "description": "Uncompressed block size\n\nDefault: 64KiB",
@@ -1739,6 +1756,10 @@
               "type": "null"
             }
           ]
+        },
+        "rocksdb-disable-blob-compression": {
+          "description": "Disable compression for blob files\n\nWhen false (default), blob files are compressed with Zstd. Set to true to\nstore blobs uncompressed, trading higher disk usage for reduced CPU overhead\non writes and blob-GC reads.\n\nOnly takes effect when `rocksdb-enable-blob-separation` is true.\n\nSince v1.7.0",
+          "type": "boolean"
         },
         "rocksdb-disable-direct-io-for-flush-and-compactions": {
           "title": "Disable Direct IO for flush and compactions",
@@ -1784,6 +1805,19 @@
           "type": "boolean",
           "default": false
         },
+        "rocksdb-enable-blob-separation": {
+          "description": "Enable storing large values in separate blob files\n\n[Experimental]\nEnables BlobDB key-value separation for the data column family. Values at or\nabove `rocksdb-blob-min-size` are written to dedicated blob files, leaving only\nsmall pointers in the LSM tree. This dramatically reduces write amplification\nduring compaction at the cost of some space amplification from unreferenced blobs\nawaiting garbage collection.\n\nThis is safe to enable/disable at any time.\n\nSince v1.7.0",
+          "type": "boolean",
+          "default": false
+        },
+        "rocksdb-l0-num-compaction-trigger": {
+          "title": "Number of L0 files to trigger compaction",
+          "description": "Sets the number of files to trigger level-0 compaction.\n\n[default] is 8\n\nSince v1.7.7",
+          "type": "integer",
+          "format": "uint32",
+          "default": 8,
+          "minimum": 1
+        },
         "rocksdb-log-keep-file-num": {
           "title": "RocksDB log keep file num",
           "description": "Number of info LOG files to keep\n\nDefault: 1",
@@ -1821,11 +1855,31 @@
           ],
           "default": null
         },
+        "rocksdb-max-background-compactions": {
+          "title": "Max background compactions",
+          "description": "Maximum number of concurrent compaction operations for this database.\n\nIf unset, defaults are computed based on CPU count and active node roles.\n\nSince v1.7.0",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
+        },
         "rocksdb-max-file-size": {
-          "title": "Clamps target size for sst files",
-          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 16 MiB if set to a smaller value.\n\n[default] is 128 MiB\n\nSince v1.7.0",
+          "title": "Target size for SST files",
+          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 8 MiB if set to a smaller value.\nWhen blob separation is enabled, non-L0 SST files instead target 8 MiB.\n\n[default] is 128 MiB\n\nSince v1.7.0",
           "$ref": "#/$defs/NonZeroHumanBytes",
           "default": "128.0 MiB"
+        },
+        "rocksdb-max-open-files": {
+          "title": "Max open files",
+          "description": "Sets the number of open files that can be used by the DB. You may need to\nincrease this if your database has a large working set. Unset means\nfiles opened are always kept open.\n\n[default] is unset\n\nSince v1.7.7",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
         },
         "rocksdb-max-sub-compactions": {
           "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed.\n\nDefault is 1",
@@ -1835,7 +1889,7 @@
           "minimum": 0
         },
         "rocksdb-memory-budget": {
-          "description": "The memory budget for rocksdb memtables in bytes\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.",
+          "description": "The memory budget for rocksdb memtables in bytes\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.\n\nThe memory budget is automatically sanitized to the minimum of 32 MiB if set to\na smaller value.",
           "anyOf": [
             {
               "$ref": "#/$defs/NonZeroHumanBytes"
@@ -1850,6 +1904,18 @@
           "type": "number",
           "format": "float",
           "default": 0.5
+        },
+        "rocksdb-partition-sst-by-log": {
+          "title": "Partition SST files by log ID",
+          "description": "Splits SST files by the log ID.\n\n[default] is true\n\nSince v1.7.7",
+          "type": "boolean",
+          "default": true
+        },
+        "rocksdb-partition-sst-by-loglet": {
+          "title": "Partition SST files by loglet ID",
+          "description": "Splits SST files by the loglet ID. Enabling this option may reduce the cost of compaction\nand trimming but may increase the number of SST files. If the number of SST files became a\nconcern, consider setting `rocksdb-max-open-files` to a reasonable value.\n\nThis overrides `rocksdb-partition-sst-by-log` if both are enabled.\n\n[default] is false\n\nSince v1.7.7",
+          "type": "boolean",
+          "default": false
         },
         "rocksdb-statistics-level": {
           "title": "RocksDB statistics level",
@@ -1869,6 +1935,12 @@
             "string",
             "null"
           ]
+        },
+        "rocksdb-writable-file-max-buffer-size": {
+          "title": "Buffer size used for writing to SST files",
+          "description": "Sets the maximum buffer size that is used to write SST files to disk.\nLarger values translate to larger IO operations which can be helpful\nfor slow or network-attached storage devices.\n\n[default] is 1 MiB\n\nSince v1.7.7",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "1.0 MiB"
         },
         "write-batch-commit-bytes": {
           "title": "Write Batch (in bytes)",
@@ -2941,6 +3013,14 @@
             "null"
           ]
         },
+        "rocksdb-l0-num-compaction-trigger": {
+          "title": "Number of L0 files to trigger compaction",
+          "description": "Sets the number of files to trigger level-0 compaction.\n\n[default] is 2\n\nSince v1.7.7",
+          "type": "integer",
+          "format": "uint32",
+          "default": 2,
+          "minimum": 1
+        },
         "rocksdb-log-keep-file-num": {
           "title": "RocksDB log keep file num",
           "description": "Number of info LOG files to keep\n\nDefault: 1",
@@ -2979,10 +3059,20 @@
           "default": null
         },
         "rocksdb-max-file-size": {
-          "title": "Clamps target size for sst files",
-          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 16 MiB if set to a smaller value.\n\n[default] is 64 MiB\n\nSince v1.7.0",
+          "title": "Target size for SST files",
+          "description": "The target size for sst files. Restate uses this value to internally determine\nthe number of memtables to keep in memory and how much to merge before flushing.\n\nThe value is automatically sanitized to 8 MiB if set to a smaller value.\n\n[default] is 64 MiB\n\nSince v1.7.0",
           "$ref": "#/$defs/NonZeroHumanBytes",
           "default": "64.0 MiB"
+        },
+        "rocksdb-max-open-files": {
+          "title": "Max open files",
+          "description": "Sets the number of open files that can be used by the DB. You may need to\nincrease this if your database has a large working set. Unset means\nfiles opened are always kept open.\n\n[default] is unset\n\nSince v1.7.7",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1
         },
         "rocksdb-max-sub-compactions": {
           "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed.\n\nDefault is 1\n\nSince v1.7.5",
@@ -3019,6 +3109,12 @@
               "type": "null"
             }
           ]
+        },
+        "rocksdb-writable-file-max-buffer-size": {
+          "title": "Buffer size used for writing to SST files",
+          "description": "Sets the maximum buffer size that is used to write SST files to disk.\nLarger values translate to larger IO operations which can be helpful\nfor slow or network-attached storage devices.\n\n[default] is 1 MiB\n\nSince v1.7.7",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "1.0 MiB"
         }
       }
     },
@@ -3183,12 +3279,14 @@
           "$ref": "#/$defs/StorageOptions",
           "default": {
             "rocksdb-disable-auto-memory-reclaimer": false,
+            "rocksdb-l0-num-compaction-trigger": 2,
             "rocksdb-log-keep-file-num": null,
             "rocksdb-log-level": null,
             "rocksdb-log-max-file-size": null,
             "rocksdb-max-file-size": "64.0 MiB",
             "rocksdb-max-sub-compactions": 1,
-            "rocksdb-memory-ratio": 0.49000000953674316
+            "rocksdb-memory-ratio": 0.49000000953674316,
+            "rocksdb-writable-file-max-buffer-size": "1.0 MiB"
           }
         },
         "trim-delay-interval": {
