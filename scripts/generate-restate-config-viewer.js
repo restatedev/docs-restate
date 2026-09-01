@@ -88,7 +88,10 @@ function formatHint(typeSchema, ownDescription = '') {
 
     if (!typeDescription) return null;
     if (typeDescription === typeTitle) return null;
-    if (!isLeafField(typeSchema, getTypeFromSchema(typeSchema).type)) return null;
+    // A struct's or tagged enum's fields are expanded below anyway, and a map's
+    // or array's blurb describes the container rather than a value.
+    const type = nonNullType(getTypeFromSchema(typeSchema).type);
+    if (type === 'object' || type === 'array' || hasNamedFields(typeSchema)) return null;
     if ((ownDescription || '').includes(typeDescription)) return null;
 
     return typeTitle ? `${typeTitle}: ${typeDescription}` : typeDescription;
@@ -186,20 +189,41 @@ function getDefaultAttr(propSchema, type) {
     return value === null ? "" : ` default="${value.replace(/"/g, '&quot;')}"`;
 }
 
-// Determines whether a field is a settable leaf value (as opposed to a
-// grouping object/array or a oneOf/anyOf container whose variants are objects).
-// Only leaves map to a single environment variable.
+// Whether a node has named options of its own, directly or in any of its
+// variants. A struct or a tagged enum does; a map, a scalar, or an enum of bare
+// values does not.
+function hasNamedFields(schema) {
+    return Boolean(schema.properties)
+        || (schema.oneOf || schema.anyOf || []).some(v => v.properties);
+}
+
+// Whether an array holds tables rather than scalars. Arrays of tables are
+// written as `[[key]]` in TOML and cannot be set from a single env var.
+function itemsAreObjects(propSchema) {
+    const items = propSchema.items;
+    return Boolean(items) && (hasNamedFields(items) || items.type === 'object');
+}
+
+// The type with its `null` alternative stripped, so that `object | null` is
+// classified like `object`.
+function nonNullType(type) {
+    return type.split(' | ').filter(t => t !== 'null').join(' | ');
+}
+
+// Whether a field is settable from a single environment variable. A whole array
+// or map is, because figment parses `[a, b]` into a list and `{k=v}` into a
+// dict. Individual elements are not, and neither is a struct or a tagged enum,
+// whose options each carry an env var of their own.
 function isLeafField(propSchema, type) {
-    if (type === 'object' || type === 'array') return false;
-    if (type === 'oneOf') return !(propSchema.oneOf || []).some(v => v.properties);
-    if (type === 'anyOf') return !(propSchema.anyOf || []).some(v => v.properties);
-    return true;
+    if (nonNullType(type) === 'array') return !itemsAreObjects(propSchema);
+    return !hasNamedFields(propSchema);
 }
 
 // Builds the environment variable name for a config option from its path.
-// Restate uses the `RESTATE_` prefix, `__` between nesting levels, and the
-// snake-cased (upper) field name.
-// TODO: Check if there's a proper way for setting array indicies in env vars
+// Restate strips the `RESTATE_` prefix, splits nesting levels on `__` and turns
+// every remaining `_` back into a `-`, which is the inverse of what we do here
+// (see `crates/types/src/config_loader.rs` in restatedev/restate). Elements of
+// an array are not addressable, since there is no index syntax.
 function buildEnvVar(path) {
     if (!path || path.length === 0) return null;
     if (path.includes('[]')) return null;
@@ -213,7 +237,28 @@ function escapeJsString(value) {
     return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-function generatePostAttr(propSchema, envVar) {
+// Builds the TOML key for a config option from its path. A dotted key is valid
+// TOML on its own line, so the rendered value is directly pasteable. Tables are
+// shown with their header syntax (`[worker.invoker]`, or `[[ingress.kafka-clusters]]`
+// for an array of tables). Options nested inside an array of tables are given
+// relative to that header, since the index is not expressible as a dotted key.
+function buildTomlPath(path, propSchema, type) {
+    if (!path || path.length === 0) return null;
+    // The synthetic `item` node of an array restates the array's own key.
+    if (path[path.length - 1] === '[]') return null;
+
+    const lastArray = path.lastIndexOf('[]');
+    const dotted = (lastArray === -1 ? path : path.slice(lastArray + 1)).join('.');
+
+    if (nonNullType(type) === 'array') {
+        return itemsAreObjects(propSchema) ? `[[${dotted}]]` : dotted;
+    }
+    // Only a struct or a tagged enum is a table. A map has no fixed keys and is
+    // set as one value, which is also what its env var badge says.
+    return hasNamedFields(propSchema) ? `[${dotted}]` : dotted;
+}
+
+function generatePostAttr(propSchema, tomlPath, envVar) {
     let postTags = []
     if (propSchema.format) {
         postTags.push(`\'format: ${propSchema.format}\'`);
@@ -235,6 +280,9 @@ function generatePostAttr(propSchema, envVar) {
     }
     if (propSchema.maxLength) {
         postTags.push(`\'maxLength: ${propSchema.maxLength}\'`);
+    }
+    if (tomlPath) {
+        postTags.push(`\'toml: ${tomlPath}\'`);
     }
     if (envVar) {
         postTags.push(`\'env: ${envVar}\'`);
@@ -286,7 +334,8 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     let description = formatDescription(docs.description, docs.title, docs.examples, docs.formatHint);
 
     const envVar = isLeafField(propSchema, type) ? buildEnvVar(path) : null;
-    let postAttr = generatePostAttr(propSchema, envVar);
+    const tomlPath = buildTomlPath(path, propSchema, type);
+    let postAttr = generatePostAttr(propSchema, tomlPath, envVar);
     const defaultAttr = getDefaultAttr(propSchema, type);
 
     // Special case: if type is string and enum has a single value, suggest setting that value (for example for type: "exponential-delay")
