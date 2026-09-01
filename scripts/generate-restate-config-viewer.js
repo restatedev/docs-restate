@@ -198,25 +198,61 @@ function generatePostAttr(propSchema, tomlPath, envVar) {
     return ` post={[${postTags.join(",")}]}`;
 }
 
-function parseVariantName(variant, index) {
-    if (variant.enum && variant.enum.length === 1) {
-        let variantValue = variant.enum[0];
-        if (typeof variantValue === 'string') {
-            return `"${variantValue}"`;
-        } else if (typeof variantValue === 'object') {
-            return JSON.stringify(variantValue);
-        } else {
-            return `${String(variantValue)}`;
+// The single fixed value a field accepts, if it has one. Serde writes a tagged
+// enum's discriminator this way: `"type": {"const": "exponential"}`.
+function fixedValue(propSchema) {
+    if (propSchema.const !== undefined) return propSchema.const;
+    if (Array.isArray(propSchema.enum) && propSchema.enum.length === 1) return propSchema.enum[0];
+    return undefined;
+}
+
+// Finds the discriminator of a tagged enum variant: the required property that
+// accepts exactly one value, and so is what selects this variant.
+function findDiscriminator(variant) {
+    const required = variant.required || [];
+    for (const [name, propSchema] of Object.entries(variant.properties || {})) {
+        const value = fixedValue(propSchema);
+        if (typeof value === 'string' && required.includes(name)) {
+            return { name, value };
         }
-    } else if (variant.title) {
-        return `Option ${index + 1}: ${variant.title}`;
-    } else if (variant.const !== undefined) {
-        return `"${variant.const}"`;
-    } else if (variant.description) {
-        return `Option ${index + 1}: ${variant.description}`;
-    } else {
-        return `Option ${index + 1}`;
     }
+    return null;
+}
+
+// Escapes a label for use inside a JSX string attribute. Note this must NOT be
+// applied to labels that go into a markdown code span, where entities are not
+// decoded and `&quot;` would show up verbatim.
+function attr(value) {
+    return String(value).replace(/"/g, '&quot;');
+}
+
+// Names a variant after what you actually have to write to select it, rather
+// than after the Rust variant name: "Exponential" does not tell you to write
+// `type = "exponential"`, and "Pretty" does not tell you to write `"pretty"`.
+// Returns unescaped text; escape at the call site if it lands in an attribute.
+function parseVariantName(variant, index) {
+    // A tagged enum: selected by a discriminator property.
+    const discriminator = findDiscriminator(variant);
+    if (discriminator) {
+        return `${discriminator.name} = "${discriminator.value}"`;
+    }
+
+    // A bare value the variant accepts, e.g. `"pretty"` for a log format.
+    const value = fixedValue(variant);
+    if (value !== undefined) {
+        if (typeof value === 'string') return `"${value}"`;
+        if (typeof value === 'object') return JSON.stringify(value);
+        return String(value);
+    }
+
+    // No literal to name it by, so fall back to the shape it accepts, e.g. an
+    // `integer` alternative alongside a `"unlimited"` literal.
+    if (variant.title) return variant.title;
+
+    const { type } = getTypeFromSchema(variant);
+    if (type && type !== 'unknown') return type;
+
+    return `Option ${index + 1}`;
 }
 
 function generateResponseFieldsFromProperties(properties, requiredProps = [], level = 0, path = []) {
@@ -244,10 +280,13 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     let postAttr = generatePostAttr(propSchema, tomlPath, envVar);
     const defaultAttr = getDefaultAttr(propSchema, type);
 
-    // Special case: if type is string and enum has a single value, suggest setting that value (for example for type: "exponential-delay")
-    if (propSchema.default === undefined && type === 'string' && Array.isArray(propSchema.enum) && propSchema.enum.length === 1) {
-        let value = propSchema.enum[0];
-        description += `\n\nSet \`${propName}: "${value}"\``;
+    // A field that accepts exactly one value is a tagged enum's discriminator,
+    // and it is the only thing that selects the variant. Without this it renders
+    // as an empty `type` field, identical in every variant, saying nothing about
+    // what to write.
+    const onlyValue = fixedValue(propSchema);
+    if (propSchema.default === undefined && typeof onlyValue === 'string') {
+        description += `\n\nSet \`${propName} = "${onlyValue}"\` to select this variant.`;
     }
 
     let output = `${indent}<ResponseField name="${propName}" type="${type}"${required}${postAttr}${defaultAttr}>\n`;
@@ -265,7 +304,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
 
             variants.forEach((variant, index) => {
                 const variantName = parseVariantName(variant, index);
-                output += `${indent}<Expandable title="${variantName}">\n`;
+                output += `${indent}<Expandable title="${attr(variantName)}">\n`;
                 output += generateResponseFieldsFromProperties(variant.properties, propSchema.required, level, path);
                 output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level, path);
                 output += `${indent}    </Expandable>\n`;
@@ -353,7 +392,7 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             let variantName = parseVariantName(variant, index);
             if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
                 output += `${indent}    \n`;
-                output += `${indent}    <Expandable title="${variantName || "Properties"}">\n`;
+                output += `${indent}    <Expandable title="${attr(variantName || "Properties")}">\n`;
                 output += `${indent}    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
                 output += generateResponseFieldsFromProperties( variant.properties, variant.required, level, path);
                 output += `${indent}    </Expandable>\n`;
@@ -407,7 +446,7 @@ function generateSection(name, propSchema) {
         // so each gets its own Expandable, as it does when nested. Properties on
         // the section itself are shared by every variant.
         variants.forEach((variant, index) => {
-            output += `<Expandable title="${parseVariantName(variant, index)}">\n`;
+            output += `<Expandable title="${attr(parseVariantName(variant, index))}">\n`;
             if (variant.description) {
                 output += `    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
             }
