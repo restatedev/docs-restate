@@ -45,6 +45,33 @@
         }, DECORATE_DEBOUNCE_MS);
     }
 
+    // A `#param-…` link can point at a row inside a closed box, which would
+    // otherwise scroll to nothing. Open every ancestor box and re-scroll.
+    //
+    // Deliberately built from standard DOM only — `location.hash`, a
+    // `querySelector`, and the <details> element itself — so it does not depend
+    // on any Mintlify class or id. If they stop using <details> for Expandable,
+    // no ancestor matches and this quietly does nothing.
+    function revealHash() {
+        if (!onConfigPage() || !location.hash) return;
+        var target;
+        try {
+            target = document.querySelector(location.hash);
+        } catch (e) {
+            return; // not a valid selector
+        }
+        if (!target) return;
+
+        var opened = false;
+        for (var el = target.parentElement; el; el = el.parentElement) {
+            if (el.tagName === "DETAILS" && !el.open) {
+                el.open = true;
+                opened = true;
+            }
+        }
+        if (opened) target.scrollIntoView({ block: "center" });
+    }
+
     // Scoped to the reference page: `field-meta-post` is a generic Mintlify part,
     // and there is no reason to watch the DOM anywhere else.
     function syncScope() {
@@ -53,6 +80,7 @@
         if (active) {
             observer.observe(document.body, { childList: true, subtree: true });
             scheduleDecorate();
+            revealHash();
         } else {
             observer.disconnect();
         }
@@ -100,6 +128,7 @@
             };
         });
         window.addEventListener("popstate", syncScope);
+        window.addEventListener("hashchange", revealHash);
 
         syncScope();
     }
