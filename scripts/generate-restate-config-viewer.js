@@ -107,27 +107,68 @@ function getDefaultAttr(propSchema, type) {
     return value === null ? "" : ` default="${value.replace(/"/g, '&quot;')}"`;
 }
 
+// Whether an array holds tables rather than scalars. Arrays of tables are
+// written as `[[key]]` in TOML and cannot be set from a single env var.
+function itemsAreObjects(propSchema) {
+    const items = propSchema.items;
+    if (!items) return false;
+    return Boolean(items.properties) || items.type === 'object';
+}
+
 // Determines whether a field is a settable leaf value (as opposed to a
 // grouping object/array or a oneOf/anyOf container whose variants are objects).
 // Only leaves map to a single environment variable.
 function isLeafField(propSchema, type) {
-    if (type === 'object' || type === 'array') return false;
+    // A whole array or map is settable from one env var, because figment parses
+    // `[a, b]` into a list and `{k=v}` into a dict. Individual elements are not.
+    if (type === 'array') return !itemsAreObjects(propSchema);
+    if (type === 'object') return !propSchema.properties && Boolean(propSchema.additionalProperties);
     if (type === 'oneOf') return !(propSchema.oneOf || []).some(v => v.properties);
     if (type === 'anyOf') return !(propSchema.anyOf || []).some(v => v.properties);
     return true;
 }
 
+// Whether a field is written as a TOML table header (`[section]`) rather than
+// as a `key = value` line.
+function isTomlTable(propSchema, type) {
+    if (type === 'object') return true;
+    if (type === 'oneOf' || type === 'anyOf') {
+        return (propSchema.oneOf || propSchema.anyOf || []).some(v => v.properties);
+    }
+    return false;
+}
+
 // Builds the environment variable name for a config option from its path.
-// Restate uses the `RESTATE_` prefix, `__` between nesting levels, and the
-// snake-cased (upper) field name.
-// TODO: Check if there's a proper way for setting array indicies in env vars
+// Restate strips the `RESTATE_` prefix, splits nesting levels on `__` and turns
+// every remaining `_` back into a `-`, which is the inverse of what we do here
+// (see `crates/types/src/config_loader.rs` in restatedev/restate). Elements of
+// an array are not addressable, since there is no index syntax.
 function buildEnvVar(path) {
     if (!path || path.length === 0) return null;
     if (path.includes('[]')) return null;
     return 'RESTATE_' + path.map(s => s.replace(/-/g, '_').toUpperCase()).join('__');
 }
 
-function generatePostAttr(propSchema, envVar) {
+// Builds the TOML key for a config option from its path. A dotted key is valid
+// TOML on its own line, so the rendered value is directly pasteable. Tables are
+// shown with their header syntax (`[worker.invoker]`, or `[[ingress.kafka-clusters]]`
+// for an array of tables). Options nested inside an array of tables are given
+// relative to that header, since the index is not expressible as a dotted key.
+function buildTomlPath(path, propSchema, type) {
+    if (!path || path.length === 0) return null;
+    // The synthetic `item` node of an array restates the array's own key.
+    if (path[path.length - 1] === '[]') return null;
+
+    const lastArray = path.lastIndexOf('[]');
+    const dotted = (lastArray === -1 ? path : path.slice(lastArray + 1)).join('.');
+
+    if (type === 'array') {
+        return itemsAreObjects(propSchema) ? `[[${dotted}]]` : dotted;
+    }
+    return isTomlTable(propSchema, type) ? `[${dotted}]` : dotted;
+}
+
+function generatePostAttr(propSchema, tomlPath, envVar) {
     let postTags = []
     if (propSchema.format) {
         postTags.push(`\'format: ${propSchema.format}\'`);
@@ -146,6 +187,9 @@ function generatePostAttr(propSchema, envVar) {
     }
     if (propSchema.maxLength) {
         postTags.push(`\'maxLength: ${propSchema.maxLength}\'`);
+    }
+    if (tomlPath) {
+        postTags.push(`\'toml: ${tomlPath}\'`);
     }
     if (envVar) {
         postTags.push(`\'env: ${envVar}\'`);
@@ -196,7 +240,8 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
     let description = formatDescription(propSchema.description, propSchema.title, propSchema.examples);
 
     const envVar = isLeafField(propSchema, type) ? buildEnvVar(path) : null;
-    let postAttr = generatePostAttr(propSchema, envVar);
+    const tomlPath = buildTomlPath(path, propSchema, type);
+    let postAttr = generatePostAttr(propSchema, tomlPath, envVar);
     const defaultAttr = getDefaultAttr(propSchema, type);
 
     // Special case: if type is string and enum has a single value, suggest setting that value (for example for type: "exponential-delay")
