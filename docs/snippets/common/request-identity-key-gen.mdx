@@ -1,0 +1,65 @@
+<Tabs>
+    <Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
+        Restate Cloud and BYOC environments create and manage the request identity key for you.
+
+        Copy the environment's public key from the Restate Cloud UI:
+        <Card
+            title="Go to Restate Cloud > Developers > Security > HTTP Endpoints"
+            icon="cloud"
+            href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
+            arrow="true"
+            horizontal
+        >
+        </Card>
+    </Tab>
+    <Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
+        Create an ED25519 private key using `openssl` as follows:
+        ```bash
+        openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+        ```
+
+        You can provide the path to the key to Restate on startup using an environment
+        variable: `RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE=private.pem`.
+
+        On start, Restate will log out the public key in a convenient compact
+        format:
+        ```log
+        INFO restate_service_client::request_identity::v1
+        Loaded request identity key
+        kid: "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"
+        path: private.pem
+        ```
+
+        Alternatively, use this script to obtain the public key without running Restate:
+
+        ```shell generate.sh expandable
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # generate private key
+        openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+        echo "Wrote private key to private.pem"
+
+        base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        # encode public key
+        encoded=$(openssl ec -in private.pem -inform pem -pubout -outform der -out /dev/stdout 2>/dev/null |
+        tail -c +13 |
+        basenc --base16 "${1:-/dev/stdin}" -w0 |
+        if
+        read
+        [[ $REPLY =~ ^((00)*)(([[:xdigit:]]{2})*) ]]
+        echo -n "${BASH_REMATCH[1]//00/1}" # leading 0s -> 1
+        (( ${#BASH_REMATCH[3]} > 0 ))
+        then
+        dc -e "16i0${BASH_REMATCH[3]^^} Ai[58~rd0<x]dsxx+f" | # hex bytes to indexes into the char string
+        while read -r
+        do echo -n "${base58_chars:REPLY:1}"
+        done
+        fi)
+
+        echo -n "publickeyv1_${encoded}" > public-key
+        echo "Wrote publickeyv1_${encoded} to public-key"
+        ```
+
+        </Tab>
+        </Tabs>
