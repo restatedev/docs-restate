@@ -1,0 +1,156 @@
+---
+title: "Containers and VMs"
+description: "Run Restate services in containers or on virtual machines and connect them to your Restate environment."
+---
+
+import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
+
+You can deploy a Restate service in a container or on any virtual machine. The service runs as a separate process using the appropriate language runtime or as a compiled binary. By convention, it accepts HTTP connections on port `9080`.
+
+## Docker
+
+You can run your Restate service in a Docker container.
+
+Most of the Restate service templates come with a `Dockerfile` that you can use to build a Docker image for your service.
+
+## Connect to Restate Cloud or BYOC
+
+If Restate Cloud or your BYOC environment can reach the service over a public HTTPS endpoint, [secure the endpoint with request identity](/services/security#locking-down-service-access) and register its URL directly. For the default bidirectional service protocol, any load balancer in front of the service must support HTTP/2 end to end.
+
+Configure the environment's public key in your SDK endpoint:
+
+<RequestIdentityValidation />
+
+For a service inside a private network, run the Restate tunnel client in the VPC, as a sidecar, or as a dedicated container. The tunnel uses an outbound connection, so you do not need to expose the service to the public internet. You can run multiple tunnel clients for redundancy.
+
+### Create the tunnel credentials
+
+In the Restate Cloud UI:
+
+1. Open **Developers > API Keys** and create an API key with the **Admin** role.
+2. Open **Developers > Security > HTTP endpoints** and copy the signing public key.
+3. Copy the environment ID and region identifier.
+
+Set the values as environment variables on the machine that will run the tunnel:
+
+```bash
+export RESTATE_ENVIRONMENT_ID=env_...
+export RESTATE_BEARER_TOKEN=key_...
+export RESTATE_TUNNEL_NAME=prod-tunnel
+export RESTATE_SIGNING_PUBLIC_KEY=publickeyv1_...
+export RESTATE_CLOUD_REGION=eu
+```
+
+For a Restate managed region, `RESTATE_CLOUD_REGION` is a value such as `eu` or `us`. For BYOC, use the BYOC region identifier shown in the UI.
+
+### Run the tunnel client
+
+```bash
+docker run \
+  -e RESTATE_ENVIRONMENT_ID \
+  -e RESTATE_BEARER_TOKEN \
+  -e RESTATE_TUNNEL_NAME \
+  -e RESTATE_SIGNING_PUBLIC_KEY \
+  -e RESTATE_CLOUD_REGION \
+  -p 8080:8080 \
+  -p 9090:9090 \
+  -p 9070:9070 \
+  -it ghcr.io/restatedev/restate-cloud-tunnel-client:latest
+```
+
+<AccordionGroup>
+<Accordion title="Tunnel configuration">
+
+- `RESTATE_ENVIRONMENT_ID` is the environment ID, including the `env_` prefix.
+- `RESTATE_BEARER_TOKEN` is the API key you created for the environment.
+- `RESTATE_TUNNEL_NAME` is a unique DNS friendly name for the tunnel.
+- `RESTATE_SIGNING_PUBLIC_KEY` is the environment's request identity public key.
+- `RESTATE_CLOUD_REGION` is the Restate Cloud or BYOC region identifier.
+- The tunnel health check is available at `:9090/health`.
+
+</Accordion>
+<Accordion title="Tunnel ports">
+
+- `9090` exposes the tunnel health endpoint.
+- `8080` exposes the Restate ingress through an authenticating proxy.
+- `9070` exposes the Restate Admin API through an authenticating proxy.
+
+</Accordion>
+</AccordionGroup>
+
+By default, the tunnel client exposes local ingress and Admin API endpoints that authenticate to the remote environment with the configured bearer token. Restrict access to these local ports. Anyone who can reach them has the same access as the configured token.
+
+Set `RESTATE_REMOTE_PROXY=false` if you do not need the local ingress and Admin API proxies.
+
+### Register the service
+
+Register the service address as it is reachable from the tunnel client:
+
+```bash
+restate deployments register \
+  --tunnel-name <tunnel-name> \
+  <service-address>
+```
+
+The Restate environment sends discovery and invocation requests to the tunnel endpoint. The tunnel client forwards those requests to the service inside your private network.
+
+<Frame>
+  <img src="/img/cloud/tunnel_deployment.png" alt="Restate Cloud or BYOC connecting to a private service through a tunnel client" />
+</Frame>
+
+## Running services behind a load balancer
+To spread load across multiple instances of services and higher availability, we recommend using a load balancer. The Restate server does not currently support multiple endpoints for a single deployment.
+
+When running an L7 load balancer such AWS Application Load Balancer, be sure to configure it to support HTTP/2 as this enables Restate to use the more efficient bi-directional service invocation protocol.
+
+<Accordion title="Using nginx load balancer">
+When using `nginx` as the load balancer, you must use the `grpc_pass` directive instead of `proxy_pass` to forward requests to your services. The `proxy_pass` directive only speaks HTTP/1.1 to the upstream, which downgrades the connection and prevents Restate from using the bidirectional protocol. The `grpc_pass` directive keeps HTTP/2 end-to-end. You also need `http2 on;` on the listener so that nginx accepts HTTP/2 from Restate.
+
+```nginx Expandable nginx.conf
+events {}
+
+http {
+    server {
+        # Plain HTTP + h2c (HTTP/1.1 and HTTP/2 prior knowledge)
+        # In production, either remove this plain HTTP listener or redirect it
+        # to HTTPS (note: HTTP/2 prior-knowledge clients won't follow redirects).
+        listen 80;
+        http2 on;
+        server_name _;
+
+        client_max_body_size 0;
+
+        location / {
+            grpc_pass grpc://app:9080;
+            grpc_set_header   Host              $host;
+            grpc_set_header   X-Real-IP         $remote_addr;
+            grpc_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            grpc_set_header   X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        # HTTPS + HTTP/2 (HTTP/1.1 and HTTP/2 via ALPN)
+        listen 443 ssl;
+        http2 on;
+        server_name _;
+
+        ssl_certificate     /etc/nginx/certs/server.crt;
+        ssl_certificate_key /etc/nginx/certs/server.key;
+
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+
+        client_max_body_size 0;
+
+        location / {
+            grpc_pass grpc://app:9080;
+            grpc_set_header   Host              $host;
+            grpc_set_header   X-Real-IP         $remote_addr;
+            grpc_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            grpc_set_header   X-Forwarded-Proto $scheme;
+        }
+    }
+}
+```
+</Accordion>
