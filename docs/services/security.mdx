@@ -4,14 +4,10 @@ description: "Restrict access to Restate services"
 icon: "shield"
 ---
 
+import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
+import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+
 This page covers securing communication between Restate and your service deployments. For securing the Restate Server itself (network ports, admin access, header handling), see [Server Security](/server/security).
-
-## Private services
-When registering an endpoint, every service is by default reachable via HTTP requests to the ingress.
-
-You can configure a service as `private`, via the [service configuration](/services/configuration).
-
-Note that private services can still be invoked by other handlers via the SDK.
 
 ## Locking down service access
 Only Restate needs to be able to make requests to your services.
@@ -25,67 +21,47 @@ To make this easier, Restate has a native request identity feature which can be
 used in the SDK to cryptographically verify that requests have come from a
 particular Restate instance.
 
-To get started, you need an ED25519 private key, which you can generate using
-openssl as follows:
-```bash
-openssl genpkey -algorithm ed25519 -outform pem -out private.pem
-```
+<Steps>
+<Step title={"Create a request identity key"}>
+<RequestIdentityKeyGen />
+</Step>
 
-You can provide the path to the key to Restate on startup using an environment
-variable: `RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE=private.pem`.
+<Step title={"Validate requests with the public key"}>
+Configure your service to use that public key to validate requests. The SDK then rejects discovery and invocation requests that were not signed by the corresponding Restate environment.
+<RequestIdentityValidation />
+The public key is not secret, so you can include it in your service source code or configuration.
+</Step>
+</Steps>
 
-On start, Restate will log out the public key in a convenient compact
-format:
-```
-INFO restate_service_client::request_identity::v1
-  Loaded request identity key
-    kid: "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"
-    path: private.pem
-```
 
-You can also obtain the public key in this format without running Restate using
-the following script:
+## Private services
+When registering an endpoint, every service is by default reachable via HTTP requests to the ingress.
 
-```shell generate.sh expandable
-#!/usr/bin/env bash
-set -euo pipefail
+You can configure a service as `private`, via the [service configuration](/services/configuration#private-services).
 
-# generate private key
-openssl genpkey -algorithm ed25519 -outform pem -out private.pem
-echo "Wrote private key to private.pem"
+Note that private services can still be invoked by other handlers via the SDK.
 
-base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-# encode public key
-encoded=$(openssl ec -in private.pem -inform pem -pubout -outform der -out /dev/stdout 2>/dev/null |
-tail -c +13 |
-basenc --base16 "${1:-/dev/stdin}" -w0 |
-if
-read
-[[ $REPLY =~ ^((00)*)(([[:xdigit:]]{2})*) ]]
-echo -n "${BASH_REMATCH[1]//00/1}" # leading 0s -> 1
-(( ${#BASH_REMATCH[3]} > 0 ))
-then
-dc -e "16i0${BASH_REMATCH[3]^^} Ai[58~rd0<x]dsxx+f" | # hex bytes to indexes into the char string
-while read -r
-do echo -n "${base58_chars:REPLY:1}"
-done
-fi)
+## Client-side journal encryption
 
-echo -n "publickeyv1_${encoded}" > public-key
-echo "Wrote publickeyv1_${encoded} to public-key"
-```
+In the TypeScript SDK, you can optionally configure client-side encryption, which makes your data opaque to Restate.
+In this case, the SDK encrypts journal entries after serializing them but before sending them to Restate.
 
-The string `publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f` does not
-need to be kept secret and can be safely included in your code when providing to the
-SDK. To learn how to provide the public key to the SDK, see the serving docs of your SDK:
-([TS](/develop/ts/serving#validating-request-identity) /
-[Java](/develop/java/serving#validating-request-identity) /
-[Go](/develop/go/serving#validating-request-identity) /
-[Python](/develop/python/serving#validating-request-identity) /
-[Rust](https://docs.rs/restate-sdk/latest/restate_sdk/http_server/index.html#validating-request-identity))
+**What is encrypted?** Only the following journal entries are encrypted:
+- The input and output parameters to the handler
+- `ctx.run` success results
+- RPC calls parameters and return values (for service-to-service invocations)
+- State values
+- Awakeables and workflow promise results
 
-## Client side journal encryption
+It is not possible to encrypt any other journal entries.
 
-You can configure SDKs to encrypt invocation inputs and outputs, step results, and state on the client side, while preserving observability in the Restate UI.
+**How to enable encryption?** You need to implement a [`JournalValueCodec`](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-core/src/entry_codec.ts) and provide it to the SDK when creating the endpoint.
 
-This feature is currently available upon request. [Contact us](mailto:info@restate.dev?subject=Journal%20Encryption%20request) to learn more.
+Currently, this feature is only available in the TypeScript SDK.
+
+Have a look at a reference implementation that uses Amazon's KMS to manage encryption keys:
+<GitHub.Repo repo="restatedev/journal-encryption" />
+
+<Info>
+    Contact us on [Discord](https://discord.restate.dev) or [Slack](https://slack.restate.dev) to request this feature for other SDKs.
+</Info>
