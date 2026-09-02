@@ -13,53 +13,131 @@
         </Card>
     </Tab>
     <Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
-        Create an ED25519 private key using `openssl` as follows:
-        ```bash
-        openssl genpkey -algorithm ed25519 -outform pem -out private.pem
-        ```
+        Request identity uses an ED25519 key pair. Give the private key to Restate so it can sign requests, and give the public key to your services so they can verify those signatures.
 
-        You can provide the path to the key to Restate on startup using an environment
-        variable: `RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE=private.pem`.
+        Choose one of the following ways to generate the keys:
 
-        On start, Restate will log out the public key in a convenient compact
-        format:
-        ```log
-        INFO restate_service_client::request_identity::v1
-        Loaded request identity key
-        kid: "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"
-        path: private.pem
-        ```
+        <AccordionGroup>
+        <Accordion title="Option 1: Let Restate output the public key">
+        1. Generate the private key:
 
-        Alternatively, use this script to obtain the public key without running Restate:
+```bash
+openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+```
 
-        ```shell generate.sh expandable
-        #!/usr/bin/env bash
-        set -euo pipefail
+        2. Provide its path to Restate on startup:
 
-        # generate private key
-        openssl genpkey -algorithm ed25519 -outform pem -out private.pem
-        echo "Wrote private key to private.pem"
+```bash
+export RESTATE_REQUEST_IDENTITY_PRIVATE_KEY_PEM_FILE=private.pem
+```
 
-        base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        # encode public key
-        encoded=$(openssl ec -in private.pem -inform pem -pubout -outform der -out /dev/stdout 2>/dev/null |
-        tail -c +13 |
-        basenc --base16 "${1:-/dev/stdin}" -w0 |
-        if
-        read
-        [[ $REPLY =~ ^((00)*)(([[:xdigit:]]{2})*) ]]
-        echo -n "${BASH_REMATCH[1]//00/1}" # leading 0s -> 1
-        (( ${#BASH_REMATCH[3]} > 0 ))
-        then
-        dc -e "16i0${BASH_REMATCH[3]^^} Ai[58~rd0<x]dsxx+f" | # hex bytes to indexes into the char string
-        while read -r
-        do echo -n "${base58_chars:REPLY:1}"
-        done
-        fi)
+        3. Start Restate and copy the corresponding public key from the startup log. Restate prints it in the compact format expected by the SDK:
 
-        echo -n "publickeyv1_${encoded}" > public-key
-        echo "Wrote publickeyv1_${encoded} to public-key"
-        ```
+```log
+INFO restate_service_client::request_identity::v1
+Loaded request identity key
+kid: "publickeyv1_w7YHemBctH5Ck2nQRQ47iBBqhNHy4FV7t2Usbye2A6f"
+path: private.pem
+```
+        </Accordion>
+
+        <Accordion title="Option 2: Generate both key files beforehand">
+        Run this script to generate `private.pem` and write the corresponding `publickeyv1_...` value to a `public-key` file before starting Restate:
+
+        <Tabs sync={false}>
+        <Tab title="macOS" icon="apple">
+        Install OpenSSL 3 with Homebrew, then run the script:
+
+```bash
+brew install openssl@3
+```
+
+```shell expandable generate.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+openssl_bin="$(brew --prefix openssl@3)/bin/openssl"
+
+# generate private key
+"$openssl_bin" genpkey -algorithm ed25519 -outform pem -out private.pem
+echo "Wrote private key to private.pem"
+
+# encode public key
+encoded=$("$openssl_bin" pkey -in private.pem -pubout -outform DER 2>/dev/null |
+tail -c +13 |
+od -An -v -tu1 |
+awk '
+BEGIN {
+  alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+  leading = 1
+}
+{
+  for (i = 1; i <= NF; i++) {
+    byte = $i
+    if (leading && byte == 0) {
+      zeroes++
+      continue
+    }
+    leading = 0
+    carry = byte
+    for (j = 0; j < digit_count; j++) {
+      carry += digits[j] * 256
+      digits[j] = carry % 58
+      carry = int(carry / 58)
+    }
+    while (carry > 0) {
+      digits[digit_count++] = carry % 58
+      carry = int(carry / 58)
+    }
+  }
+}
+END {
+  for (i = 0; i < zeroes; i++) printf "1"
+  for (i = digit_count - 1; i >= 0; i--) {
+    printf "%s", substr(alphabet, digits[i] + 1, 1)
+  }
+}')
+
+echo -n "publickeyv1_${encoded}" > public-key
+echo "Wrote publickeyv1_${encoded} to public-key"
+```
+        </Tab>
+
+        <Tab title="Linux" icon="linux">
+        This script requires Bash, OpenSSL, `awk`, and GNU Coreutils:
+
+```shell expandable generate.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# generate private key
+openssl genpkey -algorithm ed25519 -outform pem -out private.pem
+echo "Wrote private key to private.pem"
+
+base58_chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+# encode public key
+encoded=$(openssl ec -in private.pem -inform pem -pubout -outform der -out /dev/stdout 2>/dev/null |
+tail -c +13 |
+basenc --base16 "${1:-/dev/stdin}" -w0 |
+if
+read
+[[ $REPLY =~ ^((00)*)(([[:xdigit:]]{2})*) ]]
+echo -n "${BASH_REMATCH[1]//00/1}" # leading 0s -> 1
+(( ${#BASH_REMATCH[3]} > 0 ))
+then
+dc -e "16i0${BASH_REMATCH[3]^^} Ai[58~rd0<x]dsxx+f" | # hex bytes to indexes into the char string
+while read -r
+do echo -n "${base58_chars:REPLY:1}"
+done
+fi)
+
+echo -n "publickeyv1_${encoded}" > public-key
+echo "Wrote publickeyv1_${encoded} to public-key"
+```
+        </Tab>
+        </Tabs>
+        </Accordion>
+        </AccordionGroup>
 
         </Tab>
         </Tabs>
