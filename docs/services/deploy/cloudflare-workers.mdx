@@ -3,6 +3,9 @@ title: "Cloudflare Workers"
 description: "Run your TypeScript services on Cloudflare Workers"
 ---
 
+import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
+import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+
 Deploy your Restate services on Cloudflare Workers.
 This guide covers project configuration, service registration, and security setup.
 
@@ -10,19 +13,21 @@ This guide covers project configuration, service registration, and security setu
     Follow the [quickstart](/quickstart#cloudflare-workers) to try Cloudflare Workers and Restate locally.
 </Tip>
 
-## Set up your project
+## Deploying to Cloudflare Workers
+
+<Steps titleSize="h3">
+<Step title={"Set up your project"}>
 
 <Tabs>
     <Tab title="New project">
         Start with the [cloudflare-workers-template](https://github.com/restatedev/cloudflare-workers-template) and follow its README.
 
         <Card
-            title="Create your Restate + CloudFlare workers repository"
             icon="github"
             href="https://github.com/new?template_name=cloudflare-workers-template&template_owner=restatedev"
             arrow="true"
             horizontal
-        />
+        >Create your Restate + CloudFlare workers repository</Card>
     </Tab>
     <Tab title="Existing Cloudflare Workers project">
         Import the Restate SDK with the `fetch` component:
@@ -55,7 +60,7 @@ compatibility_flags = [ "nodejs_compat" ]
     </Tab>
 </Tabs>
 
-## Local development
+<Accordion title="Develop locally">
 
 A Workers dev server can be started on port 9080 using:
 
@@ -72,8 +77,22 @@ npx @restatedev/restate deployments register --use-http1.1 http://localhost:9080
 <Note>
     `wrangler` only supports HTTP/1.1 when running locally, so the `--use-http1.1` flag is required. This flag is not needed when deploying to Cloudflare Workers.
 </Note>
+</Accordion>
 
-## Register the service to Restate
+</Step>
+
+<Step title={"Configure request identity validation"}>
+
+Cloudflare Workers are public HTTP endpoints. Configure request identity validation so that your service only accepts requests from the Restate environment you trust.
+
+<RequestIdentityKeyGen/>
+
+Configure the key in your Restate SDK endpoint before deploying, then register the immutable Cloudflare Workers preview URL with that environment.
+
+<RequestIdentityValidation/>
+</Step>
+
+<Step title={"Register the service to Restate"}>
 
 After deploying to Cloudflare Workers, [register the service](/services/versioning) with Restate CLI or UI providing [Preview URLs](https://developers.cloudflare.com/workers/configuration/previews/) to target specific service versions:
 
@@ -82,27 +101,21 @@ npx @restatedev/restate deployments register \
   https://<VERSION_PREFIX OR ALIAS>-<WORKER_NAME>.<SUBDOMAIN>.workers.dev
 ```
 
-You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
+</Step>
 
-## Restate identity keys (for Restate Cloud)
+<Step title={"Send your first request"}>
+    You're set up! Go to the **Overview page > Greeter > Playground** and start sending requests to your service.
+</Step>
 
-To allow only a specific Restate Cloud environment to send requests to your Cloudflare Workers deployment,
-head over to your Restate Cloud Dashboard to set up Restate identity keys.
-
-<Card
-    title="Restate Cloud > Developers > Security"
-    icon="lock"
-    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
-    arrow="true"
-    horizontal
->
-    Set up Restate identity keys
-</Card>
+</Steps>
 
 ## CI/CD Automation
 
 To automatically deploy to Cloudflare Workers on each git commit to `main` and automatically register new [Restate service versions](/services/versioning):
 
+
+<Tabs>
+<Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
 ```yml
 name: Deploy Worker
 on:
@@ -142,21 +155,60 @@ jobs:
         run: npx -y @restatedev/restate deployment register -y ${{ steps.get-url.outputs.deployment-url }}
 ```
 
-<Note>
-    Make sure your Cloudflare Worker project exists. If it doesn't, create it with: `npx wrangler deploy`
-</Note>
-For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account. To get your account id, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#cloudflare-account-id
 - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token. To get a token, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
-- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for role
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud or BYOC auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
 
+<Accordion title="View">
+  <img src="/img/services/deploy/deployment-token.png" alt="Token setup" width="50%" />
+</Accordion>
+</Tab>
+<Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
+```yml
+name: Deploy Worker
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+      - run: npm ci
 
-![Token setup](/img/services/deploy/deployment-token.png)
+      - name: Build & Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        id: deploy
+        with:
+          # Check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Add a message to the deployment with the commit
+          command: versions upload --message "Deployed via GitHub Actions - commit ${{ github.sha }}"
+      - name: Get deployment URL
+        id: get-url
+        env:
+          WRANGLER_OUTPUT: ${{ steps.deploy.outputs.command-output }}
+        run: |
+          URL=$(echo "$WRANGLER_OUTPUT" | awk '/Version Preview URL:/ {gsub(/.*Version Preview URL: /, ""); print}')
+          echo "deployment-url=$URL" >> $GITHUB_OUTPUT
 
-<AccordionGroup>
-    <Accordion title="Self-hosted Restate">
-        You can use this workflow with Self-hosted Restate as well,
-        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
-    </Accordion>
-</AccordionGroup>
+      - name: Register Restate deployment
+        env:
+          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
+          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+        run: npx -y @restatedev/restate deployment register -y ${{ steps.get-url.outputs.deployment-url }}
+```
+
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account. To get your account id, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#cloudflare-account-id
+- `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token. To get a token, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
+- `RESTATE_ADMIN_URL`: The URL through which GitHub Actions can reach your Restate Admin API
+- `RESTATE_AUTH_TOKEN`: Set this token if GitHub Actions reaches the Admin API through a reverse proxy that accepts bearer token authentication
+</Tab>
+</Tabs>
