@@ -5,12 +5,13 @@ icon: "/img/cloud-providers/aws-lambda.svg"
 ---
 
 import LambdaCicdWorkflows from '/snippets/common/lambda-cicd-workflows.mdx';
+import {GitHubLink} from '/snippets/blocks/github-link.mdx';
 
 Deploy your Restate services as serverless functions on AWS Lambda.
 This guide covers project setup, packaging, IAM permissions, service registration, and invocation.
 
 <Tip>
-    For infrastructure as code, check out the [Restate CDK construct library](https://github.com/restatedev/cdk).
+    You can deploy manually or use the [Restate CDK construct library](https://www.npmjs.com/package/@restatedev/restate-cdk) to deploy the function, configure its invoker role, and register it with Restate Cloud.
 </Tip>
 
 ## Deploying to AWS Lambda
@@ -56,7 +57,7 @@ This guide covers project setup, packaging, IAM permissions, service registratio
 
 </Step>
 
-<Step title="Package and deploy your function">
+<Step title="Package your function">
 
 Build a deployment package containing your application code and dependencies.
 
@@ -67,8 +68,6 @@ Build a deployment package containing your application code and dependencies.
         ```shell
         npm run bundle
         ```
-
-        Set the Lambda handler to `app.handler`.
     </Tab>
     <Tab title="Python">
         Using `uv`, prepare a directory containing all the source and the dependencies, then zip it:
@@ -82,8 +81,6 @@ Build a deployment package containing your application code and dependencies.
         # Zip the dist content
         cd dist && zip ../dist.zip -r * && cd ..
         ```
-
-        Set the Lambda handler to `handler.app`.
 
         <Warning>
             When installing the dependencies, make sure the python version and your machine architecture match the one configured in the Lambda runtime.
@@ -102,8 +99,7 @@ Build a deployment package containing your application code and dependencies.
         mvn package
         ```
 
-        Upload the jar file from `build/libs/` or `target/` to Lambda.
-        Set the handler to your class name, e.g., `com.example.MyLambdaHandler`.
+        The JAR file is written to `build/libs/` or `target/`.
     </Tab>
     <Tab title="Kotlin">
         Build an uber JAR with all dependencies:
@@ -112,8 +108,7 @@ Build a deployment package containing your application code and dependencies.
         ./gradlew shadowJar
         ```
 
-        Upload the jar file from `build/libs/` to Lambda.
-        Set the handler to your class name, e.g., `com.example.MyLambdaHandler`.
+        The JAR file is written to `build/libs/`.
     </Tab>
     <Tab title="Go">
         Build the Go binary for Lambda:
@@ -123,26 +118,117 @@ Build a deployment package containing your application code and dependencies.
         zip function.zip bootstrap
         ```
 
-        Upload the zip file to Lambda.
-        The handler is automatically set to the binary name `bootstrap`.
+        This creates `function.zip` containing the `bootstrap` binary.
     </Tab>
 </Tabs>
 
-Create the function in the AWS Lambda console and upload the deployment package. For more details, follow the [AWS Lambda documentation](https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-zip.html).
-
 </Step>
 
-<Step title="Allow Restate to invoke the function">
+<Step title="Deploy and allow Restate to invoke the function">
 
-When using Restate Cloud, create an IAM role that allows Restate Cloud to invoke your Lambda function. This invoker role is separate from the execution role used by the function itself.
+<Tabs>
+<Tab title="Manual deployment">
 
-To set up the role, visit your Restate Cloud Dashboard at [Developers > Security > AWS Lambda](https://cloud.restate.dev/to/developers/integration#lambda).
+Create the function in the AWS Lambda console and upload the deployment package. For more details, follow the [AWS Lambda documentation](https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-zip.html).
+
+Configure the handler for your SDK:
+
+| SDK | Lambda handler |
+| --- | --- |
+| TypeScript | `app.handler` |
+| Python | `handler.app` |
+| Java or Kotlin | Your handler class, for example `com.example.MyLambdaHandler` |
+| Go | `bootstrap` |
+
+When using Restate Cloud, create an IAM role in the same AWS account as your function. Restate Cloud assumes this role to call `lambda:InvokeFunction`.
+
+Restate Cloud is a multi tenant system. Configure the role's trust policy so that only the Restate Cloud environments you specify can assume it.
+
+The invoker role is separate from the function's execution role. The execution role grants permissions to the function while it runs. The invoker role grants Restate Cloud permission to invoke the function, and nothing else.
+
+To copy the IAM trust policy for your environment, open [**Developers > Security > AWS Lambda**](https://cloud.restate.dev/to/developers/integration#lambda) in the Restate Cloud UI.
+
+<Info>
+    An appropriate IAM trust policy prevents unauthorized callers from invoking the function through AWS Lambda. You do not need request identity validation in this case, although request identity validation also works with Lambda endpoints if you want an additional check in the service itself.
+</Info>
+
+</Tab>
+
+<Tab title="AWS CDK">
+
+You can use AWS CDK with the [`@restatedev/restate-cdk` construct library](https://www.npmjs.com/package/@restatedev/restate-cdk) to deploy Lambda handlers, manage the invoker role, and register the deployment with Restate Cloud.
+
+The following stack deploys a TypeScript Lambda function and registers its published version:
+
+```ts expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/examples/refs/heads/main/typescript/integrations/deployment-lambda-cdk/lib/lambda-ts-cdk-stack.ts?remove_comments"} 
+
+import * as restate from "@restatedev/restate-cdk";
+import * as cdk from "aws-cdk-lib";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as lambda_nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+import * as secrets from "aws-cdk-lib/aws-secretsmanager";
+import { Construct } from "constructs";
+
+export class LambdaTsCdkStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: cdk.StackProps) {
+    super(scope, id, props);
+
+    const handler = new lambda_nodejs.NodejsFunction(this, "GreeterService", {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      entry: "lib/lambda/handler.ts",
+      architecture: lambda.Architecture.ARM_64,
+      bundling: {
+        minify: true,
+        sourceMap: true,
+      },
+    });
+
+    if (!process.env.RESTATE_ENV_ID || !process.env.RESTATE_AUTH_TOKEN) {
+      throw new Error(
+        "Required environment variables RESTATE_ENV_ID and RESTATE_AUTH_TOKEN are not set, please see README.",
+      );
+    }
+
+    const restateEnvironment = new restate.RestateCloudEnvironment(this, "RestateCloud", {
+      environmentId: process.env.RESTATE_ENV_ID! as restate.EnvironmentId,
+      apiKey: new secrets.Secret(this, "RestateCloudApiKey", {
+        secretStringValue: cdk.SecretValue.unsafePlainText(process.env.RESTATE_AUTH_TOKEN!),
+      }),
+    });
+    const deployer = new restate.ServiceDeployer(this, "ServiceDeployer");
+
+
+    deployer.deployService("Greeter", handler.currentVersion, restateEnvironment);
+    new cdk.CfnOutput(this, "restateIngressUrl", { value: restateEnvironment.ingressUrl });
+  }
+}
+```
+
+<GitHubLink url="https://github.com/restatedev/examples/blob/main/typescript/integrations/deployment-lambda-cdk/lib/lambda-ts-cdk-stack.ts" />
+
+Before deploying the stack, set:
+
+- `RESTATE_ENV_ID` to the environment ID shown in the top left of the Restate Cloud UI. It starts with `env_`.
+- `RESTATE_AUTH_TOKEN` to your Restate Cloud or BYOC auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+
+The `RestateCloudEnvironment` construct creates an IAM role with a trust policy scoped to the selected Restate Cloud environment. The `ServiceDeployer` grants that role permission to invoke the Lambda function and registers the published function version with Restate Cloud, so you do not need to register it separately.
+
+Complete examples are available for [TypeScript](https://github.com/restatedev/examples/tree/main/typescript/integrations/deployment-lambda-cdk), [Go](https://github.com/restatedev/examples/tree/main/go/integrations/go-lambda-cdk), [Java](https://github.com/restatedev/examples/tree/main/java/integrations/java-gradle-lambda-cdk), and [Kotlin](https://github.com/restatedev/examples/tree/main/kotlin/integrations/kotlin-gradle-lambda-cdk).
+
+<Tip>
+    If deployment or registration fails, check the environment logs in the Restate Cloud UI.
+</Tip>
+
+</Tab>
+</Tabs>
 
 </Step>
 
 <Step title="Register the service with Restate">
 
-Register the Lambda function with Restate using the CLI or UI:
+If you deployed with the `ServiceDeployer` CDK construct, the published function version is already registered. Continue to the next step.
+
+For a manual deployment, register the Lambda function with Restate using the CLI or UI:
 
 ```shell
 restate deployments register \
