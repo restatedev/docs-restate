@@ -1139,6 +1139,23 @@ Check the [`RUST_LOG` documentation](https://docs.rs/tracing-subscriber/latest/t
 
         </ResponseField>
 
+        <ResponseField name="rocksdb-blob-min-size" type="string | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_BLOB_MIN_SIZE']}>
+            Minimum value size for blob file separation
+
+Values at or above this threshold are stored in separate blob files when
+blob separation is enabled. Smaller values remain inline in SST files.
+Lower thresholds reduce write amplification (compactions only rewrite small
+BlobIndex pointers) at the cost of an extra read indirection on cache misses.
+
+Only takes effect when `rocksdb-enable-blob-separation` is true.
+
+[default] is 512 KiB
+
+Since v1.7.0
+
+            Non-zero human-readable bytes
+        </ResponseField>
+
         <ResponseField name="rocksdb-block-size" type="string | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_BLOCK_SIZE']}>
             RocksDB block size: Uncompressed block size
 
@@ -1153,6 +1170,19 @@ running RocksDB on spinning disks, you should set this to at least 2MB.
 That way RocksDB's compaction is doing sequential instead of random reads.
 
             Non-zero human-readable bytes
+        </ResponseField>
+
+        <ResponseField name="rocksdb-disable-blob-compression" type="boolean" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_BLOB_COMPRESSION']}>
+            Disable compression for blob files
+
+When false (default), blob files are compressed with Zstd. Set to true to
+store blobs uncompressed, trading higher disk usage for reduced CPU overhead
+on writes and blob-GC reads.
+
+Only takes effect when `rocksdb-enable-blob-separation` is true.
+
+Since v1.7.0
+
         </ResponseField>
 
         <ResponseField name="rocksdb-disable-direct-io-for-flush-and-compactions" type="boolean | null" post={['env: RESTATE_LOG_SERVER__ROCKSDB_DISABLE_DIRECT_IO_FOR_FLUSH_AND_COMPACTIONS']}>
@@ -1199,6 +1229,31 @@ Default: false (WAL compression enabled)
 
         </ResponseField>
 
+        <ResponseField name="rocksdb-enable-blob-separation" type="boolean" post={['env: RESTATE_LOG_SERVER__ROCKSDB_ENABLE_BLOB_SEPARATION']} default="false">
+            Enable storing large values in separate blob files
+
+[Experimental]
+Enables BlobDB key-value separation for the data column family. Values at or
+above `rocksdb-blob-min-size` are written to dedicated blob files, leaving only
+small pointers in the LSM tree. This dramatically reduces write amplification
+during compaction at the cost of some space amplification from unreferenced blobs
+awaiting garbage collection.
+
+This is safe to enable/disable at any time.
+
+Since v1.7.0
+
+        </ResponseField>
+
+        <ResponseField name="rocksdb-l0-num-compaction-trigger" type="integer" post={['format: uint32','minimum: 1','env: RESTATE_LOG_SERVER__ROCKSDB_L0_NUM_COMPACTION_TRIGGER']} default="8">
+            Number of L0 files to trigger compaction: Sets the number of files to trigger level-0 compaction.
+
+[default] is 8
+
+Since v1.7.7
+
+        </ResponseField>
+
         <ResponseField name="rocksdb-log-keep-file-num" type="integer | null" post={['format: uint','env: RESTATE_LOG_SERVER__ROCKSDB_LOG_KEEP_FILE_NUM']} default="null">
             RocksDB log keep file num: Number of info LOG files to keep
 
@@ -1222,8 +1277,28 @@ Default: 64MB
             Non-zero human-readable bytes
         </ResponseField>
 
+        <ResponseField name="rocksdb-max-background-compactions" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_BACKGROUND_COMPACTIONS']}>
+            Max background compactions: Maximum number of concurrent compaction operations for this database.
+
+If unset, defaults are computed based on CPU count and active node roles.
+
+Since v1.7.0
+
+        </ResponseField>
+
         <ResponseField name="rocksdb-max-file-size" type="string" post={['minLength: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_FILE_SIZE']} default="128.0 MiB">
             Non-zero human-readable bytes
+
+        </ResponseField>
+
+        <ResponseField name="rocksdb-max-open-files" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_LOG_SERVER__ROCKSDB_MAX_OPEN_FILES']}>
+            Max open files: Sets the number of open files that can be used by the DB. You may need to
+increase this if your database has a large working set. Unset means
+files opened are always kept open.
+
+[default] is unset
+
+Since v1.7.7
 
         </ResponseField>
 
@@ -1241,6 +1316,9 @@ Default is 1
 
 If this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.
 
+The memory budget is automatically sanitized to the minimum of 32 MiB if set to
+a smaller value.
+
             Non-zero human-readable bytes
         </ResponseField>
 
@@ -1251,6 +1329,28 @@ This defines the total memory for rocksdb as a ratio of the node's total budget
 for rocksdb memtables.
 
 (See `rocksdb-total-memtables-ratio` in common).
+
+        </ResponseField>
+
+        <ResponseField name="rocksdb-partition-sst-by-log" type="boolean" post={['env: RESTATE_LOG_SERVER__ROCKSDB_PARTITION_SST_BY_LOG']} default="true">
+            Partition SST files by log ID: Splits SST files by the log ID.
+
+[default] is true
+
+Since v1.7.7
+
+        </ResponseField>
+
+        <ResponseField name="rocksdb-partition-sst-by-loglet" type="boolean" post={['env: RESTATE_LOG_SERVER__ROCKSDB_PARTITION_SST_BY_LOGLET']} default="false">
+            Partition SST files by loglet ID: Splits SST files by the loglet ID. Enabling this option may reduce the cost of compaction
+and trimming but may increase the number of SST files. If the number of SST files became a
+concern, consider setting `rocksdb-max-open-files` to a reasonable value.
+
+This overrides `rocksdb-partition-sst-by-log` if both are enabled.
+
+[default] is false
+
+Since v1.7.7
 
         </ResponseField>
 
@@ -1286,6 +1386,11 @@ latency of the storage device is a significant factor in the WAL performance if
 `rocksdb-disable-wal-fsync` is set to `false`.
 
 Since v1.7.0
+
+        </ResponseField>
+
+        <ResponseField name="rocksdb-writable-file-max-buffer-size" type="string" post={['minLength: 1','env: RESTATE_LOG_SERVER__ROCKSDB_WRITABLE_FILE_MAX_BUFFER_SIZE']} default="1.0 MiB">
+            Non-zero human-readable bytes
 
         </ResponseField>
 
@@ -3344,6 +3449,15 @@ Default: false (WAL compression enabled)
 
                 </ResponseField>
 
+                <ResponseField name="rocksdb-l0-num-compaction-trigger" type="integer" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_L0_NUM_COMPACTION_TRIGGER']} default="2">
+                    Number of L0 files to trigger compaction: Sets the number of files to trigger level-0 compaction.
+
+[default] is 2
+
+Since v1.7.7
+
+                </ResponseField>
+
                 <ResponseField name="rocksdb-log-keep-file-num" type="integer | null" post={['format: uint','env: RESTATE_WORKER__STORAGE__ROCKSDB_LOG_KEEP_FILE_NUM']} default="null">
                     RocksDB log keep file num: Number of info LOG files to keep
 
@@ -3369,6 +3483,17 @@ Default: 64MB
 
                 <ResponseField name="rocksdb-max-file-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_MAX_FILE_SIZE']} default="64.0 MiB">
                     Non-zero human-readable bytes
+
+                </ResponseField>
+
+                <ResponseField name="rocksdb-max-open-files" type="integer | null" post={['format: uint32','minimum: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_MAX_OPEN_FILES']}>
+                    Max open files: Sets the number of open files that can be used by the DB. You may need to
+increase this if your database has a large working set. Unset means
+files opened are always kept open.
+
+[default] is unset
+
+Since v1.7.7
 
                 </ResponseField>
 
@@ -3420,6 +3545,11 @@ mutex lock.
                     - `"all"` : Collect all stats, including measuring duration of mutex operations.
 If getting time is expensive on the platform to run, it can
 reduce scalability to more threads, especially for writes.
+                </ResponseField>
+
+                <ResponseField name="rocksdb-writable-file-max-buffer-size" type="string" post={['minLength: 1','env: RESTATE_WORKER__STORAGE__ROCKSDB_WRITABLE_FILE_MAX_BUFFER_SIZE']} default="1.0 MiB">
+                    Non-zero human-readable bytes
+
                 </ResponseField>
 
             </Expandable>
