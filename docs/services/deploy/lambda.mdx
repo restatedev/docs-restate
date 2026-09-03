@@ -1,29 +1,34 @@
 ---
 title: "AWS Lambda"
-description: "Run your Restate services on AWS Lambda"
+description: "Run your Restate services on AWS Lambda."
 icon: "/img/cloud-providers/aws-lambda.svg"
 ---
 
+import LambdaCicdWorkflows from '/snippets/common/lambda-cicd-workflows.mdx';
+
 Deploy your Restate services as serverless functions on AWS Lambda.
-This guide covers project setup, packaging, and service registration.
+This guide covers project setup, packaging, IAM permissions, service registration, and invocation.
 
 <Tip>
     For infrastructure as code, check out the [Restate CDK construct library](https://github.com/restatedev/cdk).
 </Tip>
 
-## Set up your project
+## Deploying to AWS Lambda
+
+<Steps titleSize="h3">
+<Step title="Set up your project">
 
 <Tabs>
     <Tab title="TypeScript">
         <Card
-            title="Create your Restate + Typescript + Lambda repository"
+            title="Create your Restate + TypeScript + Lambda repository"
             icon="github"
             href="https://github.com/new?template_name=lambda-typescript-template&template_owner=restatedev"
             arrow="true"
             horizontal
         />
 
-        You can check out the template here: https://github.com/restatedev/lambda-typescript-template
+        You can also view the [TypeScript Lambda template](https://github.com/restatedev/lambda-typescript-template) on GitHub.
 
         See the [TypeScript serving docs](/develop/ts/serving#creating-a-lambda-handler) for more details.
     </Tab>
@@ -36,20 +41,22 @@ This guide covers project setup, packaging, and service registration.
             horizontal
         />
 
-        You can check out the template here: https://github.com/restatedev/lambda-python-template
+        You can also view the [Python Lambda template](https://github.com/restatedev/lambda-python-template) on GitHub.
     </Tab>
     <Tab title="Java">
-        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to setup a lambda handler.
+        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to set up a Lambda handler.
     </Tab>
     <Tab title="Kotlin">
-        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to setup a lambda handler.
+        See the [Java serving docs](/develop/java/serving#creating-a-lambda-handler) to set up a Lambda handler.
     </Tab>
     <Tab title="Go">
-        See the [Go serving docs](/develop/go/serving#creating-a-lambda-handler) to setup a lambda handler.
+        See the [Go serving docs](/develop/go/serving#creating-a-lambda-handler) to set up a Lambda handler.
     </Tab>
 </Tabs>
 
-## Package and deploy
+</Step>
+
+<Step title="Package and deploy your function">
 
 Build a deployment package containing your application code and dependencies.
 
@@ -61,7 +68,7 @@ Build a deployment package containing your application code and dependencies.
         npm run bundle
         ```
 
-        The Lambda handler to setup is `app.handler`.
+        Set the Lambda handler to `app.handler`.
     </Tab>
     <Tab title="Python">
         Using `uv`, prepare a directory containing all the source and the dependencies, then zip it:
@@ -76,7 +83,7 @@ Build a deployment package containing your application code and dependencies.
         cd dist && zip ../dist.zip -r * && cd ..
         ```
 
-        The lambda handler to setup is `handler.app`.
+        Set the Lambda handler to `handler.app`.
 
         <Warning>
             When installing the dependencies, make sure the python version and your machine architecture match the one configured in the Lambda runtime.
@@ -84,7 +91,7 @@ Build a deployment package containing your application code and dependencies.
         </Warning>
     </Tab>
     <Tab title="Java">
-        Build an uber jar with all dependencies, using gradle:
+        Build an uber JAR with all dependencies using Gradle:
 
         ```shell
         ./gradlew shadowJar
@@ -99,7 +106,7 @@ Build a deployment package containing your application code and dependencies.
         Set the handler to your class name, e.g., `com.example.MyLambdaHandler`.
     </Tab>
     <Tab title="Kotlin">
-        Build an uber jar with all dependencies:
+        Build an uber JAR with all dependencies:
 
         ```shell
         ./gradlew shadowJar
@@ -121,17 +128,21 @@ Build a deployment package containing your application code and dependencies.
     </Tab>
 </Tabs>
 
-Head over to your AWS dashboard to create the Lambda and upload the zip. For more details, follow the [AWS Lambda documentation](https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-zip.html).
+Create the function in the AWS Lambda console and upload the deployment package. For more details, follow the [AWS Lambda documentation](https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-zip.html).
 
-## Role to invoke the Lambda
+</Step>
 
-When using Cloud, you'll need to create an IAM Role for Restate Cloud to invoke your Lambda.
+<Step title="Allow Restate to invoke the function">
+
+When using Restate Cloud, create an IAM role that allows Restate Cloud to invoke your Lambda function. This invoker role is separate from the execution role used by the function itself.
 
 To set up the role, visit your Restate Cloud Dashboard at [Developers > Security > AWS Lambda](https://cloud.restate.dev/to/developers/integration#lambda).
 
-## Register the service to Restate
+</Step>
 
-In order for Restate to push requests to your Lambda function, you need to [register the service to Restate](/services/versioning) using the CLI or UI:
+<Step title="Register the service with Restate">
+
+Register the Lambda function with Restate using the CLI or UI:
 
 ```shell
 restate deployments register \
@@ -144,11 +155,21 @@ restate deployments register \
     Check the [versioning documentation](/services/versioning) for more info.
 </Info>
 
-Once your service is registered, you can start sending requests to it.  
+</Step>
+
+<Step title="Send your first request">
+
+Open your service in the Restate UI, select a handler, and use the **Playground** to send a request.
+
+</Step>
+</Steps>
 
 ## CI/CD Automation
 
 You can set up automation to upload a new Lambda version and register new [Restate service versions](/services/versioning).
+
+<Tabs>
+<Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
 
 <Tabs>
     <Tab title="TypeScript">
@@ -276,17 +297,33 @@ jobs:
     </Tab>
 </Tabs>
 
-For this workflow to execute, you need to configure your [AWS account for the Github OIDC provider](https://github.com/aws-actions/configure-aws-credentials/tree/main?tab=readme-ov-file#configuring-iam-to-trust-github).
-
-Then, add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+This workflow needs the following [GitHub Actions repository secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
 - `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
-- `AWS_INVOKE_ROLE_TO_ASSUME`: The role created in the [above paragraph](#role-to-invoke-the-lambda) to invoke the function
+- `AWS_INVOKE_ROLE_TO_ASSUME`: The role created in [Allow Restate to invoke the function](#allow-restate-to-invoke-the-function)
 - `AWS_DEPLOY_ROLE_TO_ASSUME`: The role to deploy the function, see below
 
+</Tab>
+
+<Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
+
+<LambdaCicdWorkflows/>
+
+This workflow needs the following [GitHub Actions repository secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+
+- `RESTATE_ADMIN_URL`: The URL through which GitHub Actions can reach your Restate Admin API
+- `RESTATE_AUTH_TOKEN`: Set this token if GitHub Actions reaches the Admin API through a reverse proxy that accepts bearer token authentication
+- `AWS_INVOKE_ROLE_TO_ASSUME`: An IAM role that your self hosted Restate deployment can assume to invoke the Lambda function
+- `AWS_DEPLOY_ROLE_TO_ASSUME`: The IAM role that GitHub Actions assumes to deploy the function, as described below
+
+</Tab>
+</Tabs>
+
+For either workflow, configure your [AWS account for the GitHub OIDC provider](https://github.com/aws-actions/configure-aws-credentials/tree/main?tab=readme-ov-file#configuring-iam-to-trust-github).
+
 <AccordionGroup>
-    <Accordion title="Github OIDC setup">
-        To configure your account for the Github OIDC provider, run:
+    <Accordion title="GitHub OIDC setup">
+        To configure your account for the GitHub OIDC provider, run:
 
 ```shell
 aws iam create-open-id-connect-provider \
@@ -353,9 +390,5 @@ And the following permissions:
   ]
 }
 ```
-    </Accordion>
-    <Accordion title="Self-hosted Restate">
-        You can use this workflow with Self-hosted Restate as well,
-        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
     </Accordion>
 </AccordionGroup>
