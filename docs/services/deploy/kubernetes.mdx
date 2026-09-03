@@ -7,64 +7,109 @@ import InstallRestateOperator from '/snippets/common/install-restate-operator.md
 import RestateTunnel from '/snippets/common/restate-tunnel.mdx';
 
 Kubernetes is a common choice for running Restate services in production environments.
-This page explains how to deploy Restate applications on Kubernetes using several approaches:
+This page explains how to deploy Restate applications on Kubernetes with Restate Operator.
 
-- **Restate Operator**: the recommended way to manage deployments, handle service registration, automate versioning, and connect to Restate Cloud.
-- **Direct Kubernetes Deployments**: for teams who prefer to manage their own Deployments and Services without the operator.
-- **Knative Deployments**: for environments that benefit from autoscaling and scale-to-zero capabilities.
+The operator lets you:
+- [Deploy services on Kubernetes and connect them to Restate Cloud or BYOC](/services/deploy/kubernetes#deploy-a-service-to-restate-cloud-or-byoc)
+- [Deploy services on Kubernetes and connect them to a self-hosted Restate environment](/services/deploy/kubernetes#deploy-a-service-to-self-hosted-restate), that can in turn be [managed by the operator](/server/deploy/kubernetes#restate-kubernetes-operator).
 
-## What is Restate Operator?
+## What is the Restate Operator?
 
-When deploying Restate services to Kubernetes, we recommend using the Restate Operator.
+The Restate Operator is the recommended way to deploy Restate services on Kubernetes. It manages the Kubernetes workloads for your services and handles registration with Restate and versioning.
+<GitHub.Repo repo="restatedev/restate-operator" />
 
-<Github.Repo repo="restatedev/restate-operator"/>
 
-The operator can:
-- Register your services automatically
-- Manage multiple deployment revisions
-- Scale down old revisions when no longer needed
-- Establish a tunnel to Restate Cloud for secure communication
+The operator extends Kubernetes with resources for running Restate and deploying your service applications:
+| Resource | What it manages |
+| --- | --- |
+| [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) | Your service workload, Restate registration, and service versioning |
+| [`RestateCloudEnvironment`](https://github.com/restatedev/restate-operator#restatecloudenvironment) | The credentials and secure connection to a Restate Cloud or BYOC environment |
+| [`RestateCluster`](https://github.com/restatedev/restate-operator#restatecluster) | A self-hosted Restate environment running on Kubernetes |
+
+## What does the operator do for you?
+
+For service deployments, the operator:
+
+- Deploys your application with ReplicaSets or Knative Serving
+- Registers its SDK endpoint with Restate Cloud, BYOC, or a self-hosted Restate environment
+- Creates a new service revision when your pod template changes
+- Keeps old revisions available until their invocations have drained
+- Establishes a secure outbound tunnel when connecting private services to Restate Cloud
 
 <Tip>
-Versioning gets handled automatically by the operator by keeping old ReplicaSets around with an associated Service object so that in-flight invocations can drain against the old code versions.
+In ReplicaSet mode, the operator keeps old ReplicaSets and their Service objects available while in-flight invocations drain. In Knative mode, it manages Configurations and Routes for each service version.
 [Learn more](/services/versioning#automatic-versioning-with-kubernetes-operator).
 </Tip>
 
-## Deployment with Restate Operator
+<Note title="Upgrading from operator 2.8.1 or earlier">
+    Operator 3 introduced Helm-managed CRD upgrades. The first upgrade to version 3 requires a one-time CRD ownership handoff. Follow the [operator 3 upgrade instructions](https://github.com/restatedev/restate-operator/releases/tag/v3.0.0) before upgrading an existing installation.
+</Note>
+
+
+## Deploy a service to Restate Cloud or BYOC
+
+
+Restate Cloud must be able to send invocations to your SDK endpoint. For services in a private Kubernetes cluster, you use the Restate Cloud Tunnel to set up a secure connection that does not require exposing a public ingress.
+
+First, choose a tunnel mode and then follow the corresponding instructions.
+
+### Choose a tunnel mode to connect to Restate Cloud
+
+
+You can run the tunnel in your application process or as a separate deployment:
+
+| | In-process tunnel | Separate tunnel |
+| --- | --- | --- |
+| Request path | Straight from service pod to Cloud | Via the tunnel pod to your service pod |
+| Application code | Use the tunnel SDK to serve your services | Keep the normal SDK HTTP listener |
+| SDK support | TypeScript and Go (others in-progress) | All SDKs |
+| Knative | Not supported | Supported |
+
+We recommend the in-process tunnel for TypeScript and Go because it removes the extra network hop. Use the separate tunnel for other SDKs or when you prefer to operate the tunnel independently from your application.
+
+<AccordionGroup>
+    <Accordion title="How does the in-process tunnel work?">
+        Each application pod maintains an outbound connection to Restate Cloud. Invocations arrive directly at the SDK handler without a Kubernetes Service or separate tunnel pod in the invocation path. The operator injects the environment, region, signing key, and versioned tunnel name through `RESTATE_INPROC_*` environment variables.
+    </Accordion>
+    <Accordion title="How does the separate tunnel work?">
+        Restate Cloud sends invocations over an outbound connection maintained by the tunnel pod created by the `RestateCloudEnvironment`. The tunnel pod forwards each invocation through a Kubernetes Service to your application pod.
+
+        <RestateTunnel/>
+    </Accordion>
+</AccordionGroup>
+
+Both modes use a `RestateCloudEnvironment`. The tunnel mode is selected for each `RestateDeployment`, so services using different modes can share the same Cloud environment resource.
+
+### Deploy a service and connect to Restate Cloud
+
+Choose the tunnel mode you want to use and follow the corresponding instructions:
 
 <Tabs>
-    <Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
-        The Restate Operator can help you connect your services to Restate Cloud by managing authentication and secure communication.
-        You can connect your Kubernetes services to Restate Cloud using a secure tunnel provided by the Restate Operator.
-
-        This allows you to run your services inside a private Kubernetes cluster without exposing them to the public internet.
-
-
-        <Info>
-            Try to connect your Kubernetes services to Restate Cloud by following this [guide](/guides/connecting-k8s-services-to-cloud).
-        </Info>
+    <Tab title="In-process tunnel">
+        Use the in-process tunnel to connect each application pod directly to Restate Cloud without exposing an inbound endpoint. This is the recommended path for TypeScript and Go services.
 
         <Steps>
-        <Step title="Install the Restate Operator">
-            <InstallRestateOperator/>
-        </Step>
+            <Step title={"Install the Restate Operator"}>
+                <InstallRestateOperator/>
+            </Step>
+            <Step title="Create the Restate Cloud Secrets">
+                Create an API key in Restate Cloud at [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::FullAccess). Save the `key_` value in a file named `token`.
 
-        <Step title={"Create a Restate Cloud secret"}>
+                The operator needs the key in the `restate-operator` namespace. The in-process tunnel client needs the same key in your service's namespace because Kubernetes Secrets are namespace scoped:
 
-        Create an API key via `Developers` tab of the Restate Cloud UI and give it `Full` permissions.
-        The API key starts with `key_`. Save it in a file named `token` and create the secret in Kubernetes:
-        ```bash
-        kubectl create secret generic my-cloud-environment-secret \
-          --from-file=token=./token -n restate-operator
-        ```
+```bash
+kubectl create secret generic my-cloud-environment-secret \
+  --from-file=token=./token -n restate-operator
 
-        </Step>
-        <Step title={"Set up a secure tunnel"}>
-        Set up a secure tunnel between the Kubernetes cluster and Restate Cloud with the [`RestateCloudEnvironment` CRD](https://github.com/restatedev/restate-operator#restatecloudenvironment).
+kubectl create secret generic restate-cloud-tunnel-auth \
+  --from-file=token=./token -n your-service-namespace
+```
+            </Step>
 
-        The `RestateCloudEnvironment` CRD allows you to use the `RestateDeployment` feature with a Restate Cloud environment. This resource describes a cloud environment, references a secret used to communicate with it, and manages a Deployment of tunnel pods in your Kubernetes cluster which allows Restate Cloud to call into your services without having to expose them over the public internet.
+            <Step title="Create a RestateCloudEnvironment">
+                Create the environment manifest:
 
-```yaml
+```yaml restate-cloud-environment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateCloudEnvironment
 metadata:
@@ -79,27 +124,77 @@ spec:
       key: token
 ```
 
-        - The `environmentId` can be found in the Restate Cloud UI in the top left corner when you select your environment.
-        This ID starts with `env_`.
+                - `environmentId`: copy it from the top left corner of the Restate Cloud UI. It starts with `env_`.
+                - `signingPublicKey`: copy it from [**Developers > Security > HTTP endpoints**](https://cloud.restate.dev/to/developers/integration#http-endpoints). It starts with `publickeyv1_`.
+                - `region`: use the identifier shown next to your environment ID, such as `us` or `eu`. BYOC environments can use a multi-label identifier such as `<environment>.byoc`.
 
-        - The `signingPublicKey` can be found under [**Developers > Security > HTTP endpoints**](https://cloud.restate.dev/to/developers/integration#http-endpoints) in the Restate Cloud UI, and starts with `publickeyv1_`..
+```bash
+kubectl apply -f restate-cloud-environment.yaml
+```
 
-        - Set the `region` field to the region your Restate Cloud environment is hosted in. Possible values are `us` and `eu`.
-        You can find the region next to your environment ID in the Restate Cloud UI.
+                <Note>
+                    A `RestateCloudEnvironment` deploys a separate tunnel pod by default. Services configured with `tunnelMode: in-process` connect directly from their application pods and do not use that pod in their invocation path.
+                </Note>
+            </Step>
 
-        <Info>
-            Read the [`RestateCloudEnvironment` docs](https://github.com/restatedev/restate-operator#restatecloudenvironment) to learn more,
-            or view the full spec as [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCloudEnvironment.pkl) (recommended) or [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restatecloudenvironments.yaml).
-        </Info>
+            <Step title="Add the in-process tunnel client">
+                Replace the normal SDK listener with the in-process tunnel client:
 
-        <Accordion title={"How does the tunnel work?"}>
-            <RestateTunnel/>
-        </Accordion>
-        </Step>
-        <Step title={"Create your RestateDeployment"}>
+<CodeGroup>
+```bash TypeScript
+npm install @restatedev/restate-sdk-tunnel
+```
 
-        Create a [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) manifest for your service, and specify the cloud environment to register with in the `spec`:
-```yaml
+```bash Go
+go get github.com/restatedev/sdk-go/x/tunnel
+```
+</CodeGroup>
+
+<CodeGroup>
+```typescript TypeScript
+import { connectTunnel } from "@restatedev/restate-sdk-tunnel";
+import { greeter } from "./greeter";
+
+connectTunnel({ services: [greeter] });
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "log"
+
+    restate "github.com/restatedev/sdk-go"
+    "github.com/restatedev/sdk-go/server"
+    "github.com/restatedev/sdk-go/x/tunnel"
+)
+
+func main() {
+    srv := server.NewRestate().Bind(restate.Reflect(Greeter{}))
+
+    if err := tunnel.NewTunnel(srv).Start(context.Background()); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+</CodeGroup>
+
+                In TypeScript, `connectTunnel(...)` replaces `restate.serve(...)`. In Go, `tunnel.NewTunnel(srv).Start(...)` replaces `srv.Start(...)`.
+
+                <Note>
+                    In-process tunnel clients for the other Restate SDKs are coming. Check the SDK release notes for updates.
+                </Note>
+
+                <Warning>
+                    In-process tunnels are not supported with Knative mode.
+                </Warning>
+            </Step>
+
+            <Step title="Create the RestateDeployment">
+                Create a [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) with `tunnelMode: in-process` and mount the API key Secret:
+
+```yaml expandable service-deployment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -108,8 +203,102 @@ spec:
   replicas: 1
   restate:
     register:
-      # set this to your RestateCloudEnvironment name
-      cluster: my-cloud-environment
+      cloud: my-cloud-environment
+    tunnelMode: in-process
+  selector:
+    matchLabels:
+      app: service
+  template:
+    metadata:
+      labels:
+        app: service
+    spec:
+      containers:
+        - name: service
+          image: path.to/yourrepo:yourtag
+          env:
+            - name: RESTATE_INPROC_AUTH_TOKEN_FILE
+              value: /var/run/secrets/restate.cloud/token
+          volumeMounts:
+            - name: restate-cloud-tunnel-auth
+              mountPath: /var/run/secrets/restate.cloud
+              readOnly: true
+      volumes:
+        - name: restate-cloud-tunnel-auth
+          secret:
+            secretName: restate-cloud-tunnel-auth
+```
+
+```bash
+kubectl apply -f service-deployment.yaml -n your-service-namespace
+```
+
+                The operator injects the remaining `RESTATE_INPROC_*` configuration, registers the tunnel URL, and handles [versioning](/services/versioning#automatic-versioning-with-kubernetes-operator).
+            </Step>
+
+            <Step title="Invoke your service">
+                Go to the Restate Cloud UI's Playground and send a request to your service.
+            </Step>
+        </Steps>
+    </Tab>
+
+    <Tab title="Separate tunnel">
+        Use the separate tunnel managed by the `RestateCloudEnvironment`. Your application keeps its normal HTTP listener, and the tunnel pod forwards Restate Cloud invocations to its Kubernetes Service.
+
+        <Steps>
+            <Step title={"Install the Restate Operator"}>
+                <InstallRestateOperator/>
+            </Step>
+            <Step title="Create the operator's Restate Cloud Secret">
+                Create an API key in Restate Cloud at [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::FullAccess). Save the `key_` value in a file named `token`, then create the Secret in the operator namespace:
+
+```bash
+kubectl create secret generic my-cloud-environment-secret \
+  --from-file=token=./token -n restate-operator
+```
+            </Step>
+
+            <Step title="Create a RestateCloudEnvironment">
+                Create the environment manifest. This resource deploys the separate tunnel pod used by this path:
+
+```yaml restate-cloud-environment.yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateCloudEnvironment
+metadata:
+  name: my-cloud-environment
+spec:
+  environmentId: env_...
+  signingPublicKey: publickeyv1_...
+  region: eu
+  authentication:
+    secret:
+      name: my-cloud-environment-secret
+      key: token
+```
+
+                - `environmentId`: copy it from the top left corner of the Restate Cloud UI. It starts with `env_`.
+                - `signingPublicKey`: copy it from [**Developers > Security > HTTP endpoints**](https://cloud.restate.dev/to/developers/integration#http-endpoints). It starts with `publickeyv1_`.
+                - `region`: use the identifier shown next to your environment ID, such as `us` or `eu`. BYOC environments can use a multi-label identifier such as `<environment>.byoc`.
+
+```bash
+kubectl apply -f restate-cloud-environment.yaml
+```
+            </Step>
+
+            <Step title="Create the RestateDeployment">
+                Create a [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) with `tunnelMode: external`:
+
+```yaml expandable service-deployment.yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateDeployment
+metadata:
+  name: service
+spec:
+  replicas: 1
+  restate:
+    register:
+      cloud: my-cloud-environment
+    tunnelMode: external
   selector:
     matchLabels:
       app: service
@@ -129,34 +318,36 @@ spec:
               name: restate
 ```
 
-        Once you apply the manifest, the Restate Operator will set up the secure tunnel and automatically register your service with Restate Cloud, and handle [versioning](/services/deploy/kubernetes#automatic-service-versioning) for you.
+```bash
+kubectl apply -f service-deployment.yaml -n your-service-namespace
+```
 
-        <Info>
-        Read the [`RestateDeployment` docs](https://github.com/restatedev/restate-operator#restatedeployment) to learn more,
-        or view the full spec as [pkl file](https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl) or less-readable [yaml file](https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml).
-        </Info>
-        </Step>
-        <Step title={"Send your first request"}>
-            You're set up! Go to the Restate Cloud UI's Playground and start sending requests to your service.
-        </Step>
-    </Steps>
-
-    </Tab>
-    <Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
-        <Info>
-            To try the Restate Operator on a local kind cluster, follow this [guide](/guides/restate-on-kind-with-operator).
-        </Info>
-
-        <Steps>
-            <Step title="Install the Restate Operator">
-                <InstallRestateOperator/>
+                The operator creates a Kubernetes Service for the SDK endpoint, registers it through the separate tunnel, and handles [versioning](/services/versioning#automatic-versioning-with-kubernetes-operator).
             </Step>
 
-            <Step title={"Deploy your service"}>
+            <Step title="Invoke your service">
+                Go to the Restate Cloud UI's Playground and send a request to your service.
+            </Step>
+        </Steps>
+    </Tab>
+</Tabs>
 
-                The Restate operator allows for the use of a `RestateDeployment` CRD to deploy your services:
+## Deploy a service to self-hosted Restate
 
-```yaml
+Register your service with a self-hosted Restate environment. This example uses a `RestateCluster` resource named `restate` in the same Kubernetes cluster, so no Restate Cloud tunnel or Cloud API key is required.
+
+<Info>
+    To deploy a self-hosted Restate cluster with the operator, see [Deploy Restate on Kubernetes](/server/deploy/kubernetes). To try the complete setup on a local kind cluster, follow the [operator guide](/guides/restate-on-kind-with-operator).
+</Info>
+
+<Steps>
+    <Step title={"Install the Restate Operator"}>
+        <InstallRestateOperator/>
+    </Step>
+    <Step title="Create the RestateDeployment">
+        Create a `RestateDeployment` that references [your `RestateCluster` named `restate`](/server/deploy/kubernetes#restate-kubernetes-operator):
+
+```yaml service-deployment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -165,8 +356,6 @@ spec:
   replicas: 1
   restate:
     register:
-      # set this if you want to register against your RestateCluster named 'restate'
-      # alternatively, you can set a url or a Service reference to register against
       cluster: restate
   selector:
     matchLabels:
@@ -187,23 +376,112 @@ spec:
               name: restate
 ```
 
+```bash
+kubectl apply -f service-deployment.yaml -n your-service-namespace
+```
 
-                No need to register your service. The CRD automatically manages registration and [versioning](/services/deploy/kubernetes#automatic-service-versioning) for you.
+        Once applied, the Restate Operator registers your service and handles [versioning](/services/versioning#automatic-versioning-with-kubernetes-operator).
 
-                <Info>
-                    Read the [`RestateDeployment` docs](https://github.com/restatedev/restate-operator#restatedeployment) to learn more,
-                    or view the full spec as [pkl file](https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl) or less-readable [yaml file](https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml).
-                </Info>
-            </Step>
-            <Step title={"Send your first request"}>
-                You're set up! Go to the Restate UI's Playground and start sending requests to your service.
-            </Step>
-        </Steps>
+        <Info>
+            Read the [`RestateDeployment` documentation](https://github.com/restatedev/restate-operator#restatedeployment), or view the full specification as [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl) or [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml).
+        </Info>
+    </Step>
+    <Step title="Invoke your service">
+        Go to the Restate UI's Playground and send a request to your service.
+    </Step>
+</Steps>
 
-    </Tab>
-</Tabs>
+## Knative Deployment
 
-## Direct Kubernetes Deployments
+The `RestateDeployment` CRD can use Knative Serving instead of ReplicaSets. The operator then manages the Knative Configurations, Routes, Restate registration, and service versions while Knative provides request-based autoscaling and scale-to-zero.
+
+Install [Knative Serving](https://knative.dev/docs/install/) before applying a Knative-mode `RestateDeployment`:
+
+```yaml
+apiVersion: restate.dev/v1beta1
+kind: RestateDeployment
+metadata:
+  name: service
+spec:
+  deploymentMode: knative
+  knative:
+    tag: v1
+    minScale: 0
+    maxScale: 10
+    target: 50
+  restate:
+    register:
+      cluster: restate
+  template:
+    metadata:
+      labels:
+        app: service
+    spec:
+      containers:
+        - name: service
+          image: path.to/yourrepo:yourtag
+          ports:
+            - name: h2c
+              containerPort: 9080
+```
+
+The example registers with a `RestateCluster` named `restate`. To register with Restate Cloud or BYOC, use `cloud: my-cloud-environment` instead.
+
+The optional `knative.tag` controls deployment identity:
+
+- Keep the same tag for an in-place update to the existing Restate deployment. Only do this when the change is compatible with invocations already assigned to that deployment.
+- Change the tag to create and register a new version while the previous version drains.
+- Omit the tag to use the pod template hash and create a new version for every template change.
+
+The container port must be named `h2c` for HTTP/2 or `http1` for HTTP/1.1. In-process Restate Cloud tunnels are not supported in Knative mode.
+
+<Info>
+    See the operator's [Knative Serving documentation](https://github.com/restatedev/restate-operator#knative-serving-mode) and [complete examples](https://github.com/restatedev/restate-operator/tree/main/examples/services/greeter/k8s).
+</Info>
+
+## Horizontal scaling and load balancing
+
+Restate allows scaling your services horizontally by running multiple replicas of your pods.
+To distribute traffic across these pods, you need to set up load balancing in between the Restate server and your service pods.
+This way, Restate gets a stable endpoint to send requests to, and the load balancer distributes the requests across the available pods.
+
+#### Autoscale operator-managed revisions
+
+In ReplicaSet mode, you can attach your own HorizontalPodAutoscaler to the `RestateDeployment` scale subresource to scale the latest revision. You can also configure `spec.autoscaling` so the operator creates an HPA for each older revision while its invocations drain:
+
+```yaml
+spec:
+  replicas: 3
+  autoscaling:
+    minReplicas: 1
+    maxReplicas: 10
+    metrics:
+      - type: Resource
+        resource:
+          name: cpu
+          target:
+            type: Utilization
+            averageUtilization: 70
+```
+
+The operator supplies the HPA's `scaleTargetRef`. CPU and memory metrics require resource requests on your service containers. This setting applies only to draining revisions in ReplicaSet mode. Knative uses its own autoscaler.
+
+In a standard Kubernetes setup, you would typically use a `Service` of type `ClusterIP` or `LoadBalancer` to distribute traffic across your pods.
+Kubernetes Services distribute new connections across eligible pods. The exact behavior depends on your cluster's networking implementation.
+
+If your services are running over HTTP/2 (the default), each Restate partition will generally have only one TCP connection to a single destination pod.
+However, because there are many partitions (by default 24, typically more in a larger cluster) this should get your pods a reasonably
+even distribution of traffic.
+
+For more advanced load balancing options, you can use an L7 load balancer like Istio or Cilium.
+
+Note that there is no need for routing to be sticky, because each invocation is self-contained and has all the context it needs to execute (the journal and any K/V state).
+No context is assumed to be sticky on the node.
+However, if you wish to do so, you can do sticky routing via the invocation ID in your request headers (`x-restate-invocation-id`).
+
+## Direct Kubernetes deployments
+
+<Note>Use the Restate Operator when you want automatic registration, version management, and operator-managed scaling.</Note>
 
 If you prefer not to use the Restate Operator, you can deploy your Restate services directly using standard Kubernetes `Deployment` and `Service` resources.
 
@@ -212,7 +490,7 @@ and a Kubernetes `Service` is used to provide a stable DNS name and IP for the p
 
 Here is an example manifest with a single pod in Kubernetes:
 
-```yaml
+```yaml expandable
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -254,55 +532,3 @@ Once you have applied the manifest, [register the service](/services/versioning#
 
 ⚠️ Note that this setup will not account for keeping around old code versions, so updating your code can break in-flight invocations.
 Check the [versioning documentation](/services/versioning) for more information.
-
-## Horizontal scaling and load balancing
-
-Restate allows scaling your services horizontally by running multiple replicas of your pods.
-To distribute traffic across these pods, you need to set up load balancing in between the Restate server and your service pods.
-This way, Restate gets a stable endpoint to send requests to, and the load balancer distributes the requests across the available pods.
-
-In a standard Kubernetes setup, you would typically use a `Service` of type `ClusterIP` or `LoadBalancer` to distribute traffic across your pods.
-Kubernetes Services use a round-robin algorithm to balance the load among the pods.
-
-If your services are running over HTTP2 (the default), each Restate partition will generally have only one TCP connection to a single destination pod.
-However, because there are many partitions (by default 24, typically more in a larger cluster) this should get your pods a reasonably
-even distribution of traffic.
-
-For more advanced load balancing options, you can use an L7 load balancer like Istio or Cilium.
-
-Note that there is no need for routing to be sticky, because each invocation is self-contained and has all the context it needs to execute (the journal and any K/V state).
-No context is assumed to be sticky on the node.
-However, if you wish to do so, you can do sticky routing via the invocation ID in your request headers (`x-restate-invocation-id`).
-
-## Knative Deployment
-
-Restate supports Knative services. Knative allows scaling to zero when there are no in-flight invocations and automatically configures an L7 load balancer. There are no special requirements to deploy a service deployment container with Knative:
-
-```shell
-kn service create service-name --port h2c:9080 --image path.to/yourrepo:yourtag
-```
-
-Or using the YAML manifest:
-
-```yaml
-apiVersion: serving.knative.dev/v1
-kind: Service
-metadata:
-  name: service-name
-spec:
-  template:
-    spec:
-      containers:
-        - image: path.to/yourrepo:yourtag
-          ports:
-            - name: h2c
-              containerPort: 9080
-```
-
-The service will be accessible at `http://<service-name>.<namespace>` but to handle [versioning](/services/configuration), it is preferable to register the new revision url like `http://<service-name>-0001.<namespace>` as part of your deployment workflow.
-
-By default Knative exposes the service through the Ingress. This is not required by Restate, and you can disable this behavior adding the argument `--cluster-local` to the aforementioned creation command.
-
-<Info>
-    Learn more about deploying Restate services with Knative by reading this [blog post](https://www.restate.dev/blog/building-stateful-serverless-applications-with-knative-and-restate) and the [Golang example](https://github.com/restatedev/examples/tree/main/go/integrations/knative-go).
-</Info>
