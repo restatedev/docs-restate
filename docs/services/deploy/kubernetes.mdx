@@ -57,23 +57,23 @@ First, choose a tunnel mode and then follow the corresponding instructions.
 ### Choose a tunnel mode to connect to Restate Cloud
 
 
-You can run the tunnel in your application process or as a separate deployment:
+You can run the tunnel client in your application process or as a standalone deployment:
 
-| | In-process tunnel | Separate tunnel |
+| | In-process Tunnel | Standalone Tunnel |
 | --- | --- | --- |
-| Request path | Straight from service pod to Cloud | Via the tunnel pod to your service pod |
+| Request path | Straight from the service pod to Restate Cloud | Through a standalone tunnel client pod to your service pod |
 | Application code | Use the tunnel SDK to serve your services | Keep the normal SDK HTTP listener |
 | SDK support | TypeScript and Go (others in-progress) | All SDKs |
 | Knative | Not supported | Supported |
 
-We recommend the in-process tunnel for TypeScript and Go because it removes the extra network hop. Use the separate tunnel for other SDKs or when you prefer to operate the tunnel independently from your application.
+We recommend the in-process tunnel client for TypeScript and Go because it removes the extra network hop. Use the standalone tunnel client for other SDKs or when you prefer to operate the client independently from your application.
 
 <AccordionGroup>
-    <Accordion title="How does the in-process tunnel work?">
-        Each application pod maintains an outbound connection to Restate Cloud. Invocations arrive directly at the SDK handler without a Kubernetes Service or separate tunnel pod in the invocation path. The operator injects the environment, region, signing key, and versioned tunnel name through `RESTATE_INPROC_*` environment variables.
+    <Accordion title="How does the in-process tunnel client work?">
+        Each application pod maintains an outbound connection to Restate Cloud. Invocations arrive directly at the SDK handler without a Kubernetes Service or standalone tunnel client pod in the invocation path. The operator injects the environment, region, signing key, and versioned tunnel name through `RESTATE_INPROC_*` environment variables.
     </Accordion>
-    <Accordion title="How does the separate tunnel work?">
-        Restate Cloud sends invocations over an outbound connection maintained by the tunnel pod created by the `RestateCloudEnvironment`. The tunnel pod forwards each invocation through a Kubernetes Service to your application pod.
+    <Accordion title="How does the standalone tunnel client work?">
+        Restate Cloud sends invocations over an outbound connection maintained by the tunnel client pod created by the `RestateCloudEnvironment`. The tunnel client pod forwards each invocation through a Kubernetes Service to your application pod.
 
         <RestateTunnel/>
     </Accordion>
@@ -86,8 +86,8 @@ Both modes use a `RestateCloudEnvironment`. The tunnel mode is selected for each
 Choose the tunnel mode you want to use and follow the corresponding instructions:
 
 <Tabs>
-    <Tab title="In-process tunnel">
-        Use the in-process tunnel to connect each application pod directly to Restate Cloud without exposing an inbound endpoint. This is the recommended path for TypeScript and Go services.
+    <Tab title="In-process Tunnel">
+        Use the in-process tunnel client to connect each application pod directly to Restate Cloud without exposing an inbound endpoint. This is the recommended path for TypeScript and Go services.
 
         <Steps>
             <Step title={"Install the Restate Operator"}>
@@ -134,7 +134,7 @@ kubectl apply -f restate-cloud-environment.yaml
 ```
 
                 <Note>
-                    A `RestateCloudEnvironment` deploys a separate tunnel pod by default. Services configured with `tunnelMode: in-process` connect directly from their application pods and do not use that pod in their invocation path.
+                    A `RestateCloudEnvironment` deploys a standalone tunnel client pod by default. Services configured with `tunnelMode: in-process` connect directly from their application pods and do not use that pod in their invocation path.
                 </Note>
             </Step>
 
@@ -188,7 +188,7 @@ func main() {
                 </Note>
 
                 <Warning>
-                    In-process tunnels are not supported with Knative mode.
+                    The in-process tunnel client is not supported with Knative mode.
                 </Warning>
             </Step>
 
@@ -243,8 +243,8 @@ kubectl apply -f service-deployment.yaml -n your-service-namespace
         </Steps>
     </Tab>
 
-    <Tab title="Separate tunnel">
-        Use the separate tunnel managed by the `RestateCloudEnvironment`. Your application keeps its normal HTTP listener, and the tunnel pod forwards Restate Cloud invocations to its Kubernetes Service.
+    <Tab title="Standalone Tunnel">
+        Use the standalone tunnel client managed by the `RestateCloudEnvironment`. Your application keeps its normal HTTP listener, and the tunnel client pod forwards Restate Cloud invocations to its Kubernetes Service.
 
         <Steps>
             <Step title={"Install the Restate Operator"}>
@@ -260,7 +260,7 @@ kubectl create secret generic my-cloud-environment-secret \
             </Step>
 
             <Step title="Create a RestateCloudEnvironment">
-                Create the environment manifest. This resource deploys the separate tunnel pod used by this path:
+                Create the environment manifest. This resource deploys the standalone tunnel client pod used by this path:
 
 ```yaml restate-cloud-environment.yaml
 apiVersion: restate.dev/v1beta1
@@ -323,7 +323,7 @@ spec:
 kubectl apply -f service-deployment.yaml -n your-service-namespace
 ```
 
-                The operator creates a Kubernetes Service for the SDK endpoint, registers it through the separate tunnel, and handles [versioning](/services/versioning#automatic-versioning-with-kubernetes-operator).
+                The operator creates a Kubernetes Service for the SDK endpoint, registers it through the standalone tunnel client, and handles [versioning](/services/versioning#automatic-versioning-with-kubernetes-operator).
             </Step>
 
             <Step title="Invoke your service">

@@ -8,6 +8,7 @@ require (
 	github.com/restatedev/sdk-go v1.0.4
 	github.com/restatedev/sdk-go/testing v1.0.0
 	github.com/restatedev/sdk-go/x/protoc-gen-go-restate v0.26.0
+	github.com/restatedev/sdk-go/x/tunnel v0.1.1
 	github.com/stretchr/testify v1.11.1
 	google.golang.org/protobuf v1.36.11
 )
@@ -68,6 +69,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
