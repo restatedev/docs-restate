@@ -72,19 +72,20 @@ function extractLanguageSymbol(filePath) {
 const CODE_LOAD_REGEX = /```(\w+)([^\n]*)\{["']?CODE_LOAD::([^#?\}]+)(?:#([^?\}]*))?(?:\?([^\}]*))?\}([^\n]*)\n([\s\S]*?)```/g;
 
 function parseOptions(optionsStr) {
-    // optionsStr: collapse_prequel&remove_comments&collapse_imports
-    const opts = { collapsePrequel: false, removeComments: false, collapseImports: false };
+    // optionsStr: collapse_prequel&remove_comments&remove_preamble&collapse_imports
+    const opts = { collapsePrequel: false, removeComments: false, removePreamble: false, collapseImports: false };
     if (!optionsStr) return opts;
     const parts = optionsStr.split("&");
     for (const part of parts) {
         if (part.includes("collapse_prequel")) opts.collapsePrequel = true;
         if (part.includes("remove_comments")) opts.removeComments = true;
+        if (part.includes("remove_preamble")) opts.removePreamble = true;
         if (part.includes("collapse_imports")) opts.collapseImports = true;
     }
     return opts;
 }
 
-function extractAndClean(fileContent, customTag, filePath, collapsePrequel, removeComments, collapseImports) {
+function extractAndClean(fileContent, customTag, filePath, collapsePrequel, removeComments, removePreamble, collapseImports) {
     const { commentSymbol, serviceSymbol } = extractLanguageSymbol(filePath);
     let lines;
 
@@ -123,6 +124,10 @@ function extractAndClean(fileContent, customTag, filePath, collapsePrequel, remo
         return keepLine;
     });
 
+    if (removePreamble) {
+        finalLines = removePreambleFn(finalLines, commentSymbol);
+    }
+
     if (collapsePrequel) {
         finalLines = collapsePrequelFn(finalLines, serviceSymbol, commentSymbol);
     }
@@ -132,6 +137,25 @@ function extractAndClean(fileContent, customTag, filePath, collapsePrequel, remo
     }
 
     return finalLines.map(line => line.replace(new RegExp(`^${leadingWhitespace}`), '')).join('\n');
+}
+
+function removePreambleFn(lines, commentSymbol) {
+    let index = 0;
+
+    while (index < lines.length && lines[index].trim() === '') index++;
+
+    if (lines[index]?.trim().startsWith('/*')) {
+        while (index < lines.length) {
+            const isEnd = lines[index].includes('*/');
+            index++;
+            if (isEnd) break;
+        }
+    } else {
+        while (index < lines.length && lines[index].trim().startsWith(commentSymbol)) index++;
+    }
+
+    while (index < lines.length && lines[index].trim() === '') index++;
+    return lines.slice(index);
 }
 
 function collapsePrequelFn(lines, serviceSymbol, commentSymbol) {
@@ -274,6 +298,7 @@ async function updateCodeBlocksInFile(filePath) {
                     snippetFullPath,
                     opts.collapsePrequel,
                     opts.removeComments,
+                    opts.removePreamble,
                     opts.collapseImports
                 );
             } catch (e) {
@@ -340,6 +365,7 @@ async function updateCodeBlocksInFile(filePath) {
                 snippetFullPath,
                 opts.collapsePrequel,
                 opts.removeComments,
+                opts.removePreamble,
                 opts.collapseImports
             );
         } catch (e) {
@@ -453,7 +479,7 @@ async function buildSkillFile(srcPath, outPath) {
         let codeToInsert;
         try {
             const snippetFullPath = loadPath.startsWith('https://raw.githubusercontent.com/') ? loadPath : path.resolve(SNIPPET_DIR, loadPath);
-            codeToInsert = extractAndClean(loadedCode, customTag, snippetFullPath, opts.collapsePrequel, opts.removeComments, opts.collapseImports);
+            codeToInsert = extractAndClean(loadedCode, customTag, snippetFullPath, opts.collapsePrequel, opts.removeComments, opts.removePreamble, opts.collapseImports);
         } catch (e) {
             console.warn(`❌ Skills build: error processing ${loadPath}: ${e.message}`);
             continue;

@@ -4,8 +4,10 @@ description: "Run your TypeScript services on Vercel"
 icon: "/img/cloud-providers/vercel.svg"
 ---
 
-import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
+import RequestIdentityValidationServerless from '/snippets/common/request-identity-validation-serverless.mdx';
 import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import RegisterDeploymentViaUi from '/snippets/common/register-deployment-via-ui.mdx';
+import SendGreeterRequest from '/snippets/common/send-greeter-request.mdx';
 import VercelCicdWorkflow from '/snippets/common/vercel-cicd-workflow.mdx';
 
 Deploy your Restate services on Vercel.
@@ -22,9 +24,7 @@ This guide covers project configuration, service registration, and security setu
 
 <Tabs>
     <Tab title="New project">
-        Start from the template:
-        <GitHub.Repo repo="restatedev/vercel-template" />
-
+        Start from the [template](https://github.com/restatedev/vercel-template):
         <Card
             title="Create your Restate + Vercel repository"
             icon="github"
@@ -68,9 +68,23 @@ export const { GET, POST } = serve();
 
 </Step>
 
-<Step title={"Configure Vercel project"}>
+<Step title={"Secure your service with request identity validation"}>
 
-Create the project in [the Vercel dashboard](https://vercel.com/new).
+Vercel deployments are public HTTP endpoints. Secure your service with request identity validation so that it only accepts requests from the Restate environment you trust.
+
+
+<RequestIdentityKeyGen/>
+
+Clone the project locally and configure the key in your Restate SDK endpoint before deploying.
+
+<RequestIdentityValidationServerless/>
+
+The public key is not secret, so it is safe to include it directly in your service source code or configuration files.
+</Step>
+
+<Step title={"Deploy your project to Vercel"}>
+
+Create and deploy the project from [the Vercel dashboard](https://vercel.com/new).
 
 For Restate to push requests to the Vercel project, you need Vercel Generated URLs to be accessible by Restate.
 You have two alternatives:
@@ -81,48 +95,34 @@ You have two alternatives:
 
 </Step>
 
-<Step title={"Secure your service with request identity validation"}>
-
-Vercel deployments are public HTTP endpoints. Secure your service with request identity validation so that it only accepts requests from the Restate environment you trust.
+<Step title={"Get your Commit URL"}>
 
 
-<RequestIdentityKeyGen/>
+Go to your Vercel deployment and copy the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) (highlighted in black on the screenshot).
 
-Configure the key in your Restate SDK endpoint before deploying, then register the immutable Vercel Commit URL with that environment.
+    <Frame>
+        <img src="/img/services/deploy/vercel-commit-url.png" alt="Vercel Commit URL"/>
+    </Frame>
 
-<RequestIdentityValidation/>
+    This lets that Restate address specific Vercel deployments, and handle [versioning](/services/versioning) for you.
 
-The public key is not secret, so it is safe to include it directly in your service source code or configuration files.
 </Step>
-
 <Step title={"Register the service to Restate"}>
+    <RegisterDeploymentViaUi/>
+    <Frame>
+        <img src="/img/services/deploy/vercel-register-url.png" alt="Vercel Registration"/>
+    </Frame>
 
-In order for Restate to push requests to your services, you need to [register the service to Restate](/services/versioning) using the CLI or UI.
-Make sure to register the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) so that Restate can address specific Vercel deployments:
+    In the advanced options, enable HTTP1.1 and optionally, set the header for the deployment protection bypass:
+    <Frame>
+        <img src="/img/services/deploy/vercel-register-advanced.png" alt="Vercel Registration Advanced"/>
+    </Frame>
 
-```shell
-npx @restatedev/restate deployments register \
-  --use-http1.1 \
-  https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
-```
-
-<Tip>
-    `--use-http1.1` is required to interact with Next.js projects.
-</Tip>
-
-If you set up **Protection Bypass for Automation** as described above, pass the additional header as an argument:
-
-```shell
-npx @restatedev/restate deployments register \
-    --use-http1.1 \
-    --extra-header x-vercel-protection-bypass=<token> \
-    https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
-```
-
+    <Tip>Read the [CICD Automation section](#ci%2Fcd-automation) to set up automatic service registration on push to main.</Tip>
 
 </Step>
 <Step title={"Send your first request"}>
-    You're set up! Go to the **Overview page > Greeter > Playground** and start sending requests to your service.
+    <SendGreeterRequest/>
 </Step>
 
 </Steps>
@@ -131,6 +131,10 @@ npx @restatedev/restate deployments register \
 
 You can set up automation to automatically register new [Restate service versions](/services/versioning) every time a Vercel deployment gets promoted.
 
+<Tip>
+If you've followed the steps above, then you already have the GitHub Actions workflow set up. All you need to do is to add the secrets below to your project.
+</Tip>
+
 <Tabs>
 <Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
 <VercelCicdWorkflow/>
@@ -138,7 +142,7 @@ You can set up automation to automatically register new [Restate service version
 This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
 - `RESTATE_AUTH_TOKEN`: Your Restate Cloud or BYOC auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
-<Accordion title="View"><img src="/img/services/deploy/deployment-token.png" alt="Token setup" width="50%" /></Accordion>
+    <Accordion title="View"><img src="/img/services/deploy/deployment-token.png" alt="Token setup" width="50%" /></Accordion>
 
 - `VERCEL_PROTECTION_BYPASS_TOKEN`: Only if you set up the Protection Bypass for Automation as described above.
 </Tab>

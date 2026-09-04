@@ -5,6 +5,7 @@ icon: "shield"
 ---
 
 import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
+import RequestIdentityValidationServerless from '/snippets/common/request-identity-validation-serverless.mdx';
 import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
 
 This page covers securing communication between Restate and your service deployments. For securing the Restate Server itself (network ports, admin access, header handling), see [Server Security](/server/security).
@@ -28,7 +29,15 @@ particular Restate instance.
 
 <Step title={"Validate requests with the public key"}>
 Configure your service to use that public key to validate requests. The SDK then rejects discovery and invocation requests that were not signed by the corresponding Restate environment.
+
+For a long running service, configure request identity validation on the SDK endpoint:
+
 <RequestIdentityValidation />
+
+For a TypeScript serverless platform handler, provide the public key to `restate.createEndpointHandler` instead:
+
+<RequestIdentityValidationServerless />
+
 The public key is not secret, so you can include it in your service source code or configuration.
 </Step>
 </Steps>
@@ -43,17 +52,18 @@ Note that private services can still be invoked by other handlers via the SDK.
 
 ## Client-side journal encryption
 
-In the TypeScript SDK, you can optionally configure client-side encryption, which makes your data opaque to Restate.
-In this case, the SDK encrypts journal entries after serializing them but before sending them to Restate.
+The TypeScript SDK has experimental support for client-side journal value encryption.
+It lets the SDK encrypt selected values after serializing them but before sending them to Restate.
 
-**What is encrypted?** Only the following journal entries are encrypted:
-- The input and output parameters to the handler
-- `ctx.run` success results
-- RPC calls parameters and return values (for service-to-service invocations)
+The codec is applied to:
+- Handler inputs and successful outputs
+- Successful `ctx.run` results
+- Service call and send parameters, and successful call results
 - State values
-- Awakeables and workflow promise results
+- Successful awakeable, signal, and workflow promise values
+- Successful `ctx.attach` results
 
-It is not possible to encrypt any other journal entries.
+The codec does not encrypt journal metadata or other fields such as service and handler names, state keys, headers, or failure messages.
 
 **How to enable encryption?** Implement the [`JournalValueCodec`](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-core/src/entry_codec.ts) interface:
 

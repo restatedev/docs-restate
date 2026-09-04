@@ -13,7 +13,7 @@ import (
 	"github.com/restatedev/sdk-go/x/tunnel"
 )
 
-func main() {
+func serve() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
