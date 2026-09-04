@@ -226,6 +226,62 @@ function attr(value) {
     return String(value).replace(/"/g, '&quot;');
 }
 
+// Renders a tagged enum: the discriminator as a normal, visible option listing
+// the values it accepts, then one tab per value holding the options that value
+// adds.
+//
+// Without this the discriminator is invisible — it only appears inside each
+// variant's own box, so nothing on the page says a `type` has to be set at all,
+// let alone to what. Tabs rather than collapsed boxes because picking exactly
+// one is what tabs mean, and because it keeps one variant's options on screen.
+function generateTaggedEnum(variants, requiredProps, path, indent) {
+    const discriminators = variants.map(findDiscriminator);
+    if (discriminators.some(d => d === null)) return null;
+
+    const name = discriminators[0].name;
+    if (!discriminators.every(d => d.name === name)) return null;
+
+    // The discriminator itself, described once with every value it accepts.
+    const fieldPath = [...path, name];
+    const post = generatePostAttr({}, buildTomlPath(fieldPath, {}, 'string'), buildEnvVar(fieldPath));
+    let output = `${indent}<ResponseField name="${name}" type="string" required${post}>\n`;
+    output += `${indent}    Selects which shape this section takes. Each value accepts its own\n`;
+    output += `${indent}    additional options, listed under it below.\n\n`;
+    variants.forEach((variant, index) => {
+        // The title is dropped: it restates the value, giving `"none" : None:
+        // No retry strategy.`. Collapsed onto one line too, since a hard break
+        // inside a list item ends the list and several of these are multi-paragraph.
+        const description = formatDescription(variant.description, undefined, variant.examples)
+            .replace(/\s+/g, ' ').trim();
+        output += `${indent}    - \`"${discriminators[index].value}"\`${description ? ' : ' + description : ''}\n`;
+    });
+    output += `${indent}</ResponseField>\n\n`;
+
+    // A variant whose only field is the discriminator adds nothing, so it gets
+    // no tab; the bullet above already describes it.
+    const withOptions = variants
+        .map((variant, index) => ({ variant, value: discriminators[index].value }))
+        .filter(({ variant }) => Object.keys(variant.properties || {})
+            .some(key => fixedValue(variant.properties[key]) === undefined));
+
+    if (withOptions.length === 0) return output;
+
+    output += `${indent}Additional options for each \`${name}\`:\n\n`;
+    output += `${indent}<Tabs>\n`;
+    withOptions.forEach(({ variant, value }) => {
+        const fields = {};
+        Object.entries(variant.properties || {}).forEach(([key, schema]) => {
+            if (fixedValue(schema) === undefined) fields[key] = schema;
+        });
+        output += `${indent}<Tab title="${attr(`${name} = "${value}"`)}">\n`;
+        output += generateResponseFieldsFromProperties(fields, variant.required || requiredProps, -2, path);
+        output += `${indent}</Tab>\n`;
+    });
+    output += `${indent}</Tabs>\n\n`;
+
+    return output;
+}
+
 // Names a variant after what you actually have to write to select it, rather
 // than after the Rust variant name: "Exponential" does not tell you to write
 // `type = "exponential"`, and "Pretty" does not tell you to write `"pretty"`.
@@ -302,11 +358,14 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
             const variants = propSchema.oneOf;
             output += `${indent}    \n`;
 
+            // Shared options apply to every variant, so emit them once rather
+            // than repeating the same keys inside each box.
+            output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level, path);
+
             variants.forEach((variant, index) => {
                 const variantName = parseVariantName(variant, index);
                 output += `${indent}<Expandable title="${attr(variantName)}">\n`;
                 output += generateResponseFieldsFromProperties(variant.properties, propSchema.required, level, path);
-                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, level, path);
                 output += `${indent}    </Expandable>\n`;
             });
 
@@ -319,10 +378,27 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
 
     // Handle array items
     if (type === 'array' && propSchema.items) {
-        output += `${indent}    \n`;
-        output += `${indent}    <Expandable title="Array Items">\n`;
-        output += generateResponseField('item', propSchema.items, propSchema.required, level + 2, [...path, '[]']);
-        output += `${indent}    </Expandable>\n`;
+        if (itemsAreObjects(propSchema)) {
+            // An array of tables: the element has real fields of its own, so it
+            // is worth a box.
+            output += `${indent}    \n`;
+            output += `${indent}    <Expandable title="Array Items">\n`;
+            output += generateResponseField('item', propSchema.items, propSchema.required, level + 2, [...path, '[]']);
+            output += `${indent}    </Expandable>\n`;
+        } else {
+            // An array of scalars. The element has no key of its own, so a box
+            // around it costs a click to reveal a nameless row. List the
+            // permitted values inline instead, and emit nothing when the element
+            // is a free-form string.
+            const itemVariants = (propSchema.items.oneOf || propSchema.items.anyOf || [])
+                .filter(v => fixedValue(v) !== undefined);
+            if (itemVariants.length > 0) {
+                output += `${indent}    \n`;
+                itemVariants.forEach((variant, index) => {
+                    output += `${indent}    - \`${parseVariantName(variant, index)}\` : ${formatDescription(variant.description)}\n`;
+                });
+            }
+        }
     }
     
     // Handle anyOf
@@ -388,18 +464,28 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
         }
         output += `${indent}    \n`;
 
-        variants.forEach((variant, index) => {
-            let variantName = parseVariantName(variant, index);
-            if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
-                output += `${indent}    \n`;
-                output += `${indent}    <Expandable title="${attr(variantName || "Properties")}">\n`;
-                output += `${indent}    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
-                output += generateResponseFieldsFromProperties( variant.properties, variant.required, level, path);
-                output += `${indent}    </Expandable>\n`;
-            } else {
-                output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
-            }
-        });
+        // A nested tagged enum, e.g. a retry policy: same treatment as at
+        // section level, so `type` is visible without opening anything.
+        const tagged = variants.some(v => v.properties)
+            ? generateTaggedEnum(variants, propSchema.required, path, `${indent}    `)
+            : null;
+
+        if (tagged) {
+            output += tagged;
+        } else {
+            variants.forEach((variant, index) => {
+                let variantName = parseVariantName(variant, index);
+                if ((['object', 'oneOf', 'array'].some(t => variant.type.includes(t))) && variant.properties) {
+                    output += `${indent}    \n`;
+                    output += `${indent}    <Expandable title="${attr(variantName || "Properties")}">\n`;
+                    output += `${indent}    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
+                    output += generateResponseFieldsFromProperties( variant.properties, variant.required, level, path);
+                    output += `${indent}    </Expandable>\n`;
+                } else {
+                    output += `${indent}    - \`${variantName}\` : ${formatDescription(variant.description)}\n`
+                }
+            });
+        }
     }
     
     output += `${indent}</ResponseField>\n\n`;
@@ -407,14 +493,35 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
 }
 
 
-// Whether a top-level property is a `[section]` table worth its own heading,
-// i.e. it has named options underneath it. A map like `tracing-headers` is not:
-// its keys are arbitrary, so it is a single settable value and belongs with the
-// root options.
-function isTopLevelSection(propSchema) {
-    const { type } = getTypeFromSchema(propSchema);
+// Unwraps the `anyOf: [T, null]` that an optional sub-table is modelled as, so
+// a nullable section (`worker.invoker.action-throttling`) is treated like any
+// other section rather than as an opaque field.
+function unwrapOptional(propSchema) {
+    const variants = propSchema.anyOf;
+    if (!Array.isArray(variants) || variants.length !== 2) return propSchema;
+    if (!variants.some(v => v.type === 'null')) return propSchema;
+    return variants.find(v => v.type !== 'null') || propSchema;
+}
+
+// Whether a property is a `[section]` table worth its own heading, i.e. it has
+// named options underneath it. A map like `tracing-headers` is not: its keys are
+// arbitrary, so it is a single settable value and belongs with the plain options.
+function isSection(propSchema) {
+    const schema = unwrapOptional(propSchema);
+    const { type } = getTypeFromSchema(schema);
     if (type !== 'object' && type !== 'oneOf') return false;
-    return Boolean(propSchema.properties) || (propSchema.oneOf || []).some(v => v.properties);
+    return Boolean(schema.properties) || (schema.oneOf || []).some(v => v.properties);
+}
+
+// Separates a table's own options from its sub-tables. Options are rendered
+// under the table's own heading; sub-tables each get a heading of their own.
+function splitProperties(properties) {
+    const options = {};
+    const subSections = {};
+    Object.entries(properties || {}).forEach(([name, propSchema]) => {
+        (isSection(propSchema) ? subSections : options)[name] = propSchema;
+    });
+    return { options, subSections };
 }
 
 // Renders one `[section]` of the config file: an `## admin` heading, the
@@ -427,43 +534,62 @@ function isTopLevelSection(propSchema) {
 // enum whose variants are objects (`metadata-client`, `network-error-retry-policy`).
 // Anything else throws, so a future server release that reshapes a section fails
 // the generator loudly instead of quietly emitting an empty section.
-function generateSection(name, propSchema) {
-    const { type } = getTypeFromSchema(propSchema);
-    const description = formatDescription(propSchema.description, propSchema.title, propSchema.examples);
+function generateSection(path, propSchema, level) {
+    const schema = unwrapOptional(propSchema);
+    const { type } = getTypeFromSchema(schema);
+    const dotted = path.join('.');
+    const description = formatDescription(
+        propSchema.description || schema.description,
+        propSchema.title || schema.title,
+        propSchema.examples || schema.examples
+    );
 
-    let output = `## ${name}\n\n`;
+    let output = `${'#'.repeat(level)} ${dotted}\n\n`;
     if (description) {
         output += `${description}\n\n`;
     }
     // The heading alone does not say how to address the section as a whole,
     // which the removed wrapper's badge used to. Spell out both forms.
-    output += `Configuration file section \`[${name}]\`, environment variable prefix \`${buildEnvVar([name])}__\`.\n\n`;
+    output += `Configuration file section \`[${dotted}]\`, environment variable prefix \`${buildEnvVar(path)}__\`.\n\n`;
 
-    const variants = (propSchema.oneOf || []).some(v => v.properties) ? propSchema.oneOf : null;
+    const variants = (schema.oneOf || []).some(v => v.properties) ? schema.oneOf : null;
 
-    if (variants) {
-        // A tagged enum: each variant is a different shape of the same section,
-        // so each gets its own Expandable, as it does when nested. Properties on
-        // the section itself are shared by every variant.
-        variants.forEach((variant, index) => {
-            output += `<Expandable title="${attr(parseVariantName(variant, index))}">\n`;
-            if (variant.description) {
-                output += `    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
-            }
-            output += generateResponseFieldsFromProperties(variant.properties || {}, variant.required, -2, [name]);
-            if (propSchema.properties) {
-                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, -2, [name]);
-            }
-            output += `</Expandable>\n\n`;
-        });
-    } else if (propSchema.properties) {
-        output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, -2, [name]);
-    } else {
+    if (!variants && !schema.properties) {
         throw new Error(
-            `Cannot render top-level section "${name}": expected an object with properties or a ` +
+            `Cannot render section "${dotted}": expected an object with properties or a ` +
             `oneOf of object variants, got type="${type}". Teach generateSection() the new shape.`
         );
     }
+
+    // Everything belonging to this table has to be emitted before the first
+    // sub-table heading, because from that heading onwards the reader — and the
+    // table of contents — attributes what follows to the sub-table. That is why
+    // the section's own variant boxes come before the recursion and not after.
+    const { options, subSections } = splitProperties(schema.properties);
+    output += generateResponseFieldsFromProperties(options, schema.required, -2, path);
+
+    if (variants) {
+        // Options the section declares itself apply to every variant, so they
+        // are emitted once above rather than repeated per variant.
+        const tagged = generateTaggedEnum(variants, schema.required, path, '');
+        if (tagged) {
+            output += tagged;
+        } else {
+            // Not a tagged enum, so there is no value to name the variants by.
+            variants.forEach((variant, index) => {
+                output += `<Expandable title="${attr(parseVariantName(variant, index))}">\n`;
+                if (variant.description) {
+                    output += `    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
+                }
+                output += generateResponseFieldsFromProperties(variant.properties || {}, variant.required, -2, path);
+                output += `</Expandable>\n\n`;
+            });
+        }
+    }
+
+    Object.entries(subSections).forEach(([name, subSchema]) => {
+        output += generateSection([...path, name], subSchema, level + 1);
+    });
 
     return output;
 }
@@ -488,7 +614,7 @@ function generateRestateConfigViewer(schema) {
     const rootKeys = {};
     const sections = {};
     Object.entries(properties).forEach(([name, propSchema]) => {
-        (isTopLevelSection(propSchema) ? sections : rootKeys)[name] = propSchema;
+        (isSection(propSchema) ? sections : rootKeys)[name] = propSchema;
     });
 
     output += '## General options\n\n';
@@ -496,7 +622,7 @@ function generateRestateConfigViewer(schema) {
     output += generateResponseFieldsFromProperties(rootKeys, schema.required, -2, []);
 
     Object.entries(sections).forEach(([name, propSchema]) => {
-        output += generateSection(name, propSchema);
+        output += generateSection([name], propSchema, 2);
     });
 
     return output;
