@@ -368,16 +368,98 @@ function generateResponseField(propName, propSchema, isRequired = false, level =
 }
 
 
+// Whether a top-level property is a `[section]` table worth its own heading,
+// i.e. it has named options underneath it. A map like `tracing-headers` is not:
+// its keys are arbitrary, so it is a single settable value and belongs with the
+// root options.
+function isTopLevelSection(propSchema) {
+    const { type } = getTypeFromSchema(propSchema);
+    if (type !== 'object' && type !== 'oneOf') return false;
+    return Boolean(propSchema.properties) || (propSchema.oneOf || []).some(v => v.properties);
+}
+
+// Renders one `[section]` of the config file: an `## admin` heading, the
+// section's own description, then its options at the top nesting level. Dropping
+// the wrapping ResponseField/Expandable is what makes the heading useful, since
+// a table-of-contents jump then lands on the options themselves rather than on a
+// collapsed box.
+//
+// Today's schema produces two shapes: a plain object of options, and a tagged
+// enum whose variants are objects (`metadata-client`, `network-error-retry-policy`).
+// Anything else throws, so a future server release that reshapes a section fails
+// the generator loudly instead of quietly emitting an empty section.
+function generateSection(name, propSchema) {
+    const { type } = getTypeFromSchema(propSchema);
+    const description = formatDescription(propSchema.description, propSchema.title, propSchema.examples);
+
+    let output = `## ${name}\n\n`;
+    if (description) {
+        output += `${description}\n\n`;
+    }
+    // The heading alone does not say how to address the section as a whole,
+    // which the removed wrapper's badge used to. Spell out both forms.
+    output += `Configuration file section \`[${name}]\`, environment variable prefix \`${buildEnvVar([name])}__\`.\n\n`;
+
+    const variants = (propSchema.oneOf || []).some(v => v.properties) ? propSchema.oneOf : null;
+
+    if (variants) {
+        // A tagged enum: each variant is a different shape of the same section,
+        // so each gets its own Expandable, as it does when nested. Properties on
+        // the section itself are shared by every variant.
+        variants.forEach((variant, index) => {
+            output += `<Expandable title="${parseVariantName(variant, index)}">\n`;
+            if (variant.description) {
+                output += `    ${formatDescription(variant.description, undefined, variant.examples)}\n\n`;
+            }
+            output += generateResponseFieldsFromProperties(variant.properties || {}, variant.required, -2, [name]);
+            if (propSchema.properties) {
+                output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, -2, [name]);
+            }
+            output += `</Expandable>\n\n`;
+        });
+    } else if (propSchema.properties) {
+        output += generateResponseFieldsFromProperties(propSchema.properties, propSchema.required, -2, [name]);
+    } else {
+        throw new Error(
+            `Cannot render top-level section "${name}": expected an object with properties or a ` +
+            `oneOf of object variants, got type="${type}". Teach generateSection() the new shape.`
+        );
+    }
+
+    return output;
+}
+
 function generateRestateConfigViewer(schema) {
-    let output = `---\ntitle: "Restate Server Configuration"\ndescription: "Reference of the configuration options for Restate Server."\nmode: "wide"\n---\n\n` +
+    // No `mode: "wide"` on purpose: it suppresses the "On this page" sidebar,
+    // which this page needs, and it pins the column to a fixed width so the page
+    // would no longer match the rest of the docs.
+    let output = `---\ntitle: "Restate Server Configuration"\ndescription: "Reference of the configuration options for Restate Server."\n---\n\n` +
         'import Intro from "/snippets/common/default-configuration.mdx" \n' +
         '\n' +
         '<Intro />' +
         '\n\n';
 
-    if (schema.properties) {
-        output += generateResponseFieldsFromProperties(schema.properties, schema.required, -2, []);
-    }
+    const properties = schema.properties || {};
+
+    // Split the flattened root keys from the `[section]` tables, and put the
+    // root keys first. That is the order a TOML file has to be written in, and
+    // it is what lets each section carry its own heading: interleaved
+    // alphabetically, as the schema lists them, a heading would sit above
+    // options that do not belong to it.
+    const rootKeys = {};
+    const sections = {};
+    Object.entries(properties).forEach(([name, propSchema]) => {
+        (isTopLevelSection(propSchema) ? sections : rootKeys)[name] = propSchema;
+    });
+
+    output += '## General options\n\n';
+    output += 'Options set at the root of the configuration file, above any `[section]` header.\n\n';
+    output += generateResponseFieldsFromProperties(rootKeys, schema.required, -2, []);
+
+    Object.entries(sections).forEach(([name, propSchema]) => {
+        output += generateSection(name, propSchema);
+    });
+
     return output;
 }
 

@@ -1,6 +1,8 @@
-// Click-to-copy for the TOML key and environment variable badges on the server
-// configuration reference, so you can lift either one for an option without
-// walking back up the nested sections by hand.
+// Client-side enhancements for the server configuration reference. Marks the
+// page with `config-reference` on <html> so styles.css can scope its badge
+// styling to it, and makes the TOML key and environment variable badges
+// click-to-copy, so you can lift either one for an option without walking back
+// up the nested sections by hand.
 //
 // Mintlify renders each string of a `<ResponseField post={[...]}>` array as its
 // own element tagged `data-component-part="field-meta-post"`, with no way to
@@ -47,7 +49,7 @@
     // and there is no reason to watch the DOM anywhere else.
     function syncScope() {
         var active = onConfigPage();
-        document.documentElement.classList.toggle("config-copy", active);
+        document.documentElement.classList.toggle("config-reference", active);
         if (active) {
             observer.observe(document.body, { childList: true, subtree: true });
             scheduleDecorate();
