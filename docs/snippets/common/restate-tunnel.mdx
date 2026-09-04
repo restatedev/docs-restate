@@ -1,5 +1,14 @@
-- Restate CLI is communicating with your Restate environment at `https://*.eu.restate.cloud:9070` using your user ID token and asks the admin API to perform a discovery at a special tunnel URL.
-- The Restate Cloud end of the tunnel receives the request from your environment and forwards the traffic to the tunnel container.
-- The tunnel container is forwarding the traffic to the Restate service endpoint.
+The tunnel client opens an **outbound** connection to Restate Cloud, so your service needs no public ingress and no inbound ports.
 
-<img src="/img/cloud/tunnel_deployment.png" alt="Restate Cloud Tunnel" />
+1. **Connect.** The tunnel client resolves the tunnel servers for your region and dials out to them, authenticating with your API key. It holds one connection per tunnel server and redials on its own if a connection drops.
+2. **Register.** Each connection is keyed by your environment and tunnel name. The deployment URL you register encodes both, plus the address the tunnel client should forward to.
+3. **Invoke.** Restate Cloud sends discovery and invocation requests for that deployment to the tunnel server, which streams them down one of the connections registered under that tunnel name.
+4. **Forward.** The tunnel client forwards each request to your service's endpoint inside your network, and responses stream back over the same connection.
+
+Requests are signed with your environment's request identity key, so your service only accepts requests that genuinely came from your environment.
+
+Run several tunnel clients with the same tunnel name for redundancy. The tunnel server load balances invocations across every connection registered under that name, so a client going away does not take the deployment offline.
+
+<Frame>
+    <img src="/img/cloud/tunnel_deployment.png" alt="Restate Cloud reaching a private service through a tunnel client that holds an outbound connection" />
+</Frame>

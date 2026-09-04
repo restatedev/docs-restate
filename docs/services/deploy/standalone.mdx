@@ -6,6 +6,7 @@ icon: "/img/cloud-providers/docker.svg"
 
 import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
 import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import RestateTunnel from '/snippets/common/restate-tunnel.mdx';
 
 You can deploy a Restate service in a container or on any virtual machine. The service runs as a separate process using the appropriate language runtime or as a compiled binary. By convention, it accepts HTTP connections on port `9080`.
 
@@ -38,6 +39,8 @@ restate deployments register <service-address>
 
 Restate Cloud must be able to send discovery and invocation requests to your service. For a service in a private network, a tunnel establishes an outbound connection to Restate Cloud, so you do not need to expose an inbound endpoint.
 
+The tunnel also acts as an authenticating proxy, making it appear as if your Restate Cloud environment sits inside your private network. That means you can use native access control mechanisms, such as VPC security groups and Kubernetes network policies, to manage access to your Cloud environment. It also lets you control connections from the Cloud environment into the rest of your network, by restricting which internal services the tunnel client is allowed to reach.
+
 Choose how you want to run the tunnel client:
 
 | | In-process Tunnel | Standalone Tunnel |
@@ -54,11 +57,9 @@ We recommend the in-process tunnel client for TypeScript and Go because it remov
     Each service process maintains its own outbound connection to Restate Cloud. Invocations arrive directly at the SDK handler, without a standalone tunnel client or HTTP listener in the invocation path. Replicas of the same deployment use the same tunnel name, which lets Restate Cloud balance requests across their connections.
 </Accordion>
 <Accordion title="How does the standalone tunnel client work?">
-    A standalone tunnel client maintains the outbound connection to Restate Cloud and forwards invocations to your service over its normal HTTP endpoint. You can run it beside the service or elsewhere in the same private network, and run multiple tunnel clients for redundancy.
+    You run the tunnel client yourself, beside your service or elsewhere in the same private network, and it forwards invocations to your service over its normal HTTP endpoint.
 
-    <Frame>
-        <img src="/img/cloud/tunnel_deployment.png" alt="Restate Cloud or BYOC connecting to a private service through a standalone tunnel client" />
-    </Frame>
+    <RestateTunnel/>
 </Accordion>
 </AccordionGroup>
 
@@ -106,7 +107,7 @@ go get github.com/restatedev/sdk-go/x/tunnel
         Replace the normal SDK listener with the tunnel client:
 
 <CodeGroup>
-```typescript TypeScript {"CODE_LOAD::ts/src/develop/tunnel.ts#in_process_tunnel"}
+```typescript TypeScript {"CODE_LOAD::ts/src/develop/tunnel.ts#in_process_tunnel"} 
 import { connectTunnel } from "@restatedev/restate-sdk-tunnel";
 import { greeter } from "./greeter";
 
@@ -124,34 +125,34 @@ connection.ready.then(() => {
 });
 ```
 
-```go Go {"CODE_LOAD::go/develop/tunnel.go#in_process_tunnel"}
+```go Go {"CODE_LOAD::go/develop/tunnel.go#in_process_tunnel"} 
 package develop
 
 import (
-    "context"
-    "log"
-    "os"
+  "context"
+  "log"
+  "os"
 
-    restate "github.com/restatedev/sdk-go"
-    "github.com/restatedev/sdk-go/server"
-    "github.com/restatedev/sdk-go/x/tunnel"
+  restate "github.com/restatedev/sdk-go"
+  "github.com/restatedev/sdk-go/server"
+  "github.com/restatedev/sdk-go/x/tunnel"
 )
 
 func serveWithTunnel() {
-    srv := server.NewRestate().Bind(restate.Reflect(MyService{}))
+  srv := server.NewRestate().Bind(restate.Reflect(MyService{}))
 
-    err := tunnel.NewTunnel(srv,
-        tunnel.WithRegion(os.Getenv("RESTATE_CLOUD_REGION")),
-        tunnel.WithEnvironment(
-            os.Getenv("RESTATE_ENVIRONMENT_ID"),
-            os.Getenv("RESTATE_SIGNING_PUBLIC_KEY"),
-        ),
-        tunnel.WithAuthToken(os.Getenv("RESTATE_AUTH_TOKEN")),
-        tunnel.WithTunnelName(os.Getenv("RESTATE_TUNNEL_NAME")),
-    ).Start(context.Background())
-    if err != nil {
-        log.Fatal(err)
-    }
+  err := tunnel.NewTunnel(srv,
+    tunnel.WithRegion(os.Getenv("RESTATE_CLOUD_REGION")),
+    tunnel.WithEnvironment(
+      os.Getenv("RESTATE_ENVIRONMENT_ID"),
+      os.Getenv("RESTATE_SIGNING_PUBLIC_KEY"),
+    ),
+    tunnel.WithAuthToken(os.Getenv("RESTATE_AUTH_TOKEN")),
+    tunnel.WithTunnelName(os.Getenv("RESTATE_TUNNEL_NAME")),
+  ).Start(context.Background())
+  if err != nil {
+    log.Fatal(err)
+  }
 }
 ```
 </CodeGroup>
@@ -221,6 +222,8 @@ docker run \
         - `RESTATE_CLOUD_REGION`: Use the region identifier shown in the UI, such as `eu` or `us`. For BYOC, use the BYOC region identifier.
 
         The health check is available at `:9090/health`. The tunnel container must be able to reach your service's HTTP endpoint.
+
+        You can run the `latest` image tag or pin a specific version of the tunnel client, such as `0.4.0`.
 
         <Accordion title="Local ingress and Admin API proxies">
             By default, the tunnel client exposes the Restate ingress on port `8080` and the Admin API on port `9070` through authenticating proxies. Restrict access to these ports because anyone who can reach them has the same access as the configured token.

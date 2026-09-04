@@ -1,11 +1,12 @@
 ---
 title: "Vercel"
 description: "Run your TypeScript services on Vercel"
-icon: "/img/ai/sdk-integrations/vercel.svg"
+icon: "/img/cloud-providers/vercel.svg"
 ---
 
 import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
 import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import VercelCicdWorkflow from '/snippets/common/vercel-cicd-workflow.mdx';
 
 Deploy your Restate services on Vercel.
 This guide covers project configuration, service registration, and security setup.
@@ -132,33 +133,7 @@ You can set up automation to automatically register new [Restate service version
 
 <Tabs>
 <Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
-```yml
-name: Register to Restate
-
-# React to vercel.deployment.promoted event
-on:
-  repository_dispatch:
-    types:
-      - 'vercel.deployment.promoted'
-jobs:
-  deploy-to-restate:
-    if: github.event_name == 'repository_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Register Restate deployment
-        env:
-          # In your Restate Cloud dashboard, go to Developers > API Keys > Create API Key, and make sure to select **Admin** for the role
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          # You can find this out in Developers > Admin URL.
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
-
-        # Run service registration
-        run: |
-          npx -y @restatedev/restate deployment register -y \
-            --use-http1.1 \
-            ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN && format('--extra-header x-vercel-protection-bypass={0}', secrets.VERCEL_PROTECTION_BYPASS_TOKEN) }} \
-            ${{ github.event.client_payload.url }}/restate
-```
+<VercelCicdWorkflow/>
 
 This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
@@ -168,33 +143,10 @@ This workflow needs the following [**GitHub Actions repository secrets**](https:
 - `VERCEL_PROTECTION_BYPASS_TOKEN`: Only if you set up the Protection Bypass for Automation as described above.
 </Tab>
 <Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
-```yml
-name: Register to Restate
-
-# React to vercel.deployment.promoted event
-on:
-  repository_dispatch:
-    types:
-      - 'vercel.deployment.promoted'
-jobs:
-  deploy-to-restate:
-    if: github.event_name == 'repository_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Register Restate deployment
-        env:
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
-        # Run service registration
-        run: |
-          npx -y @restatedev/restate deployment register -y \
-            --use-http1.1 \
-            ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN && format('--extra-header x-vercel-protection-bypass={0}', secrets.VERCEL_PROTECTION_BYPASS_TOKEN) }} \
-            ${{ github.event.client_payload.url }}/restate
-```
+<VercelCicdWorkflow/>
 
 This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
-- `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
+- `RESTATE_ADMIN_URL`: The URL through which GitHub Actions can reach your Restate Admin API
 - `RESTATE_AUTH_TOKEN`: Set this token if GitHub Actions reaches the Admin API through a reverse proxy that accepts bearer token authentication.
 - `VERCEL_PROTECTION_BYPASS_TOKEN`: Only if you set up the Protection Bypass for Automation as described above.
 </Tab>

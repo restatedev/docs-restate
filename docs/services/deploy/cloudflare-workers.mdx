@@ -1,11 +1,12 @@
 ---
 title: "Cloudflare Workers"
 description: "Run your TypeScript services on Cloudflare Workers"
-icon: "/img/quickstart/cloudflare_workers.svg"
+icon: "/img/cloud-providers/cloudflare-workers.svg"
 ---
 
 import RequestIdentityValidation from '/snippets/common/request-identity-validation.mdx';
 import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import CloudflareCicdWorkflow from '/snippets/common/cloudflare-cicd-workflow.mdx';
 
 Deploy your Restate services on Cloudflare Workers.
 This guide covers project configuration, service registration, and security setup.
@@ -116,47 +117,13 @@ npx @restatedev/restate deployments register \
 
 To automatically deploy to Cloudflare Workers on each git commit to `main` and automatically register new [Restate service versions](/services/versioning):
 
+<Note>
+    Make sure your Cloudflare Worker project exists before the first workflow run. If it does not, create it with `npx wrangler deploy`.
+</Note>
 
 <Tabs>
 <Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
-```yml
-name: Deploy Worker
-on:
-  push:
-    branches:
-      - main
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v5
-      - run: npm ci
-
-      - name: Build & Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        id: deploy
-        with:
-          # Check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Add a message to the deployment with the commit
-          command: versions upload --message "Deployed via GitHub Actions - commit ${{ github.sha }}"
-      - name: Get deployment URL
-        id: get-url
-        env:
-          WRANGLER_OUTPUT: ${{ steps.deploy.outputs.command-output }}
-        run: |
-          URL=$(echo "$WRANGLER_OUTPUT" | awk '/Version Preview URL:/ {gsub(/.*Version Preview URL: /, ""); print}')
-          echo "deployment-url=$URL" >> $GITHUB_OUTPUT
-
-      - name: Register Restate deployment
-        env:
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
-        run: npx -y @restatedev/restate deployment register -y ${{ steps.get-url.outputs.deployment-url }}
-```
+<CloudflareCicdWorkflow/>
 
 This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account. To get your account id, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#cloudflare-account-id
@@ -169,44 +136,7 @@ This workflow needs the following [**GitHub Actions repository secrets**](https:
 </Accordion>
 </Tab>
 <Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
-```yml
-name: Deploy Worker
-on:
-  push:
-    branches:
-      - main
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v5
-      - run: npm ci
-
-      - name: Build & Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        id: deploy
-        with:
-          # Check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # Add a message to the deployment with the commit
-          command: versions upload --message "Deployed via GitHub Actions - commit ${{ github.sha }}"
-      - name: Get deployment URL
-        id: get-url
-        env:
-          WRANGLER_OUTPUT: ${{ steps.deploy.outputs.command-output }}
-        run: |
-          URL=$(echo "$WRANGLER_OUTPUT" | awk '/Version Preview URL:/ {gsub(/.*Version Preview URL: /, ""); print}')
-          echo "deployment-url=$URL" >> $GITHUB_OUTPUT
-
-      - name: Register Restate deployment
-        env:
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
-        run: npx -y @restatedev/restate deployment register -y ${{ steps.get-url.outputs.deployment-url }}
-```
+<CloudflareCicdWorkflow/>
 
 This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare Account. To get your account id, check https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/#cloudflare-account-id
