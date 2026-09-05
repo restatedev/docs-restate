@@ -6,7 +6,8 @@ description: "Run your Restate services on Google Cloud Run with native OIDC aut
 Deploy your Restate services as containers on Google Cloud Run. Restate can invoke private Cloud Run services natively by minting short-lived, Google-signed OIDC ID tokens for each discovery and invocation request.
 
 <Note>
-  Native Google OIDC authentication to private Cloud Run services is only available when `restate-server` runs with a GCP workload identity. It is **not currently supported on [Restate Cloud](/cloud/getting-started)** — registering a private Cloud Run deployment against a Restate Cloud environment will fail discovery with `403 Forbidden`. Support in Restate Cloud is on the roadmap; in the meantime, deploy the service as a public Cloud Run service (`--allow-unauthenticated`) and secure it with [Restate request signing](/services/security#locking-down-service-access) so the SDK authenticates the calling environment.
+  Native Google OIDC authentication to private Cloud Run services requires a Google-recognized identity for `restate-server`: either an ambient GCP workload identity, or an AWS identity federated into your Google Cloud project via a workload identity provider.
+  On [Restate Cloud](/cloud/getting-started), use the latter — see [connecting Google Cloud Run services](/cloud/connecting-services#google-cloud-run-services) for the environment-specific trust setup, then register with the flags described on this page.
 </Note>
 
 ## Set up your service on Cloud Run
@@ -81,6 +82,18 @@ Restate discovers credentials through Google's [Application Default Credentials 
 
 When the ambient identity cannot mint ID tokens for arbitrary audiences, pair it with `--gcp-impersonate-service-account` so Restate calls the IAM Credentials `generateIdToken` API on a target service account that the ambient identity is authorized to impersonate.
 
+### AWS-hosted Restate: workload identity federation
+
+A Restate server whose ambient identity is an AWS identity (such as Restate Cloud, or a self-hosted deployment on EKS/EC2) can mint Google ID tokens without any Google credential, by exchanging a signed AWS identity assertion through a [workload identity federation](https://cloud.google.com/iam/docs/workload-identity-federation) provider in your Google Cloud project. Register with the provider's full resource name, always paired with a service account to impersonate:
+
+```shell
+restate deployments register https://svc-abc-uc.a.run.app \
+  --gcp-workload-identity-provider="//iam.googleapis.com/projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL>/providers/<PROVIDER>" \
+  --gcp-impersonate-service-account caller@my-proj.iam.gserviceaccount.com
+```
+
+The server operator configures which AWS role is assumed for federation (`worker.invoker.gcp-federation` in the server configuration); the provider you create must trust that role, and the impersonation grant is made to the resulting federated subject. On Restate Cloud this is preconfigured — follow [connecting Google Cloud Run services](/cloud/connecting-services#google-cloud-run-services) for the exact trust setup.
+
 ### IAM roles
 
 The principal whose identity ends up in the minted token must hold:
@@ -105,4 +118,4 @@ Authorized-user ADC credentials cannot mint ID tokens for arbitrary audiences wi
 
 ## Token caching and rotation
 
-Tokens are minted on demand and cached per `(impersonate_service_account, audience)` pair on the invoker. Cached tokens are evicted 60 seconds before expiry so that every outbound request carries a token with sufficient lifetime. Discovery requests do not cache tokens; a fresh token is minted for each discovery call.
+Credentials are cached per identity — `(workload identity provider, impersonated service account, audience)` — and shared across discovery and invocations. Each cached credential refreshes its token proactively in the background, so steady-state requests never wait on a mint. Idle credentials are evicted after an hour of disuse and rebuilt transparently on the next request.
