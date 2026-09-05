@@ -1,0 +1,99 @@
+---
+title: "Build your own integration"
+description: "Push events into Restate from your own source with the Integration API."
+---
+
+You can use the Integration API to turn any source of events into Restate invocations.
+
+## Integration client
+
+Use an integration client to send invocations to Restate using the Integration API.
+
+<Tabs>
+<Tab title="Java" icon={"/img/languages/java.svg"}>
+
+Add [`dev.restate:integration-client`](https://central.sonatype.com/artifact/dev.restate/integration-client) to your dependencies.
+
+### Create a client
+
+Create one client for your Restate ingress URL and close it when your integration shuts down:
+
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#client"}
+try (IntegrationClient client = IntegrationClient.builder("http://localhost:8080").build()) {
+  // Use client
+}
+```
+
+### Simple producer
+
+Use `Producer` when your source does not provide stable offsets that you can replay.
+The client assigns an offset to each invocation.
+Call `flush()` before closing the producer to wait until Restate has durably committed everything you sent:
+
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer"}
+try (Producer producer = client.newProducer()) {
+  for (SourceRecord record : records) {
+    producer.send(
+        Invocation.create()
+            .setServiceName("OrderService")
+            .setHandlerName("ingest")
+            .putHeader("content-type", "application/json")
+            .setBody(record.payload()));
+  }
+  producer.flush().get();
+}
+```
+
+## Exactly once producer
+
+Use `ExactlyOnceProducer` when your source provides stable, strictly increasing offsets,
+and choose a producer ID that remains stable across restarts and is unique to that offset sequence.
+After `flush()` returns, you can checkpoint the returned offset in your source:
+
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#exactly_once_producer"}
+try (ExactlyOnceProducer producer = client.newExactlyOnceProducer("orders/partition-0")) {
+  for (SourceRecord record : sourceRecords) {
+    producer.send(
+        record.offset(),
+        Invocation.create()
+            .setServiceName("OrderService")
+            .setHandlerName("ingest")
+            .putHeader("content-type", "application/json")
+            .setBody(record.payload()));
+  }
+  producer.flush().get();
+}
+```
+
+<Accordion title="Producer default fields">
+
+Producers accept `InvocationMetadata` when every invocation shares fields such as the target service, handler, or headers.
+Set defaults to avoid sending over and over the same fields in every invocation.
+
+Fields set on an individual invocation override these defaults.
+
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer_defaults"}
+InvocationMetadata defaults =
+    InvocationMetadata.create()
+        .setServiceName("OrderService")
+        .setHandlerName("ingest")
+        .putHeader("content-type", "application/json");
+
+try (Producer producer = client.newProducer(defaults)) {
+  for (SourceRecord record : records) {
+    producer.send(Invocation.create().setBody(record.payload()));
+  }
+  producer.flush();
+}
+```
+
+</Accordion>
+
+For configuration options and advanced usage, see the [Integration client Javadocs](https://restatedev.github.io/sdk-java/javadocs/dev/restate/integration/package-summary.html).
+
+</Tab>
+</Tabs>
+
+<Note>
+    Java is currently the only supported integration client. We plan to add more in future.
+</Note>
