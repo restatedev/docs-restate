@@ -1,0 +1,86 @@
+---
+title: "Other serverless platforms"
+description: "Deploy Restate services to Modal, Render, Railway, Fly.io, sandboxes, and other serverless or application platforms."
+icon: "/img/cloud-providers/other-serverless.svg"
+---
+
+import RequestIdentityValidation from '/snippets/common/request-identity-validation-platforms.mdx';
+import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+
+You can deploy a Restate service to any serverless, application, AI compute, or sandbox platform that can expose the service as an HTTP endpoint. Use this guide when your platform does not have a dedicated Restate deployment guide or template.
+
+## Supported platforms
+In practice, many environments that can host an HTTP API can also host a Restate service. They must run or forward requests to a Restate SDK endpoint, expose it to your Restate environment, and keep the registered deployment available while it has active or retrying invocations.
+
+Examples include Azure Functions, Google Cloud Functions, Netlify Functions, Render, Railway, Fly.io, and Heroku. For AI applications, you can also consider platforms such as Modal, Beam, and BentoCloud, or sandbox environments such as Daytona and E2B.
+
+For AWS Lambda, Vercel, Google Cloud Run, Cloudflare Workers, and Deno Deploy, use their dedicated guides in this section.
+
+<Note>
+    If you use a public endpoint, communication between Restate and your service must use HTTPS. You can use a load balancer such as AWS Network Load Balancer for TLS termination. For optimum performance, the load balancer in front of your service must support HTTP/2.
+
+    Check which HTTP versions and streaming modes your platform supports. If it does not support bidirectional communication, configure the SDK endpoint accordingly. When the public endpoint only supports HTTP/1.1, register it with `--use-http1.1`. See the serving guide for [TypeScript](/develop/ts/serving), [Java and Kotlin](/develop/java/serving), [Python](/develop/python/serving), or [Go](/develop/go/serving) for the available endpoint types.
+</Note>
+
+## Deploying to another serverless platform
+
+<Steps titleSize="h3">
+<Step title="Develop your service">
+
+Develop and test your Restate service locally by following the [quickstart](/quickstart). Then expose the service through the HTTP or Fetch handler supported by your serverless platform.
+
+</Step>
+
+<Step title="Secure your service with request identity validation">
+
+Serverless functions are commonly exposed through public HTTP endpoints. Secure your service with request identity validation so that it only accepts requests from the Restate environment you trust.
+
+<RequestIdentityKeyGen/>
+
+Configure the key in your Restate SDK endpoint before deploying the service.
+
+<RequestIdentityValidation/>
+
+The public key is not secret, so it is safe to include it directly in your service source code or configuration files.
+
+</Step>
+
+<Step title="Deploy to your serverless platform">
+
+Package and deploy the service by following your platform's documentation. Configure the function or application route so that it forwards requests to the Restate SDK endpoint.
+
+The resulting endpoint must be reachable from your Restate environment.
+
+<Tip>
+    Prefer a platform that provides an immutable URL for every deployed revision. Depending on the platform, this might be called a revision URL, preview URL, deploy permalink, or versioned route. Register that URL rather than a mutable production URL.
+
+    Restate sends retries and ongoing invocations to the deployment where they started. That endpoint must therefore continue serving the same code until the deployment no longer has active invocations. See [service versioning](/services/versioning) for details.
+</Tip>
+
+</Step>
+
+<Step title="Register the service with Restate">
+
+Register the deployed endpoint using the Restate CLI or UI:
+
+```shell
+npx @restatedev/restate deployments register \
+  https://<your-serverless-endpoint>
+```
+
+If the endpoint only supports HTTP/1.1, register it with:
+
+```shell
+npx @restatedev/restate deployments register \
+  --use-http1.1 \
+  https://<your-serverless-endpoint>
+```
+
+</Step>
+
+<Step title="Send your first request">
+
+Open your service in the Restate UI, select a handler, and use the **Playground** to send a request.
+
+</Step>
+</Steps>

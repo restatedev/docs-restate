@@ -1,9 +1,14 @@
 ---
 title: "Deno Deploy"
 description: "Run your TypeScript services on Deno Deploy"
+icon: "/img/cloud-providers/deno.svg"
 ---
 
-import CustomVars from "/snippets/custom-variables.mdx";
+import RequestIdentityValidationServerless from '/snippets/common/request-identity-validation-serverless.mdx';
+import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import RegisterDeploymentViaUi from '/snippets/common/register-deployment-via-ui.mdx';
+import SendGreeterRequest from '/snippets/common/send-greeter-request.mdx';
+import DenoCicdWorkflow from '/snippets/common/deno-cicd-workflow.mdx';
 
 Deploy your Restate services on Deno Deploy.
 This guide covers project configuration, service registration, and security setup.
@@ -12,11 +17,14 @@ This guide covers project configuration, service registration, and security setu
     Follow the [quickstart](/quickstart#deno) to try Deno and Restate locally.
 </Tip>
 
-## Set up your project
+## Deploying to Deno Deploy
+
+<Steps titleSize="h3">
+<Step title={"Set up your project"}>
 
 <Tabs>
     <Tab title="New project">
-        Start with the [deno-template](https://github.com/restatedev/examples/tree/main/typescript/templates/deno) and follow its README.
+        Start from the [Deno template](https://github.com/restatedev/deno-template):
 
         [![Deploy on Deno](https://deno.com/button)](https://console.deno.com/new?clone=https://github.com/restatedev/deno-template)
     </Tab>
@@ -39,63 +47,84 @@ Deno.serve({ port: 9080 }, handler);
     </Tab>
 </Tabs>
 
-## Register the service to Restate
+</Step>
 
-Once deployed on Deno Deploy EA, [register the service](/services/versioning) with Restate using the CLI or UI. Use **Preview URLs** so that Restate can target specific Deno deployments:
+<Step title={"Secure your service with request identity validation"}>
+
+Deno Deploy services are public HTTP endpoints. Secure your service with request identity validation so that it only accepts requests from the Restate environment you trust.
+
+<RequestIdentityKeyGen/>
+
+Configure the key in your Restate SDK endpoint before deploying.
+
+<RequestIdentityValidationServerless/>
+
+The public key is not secret, so it is safe to include it directly in your service source code or configuration files.
+</Step>
+
+
+<Step title={"Register the service to Restate"}>
+
+Once deployed on Deno Deploy EA, use **Preview URLs** so that Restate can target specific [service versions](/services/versioning).
+
+<RegisterDeploymentViaUi/>
+
+    <Frame>
+        <img src="/img/services/deploy/deno-deploy-register-url.png" alt="Deno Deploy UI" width="100%" />
+    </Frame>
+
+Or register the service with the CLI:
 
 ```shell
 npx @restatedev/restate deployments register \
   https://your-project-name-<deployment_id>.deno.dev
 ```
 
-You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
+</Step>
 
-## Restate identity keys (for Restate Cloud)
+<Step title={"Send your first request"}>
+    <SendGreeterRequest/>
+</Step>
 
-In order to make sure only a specific Restate Cloud environment can push requests to your Deno Deploy deployment,
-head over to your Restate Cloud Dashboard to set up Restate identity keys.
-
-<Card
-    title="Restate Cloud > Developers > Security"
-    icon="lock"
-    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
-    arrow="true"
-    horizontal
->
-    Set up Restate identity keys
-</Card>
+</Steps>
 
 ## CI/CD Automation
 
 You can set up automation to register new [Restate service versions](/services/versioning) every time you deploy to Deno Deploy:
 
-```yml
-name: Register to Restate
+<Tip>
+    If you've followed the steps above, then you already have the GitHub Actions workflow set up. All you need to do is to add the secrets below to your project.
+</Tip>
 
-on:
-  repository_dispatch:
-    types: [deno_deploy.build.routed] # Listen for successful builds
+<Note>
+    Create the project in the [Deno console](https://console.deno.com/) before the first workflow run.
+</Note>
 
-jobs:
-  notify:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Register Restate deployment
-        env:
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
-        run: npx -y @restatedev/restate deployment register -y ${{ github.event.client_payload.revision.preview_url }}
-```
+<Tabs>
+<Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
+<DenoCicdWorkflow/>
 
-For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
-- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud or BYOC auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+    <Accordion title="View">
+      <img src="/img/services/deploy/deployment-token.png" alt="Token setup" width="50%" />
+    </Accordion>
+</Tab>
+<Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
+<DenoCicdWorkflow/>
 
-![Token setup](/img/services/deploy/deployment-token.png)
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `RESTATE_ADMIN_URL`: The URL through which GitHub Actions can reach your Restate Admin API
+- `RESTATE_AUTH_TOKEN`: Set this token if GitHub Actions reaches the Admin API through a reverse proxy that accepts bearer token authentication
+</Tab>
+</Tabs>
 
 <AccordionGroup>
     <Accordion title="Deno Deploy Classic">
         For [Deno Deploy Classic](https://docs.deno.com/deploy/classic/), we suggest the following CI/CD setup that deploys to Deno and then registers the deployment with Restate:
+
+        Configure `RESTATE_ADMIN_URL` and `RESTATE_AUTH_TOKEN` as described above for your Restate environment.
 
 ```yml
 name: Deploy Deno
@@ -139,9 +168,5 @@ jobs:
         # Revision URL https://docs.deno.com/deploy/classic/deployments/#production-vs.-preview-deployments
         run: npx -y @restatedev/restate deployment register -y https://${{ env.DENO_PROJECT_NAME }}-${{ steps.deploy.outputs.deployment-id }}.deno.dev
 ```
-    </Accordion>
-    <Accordion title="Self-hosted Restate">
-        You can use this workflow with Self-hosted Restate as well,
-        just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
     </Accordion>
 </AccordionGroup>
