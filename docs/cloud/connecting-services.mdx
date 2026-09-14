@@ -15,6 +15,7 @@ You can connect your services to Restate Cloud in several ways, depending on whe
 - Connect [Kubernetes services](/cloud/connecting-services#kubernetes-services) via a secure tunnel with Restate Operator.
 - Connect [serverless functions (Vercel, Cloudflare Workers, Deno Deploy, etc.) or other public endpoints](/cloud/connecting-services#serverless-functions-and-other-public-endpoints), by signing requests with your cloud environment's public key.
 - Connect [AWS Lambda functions](#aws-lambda-functions), by granting Restate Cloud permission to assume a role in your AWS account.
+- Connect [private Google Cloud Run services](#google-cloud-run-services), by federating your Restate Cloud environment's identity into your Google Cloud project.
 - Connect [services in private environments](#services-in-private-environments), by setting up a tunnel.
 
 If you prefer a video walkthrough, check out this webinar on getting started with cloud:
@@ -287,6 +288,86 @@ The `RestateCloudEnvironment` automatically creates an IAM role with an appropri
 The CDK also registers your service with Restate Cloud, so no need to do this manually.
 
 If something isn't working, the environment logs in the Cloud UI may help you find the issue.
+
+## Google Cloud Run services
+
+Restate Cloud can invoke private Cloud Run services by minting a short-lived, Google-signed OIDC ID token for every discovery and invocation request.
+No Google credentials are stored anywhere: your Restate Cloud environment's identity is federated into your Google Cloud project via [workload identity federation](https://cloud.google.com/iam/docs/workload-identity-federation), and every grant lives in your own project's IAM — you can audit and revoke Restate Cloud's access unilaterally, without contacting us.
+
+<Info>
+    This section covers connecting a private Cloud Run service to Restate Cloud.
+    For the service itself — container requirements, HTTP/2, registration flags — see [deploying on Google Cloud Run](/services/deploy/cloud-run).
+    Public (`--allow-unauthenticated`) Cloud Run services don't need any of this: secure them with [request signing](#serverless-functions-and-other-public-endpoints) like any other public endpoint.
+</Info>
+
+### How it works
+
+Your environment appears to Google Cloud as one fixed AWS principal:
+
+```text
+arn:aws:sts::654654156625:assumed-role/RestateCloudGcpFederation/<ENVIRONMENT_NAMESPACE>
+```
+
+where `<ENVIRONMENT_NAMESPACE>` is your environment ID with the `env_` prefix replaced by `env-` (for example, `env_301x...` becomes `env-301x...`).
+You grant exactly that subject permission to mint ID tokens as a Google service account you own, and grant that service account permission to invoke your Cloud Run service.
+Because the subject includes your environment's identity, no other Restate Cloud environment — yours or anyone else's — can mint tokens as your service account.
+
+<Info>
+    The Restate Cloud UI shows these commands prefilled with your environment's exact identity under [Developers > Security > Google Cloud Run](https://cloud.restate.dev/to/developers/integration#gcp).
+</Info>
+
+### Create a workload identity pool and provider
+
+Create a pool and an AWS provider in your Google Cloud project that trusts Restate Cloud's AWS account, pinned to the Restate Cloud federation role:
+
+```shell
+gcloud iam workload-identity-pools create restate-cloud \
+  --project=<YOUR_PROJECT> --location=global
+
+gcloud iam workload-identity-pools providers create-aws restate-cloud-aws \
+  --project=<YOUR_PROJECT> --location=global \
+  --workload-identity-pool=restate-cloud \
+  --account-id=654654156625 \
+  --attribute-mapping='google.subject=assertion.arn,attribute.aws_role=assertion.arn.extract("assumed-role/{role}/")' \
+  --attribute-condition="assertion.account == '654654156625' && attribute.aws_role == 'RestateCloudGcpFederation'"
+```
+
+The `--attribute-condition` is required: it ensures only Restate Cloud's federation role — and no other principal in that AWS account — can federate through your provider.
+
+### Allow your environment to mint ID tokens
+
+Grant your environment's exact subject permission to mint ID tokens as the service account that should invoke your Cloud Run service:
+
+```shell
+gcloud iam service-accounts add-iam-policy-binding \
+  <INVOKER_SA>@<YOUR_PROJECT>.iam.gserviceaccount.com \
+  --role=roles/iam.serviceAccountOpenIdTokenCreator \
+  --member="principal://iam.googleapis.com/projects/<YOUR_PROJECT_NUMBER>/locations/global/workloadIdentityPools/restate-cloud/subject/arn:aws:sts::654654156625:assumed-role/RestateCloudGcpFederation/<ENVIRONMENT_NAMESPACE>"
+```
+
+IAM changes can take a minute to propagate; a `403 PERMISSION_DENIED` immediately after granting usually resolves on its own.
+
+### Allow the service account to invoke your service
+
+```shell
+gcloud run services add-iam-policy-binding <YOUR_SERVICE> \
+  --project=<YOUR_PROJECT> --region=<YOUR_REGION> \
+  --role=roles/run.invoker \
+  --member="serviceAccount:<INVOKER_SA>@<YOUR_PROJECT>.iam.gserviceaccount.com"
+```
+
+### Register the deployment
+
+Register your Cloud Run service, referencing the provider you created and the service account to impersonate:
+
+```shell
+restate deployments register https://<YOUR_SERVICE>-abc-uc.a.run.app \
+  --gcp-workload-identity-provider="//iam.googleapis.com/projects/<YOUR_PROJECT_NUMBER>/locations/global/workloadIdentityPools/restate-cloud/providers/restate-cloud-aws" \
+  --gcp-impersonate-service-account=<INVOKER_SA>@<YOUR_PROJECT>.iam.gserviceaccount.com
+```
+
+Registration performs a discovery request through the full chain, so a successful registration means authentication is working end to end.
+From here, Restate Cloud mints, caches, and refreshes tokens automatically; authorization failures (for example, after revoking a grant) surface as invocation errors with the full Google error detail.
 
 ## Services in private environments
 
