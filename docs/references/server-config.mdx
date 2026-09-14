@@ -1862,7 +1862,9 @@ Examples:
 </ResponseField>
 
 <ResponseField name="keep-alive-interval" type="string" post={['minLength: 1','toml: metadata-client.keep-alive-interval','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_INTERVAL']} default="5s">
-    Metadata Store Keep Alive Interval
+    Metadata Store Keep Alive Interval: Interval at which keep-alive probes are sent on the connection to the
+metadata store, to keep it alive and to detect a store that has become
+unreachable.
 
 Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
@@ -1872,7 +1874,8 @@ Examples:
 </ResponseField>
 
 <ResponseField name="keep-alive-timeout" type="string" post={['minLength: 1','toml: metadata-client.keep-alive-timeout','env: RESTATE_METADATA_CLIENT__KEEP_ALIVE_TIMEOUT']} default="5s">
-    Metadata Store Keep Alive Timeout
+    Metadata Store Keep Alive Timeout: How long to wait for a keep-alive probe to be acknowledged by the
+metadata store before treating the connection as dead and closing it.
 
 Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
@@ -1962,7 +1965,13 @@ set this to any string, such as `us-east-1`.
 </ResponseField>
 
 <ResponseField name="object-store-retry-policy" type="object" post={['toml: [metadata-client.object-store-retry-policy]']}>
-    Error retry policy
+    Error retry policy: Retry policy for the object store requests the metadata client
+makes, covering both reads of the current metadata version and the
+conditional writes used to update it.
+
+Retries here absorb the transient errors and throttling responses
+object stores return under load, so a short or non-retrying policy
+can surface those as metadata operation failures.
 
     
     <ResponseField name="type" type="string" required post={['toml: metadata-client.object-store-retry-policy.type','env: RESTATE_METADATA_CLIENT__OBJECT_STORE_RETRY_POLICY__TYPE']}>
@@ -2438,7 +2447,12 @@ Examples:
 </ResponseField>
 
 <ResponseField name="http2-keep-alive-interval" type="string" post={['minLength: 1','toml: networking.http2-keep-alive-interval','env: RESTATE_NETWORKING__HTTP2_KEEP_ALIVE_INTERVAL']} default="1s">
-    HTTP/2 Keep Alive Interval
+    HTTP/2 Keep Alive Interval: Interval at which HTTP/2 PING frames are sent on node-to-node
+connections, to keep them alive and to detect peers that have become
+unreachable.
+
+Applies both to the gRPC channels a node opens to its peers and to the
+connections it accepts from them.
 
 Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
@@ -2448,7 +2462,9 @@ Examples:
 </ResponseField>
 
 <ResponseField name="http2-keep-alive-timeout" type="string" post={['minLength: 1','toml: networking.http2-keep-alive-timeout','env: RESTATE_NETWORKING__HTTP2_KEEP_ALIVE_TIMEOUT']} default="3s">
-    HTTP/2 Keep Alive Timeout
+    HTTP/2 Keep Alive Timeout: How long to wait for a peer to acknowledge a keep-alive PING on a
+node-to-node connection. If the acknowledgement does not arrive within
+this timeout, the connection is closed and re-established.
 
 Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
 
@@ -2819,7 +2835,8 @@ Default: 2 MiB
 
 <ResponseField name="http2-keep-alive-interval" type="string" post={['minLength: 1','toml: worker.invoker.http2-keep-alive-interval','env: RESTATE_WORKER__INVOKER__HTTP2_KEEP_ALIVE_INTERVAL']} default="40s">
     HTTP/2 Keep-alive interval: Sets an interval for HTTP/2 PING frames should be sent to keep a
-connection alive.
+connection alive. This governs connections to HTTP deployments as well as
+to the AWS Lambda API.
 
 `0` disables keep-alive pings entirely. Defaults to `40s`.
 
@@ -2845,6 +2862,7 @@ Default 0.2 (20% of http2-keep-alive-interval)
 
 <ResponseField name="http2-keep-alive-timeout" type="string" post={['minLength: 1','toml: worker.invoker.http2-keep-alive-timeout','env: RESTATE_WORKER__INVOKER__HTTP2_KEEP_ALIVE_TIMEOUT']} default="20s">
     HTTP/2 Keep-Alive Timeout: Sets a timeout for receiving an acknowledgement of the keep-alive ping.
+This governs connections to HTTP deployments as well as to the AWS Lambda API.
 
 If the ping is not acknowledged within the timeout, the connection will
 be closed.
