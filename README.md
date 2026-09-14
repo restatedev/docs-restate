@@ -60,30 +60,30 @@ node loadScripts.js
 
 For TS:
 ```
-cd code_snippets/ts
+cd snippets/ts
 npm run format
 ```
 
 For Java:
 ```
-cd code_snippets/java
+cd snippets/java
 ./gradlew spotlessApply
 ```
 
 For Kotlin:
 ```
-cd code_snippets/kotlin
+cd snippets/kotlin
 ./gradlew spotlessApply
 ```
 
 For Go:
 ```
-cd code_snippets/go
-go fmt
+cd snippets/go
+go fmt ./...
 ```
 
 For Python:
 ```
-cd code_snippets/python
+cd snippets/python
 python3 -m black .
 ```
