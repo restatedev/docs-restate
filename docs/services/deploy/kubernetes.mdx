@@ -20,11 +20,11 @@ The Restate Operator is the recommended way to deploy Restate services on Kubern
 
 The operator extends Kubernetes with resources for running Restate and deploying your service applications:
 
-| Resource | What it manages |
-| --- | --- |
-| [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) | Your service workload, Restate registration, and service versioning |
-| [`RestateCloudEnvironment`](https://github.com/restatedev/restate-operator#restatecloudenvironment) | The credentials and secure connection to a Restate Cloud or BYOC environment |
-| [`RestateCluster`](https://github.com/restatedev/restate-operator#restatecluster) | A self-hosted Restate environment running on Kubernetes |
+| Resource | What it manages | Full specification |
+| --- | --- | --- |
+| [`RestateDeployment`](https://github.com/restatedev/restate-operator#restatedeployment) | Your service workload, Restate registration, and service versioning | [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateDeployment.pkl) / [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restatedeployments.yaml) |
+| [`RestateCloudEnvironment`](https://github.com/restatedev/restate-operator#restatecloudenvironment) | The credentials and secure connection to a Restate Cloud or BYOC environment | [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCloudEnvironment.pkl) / [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restatecloudenvironments.yaml) |
+| [`RestateCluster`](https://github.com/restatedev/restate-operator#restatecluster) | A self-hosted Restate environment running on Kubernetes | [Pkl](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCluster.pkl) / [YAML](https://github.com/restatedev/restate-operator/blob/main/crd/restateclusters.yaml) |
 
 For service deployments, the operator:
 
@@ -545,7 +545,7 @@ Register your service with a self-hosted Restate environment. This example uses 
     <Step title="Create the RestateDeployment">
         Create a `RestateDeployment` that references [your `RestateCluster` named `restate`](/server/deploy/kubernetes#restate-kubernetes-operator):
 
-```yaml service-deployment.yaml
+```yaml expandable service-deployment.yaml
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -595,7 +595,7 @@ The `RestateDeployment` CRD can use Knative Serving instead of ReplicaSets. The 
 
 Install [Knative Serving](https://knative.dev/docs/install/) before applying a Knative-mode `RestateDeployment`:
 
-```yaml
+```yaml expandable
 apiVersion: restate.dev/v1beta1
 kind: RestateDeployment
 metadata:
@@ -627,57 +627,24 @@ The example registers with a `RestateCluster` named `restate`. To register with 
 
 The optional `knative.tag` controls deployment identity:
 
-- Keep the same tag for an in-place update to the existing Restate deployment. Only do this when the change is compatible with invocations already assigned to that deployment.
-- Change the tag to create and register a new version while the previous version drains.
 - Omit the tag to use the pod template hash and create a new version for every template change.
+- Change the tag to create and register a new version while the previous version drains.
+- Not recommended / dangerous: Keep the same tag for an in-place update to the existing Restate deployment. Only do this when the change is compatible with invocations already assigned to that deployment.
 
 The container port must be named `h2c` for HTTP/2 or `http1` for HTTP/1.1. In-process Restate Cloud tunnels are not supported in Knative mode.
 
 <Info>
-    See the operator's [Knative Serving documentation](https://github.com/restatedev/restate-operator#knative-serving-mode) and [complete examples](https://github.com/restatedev/restate-operator/tree/main/examples/services/greeter/k8s).
-    To run on Knative without the operator, see the accordion under [Direct Kubernetes deployments](#direct-kubernetes-deployments).
+    See the [operator's Knative Serving documentation](https://github.com/restatedev/restate-operator#knative-serving-mode) and [complete examples](https://github.com/restatedev/restate-operator/tree/main/examples/services/greeter/k8s).
 </Info>
 
 ## Horizontal scaling and load balancing
 
-Restate allows you to scale services horizontally by running multiple pod replicas. How traffic reaches those replicas depends on the deployment mode:
+You can scale your services horizontally by running multiple pod replicas. With an [in-process tunnel](https://github.com/restatedev/restate-operator#in-process-tunnels), the tunnel server balances invocations across replicas without an additional load balancer in the invocation path.
 
-- With an in-process Restate Cloud tunnel, every pod opens its own outbound connection. The tunnel distributes invocations across the replicas, so you do not need a Kubernetes Service, load balancer, or proxy in the request path.
-- With a standalone tunnel, direct Kubernetes deployment, or self-hosted Restate, use a Kubernetes Service or another load balancer to provide a stable endpoint for the pods.
+For autoscaling configuration and examples, see the Restate Operator documentation:
 
-#### Autoscale operator-managed revisions
-
-In ReplicaSet mode, you can attach your own HorizontalPodAutoscaler to the `RestateDeployment` scale subresource to scale the latest revision. You can also configure `spec.autoscaling` so the operator creates an HPA for each older revision while its invocations drain:
-
-```yaml
-spec:
-  replicas: 3
-  autoscaling:
-    minReplicas: 1
-    maxReplicas: 10
-    metrics:
-      - type: Resource
-        resource:
-          name: cpu
-          target:
-            type: Utilization
-            averageUtilization: 70
-```
-
-The operator supplies the HPA's `scaleTargetRef`. CPU and memory metrics require resource requests on your service containers. This setting applies only to draining revisions in ReplicaSet mode. Knative uses its own autoscaler.
-
-When the service is reached over the Kubernetes network, you would typically use a `Service` of type `ClusterIP` or `LoadBalancer` to distribute traffic across your pods.
-Kubernetes Services distribute new connections across eligible pods. The exact behavior depends on your cluster's networking implementation.
-
-If your services are running over HTTP/2 (the default), each Restate partition will generally have only one TCP connection to a single destination pod.
-However, because there are many partitions (by default 24, typically more in a larger cluster) this should get your pods a reasonably
-even distribution of traffic.
-
-For more advanced load balancing options, you can use an L7 load balancer like Istio or Cilium.
-
-Note that there is no need for routing to be sticky, because each invocation is self-contained and has all the context it needs to execute (the journal and any K/V state).
-No context is assumed to be sticky on the node.
-However, if you wish to do so, you can do sticky routing via the invocation ID in your request headers (`x-restate-invocation-id`).
+- [ReplicaSet autoscaling](https://github.com/restatedev/restate-operator#specautoscaling): Scale the latest revision with your own HPA and draining revisions with `spec.autoscaling`.
+- [Knative Serving](https://github.com/restatedev/restate-operator#knative-serving-mode): Use request-based autoscaling and scale-to-zero.
 
 ## Direct Kubernetes deployments
 
