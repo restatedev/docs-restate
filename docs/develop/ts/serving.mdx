@@ -6,7 +6,7 @@ icon: "globe"
 
 import RequestIdentityValidationServerless from '/snippets/common/request-identity-validation-serverless.mdx';
 
-Restate services can run in a few ways: as a Node.js HTTP handler, as an AWS
+Restate services can run in a few ways: as a Node.js HTTP handler, connected to Restate Cloud/BYOC through an in-process tunnel, as an AWS
 Lambda handler, or on other Javascript runtimes like Bun, Deno and Cloudflare
 Workers.
 
@@ -52,6 +52,39 @@ This is useful in environments that don't support HTTP/2.
 
 </Accordion>
 
+## Connecting to Restate Cloud or BYOC
+
+You can connect your service to Restate Cloud or BYOC through an outbound tunnel without exposing an inbound HTTP endpoint. Your service and handler implementations stay the same.
+
+Install the tunnel package:
+
+```bash
+npm install @restatedev/restate-sdk-tunnel
+```
+
+Replace the HTTP server with a tunnel client, while passing the same services.
+
+```typescript {"CODE_LOAD::ts/src/develop/tunnel-operator.ts#operator_in_process_tunnel"}
+import { connectTunnel } from "@restatedev/restate-sdk-tunnel";
+import { greeter } from "./greeter";
+
+connectTunnel({ services: [greeter] });
+```
+
+This example reads its configuration from environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `RESTATE_INPROC_ENVIRONMENT_ID` | Your Restate Cloud environment ID |
+| `RESTATE_INPROC_CLOUD_REGION` | Your environment's region identifier |
+| `RESTATE_INPROC_TUNNEL_NAME` | The tunnel name for this deployment |
+| `RESTATE_INPROC_SIGNING_PUBLIC_KEY` | Your environment's request signing public key |
+| `RESTATE_INPROC_AUTH_TOKEN_FILE` | Path to a file containing your Restate Cloud API key |
+
+On Kubernetes, the Restate operator supplies the environment ID, region, tunnel name, and signing public key when you use `tunnelMode: in-process`. Follow the [Kubernetes deployment guide](/services/deploy/kubernetes#deploy-a-service-to-restate-cloud-or-byoc) to mount the API key and configure the deployment.
+
+Outside Kubernetes, you can set these variables yourself, or pass the configuration explicitly as shown in the [Containers and VMs guide](/services/deploy/standalone). That guide also covers creating credentials and registering the tunnel deployment.
+
 ## Creating a Lambda handler
 
 To register your service as a Lambda function, use the `/lambda` import
@@ -64,7 +97,7 @@ export const handler = restate.createEndpointHandler({
 });
 ```
 
-The implementation of your services and handlers remains the same for both deployment options.
+The implementation of your services and handlers remains the same across these deployment options.
 
 Have a look at the [deployment section](/services/deploy/lambda)
 for guidance on how to deploy your services on AWS Lambda.
