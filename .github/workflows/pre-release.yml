@@ -20,7 +20,11 @@ on:
         required: false
         type: string
       sdkGoVersion:
-        description: "sdk-go version (WITH the prepending v)."
+        description: "sdk-go version (without prepending v)."
+        required: false
+        type: string
+      sdkGoTunnelVersion:
+        description: "Go tunnel module version (without prepending v). Leave empty to keep the current version."
         required: false
         type: string
       sdkRustVersion:
@@ -102,6 +106,9 @@ jobs:
       - name: Upgrade TS Restate SDK
         if: github.event.inputs.sdkTypescriptVersion != ''
         run: npm --prefix snippets/ts install @restatedev/restate-sdk@^${{ inputs.sdkTypescriptVersion }}
+      - name: Upgrade TS Restate SDK Tunnel
+        if: github.event.inputs.sdkTypescriptVersion != ''
+        run: npm --prefix snippets/ts install @restatedev/restate-sdk-tunnel@^${{ inputs.sdkTypescriptVersion }}
       - name: Upgrade TS Restate SDK Clients
         if: github.event.inputs.sdkTypescriptVersion != ''
         run: npm --prefix snippets/ts install @restatedev/restate-sdk-clients@^${{ inputs.sdkTypescriptVersion }}
@@ -159,22 +166,31 @@ jobs:
         if: ${{ inputs.sdkJavaVersion != '' }}
         run: gradle -p snippets/kotlin check
 
-      # Upgrade Go code snippets if new version is provided
+      # Upgrade Go modules independently or together
       - uses: actions/setup-go@v5
-        if: ${{ inputs.sdkGoVersion != '' }}
+        if: ${{ inputs.sdkGoVersion != '' || inputs.sdkGoTunnelVersion != '' }}
         with:
-          go-version: "1.22"
-      - name: Bump sdk-go
-        if: ${{ inputs.sdkGoVersion != '' }}
+          go-version-file: snippets/go/go.mod
+      - name: Bump Go dependencies
+        if: ${{ inputs.sdkGoVersion != '' || inputs.sdkGoTunnelVersion != '' }}
+        working-directory: snippets/go
+        env:
+          SDK_GO_VERSION: ${{ inputs.sdkGoVersion }}
+          SDK_GO_TUNNEL_VERSION: ${{ inputs.sdkGoTunnelVersion }}
         run: |
-          cd snippets/go
-          go get github.com/restatedev/sdk-go@v${{ inputs.sdkGoVersion }}
+          modules=()
+          if [[ -n "$SDK_GO_VERSION" ]]; then
+            modules+=("github.com/restatedev/sdk-go@v${SDK_GO_VERSION#v}")
+          fi
+          if [[ -n "$SDK_GO_TUNNEL_VERSION" ]]; then
+            modules+=("github.com/restatedev/sdk-go/x/tunnel@v${SDK_GO_TUNNEL_VERSION#v}")
+          fi
+          go get "${modules[@]}"
           go mod tidy
       - name: Test Go code snippets
-        if: ${{ inputs.sdkGoVersion != '' }}
-        run: |
-          cd snippets/go
-          go test ./...
+        if: ${{ inputs.sdkGoVersion != '' || inputs.sdkGoTunnelVersion != '' }}
+        working-directory: snippets/go
+        run: go test ./...
 
       # Bump Rust SDK
       - name: Install Rust toolchain
@@ -195,8 +211,8 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
-          title: "[GithubActions] Update documentation ${{ inputs.restateVersion != '' && format('Restate {0}, ', inputs.restateVersion) }} ${{ inputs.sdkTypescriptVersion != '' && format('SDK-Typescript {0}, ', inputs.sdkTypescriptVersion) }} ${{ inputs.sdkJavaVersion != '' && format('SDK-Java {0}, ', inputs.sdkJavaVersion) }} ${{ inputs.sdkPythonVersion != '' && format('SDK-Python {0}, ', inputs.sdkPythonVersion) }} ${{ inputs.sdkGoVersion != '' && format('SDK-Go {0}, ', inputs.sdkGoVersion) }} ${{ inputs.sdkRustVersion != '' && format('SDK-Rust {0}, ', inputs.sdkRustVersion) }}"
-          commit-message: "Update documentation: ${{ inputs.restateVersion != '' && format('\n* Bump Restate to {0}', inputs.restateVersion) }} ${{ inputs.sdkTypescriptVersion != '' && format('\n* Bump SDK-Typescript to {0} ', inputs.sdkTypescriptVersion) }} ${{ inputs.sdkJavaVersion != '' && format('\n* Bump SDK-Java to {0} ', inputs.sdkJavaVersion) }} ${{ inputs.sdkPythonVersion != '' && format('SDK-Python {0}, ', inputs.sdkPythonVersion) }} ${{ inputs.sdkGoVersion != '' && format('SDK-Go {0}, ', inputs.sdkGoVersion) }} ${{ inputs.sdkRustVersion != '' && format('SDK-Rust {0}, ', inputs.sdkRustVersion) }}"
+          title: "[GithubActions] Update documentation ${{ inputs.restateVersion != '' && format('Restate {0}, ', inputs.restateVersion) }} ${{ inputs.sdkTypescriptVersion != '' && format('SDK-Typescript {0}, ', inputs.sdkTypescriptVersion) }} ${{ inputs.sdkJavaVersion != '' && format('SDK-Java {0}, ', inputs.sdkJavaVersion) }} ${{ inputs.sdkPythonVersion != '' && format('SDK-Python {0}, ', inputs.sdkPythonVersion) }} ${{ inputs.sdkGoVersion != '' && format('SDK-Go {0}, ', inputs.sdkGoVersion) }} ${{ inputs.sdkGoTunnelVersion != '' && format('Go-Tunnel {0}, ', inputs.sdkGoTunnelVersion) }} ${{ inputs.sdkRustVersion != '' && format('SDK-Rust {0}, ', inputs.sdkRustVersion) }}"
+          commit-message: "Update documentation: ${{ inputs.restateVersion != '' && format('\n* Bump Restate to {0}', inputs.restateVersion) }} ${{ inputs.sdkTypescriptVersion != '' && format('\n* Bump SDK-Typescript to {0} ', inputs.sdkTypescriptVersion) }} ${{ inputs.sdkJavaVersion != '' && format('\n* Bump SDK-Java to {0} ', inputs.sdkJavaVersion) }} ${{ inputs.sdkPythonVersion != '' && format('SDK-Python {0}, ', inputs.sdkPythonVersion) }} ${{ inputs.sdkGoVersion != '' && format('SDK-Go {0}, ', inputs.sdkGoVersion) }} ${{ inputs.sdkGoTunnelVersion != '' && format('Go-Tunnel {0}, ', inputs.sdkGoTunnelVersion) }} ${{ inputs.sdkRustVersion != '' && format('SDK-Rust {0}, ', inputs.sdkRustVersion) }}"
           add-paths: |
             docs/snippets/custom-variables.mdx
             docs/schemas/*
@@ -205,6 +221,7 @@ jobs:
             snippets/ts/package-lock.json
             snippets/java/gradle/libs.versions.toml
             snippets/python/pyproject.toml
+            snippets/python/uv.lock
             snippets/go/go.mod
             snippets/go/go.sum
             snippets/rust/Cargo.lock
