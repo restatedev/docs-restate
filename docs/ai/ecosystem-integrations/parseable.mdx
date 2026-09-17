@@ -1,0 +1,128 @@
+---
+title: "Parseable"
+sidebarTitle: "Parseable"
+icon: "magnifying-glass"
+description: "Trace durable OpenAI agent workflows with Restate and Parseable."
+---
+
+Send Restate and OpenAI Agents SDK traces to [Parseable](https://www.parseable.com/) to inspect each durable agent run.
+You can follow agent turns, model and tool calls, token usage, and errors alongside Restate invocation, retry, and journal spans.
+
+<Card title="Parseable integration guide" icon="link" href="https://www.parseable.com/docs/ingest-data/ai-agents/restate-openai-agents">
+  Run the weather agent example or troubleshoot the integration.
+</Card>
+
+## Instrumentation setup
+
+Configure an OpenTelemetry provider to export agent spans to Parseable. Wrap its tracer with `RestateTracer` to attach OpenInference spans to the active Restate invocation:
+
+```python telemetry.py
+import os
+
+from agents import set_trace_processors
+from openinference.instrumentation import OITracer, TraceConfig
+from openinference.instrumentation.openai_agents._processor import (
+    OpenInferenceTracingProcessor,
+)
+from opentelemetry import trace as trace_api
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from restate.ext.tracing import RestateTracer
+
+parseable_url = os.environ["PARSEABLE_URL"].rstrip("/")
+provider = TracerProvider(
+    resource=Resource.create({"service.name": "restate-openai-agent"})
+)
+provider.add_span_processor(
+    BatchSpanProcessor(
+        OTLPSpanExporter(
+            endpoint=f"{parseable_url}/v1/traces",
+            headers={
+                "Authorization": f"Bearer {os.environ['PARSEABLE_API_KEY']}",
+                "X-P-Stream": os.getenv(
+                    "PARSEABLE_STREAM", "<parseable-dataset>"
+                ),
+            },
+        )
+    )
+)
+trace_api.set_tracer_provider(provider)
+
+tracer = OITracer(
+    RestateTracer(trace_api.get_tracer("openinference.openai_agents")),
+    config=TraceConfig(),
+)
+set_trace_processors([OpenInferenceTracingProcessor(tracer)])
+```
+
+Import `telemetry` before you create the Restate application. Call `provider.shutdown()` when the process exits to flush queued spans.
+
+<Accordion title="Run the example" icon="laptop">
+
+**Prerequisites**: Python 3.11 or later, [Parseable instance and API key](https://www.parseable.com/docs/get-started), [OpenAI API key](https://platform.openai.com/api-keys), and [Restate installed](/installation).
+
+Install the OpenAI Agents SDK, OpenInference instrumentation, and OpenTelemetry exporter:
+
+```bash
+pip install restate-sdk openai-agents openinference-instrumentation-openai-agents opentelemetry-sdk opentelemetry-exporter-otlp-proto-http hypercorn
+```
+
+Configure your environment:
+
+```bash
+export PARSEABLE_URL="https://<parseable-host>"
+export PARSEABLE_API_KEY="<parseable-api-key>"
+export PARSEABLE_STREAM="<parseable-dataset>"
+export OPENAI_API_KEY="<openai-api-key>"
+```
+
+Start the agent service:
+
+```bash
+python agent.py
+```
+
+Send Restate Server spans to the same Parseable dataset as the agent spans:
+
+```bash
+export RESTATE_TRACING_HEADERS__AUTHORIZATION="Bearer ${PARSEABLE_API_KEY}"
+export RESTATE_TRACING_HEADERS__X_P_STREAM="${PARSEABLE_STREAM}"
+
+restate-server \
+  --tracing-endpoint "otlp+${PARSEABLE_URL%/}/v1/traces" \
+  --tracing-filter "restate=info"
+```
+
+Register the agent service:
+
+```bash
+restate deployments add --yes http://localhost:9080
+```
+
+Invoke the agent through Restate:
+
+```bash
+curl --fail-with-body \
+  http://localhost:8080/agent/run \
+  --json '"What is the weather in Bengaluru?"'
+```
+
+</Accordion>
+
+<Warning>
+  Export the agent service and Restate Server spans to the same Parseable dataset. Parseable cannot display a single trace hierarchy across separate datasets.
+</Warning>
+
+## Inspect traces in Parseable
+
+After the first invocation, add the `agent-observability` tag to `<parseable-dataset>` in the Parseable dataset settings. Parseable only lists tagged datasets in the **Agents** view.
+
+Open the dataset in the **Agents** view, then select a run to inspect its Restate invocation and recovery lifecycle, OpenAI agent turns, generations, tool calls, inputs, outputs, and token usage.
+
+<Frame>
+  <img src="/img/ai/ecosystem-integrations/parseable.png" alt="Parseable agent trace showing model calls, tool calls, tool outputs, token usage, and execution details" />
+</Frame>
+
+In production, route both exporters through an OpenTelemetry Collector with a sending queue and retry policy. Remove prompt and response attributes in the Collector if they contain sensitive data.
