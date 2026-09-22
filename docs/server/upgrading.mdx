@@ -21,6 +21,71 @@ Since later versions may introduce new functionality that is on by default, it's
 
 If you encounter any issues with a new version, you can downgrade a Restate installation to the latest patch level of the previous minor version. For example, you can safely rollback the Restate server version from `x.y.0` to `x.(y-1).z` if you encounter any issues. However, rollback is only supported as long as you have not used any new features exclusive to the newer version. You should enable new features in the server configuration only after you have verified the overall system behaviour on the new version. Going back to more than one minor version behind to the most recent version used with the data store is not supported.
 
+## Rolling updates
+
+Restart one node at a time and wait for its assigned partitions to recover before
+proceeding. Use this procedure for upgrades and configuration restarts on any platform.
+A successful HTTP health check alone does not establish partition recovery.
+
+### Before you begin
+
+* Follow the version compatibility policy above, take backups, and test the upgrade path.
+* Check your [replicated cluster](/server/clusters) with `restatectl status --extra` and
+  `restatectl partitions list`. It must be healthy and able to tolerate one unavailable
+  node: another caught-up replica for each affected partition, enough surviving log
+  servers to satisfy replication, and a majority of replicated metadata voters.
+  A single-node deployment cannot remain available during its restart.
+* Install [restatectl](/installation#advanced%3A-installing-restatectl). The command below
+  requires Restate v1.7.10 or newer and an admin-role node's fabric address, normally on
+  port `5122`.
+
+### Repeat for each node
+
+1. **Run this command and record the generation**, for example `N1:2`. Replace the address
+   with a reachable admin-role node and `N1` with the node you will restart. Find node IDs
+   with `restatectl nodes list`.
+
+   ```shell
+   restatectl --address http://localhost:5122/ sql "
+   SELECT n.gen_node_id AS generation,
+          n.state AS state,
+          r.partition_id AS partition_id,
+          r.membership AS membership,
+          s.replay_status AS replay_status,
+          s.updated_at AS updated_at
+   FROM nodes n
+   LEFT JOIN partition_replica_set r
+     ON r.plain_node_id = n.plain_node_id
+   LEFT JOIN partition_state s
+     ON s.partition_id = r.partition_id AND s.gen_node_id = n.gen_node_id
+   WHERE n.plain_node_id = 'N1'
+   ORDER BY r.partition_id, r.membership"
+   ```
+
+2. **Gracefully stop, update, and restart that node.** Preserve its identity and persistent
+   data, allow shutdown to complete, and leave the other nodes running.
+
+3. **Repeat the command until the node has recovered.** Proceed when:
+   * The generation differs from the one recorded before the restart.
+   * The node's state is `alive`.
+   * Every assignment is `current` and every processor's replay status is `active`.
+   * Repeated checks show advancing `updated_at` values.
+
+   Keep waiting if any assignment is `next` or processor fields are missing. An unexpected
+   empty assignment set does not indicate recovery. The generation check excludes cached
+   status from the previous process.
+
+4. **Check cluster and application health, then continue to the next node.** If recovery
+   stalls or times out, pause the rollout and investigate node logs, disk capacity, and
+   [snapshot access](/server/snapshots). Storage migrations can make the first startup
+   after an upgrade take longer.
+
+<Info>
+`active` means startup catch-up has completed. For ongoing lag, inspect `LSN-LAG` in
+`restatectl partitions list`; wait for excessive lag to subside before continuing.
+Leader transitions can still cause brief request delays, so keep client retries enabled.
+</Info>
+
 ## Service compatibility
 
 Registered Restate services must use an SDK compatible with the service protocol version(s) of the running Restate server. Note that Restate SDKs follow independent versioning from the server. You can find the latest SDK compatibility matrix in the respective SDK version documentation.
