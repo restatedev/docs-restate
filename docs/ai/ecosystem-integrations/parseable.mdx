@@ -14,22 +14,18 @@ You can follow agent turns, model and tool calls, token usage, and errors alongs
 
 ## Instrumentation setup
 
-Configure an OpenTelemetry provider to export agent spans to Parseable. Wrap its tracer with `RestateTracer` to attach OpenInference spans to the active Restate invocation:
+Configure an OpenTelemetry provider to export agent spans to Parseable. Pass a `RestateTracerProvider` to OpenInference to attach its spans to the active Restate invocation:
 
-```python telemetry.py
+```python telemetry.py {"CODE_LOAD::python/src/ai/parseable_telemetry.py"} 
 import os
 
-from agents import set_trace_processors
-from openinference.instrumentation import OITracer, TraceConfig
-from openinference.instrumentation.openai_agents._processor import (
-    OpenInferenceTracingProcessor,
-)
+from openinference.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 from opentelemetry import trace as trace_api
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from restate.ext.tracing import RestateTracer
+from restate.ext.tracing import RestateTracerProvider
 
 parseable_url = os.environ["PARSEABLE_URL"].rstrip("/")
 provider = TracerProvider(
@@ -50,24 +46,30 @@ provider.add_span_processor(
 )
 trace_api.set_tracer_provider(provider)
 
-tracer = OITracer(
-    RestateTracer(trace_api.get_tracer("openinference.openai_agents")),
-    config=TraceConfig(),
+OpenAIAgentsInstrumentor().instrument(
+    tracer_provider=RestateTracerProvider(provider)
 )
-set_trace_processors([OpenInferenceTracingProcessor(tracer)])
 ```
 
 Import `telemetry` before you create the Restate application. Call `provider.shutdown()` when the process exits to flush queued spans.
 
 <Accordion title="Run the example" icon="laptop">
 
-**Prerequisites**: Python 3.11 or later, [Parseable instance and API key](https://www.parseable.com/docs/get-started), [OpenAI API key](https://platform.openai.com/api-keys), and [Restate installed](/installation).
+**Prerequisites**: Python 3.12 or later, [uv](https://docs.astral.sh/uv/getting-started/installation/), [Parseable instance and API key](https://www.parseable.com/docs/get-started), [OpenAI API key](https://platform.openai.com/api-keys), and [Restate installed](/installation).
 
-Install the OpenAI Agents SDK, OpenInference instrumentation, and OpenTelemetry exporter:
+Get the weather agent template from the [OpenAI Agents quickstart](/ai-quickstart#openai-agents):
 
 ```bash
-pip install restate-sdk openai-agents openinference-instrumentation-openai-agents opentelemetry-sdk opentelemetry-exporter-otlp-proto-http hypercorn
+restate example python-openai-agents-template && cd python-openai-agents-template
 ```
+
+Install the OpenInference instrumentation and OpenTelemetry exporter:
+
+```bash
+uv add openinference-instrumentation-openai-agents opentelemetry-sdk opentelemetry-exporter-otlp-proto-http
+```
+
+Create `telemetry.py` with the instrumentation setup above. Import `telemetry` in `__main__.py` before Restate creates the application.
 
 Configure your environment:
 
@@ -81,7 +83,7 @@ export OPENAI_API_KEY="<openai-api-key>"
 Start the agent service:
 
 ```bash
-python agent.py
+uv run .
 ```
 
 Send Restate Server spans to the same Parseable dataset as the agent spans:
@@ -98,15 +100,15 @@ restate-server \
 Register the agent service:
 
 ```bash
-restate deployments add --yes http://localhost:9080
+restate deployments register --yes http://localhost:9080
 ```
 
 Invoke the agent through Restate:
 
 ```bash
 curl --fail-with-body \
-  http://localhost:8080/agent/run \
-  --json '"What is the weather in Bengaluru?"'
+  http://localhost:8080/restate/call/agent/run \
+  --json '{"message": "What is the weather in Bengaluru?"}'
 ```
 
 </Accordion>
