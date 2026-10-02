@@ -36,6 +36,18 @@ To update the Restate configuration JSON schema, add it as `docs/schemas/restate
 node scripts/generate-restate-config-viewer.js
 ```
 
+For a complete release refresh, use the workflow below, which also regenerates the configuration schema from the runtime.
+
+### Pre-release updates
+
+Use the [Pre-release updates workflow](https://github.com/restatedev/docs-restate/actions/workflows/pre-release.yml) to refresh generated documentation for a release. When you supply `restateVersion`, it checks out the corresponding runtime tag and regenerates the Admin OpenAPI document, configuration schema and reference, default configuration, SQL introspection reference, and error reference. It validates the Admin OpenAPI document and opens or updates a PR with the generated changes.
+
+1. Open the workflow and select **Run workflow**. Under **Use workflow from**, select the documentation staging branch, such as `release/1.8`, for an upcoming release. Use `main` for updates intended for the live documentation.
+2. Set `restateVersion` to an existing runtime version **without the leading `v`**. For example, `1.8.0-rc.1` requires the tag `v1.8.0-rc.1` to exist in `restatedev/restate`. Leave SDK version inputs empty unless you also want to update those SDKs and their examples.
+3. Review the workflow results and generated PR. Check that its base is the intended documentation branch, and merge release updates into the staging branch. Publish that branch to `main` when the release is available, since `main` deploys to production.
+
+The workflow uses [`.tools/generate.sh`](.tools/generate.sh). The individual generators are [Admin OpenAPI](.tools/generate_openapi_admin_spec.sh) and [SQL introspection](.tools/generate_sql_introspection_page.sh); for rendering a configuration schema you already have, follow [Restate configuration schema](#restate-configuration-schema) above.
+
 ## Adding guides 
 
 1. Add the mdx to `docs/guides`. Make sure it has a title, description, and a single tag (either `recipe`, `development`, `deployment`, or `integration`).
