@@ -524,9 +524,9 @@ Since v1.7.0 (renamed from `rocksdb-bg-threads`)
 
 <ResponseField name="rocksdb-max-write-rate-per-second" type="string" post={['pattern: ^\\d+(\\.\\d+)? ?[KMG]B$','minLength: 1','toml: rocksdb-max-write-rate-per-second','env: RESTATE_ROCKSDB_MAX_WRITE_RATE_PER_SECOND']} default="7.0 GiB">
     Rocksdb global disk write rate limiter: This lets Rocksdb calibrates its IO operations to make the best use out of
-the available IO bandwidth of the underlying storage device. Rocksdb will
-auto-tune the rate according to the actual background IO workload and will
-use this value as an upper bound.
+the available IO bandwidth of the underlying storage device. By default, Rocksdb
+auto-tunes the rate according to the actual background IO workload and uses this
+value as an upper bound; see `rocksdb-write-rate-limiter-mode`.
 
 You can use a tool like `fio` to measure the actual IO bandwidth of your storage
 device (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a
@@ -592,6 +592,24 @@ The remaining memory will be dedicated to the block cache.
 
 This value will be sanitized to 1.0 if outside the valid bounds.
 
+</ResponseField>
+
+<ResponseField name="rocksdb-write-rate-limiter-mode" type="string" post={['toml: rocksdb-write-rate-limiter-mode','env: RESTATE_ROCKSDB_WRITE_RATE_LIMITER_MODE']} default="auto-tuned">
+    Rocksdb write rate limiter mode: How the global write rate limiter applies `rocksdb-max-write-rate-per-second`.
+
+Takes effect on restart.
+
+Since v1.7.13
+
+    
+    - `"auto-tuned"` : Rocksdb adjusts the rate to the recent background IO demand, between 1/20 of
+`rocksdb-max-write-rate-per-second` and the full value. Under sustained demand the
+rate can increase by 5% roughly every 10 seconds, so after a quiet period a sudden
+write burst can start near the lower bound and take minutes to reach the full rate.
+    - `"fixed"` : Flushes and compactions share a fixed aggregate limit of
+`rocksdb-max-write-rate-per-second`, with no ramp-up. It does not guarantee throughput
+or reserve bandwidth for flushes. Use it when write bursts arrive faster than the
+auto-tuner ramps up, and set the limit to what the storage device can sustain.
 </ResponseField>
 
 <ResponseField name="roles" type="array" post={['toml: roles','env: RESTATE_ROLES']} default="[&quot;http-ingress&quot;,&quot;admin&quot;,&quot;worker&quot;,&quot;log-server&quot;,&quot;metadata-server&quot;]">

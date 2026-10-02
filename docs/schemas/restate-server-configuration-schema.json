@@ -605,7 +605,7 @@
     },
     "rocksdb-max-write-rate-per-second": {
       "title": "Rocksdb global disk write rate limiter",
-      "description": "This lets Rocksdb calibrates its IO operations to make the best use out of\nthe available IO bandwidth of the underlying storage device. Rocksdb will\nauto-tune the rate according to the actual background IO workload and will\nuse this value as an upper bound.\n\nYou can use a tool like `fio` to measure the actual IO bandwidth of your storage\ndevice (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a\nreasonable estimate).\n\nFor instance, consider the output of the following command:\n\n```text\nfio --name=c --directory=/restate-data --rw=write --bs=1m --size=8g --numjobs=4 --direct=1 --group_reporting\n...\n  WRITE: bw=601MiB/s (630MB/s), 601MiB/s-601MiB/s (630MB/s-630MB/s), io=32.0GiB (34.4GB), run=54560-54560msec\n```\n\nThe default value assumes a fast NVMe with bandwidth of 7GiB (per second).",
+      "description": "This lets Rocksdb calibrates its IO operations to make the best use out of\nthe available IO bandwidth of the underlying storage device. By default, Rocksdb\nauto-tunes the rate according to the actual background IO workload and uses this\nvalue as an upper bound; see `rocksdb-write-rate-limiter-mode`.\n\nYou can use a tool like `fio` to measure the actual IO bandwidth of your storage\ndevice (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a\nreasonable estimate).\n\nFor instance, consider the output of the following command:\n\n```text\nfio --name=c --directory=/restate-data --rw=write --bs=1m --size=8g --numjobs=4 --direct=1 --group_reporting\n...\n  WRITE: bw=601MiB/s (630MB/s), 601MiB/s-601MiB/s (630MB/s-630MB/s), io=32.0GiB (34.4GB), run=54560-54560msec\n```\n\nThe default value assumes a fast NVMe with bandwidth of 7GiB (per second).",
       "$ref": "#/$defs/NonZeroHumanBytes",
       "default": "7.0 GiB"
     },
@@ -639,6 +639,12 @@
       "type": "number",
       "format": "float",
       "default": 0.8500000238418579
+    },
+    "rocksdb-write-rate-limiter-mode": {
+      "title": "Rocksdb write rate limiter mode",
+      "description": "How the global write rate limiter applies `rocksdb-max-write-rate-per-second`.\n\nTakes effect on restart.\n\nSince v1.7.13",
+      "$ref": "#/$defs/RocksDbWriteRateLimiterMode",
+      "default": "auto-tuned"
     },
     "roles": {
       "description": "Defines the roles which this Restate node should run, by default the node\nstarts with all roles.",
@@ -2709,6 +2715,23 @@
         "error",
         "fatal",
         "header"
+      ]
+    },
+    "RocksDbWriteRateLimiterMode": {
+      "title": "Rocksdb write rate limiter mode",
+      "oneOf": [
+        {
+          "title": "Auto-tuned",
+          "description": "Rocksdb adjusts the rate to the recent background IO demand, between 1/20 of\n`rocksdb-max-write-rate-per-second` and the full value. Under sustained demand the\nrate can increase by 5% roughly every 10 seconds, so after a quiet period a sudden\nwrite burst can start near the lower bound and take minutes to reach the full rate.",
+          "type": "string",
+          "const": "auto-tuned"
+        },
+        {
+          "title": "Fixed",
+          "description": "Flushes and compactions share a fixed aggregate limit of\n`rocksdb-max-write-rate-per-second`, with no ramp-up. It does not guarantee throughput\nor reserve bandwidth for flushes. Use it when write bursts arrive faster than the\nauto-tuner ramps up, and set the limit to what the storage device can sustain.",
+          "type": "string",
+          "const": "fixed"
+        }
       ]
     },
     "RocksbPerfStatisticsLevel": {
