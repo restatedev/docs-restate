@@ -44,9 +44,9 @@ Use the [Pre-release updates workflow](https://github.com/restatedev/docs-restat
 
 When you supply `restateVersion`, the workflow checks out the corresponding runtime tag and regenerates the Admin OpenAPI document, configuration schema and reference, default configuration, SQL introspection reference, and error reference. It also validates the Admin OpenAPI document. SDK version inputs update the corresponding version references and example dependencies. The workflow opens or updates a PR with the generated changes.
 
-1. Open the workflow and select **Run workflow**. Under **Use workflow from**, select the documentation branch you want to update: `main` for live documentation, or a staging branch such as `release/1.8` for an upcoming release. **The generated PR targets the selected branch**: the workflow checks out that branch, and the PR action uses it as the default base.
+1. Open the workflow, select **Run workflow**, and choose the documentation branch to update.
 2. Provide the version inputs you want to update, leaving the others empty. For runtime references, set `restateVersion` **without the leading `v`**; the corresponding tag must already exist in `restatedev/restate`. SDK-only updates can leave `restateVersion` empty.
-3. Review the workflow results and generated PR before merging. Merging into `main` publishes to production; merge staged documentation into `main` when the release is available.
+3. Review the workflow results and generated PR before merging.
 
 The workflow uses [`.tools/generate.sh`](.tools/generate.sh). The individual generators are [Admin OpenAPI](.tools/generate_openapi_admin_spec.sh) and [SQL introspection](.tools/generate_sql_introspection_page.sh); for rendering a configuration schema you already have, follow [Restate configuration schema](#restate-configuration-schema) above.
 
