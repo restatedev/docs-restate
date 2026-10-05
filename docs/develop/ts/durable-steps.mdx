@@ -61,6 +61,26 @@ try {
 
     For more information, see the [error handling guide](/guides/error-handling).
   </Accordion>
+  <Accordion title="Stopping work when an attempt ends">
+    If the connection between Restate and your service is lost while a `ctx.run` is still executing, Restate retries the invocation in a new attempt. The old attempt keeps running in your service until its code finishes. Its result is discarded, but its side effects still happen: the HTTP request still goes out and the LLM call still runs to the end.
+
+    `ctx.request().attemptCompletedSignal` is aborted when the current attempt ends. Pass it to anything that accepts an `AbortSignal`, so the old attempt stops instead of running alongside the new one:
+
+```typescript {"CODE_LOAD::ts/src/develop/journaling_results.ts#attempt_signal"} 
+const signal = ctx.request().attemptCompletedSignal;
+const charge = await ctx.run("charge", async () => {
+  const response = await fetch("https://payments.example.com/charges", {
+    method: "POST",
+    headers: { "Idempotency-Key": `${ctx.request().id}/charge` },
+    body: JSON.stringify({ orderId }),
+    signal,
+  });
+  return response.json();
+});
+```
+
+    Aborting stops work that has not happened yet. It cannot take back a request that already reached the other system, so calls that are not idempotent still need an idempotency key, like the invocation ID above.
+  </Accordion>
 
 </AccordionGroup>
 
