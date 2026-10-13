@@ -54,6 +54,7 @@ After detecting the SDK, always load the SDK reference:
 | Build AI agent with Pydantic AI | `references/python/restate-pydantic-ai-agents.md` |
 | Build AI agent with LangChain or LangGraph | `references/python/restate-langchain-agents.md` |
 | Debug errors, stuck invocations, journal mismatches | `references/debug-applications.md` |
+| Connect to a remote Restate Cloud environment | `references/restate-cloud.md` |
 | Testing, deployment, server config, Kafka, advanced topics | Use the bundled **restate-docs** MCP server |
 | Code examples and templates | `github.com/restatedev/examples`, `github.com/restatedev/ai-examples` |
 | Complete TypeScript agent reference architecture | [restatedev/agent](https://github.com/restatedev/agent) |
