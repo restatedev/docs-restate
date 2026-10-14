@@ -21,7 +21,7 @@ You can inspect what is stored in Restate via the UI, via the [CLI](/installatio
 Restate exposes the following SQL tables:
 - `sys_invocation`: to inspect invocations
 - `sys_inbox`: to inspect queue of pending invocations
-- `sys_keyed_service_status`: to inspect the status of a Virtual Object
+- `sys_locks`: to inspect the locks held on Virtual Object keys
 - `sys_journal`: to inspect the invocations' journal
 - `sys_service`: to inspect the registered services
 - `sys_deployment`: to inspect service deployments
@@ -121,10 +121,10 @@ You can execute SQL queries via the CLI or over HTTP.
         restate invocations list --service MyService --key myKey
         ```
         ```shell CLI-SQL
-        restate sql --json "select invocation_id from sys_keyed_service_status where service_name = 'test.MyServiceName' and service_key = 'myKey';"
+        restate sql --json "select acquired_by from sys_locks where lock_name = 'test.MyServiceName/myKey';"
         ```
         ```shell curl
-        curl localhost:9070/query --json '{ "query" : "select invocation_id from sys_keyed_service_status where service_name = 'test.MyServiceName' and service_key = 'myKey';" }'
+        curl localhost:9070/query --json '{ "query" : "select acquired_by from sys_locks where lock_name = 'test.MyServiceName/myKey';" }'
         ```
     </CodeGroup>
 
@@ -246,7 +246,7 @@ For the SQL queries, you need to know the deployment ID of the deployment that w
 To retrieve the state of a specific service and service key, do:
 
 ```shell
-restate kv get <SERVICE_NAME> <SERVICE_KEY>
+restate state get <SERVICE_NAME> <SERVICE_KEY>
 ```
 
 Example output:
@@ -311,7 +311,7 @@ The state key is the name you used to store the state with the SDK. For example,
 You can edit the application state either via the state tab of the UI or via the CLI:
 
 ```shell
-restate kv edit <SERVICE_NAME> <SERVICE_KEY>
+restate state edit <SERVICE_NAME> <SERVICE_KEY>
 ```
 
 This command opens your default editor (as configured in the `cli env`).
@@ -324,7 +324,7 @@ Use `--plain` to retrieve the state as a JSON object.
 This can be useful in combination with tools like `jq` for example:
 
 ```shell
-restate kv get counter bob --plain | jq '.seen'
+restate state get counter bob --plain | jq '.seen'
 ```
 
 <Warning title="Editing state during ongoing invocations">
@@ -336,7 +336,7 @@ An example on how to edit the K/V state of the service `counter` for the key `bo
 
 <Terminal>
     ```shell !command
-    restate kv edit counter bob
+    restate state edit counter bob
     ```
 
     ```log !output

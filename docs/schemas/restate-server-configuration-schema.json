@@ -114,8 +114,8 @@
         "null"
       ],
       "format": "uint16",
-      "maximum": 65535,
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 65535
     },
     "cluster-name": {
       "title": "Cluster name",
@@ -138,9 +138,9 @@
       "description": "Number of partitions that will be provisioned during initial cluster provisioning.\npartitions are the logical shards used to process messages.\n\nCannot be higher than `65535` (You should almost never need as many partitions anyway)\n\nNOTE 1: This config entry only impacts the initial number of partitions, the\nvalue of this entry is ignored for provisioned nodes/clusters.\n\nDefault: 24",
       "type": "integer",
       "format": "uint16",
-      "default": 24,
+      "minimum": 0,
       "maximum": 65535,
-      "minimum": 0
+      "default": 24
     },
     "default-replication": {
       "title": "Default replication factor",
@@ -168,8 +168,8 @@
         "null"
       ],
       "format": "uint32",
-      "default": null,
-      "minimum": 0
+      "minimum": 0,
+      "default": null
     },
     "default-thread-stack-size": {
       "title": "Default async runtime thread stack size",
@@ -211,47 +211,47 @@
         "null"
       ],
       "format": "uint32",
-      "default": null,
-      "minimum": 0
+      "minimum": 0,
+      "default": null
     },
     "gossip-extras-exchange-frequency": {
       "title": "Gossip extras exchange frequency",
       "description": "In addition to basic health/liveness information, the gossip protocol is used to exchange\nextra information about the roles hosted by this node. For instance, which partitions are\ncurrently running, their configuration versions, and the durable LSN of the corresponding\npartition databases. This information is sent every Nth gossip message. This setting\ncontrols the frequency of this exchange. For instance, `10` means that every 10th gossip\nmessage will contain the extra information about.",
       "type": "integer",
       "format": "uint32",
-      "default": 10,
-      "minimum": 1
+      "minimum": 1,
+      "default": 10
     },
     "gossip-failure-threshold": {
       "title": "Gossip failure threshold",
       "description": "Specifies how many gossip intervals of inactivity need to pass before\nconsidering a node as dead.",
       "type": "integer",
       "format": "uint32",
-      "default": 10,
-      "minimum": 1
+      "minimum": 1,
+      "default": 10
     },
     "gossip-fd-stability-threshold": {
       "title": "Gossips before failure detector is stable",
       "type": "integer",
       "format": "uint32",
-      "default": 3,
-      "minimum": 1
+      "minimum": 1,
+      "default": 3
     },
     "gossip-loneliness-threshold": {
       "title": "Gossip loneliness threshold",
       "description": "How many intervals need to pass without receiving any gossip messages before considering\nthis node as potentially isolated/dead. This threshold is used in the case where the node\ncan still send gossip messages but did not receive any. This can rarely happen in\nasymmetric network partitions.\n\nIn this case, the node will advertise itself as dead in the gossip messages it sends out.\n\nNote: this threshold does not apply to a cluster that's configured with a single node.",
       "type": "integer",
       "format": "uint32",
-      "default": 30,
-      "minimum": 1
+      "minimum": 1,
+      "default": 30
     },
     "gossip-num-peers": {
       "title": "Number of peers to gossip",
       "description": "On every gossip interval, how many peers each node attempts to gossip with. The default is\noptimized for small clusters (less than 5 nodes). On larger clusters, if gossip overhead is noticeable,\nconsider reducing this value to 1.",
       "type": "integer",
       "format": "uint32",
-      "default": 2,
-      "minimum": 1
+      "minimum": 1,
+      "default": 2
     },
     "gossip-suspect-interval": {
       "title": "Suspect duration",
@@ -281,6 +281,8 @@
       "$ref": "#/$defs/IngressOptions",
       "default": {
         "concurrent-api-requests-limit": null,
+        "http2-keep-alive-interval": "40s",
+        "http2-keep-alive-timeout": "20s",
         "ingestion": {
           "connection-retry-policy": {
             "factor": 2.0,
@@ -291,6 +293,11 @@
           },
           "inflight-memory-budget": "1.0 MiB",
           "request-batch-size": "50.0 KiB"
+        },
+        "ingestion-api": {
+          "disable": false,
+          "max-concurrent-streams": 1000,
+          "max-window-size": "128.0 KiB"
         },
         "kafka-clusters": []
       }
@@ -466,10 +473,9 @@
           "type": "exponential"
         },
         "connect-timeout": "3s",
-        "data-stream-window-size": "2.0 MiB",
+        "data-stream-window-size": "4.0 MiB",
         "disable-compression": false,
         "handshake-timeout": "3s",
-        "http2-adaptive-window": true,
         "http2-keep-alive-interval": "1s",
         "http2-keep-alive-timeout": "3s"
       }
@@ -564,8 +570,8 @@
         "null"
       ],
       "format": "uint",
-      "default": null,
-      "minimum": 0
+      "minimum": 0,
+      "default": null
     },
     "rocksdb-log-level": {
       "title": "RocksDB log level",
@@ -605,7 +611,7 @@
     },
     "rocksdb-max-write-rate-per-second": {
       "title": "Rocksdb global disk write rate limiter",
-      "description": "This lets Rocksdb calibrates its IO operations to make the best use out of\nthe available IO bandwidth of the underlying storage device. Rocksdb will\nauto-tune the rate according to the actual background IO workload and will\nuse this value as an upper bound.\n\nYou can use a tool like `fio` to measure the actual IO bandwidth of your storage\ndevice (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a\nreasonable estimate).\n\nFor instance, consider the output of the following command:\n\n```text\nfio --name=c --directory=/restate-data --rw=write --bs=1m --size=8g --numjobs=4 --direct=1 --group_reporting\n...\n  WRITE: bw=601MiB/s (630MB/s), 601MiB/s-601MiB/s (630MB/s-630MB/s), io=32.0GiB (34.4GB), run=54560-54560msec\n```\n\nThe default value assumes a fast NVMe with bandwidth of 7GiB (per second).",
+      "description": "This lets Rocksdb calibrates its IO operations to make the best use out of\nthe available IO bandwidth of the underlying storage device. By default, Rocksdb\nauto-tunes the rate according to the actual background IO workload and uses this\nvalue as an upper bound; see `rocksdb-write-rate-limiter-mode`.\n\nYou can use a tool like `fio` to measure the actual IO bandwidth of your storage\ndevice (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a\nreasonable estimate).\n\nFor instance, consider the output of the following command:\n\n```text\nfio --name=c --directory=/restate-data --rw=write --bs=1m --size=8g --numjobs=4 --direct=1 --group_reporting\n...\n  WRITE: bw=601MiB/s (630MB/s), 601MiB/s-601MiB/s (630MB/s-630MB/s), io=32.0GiB (34.4GB), run=54560-54560msec\n```\n\nThe default value assumes a fast NVMe with bandwidth of 7GiB (per second).",
       "$ref": "#/$defs/NonZeroHumanBytes",
       "default": "7.0 GiB"
     },
@@ -640,19 +646,25 @@
       "format": "float",
       "default": 0.8500000238418579
     },
+    "rocksdb-write-rate-limiter-mode": {
+      "title": "Rocksdb write rate limiter mode",
+      "description": "How the global write rate limiter applies `rocksdb-max-write-rate-per-second`.\n\nTakes effect on restart.\n\nSince v1.8.0",
+      "$ref": "#/$defs/RocksDbWriteRateLimiterMode",
+      "default": "auto-tuned"
+    },
     "roles": {
       "description": "Defines the roles which this Restate node should run, by default the node\nstarts with all roles.",
       "type": "array",
+      "items": {
+        "$ref": "#/$defs/Role"
+      },
       "default": [
         "http-ingress",
         "admin",
         "worker",
         "log-server",
         "metadata-server"
-      ],
-      "items": {
-        "$ref": "#/$defs/Role"
-      }
+      ]
     },
     "shutdown-timeout": {
       "title": "Shutdown grace timeout",
@@ -684,37 +696,16 @@
     },
     "tracing-endpoint": {
       "title": "Tracing Endpoint",
-      "description": "This is a shortcut to set both [`Self::tracing_runtime_endpoint`], and [`Self::tracing_services_endpoint`].\n\nSpecify the tracing endpoint to send runtime traces to.\nTraces will be exported using [OTLP gRPC](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc)\nthrough [opentelemetry_otlp](https://docs.rs/opentelemetry-otlp/0.12.0/opentelemetry_otlp/).\n\nTo configure the sampling, please refer to the [opentelemetry autoconfigure docs](https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#sampler).",
+      "description": "Default endpoint for user-invocation traces. Overridden by\n[`Self::tracing_services_endpoint`].\n\nSpecify the tracing endpoint to send user-invocation traces to.\nTraces will be exported using [OTLP gRPC](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc)\nthrough [opentelemetry_otlp](https://docs.rs/opentelemetry-otlp/0.12.0/opentelemetry_otlp/).\n\nTo configure the sampling, please refer to the [opentelemetry autoconfigure docs](https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#sampler).",
       "type": [
         "string",
         "null"
       ]
-    },
-    "tracing-filter": {
-      "title": "Tracing Filter",
-      "description": "Distributed tracing exporter filter.\nCheck the [`RUST_LOG` documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) for more details how to configure it.",
-      "type": "string"
     },
     "tracing-headers": {
       "title": "Additional tracing headers",
       "description": "Specify additional headers you want the system to send to the tracing endpoint (e.g.\nauthentication headers).",
       "$ref": "#/$defs/SerdeableHeaderHashMap"
-    },
-    "tracing-json-path": {
-      "title": "Distributed Tracing JSON Export Path",
-      "description": "If set, an exporter will be configured to write traces to files using the Jaeger JSON format.\nEach trace file will start with the `trace` prefix.\n\nIf unset, no traces will be written to file.\n\nIt can be used to export traces in a structured format without configuring a Jaeger agent.\n\nTo inspect the traces, open the Jaeger UI and use the Upload JSON feature to load and inspect them.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "tracing-runtime-endpoint": {
-      "title": "Runtime Tracing Endpoint",
-      "description": "Overrides [`Self::tracing_endpoint`] for runtime traces\n\nSpecify the tracing endpoint to send runtime traces to.\nTraces will be exported using [OTLP gRPC](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc)\nthrough [opentelemetry_otlp](https://docs.rs/opentelemetry-otlp/0.12.0/opentelemetry_otlp/).\n\nTo configure the sampling, please refer to the [opentelemetry autoconfigure docs](https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#sampler).",
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "tracing-services-endpoint": {
       "title": "Services Tracing Endpoint",
@@ -742,7 +733,7 @@
           "action-throttling": null,
           "aws-assume-role-external-id": null,
           "aws-profile": null,
-          "concurrent-invocations-limit": 1000,
+          "concurrent-invocations-limit": 24000,
           "connect-timeout": "10s",
           "http-proxy": null,
           "http2-idle-connection-timeout": "5m",
@@ -754,7 +745,6 @@
           "http2-keep-alive-timeout": "20s",
           "http2-max-frame-size": "16.0 KiB",
           "http2-streams-per-connection-limit": 128,
-          "in-memory-queue-length-limit": 66049,
           "inactivity-timeout": "1m",
           "invocation-throttling": null,
           "max-awaited-future-depth": 1000,
@@ -764,8 +754,7 @@
           "per-invocation-initial-memory": "32.0 KiB",
           "request-compression-threshold": "4.0 MiB",
           "request-identity-expiration": "1m",
-          "request-identity-private-key-pem-file": null,
-          "tmp-dir": null
+          "request-identity-private-key-pem-file": null
         },
         "max-command-batch-bytes": "1.0 MiB",
         "max-command-batch-size": 32,
@@ -811,9 +800,6 @@
       }
     }
   },
-  "required": [
-    "tracing-filter"
-  ],
   "$defs": {
     "AdminOptions": {
       "title": "Admin server options",
@@ -875,8 +861,8 @@
             "null"
           ],
           "format": "uint16",
-          "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 65535
         },
         "concurrent-api-requests-limit": {
           "title": "Concurrency limit",
@@ -886,8 +872,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         },
         "deployment-routing-headers": {
           "title": "Deployment routing headers",
@@ -1140,6 +1126,7 @@
       "title": "Human-readable duration",
       "description": "Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.",
       "type": "string",
+      "minLength": 1,
       "examples": [
         "10 hours",
         "5 days",
@@ -1147,15 +1134,61 @@
         "1h 4m",
         "P40D",
         "0"
-      ],
-      "minLength": 1
+      ]
+    },
+    "GcpFederationOptions": {
+      "title": "GCP workload identity federation options",
+      "description": "Configures the process-wide AWS role Restate uses for GCP workload identity federation. Each\ndeployment selects its own workload identity provider and service account.\nRegistering a federated deployment also requires\n`experimental-enable-gcp-workload-identity-federation = true`.\n\nLeave this block unset to disable the federation path entirely: a deployment that requests\n`workload_identity_provider` authentication on a server without this configured fails\nregistration and every subsequent mint with an actionable error, rather than falling back to\nan unauthenticated request. Removing this block while registered deployments depend on it\nstrands those deployments after restart; restore the block and restart the server to recover.\n\n**Not live-reloadable.** Changing `aws-role-arn` or `aws-role-session-name` on a running server\nhas no effect until restart. The configuration is captured once at node startup because\nalready-constructed credentials retain the AWS federation identity used at construction.\n\nThe role ARN and session name are operator-controlled. They must not be accepted through\ndeployment registration: the server's ambient AWS identity may be allowed to assume roles that\na deployment registrant must not be able to select. The deployment's provider, service account,\nand audience remain deployment-controlled.",
+      "type": "object",
+      "properties": {
+        "aws-role-arn": {
+          "title": "AWS role ARN",
+          "description": "The AWS IAM role Restate assumes to obtain the AWS identity used to sign the GCP workload\nidentity federation subject token. This role is shared by every federated deployment in\nthe process.",
+          "type": "string"
+        },
+        "aws-role-session-name": {
+          "title": "AWS role session name",
+          "description": "The `RoleSessionName` used when assuming `aws_role_arn`. This value alone grants no\nisolation between tenants; the role's trust policy controls which sessions may assume it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "aws-role-arn",
+        "aws-role-session-name"
+      ]
     },
     "HumanBytes": {
       "title": "Human-readable bytes",
       "description": "Human-readable bytes",
       "type": "string",
-      "minLength": 1,
-      "pattern": "^\\d+(\\.\\d+)? ?[KMG]B$"
+      "pattern": "^\\d+(\\.\\d+)? ?[KMG]B$",
+      "minLength": 1
+    },
+    "IngestionApiOptions": {
+      "title": "Ingestion API options",
+      "type": "object",
+      "properties": {
+        "disable": {
+          "title": "Disable the gRPC ingestion API",
+          "description": "Disable the experimental gRPC ingestion API on the ingress endpoint.\n\nSince v1.8.0",
+          "type": "boolean",
+          "default": false
+        },
+        "max-concurrent-streams": {
+          "title": "Maximum concurrent streams",
+          "description": "Maximum number of ingestion streams may have in flight before the server\nstart rejecting them\n\nSince v1.8.0",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 1,
+          "default": 1000
+        },
+        "max-window-size": {
+          "title": "Maximum ingestion window size",
+          "description": "Maximum number of bytes an ingestion stream may have in flight before the server\napplies back pressure.\n\nValues below 32KiB, the minimum window defined by the ingestion\nprotocol, are rounded up to 32KiB\n\nValue is clipped at [`u32::MAX`]\n\nSince v1.8.0",
+          "$ref": "#/$defs/NonZeroHumanBytes",
+          "default": "128.0 KiB"
+        }
+      }
     },
     "IngestionOptions": {
       "title": "Ingestion Options",
@@ -1244,8 +1277,8 @@
             "null"
           ],
           "format": "uint16",
-          "maximum": 65535,
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 65535
         },
         "concurrent-api-requests-limit": {
           "title": "Concurrency limit",
@@ -1255,8 +1288,20 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
+        },
+        "http2-keep-alive-interval": {
+          "title": "HTTP/2 Keep-alive interval",
+          "description": "Interval at which HTTP/2 PING frames are sent on inbound ingress connections, to keep\nthem alive and to detect clients that have become unreachable.\n\n`0` disables keep-alive pings entirely.\n\nSince v1.8.0",
+          "$ref": "#/$defs/FriendlyDuration",
+          "default": "40s"
+        },
+        "http2-keep-alive-timeout": {
+          "title": "HTTP/2 Keep-alive timeout",
+          "description": "How long to wait for a client to acknowledge a keep-alive PING. If the acknowledgement\ndoes not arrive within this timeout, the connection is closed.\n\nOnly meaningful when `http2-keep-alive-interval` is not zero.\n\nSince v1.8.0",
+          "$ref": "#/$defs/NonZeroFriendlyDuration",
+          "default": "20s"
         },
         "http2-max-concurrent-streams": {
           "title": "HTTP/2 max concurrent streams",
@@ -1284,14 +1329,24 @@
             "request-batch-size": "50.0 KiB"
           }
         },
+        "ingestion-api": {
+          "title": "Ingestion API options",
+          "description": "Settings for the experimental gRPC ingestion API.",
+          "$ref": "#/$defs/IngestionApiOptions",
+          "default": {
+            "disable": false,
+            "max-concurrent-streams": 1000,
+            "max-window-size": "128.0 KiB"
+          }
+        },
         "kafka-clusters": {
           "title": "Kafka clusters",
           "description": "**Deprecated in 1.7**: Kafka clusters should now be configured through the UI/Admin API",
           "type": "array",
-          "default": [],
           "items": {
             "$ref": "#/$defs/KafkaClusterOptions"
-          }
+          },
+          "default": []
         },
         "listen-mode": {
           "description": "Listen on unix-sockets, TCP sockets, or both.\n\nThe default is to listen on both.",
@@ -1417,14 +1472,14 @@
         },
         "concurrent-invocations-limit": {
           "title": "Limit number of concurrent invocations from this node",
-          "description": "Number of concurrent invocations that can be processed by the invoker.",
+          "description": "Number of invocations that can be concurrently processed by this node.\n\nNote: Default has been increased from 1000 to 24000 since v1.8.0. This value\nsets the limit on per restate-server node level. In prior versions, the limit\nwas applied per-partition.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint",
-          "default": 1000,
-          "minimum": 1
+          "minimum": 1,
+          "default": 24000
         },
         "connect-timeout": {
           "title": "Connect timeout",
@@ -1438,6 +1493,18 @@
           "anyOf": [
             {
               "$ref": "#/$defs/HumanBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gcp-federation": {
+          "title": "GCP workload identity federation",
+          "description": "Enables minting Google ID tokens for deployments that set `workload_identity_provider` in\ntheir `auth` block, using an operator-configured AWS federation role. New federated\nregistrations also require `experimental-enable-gcp-workload-identity-federation = true`.\nUnset by default: deployments requesting this authentication fail registration and mint\nwith an actionable error until this block is configured.\n\nSince v1.8.0",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcpFederationOptions"
             },
             {
               "type": "null"
@@ -1473,8 +1540,8 @@
             "null"
           ],
           "format": "uint32",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         },
         "http2-initial-stream-window-size": {
           "title": "HTTP/2 initial stream window size",
@@ -1511,16 +1578,8 @@
           "description": "Upper bound on the per-connection max-send-streams.\n\nCaps the remote server's advertised `max_concurrent_streams`.\n\nA high number of concurrent streams per connection works\npoorly with L4 load balancers because streams are not balanced across\nbackends.\n\nSince v1.7.0\n\nDefault: 128",
           "type": "integer",
           "format": "uint",
-          "default": 128,
-          "minimum": 1
-        },
-        "in-memory-queue-length-limit": {
-          "title": "Spill invocations to disk",
-          "description": "Defines the threshold after which queues invocations will spill to disk at\nthe path defined in `tmp-dir`. In other words, this is the number of invocations\nthat can be kept in memory before spilling to disk. This is a per-partition limit.",
-          "type": "integer",
-          "format": "uint",
-          "default": 66049,
-          "minimum": 1
+          "minimum": 1,
+          "default": 128
         },
         "inactivity-timeout": {
           "title": "Inactivity timeout",
@@ -1546,8 +1605,8 @@
           "description": "The maximum nesting depth allowed for the futures (promises) an invocation\nawaits on. Restate futures can be composed with combinators (e.g. `all`,\n`race`), and each level of composition adds one level of nesting. This limit\nbounds how deeply such futures may be nested, guarding against unbounded or\nrunaway recursion in service code.\n\nWhen an invocation awaits on (or suspends on) a future whose nesting depth\nexceeds this limit, the attempt fails with a \"maximum promise recursion\nreached\" error, and the invocation is then handled according to\n`on-future-recursion-limit`.\n\nDefault: `1000`.\n\nSince v1.7.3",
           "type": "integer",
           "format": "uint",
-          "default": 1000,
-          "minimum": 0
+          "minimum": 0,
+          "default": 1000
         },
         "memory-limit": {
           "title": "Memory limit",
@@ -1627,15 +1686,6 @@
             "null"
           ],
           "default": null
-        },
-        "tmp-dir": {
-          "title": "Temporary directory",
-          "description": "Temporary directory to use for the invoker temporary files.\nIf empty, the system temporary directory will be used instead.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
         }
       }
     },
@@ -1657,13 +1707,13 @@
           "type": "string"
         }
       },
-      "additionalProperties": {
-        "type": "string"
-      },
       "required": [
         "name",
         "brokers"
-      ]
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "ListenMode": {
       "oneOf": [
@@ -1719,8 +1769,8 @@
             "null"
           ],
           "format": "uint",
-          "deprecated": true,
-          "minimum": 1
+          "minimum": 1,
+          "deprecated": true
         },
         "rocksdb-blob-min-size": {
           "description": "Minimum value size for blob file separation\n\nValues at or above this threshold are stored in separate blob files when\nblob separation is enabled. Smaller values remain inline in SST files.\nLower thresholds reduce write amplification (compactions only rewrite small\nBlobIndex pointers) at the cost of an extra read indirection on cache misses.\n\nOnly takes effect when `rocksdb-enable-blob-separation` is true.\n\n[default] is 512 KiB\n\nSince v1.7.0",
@@ -1815,8 +1865,8 @@
           "description": "Sets the number of files to trigger level-0 compaction.\n\n[default] is 8\n\nSince v1.7.7",
           "type": "integer",
           "format": "uint32",
-          "default": 8,
-          "minimum": 1
+          "minimum": 1,
+          "default": 8
         },
         "rocksdb-log-keep-file-num": {
           "title": "RocksDB log keep file num",
@@ -1826,8 +1876,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 0
+          "minimum": 0,
+          "default": null
         },
         "rocksdb-log-level": {
           "title": "RocksDB log level",
@@ -1885,8 +1935,8 @@
           "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed.\n\nDefault is 1",
           "type": "integer",
           "format": "uint32",
-          "default": 1,
-          "minimum": 0
+          "minimum": 0,
+          "default": 1
         },
         "rocksdb-memory-budget": {
           "description": "The memory budget for rocksdb memtables in bytes\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.\n\nThe memory budget is automatically sanitized to the minimum of 32 MiB if set to\na smaller value.",
@@ -2143,7 +2193,7 @@
             },
             "path": {
               "title": "Object store path for metadata storage",
-              "description": "This location will be used to persist cluster metadata. Takes the form of a URL\nwith `s3://` as the protocol and bucket name as the authority, plus an optional\nprefix specified as the path component.\n\nExample: `s3://bucket/prefix`",
+              "description": "This location will be used to persist cluster metadata. Takes the form of a URL\nwith `s3://` or `gs://` as the protocol and bucket name as the authority, plus\nan optional prefix specified as the path component.\n\nExamples: `s3://bucket/prefix`, `gs://bucket/prefix`\n\nFor `gs://`, credentials come from the environment: a service account key named by\n`GOOGLE_SERVICE_ACCOUNT` or given inline in `GOOGLE_SERVICE_ACCOUNT_KEY`, else\nApplication Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` or the `gcloud`\ndefault file), else the instance metadata server. Workload identity federation\n(`external_account`) credential files are not supported. The `aws-*` options apply\nto `s3://` only.",
               "type": "string"
             },
             "type": {
@@ -2175,22 +2225,22 @@
             "null"
           ],
           "format": "uint64",
-          "default": 1000,
-          "minimum": 0
+          "minimum": 0,
+          "default": 1000
         },
         "raft-election-tick": {
           "description": "The number of ticks before triggering an election\n\nThe number of ticks before triggering an election. The value must be larger than\n`raft_heartbeat_tick`. It's recommended to set `raft_election_tick = 10 * raft_heartbeat_tick`.\nDecrease this value if you want to react faster to failed leaders. Note, decreasing this\nvalue too much can lead to cluster instabilities due to falsely detecting dead leaders.",
           "type": "integer",
           "format": "uint",
-          "default": 10,
-          "minimum": 1
+          "minimum": 1,
+          "default": 10
         },
         "raft-heartbeat-tick": {
           "description": "The number of ticks before sending a heartbeat\n\nA leader sends heartbeat messages to maintain its leadership every heartbeat ticks.\nDecrease this value to send heartbeats more often.",
           "type": "integer",
           "format": "uint",
-          "default": 2,
-          "minimum": 1
+          "minimum": 1,
+          "default": 2
         },
         "raft-tick-interval": {
           "description": "The raft tick interval\n\nThe interval at which the raft node will tick. Decrease this value in order to let the Raft\nnode react more quickly to changes. Note, that every tick comes with an overhead. Moreover,\nthe tick interval directly affects the election timeout. If the election timeout becomes too\nsmall, then this can cause cluster instabilities due to frequent leader changes.",
@@ -2201,8 +2251,8 @@
           "description": "Limit number of in-flight requests\n\nNumber of in-flight metadata store requests.",
           "type": "integer",
           "format": "uint",
-          "default": 32,
-          "minimum": 1
+          "minimum": 1,
+          "default": 32
         },
         "rocksdb-block-size": {
           "title": "RocksDB block size",
@@ -2275,8 +2325,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 0
+          "minimum": 0,
+          "default": null
         },
         "rocksdb-log-level": {
           "title": "RocksDB log level",
@@ -2365,9 +2415,9 @@
         },
         "data-stream-window-size": {
           "title": "Data Stream Window Size",
-          "description": "Controls the number of bytes the can be sent on every data stream before inducing\nback pressure. Data streams are used for sending messages between nodes.\n\nThe value should is often derived from BDP (Bandwidth Delay Product) of the network. For\ninstance, if the network has a bandwidth of 10 Gbps with a round-trip time of 5 ms, the BDP\nis 10 Gbps * 0.005 s = 6.25 MB. This means that the window size should be at least 6.25 MB\nto fully utilize the network bandwidth assuming the latency is constant. Our recommendation\nis to set the window size to 2x the BDP to account for any variations in latency.\n\nIf network latency is high, it's recommended to set this to a higher value.\nMaximum theoretical value is 2^31-1 (2 GiB - 1), but we will sanitize this value to 500 MiB.",
+          "description": "Controls how many bytes a node can send to another node before the receiving node has\nprocessed them. Beyond that, the sender waits, which applies back pressure.\n\nThe value is best derived from the bandwidth-delay product (BDP) of the network. For\ninstance, if the network has a bandwidth of 10 Gbps and a round-trip time of 5 ms, the BDP\nis 10 Gbps * 0.005 s = 6.25 MB. The window should be at least the BDP to fully utilize the\nbandwidth, assuming the latency is constant. We recommend twice the BDP to account for\nvariations in latency.\n\nAt 10 Gbps, the default of 4 MiB is twice the BDP of a round trip of about 1.7 ms, which\ncovers typical networks within a data center. On high-latency links, the window limits\nthroughput to about one window per round trip, for example about 40 MiB/s at 100 ms, so\nraise it there. Each connection can buffer up to one window of data that the receiving\nnode has not processed yet.\n\nWindows above 4 MiB also need larger TCP buffers on every node, because the kernel limits\neach connection's buffers independently of this setting. On Linux, raise the maximum\n(third) values of `net.ipv4.tcp_wmem` and `net.ipv4.tcp_rmem`.\n\nThe maximum theoretical value is 2^31-1 (2 GiB - 1), but values above 500 MiB are reduced\nto 500 MiB. Since v1.8.0, the default is 4 MiB (previously 2 MiB).",
           "$ref": "#/$defs/NonZeroHumanBytes",
-          "default": "2.0 MiB"
+          "default": "4.0 MiB"
         },
         "disable-compression": {
           "title": "Disable Compression",
@@ -2388,8 +2438,12 @@
         },
         "http2-adaptive-window": {
           "title": "HTTP/2 Adaptive Window",
-          "type": "boolean",
-          "default": true
+          "description": "Deprecated and has no effect. Node-to-node connections use fixed HTTP/2 flow-control\nwindows sized by `data-stream-window-size`.\n\nSince v1.8.0 (deprecated)",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "deprecated": true
         },
         "http2-keep-alive-interval": {
           "title": "HTTP/2 Keep Alive Interval",
@@ -2414,21 +2468,21 @@
       "title": "Non-zero human-readable duration",
       "description": "Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.",
       "type": "string",
+      "minLength": 1,
       "examples": [
         "10 hours",
         "5 days",
         "5d",
         "1h 4m",
         "P40D"
-      ],
-      "minLength": 1
+      ]
     },
     "NonZeroHumanBytes": {
       "title": "Non-zero human-readable bytes",
       "description": "Non-zero human-readable bytes",
       "type": "string",
-      "minLength": 1,
-      "pattern": "^\\d+(\\.\\d+)? ?[KMG]B$"
+      "pattern": "^\\d+(\\.\\d+)? ?[KMG]B$",
+      "minLength": 1
     },
     "OnMaxAttempts": {
       "oneOf": [
@@ -2477,8 +2531,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         },
         "rate-limiting": {
           "title": "Query rate limiting",
@@ -2534,8 +2588,8 @@
           "description": "Maximum number of inflight records sequencer can accept\n\nOnce this maximum is hit, sequencer will induce back pressure\non clients. This controls the total number of records regardless of how many batches.\n\nNote that this will be increased to fit the biggest batch of records being enqueued.",
           "type": "integer",
           "format": "uint",
-          "default": 1000,
-          "minimum": 1
+          "minimum": 1,
+          "default": 1000
         },
         "read-batch-size": {
           "title": "Limits memory per remote batch read",
@@ -2547,9 +2601,9 @@
           "description": "Maximum number of records to prefetch from log servers\n\nThe number of records bifrost will attempt to prefetch from replicated loglet's log-servers\nfor every loglet reader (e.g. partition processor). Note that this mainly impacts readers\nthat are not co-located with the loglet sequencer (i.e. partition processor followers).",
           "type": "integer",
           "format": "uint16",
-          "default": 20,
+          "minimum": 1,
           "maximum": 65535,
-          "minimum": 1
+          "default": 20
         },
         "readahead-trigger-ratio": {
           "description": "Trigger to prefetch more records\n\nWhen read-ahead is used (readahead-records), this value (percentage in float) will determine when\nreaders should trigger a prefetch for another batch to fill up the buffer. For instance, if\nthis value is 0.3, then bifrost will trigger a prefetch when 30% or more of the read-ahead\nslots become available (e.g. partition processor consumed records and freed up enough slots).\n\nThe higher the value is, the longer bifrost will wait before it triggers the next fetch, potentially\nfetching more records as a result.\n\nTo illustrate, if readahead-records is set to 100 and readahead-trigger-ratio is 1.0. Then\nbifrost will prefetch up to 100 records from log-servers and will not trigger the next\nprefetch unless the consumer consumes 100% of this buffer. This means that bifrost will\nread in batches but will not do while the consumer is still reading the previous batch.\n\nValue must be between 0 and 1. It will be clamped at `1.0`.",
@@ -2560,14 +2614,14 @@
         "rpc-timeout": {
           "description": "Adaptive timeout for LogServer RPC\n\nThis configures the adaptive timeout range for RPC operations from this node to log servers.\nThe timeout range is also used to determine the appropriate retry delay between retry attempts.",
           "type": "string",
-          "default": "250ms..1m",
+          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$",
           "examples": [
             "250ms..1m",
             "10ms..60s",
             "0.5s..5m",
             "1s..1h"
           ],
-          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$"
+          "default": "250ms..1m"
         },
         "sequencer-inactivity-timeout": {
           "description": "Sequencer inactivity timeout\n\nThe sequencer is allowed to consider itself quiescent if it did not commit records for this period of time.\nIt may use this to sends pre-emptive release/seal check requests to log-servers.\n\nThe sequencer is also allowed to use this value as interval to send seal/release checks even if it's not quiescent.",
@@ -2589,14 +2643,14 @@
         "store-timeout": {
           "description": "Adaptive timeout for LogServer Store Messages\n\nThis configures the adaptive timeout range for Store operations from this node to log servers.\n\nSince v1.7.0",
           "type": "string",
-          "default": "2s..1m",
+          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$",
           "examples": [
             "250ms..1m",
             "10ms..60s",
             "0.5s..5m",
             "1s..1h"
           ],
-          "pattern": "^\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)\\s*\\.\\.\\s*\\d+(\\.\\d+)?\\s*(ns|us|ms|s|m|h|d|nanoseconds?|microseconds?|milliseconds?|seconds?|minutes?|hours?|days?)$"
+          "default": "2s..1m"
         }
       }
     },
@@ -2709,6 +2763,23 @@
         "error",
         "fatal",
         "header"
+      ]
+    },
+    "RocksDbWriteRateLimiterMode": {
+      "title": "Rocksdb write rate limiter mode",
+      "oneOf": [
+        {
+          "title": "Auto-tuned",
+          "description": "Rocksdb adjusts the rate to the recent background IO demand, between 1/20 of\n`rocksdb-max-write-rate-per-second` and the full value. Under sustained demand the\nrate can increase by 5% roughly every 10 seconds, so after a quiet period a sudden\nwrite burst can start near the lower bound and take minutes to reach the full rate.",
+          "type": "string",
+          "const": "auto-tuned"
+        },
+        {
+          "title": "Fixed",
+          "description": "Flushes and compactions share a fixed aggregate limit of\n`rocksdb-max-write-rate-per-second`, with no ramp-up. It does not guarantee throughput\nor reserve bandwidth for flushes. Use it when write bursts arrive faster than the\nauto-tuner ramps up, and set the limit to what the storage device can sustain.",
+          "type": "string",
+          "const": "fixed"
+        }
       ]
     },
     "RocksbPerfStatisticsLevel": {
@@ -2873,7 +2944,7 @@
         },
         "destination": {
           "title": "Snapshot destination URL",
-          "description": "Base URL for cluster snapshots. Currently only supports the `s3://` protocol scheme.\nS3-compatible object stores must support ETag-based conditional writes.\n\nDefault: `None`",
+          "description": "Base URL for cluster snapshots, using the `s3://`, `gs://` or `az://` protocol scheme.\nS3-compatible object stores must support ETag-based conditional writes. For `gs://`,\ncredentials come from the environment, as for a `gs://` metadata path.\n\nDefault: `None`",
           "type": [
             "string",
             "null"
@@ -2899,9 +2970,9 @@
           "description": "Number of most recent snapshots to retain. Older snapshots will be\ndeleted automatically. Only snapshots created after this setting is enabled will\nbe considered for pruning.\n\nRetaining multiple snapshots causes the partition archived LSN to be reported as that of the\noldest retained snapshot. Therefore, retaining multiple snapshots will cause increased disk\nusage on log-server nodes.\n\nDefault: `1`\n\nSince v1.7.0",
           "type": "integer",
           "format": "uint8",
-          "default": 1,
+          "minimum": 1,
           "maximum": 255,
-          "minimum": 1
+          "default": 1
         },
         "object-store-retry-policy": {
           "title": "Error retry policy",
@@ -2935,8 +3006,8 @@
             "null"
           ],
           "format": "uint64",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         }
       }
     },
@@ -3023,8 +3094,8 @@
           "description": "Sets the number of files to trigger level-0 compaction.\n\n[default] is 2\n\nSince v1.7.7",
           "type": "integer",
           "format": "uint32",
-          "default": 2,
-          "minimum": 1
+          "minimum": 1,
+          "default": 2
         },
         "rocksdb-log-keep-file-num": {
           "title": "RocksDB log keep file num",
@@ -3034,8 +3105,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 0
+          "minimum": 0,
+          "default": null
         },
         "rocksdb-log-level": {
           "title": "RocksDB log level",
@@ -3083,8 +3154,8 @@
           "description": "The maximum number of subcompactions to run in parallel.\n\nSetting this to 1 means no sub-compactions are allowed.\n\nDefault is 1\n\nSince v1.7.5",
           "type": "integer",
           "format": "uint32",
-          "default": 1,
-          "minimum": 0
+          "minimum": 0,
+          "default": 1
         },
         "rocksdb-memory-budget": {
           "description": "The memory budget for rocksdb memtables in bytes\n\nThe total is divided evenly across partitions. The server will rebalance the memory budget\nperiodically depending on the number of running partitions on this node.\n\nIf this value is set, it overrides the ratio defined in `rocksdb-memory-ratio`.",
@@ -3158,6 +3229,13 @@
           "$ref": "#/$defs/NonZeroFriendlyDuration",
           "default": "1h"
         },
+        "cleanup-max-in-flight-purges": {
+          "title": "Cleanup max in-flight purges",
+          "description": "The maximum number of purges the cleanup procedure keeps in flight per partition, i.e.\nproposed to the log but not yet applied. Higher values let the cleanup procedure purge\ncompleted invocations faster, but can increase tail latencies of other operations in\nthe system while it's being processed.\n\nIf purging is not keeping up with the rate of completed invocations, consider increasing\nthis value further. This is mostly relevant in deployments with high (100ms+) base write to read\nlatency baseline (e.g. multi-regional deployments).\n\nDefault: 32\n\nSince v1.8.0",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        },
         "data-service-memory-limit": {
           "description": "Memory limit for incoming partition data service messages (Ingestion).\n\nDefault is 256 MiB.",
           "$ref": "#/$defs/NonZeroHumanBytes",
@@ -3179,8 +3257,8 @@
           "title": "Internal queue for partition processor communication",
           "type": "integer",
           "format": "uint",
-          "default": 1000,
-          "minimum": 1
+          "minimum": 1,
+          "default": 1000
         },
         "invoker": {
           "$ref": "#/$defs/InvokerOptions",
@@ -3189,7 +3267,7 @@
             "action-throttling": null,
             "aws-assume-role-external-id": null,
             "aws-profile": null,
-            "concurrent-invocations-limit": 1000,
+            "concurrent-invocations-limit": 24000,
             "connect-timeout": "10s",
             "http-proxy": null,
             "http2-idle-connection-timeout": "5m",
@@ -3201,7 +3279,6 @@
             "http2-keep-alive-timeout": "20s",
             "http2-max-frame-size": "16.0 KiB",
             "http2-streams-per-connection-limit": 128,
-            "in-memory-queue-length-limit": 66049,
             "inactivity-timeout": "1m",
             "invocation-throttling": null,
             "max-awaited-future-depth": 1000,
@@ -3211,8 +3288,7 @@
             "per-invocation-initial-memory": "32.0 KiB",
             "request-compression-threshold": "4.0 MiB",
             "request-identity-expiration": "1m",
-            "request-identity-private-key-pem-file": null,
-            "tmp-dir": null
+            "request-identity-private-key-pem-file": null
           }
         },
         "max-command-batch-bytes": {
@@ -3226,8 +3302,8 @@
           "description": "The maximum number of Bifrost log records a partition processor will process opportunistically\nin a single batch. The larger this value is, the higher the throughput and latency are.",
           "type": "integer",
           "format": "uint",
-          "default": 32,
-          "minimum": 1
+          "minimum": 1,
+          "default": 32
         },
         "num-timers-in-memory-limit": {
           "title": "Num timers in memory limit",
@@ -3237,8 +3313,8 @@
             "null"
           ],
           "format": "uint",
-          "default": null,
-          "minimum": 1
+          "minimum": 1,
+          "default": null
         },
         "rule-book-poll-interval": {
           "title": "Rule book poll interval",
@@ -3298,6 +3374,13 @@
           "title": "Delayed log trimming",
           "description": "Log trimming normally happens immediately after the partition becomes fully durable. A\npartition is considered fully durable when one of the following conditions is met:\n\n1. The partition has been fully replicated and flushed to all nodes in its replica-set.\n2. The partition has been snapshotted into the snapshot repository.\n\nThe delay interval is the time that Restate will wait before trimming the log _after_ the\ndurability condition is met. It's useful to set this to a non-zero duration if you want to\ncover the time needed for the snapshot repository (i.e. S3) to replicate the snapshot\nacross regions (typically a few seconds, but can be longer. Check S3's guidelines and\ncross-region replication SLA for more information).",
           "$ref": "#/$defs/FriendlyDuration"
+        },
+        "vqueue-metadata-cache-size": {
+          "title": "VQueue metadata cache size",
+          "description": "The target number of VQueue metadata entries to cache per partition. Each entry uses\napproximately 300 bytes. Active VQueues remain cached even when this target is exceeded.\n\nDefault: 32,000 (approximately 9 MiB per partition)\n\nSince v1.8.0",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       }
     }
