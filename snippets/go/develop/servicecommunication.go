@@ -112,8 +112,6 @@ func (Router) GreetScoped(ctx restate.Context, name string) error {
 	wfResponse, err := restate.Workflow[bool](ctx, "MyWorkflow", "my-workflow-id", "Run", restate.WithScope("tenant-123")).
 		Request("Hi", restate.WithLimitKey("premium/user42"))
 
-	// Scoped Virtual Object calls need
-	// RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
 	objResponse, err := restate.Object[string](ctx, "MyObject", "Mary", "MyHandler", restate.WithScope("tenant-123")).
 		Request("Hi")
 

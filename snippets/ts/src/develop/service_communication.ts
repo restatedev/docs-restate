@@ -148,8 +148,6 @@ const service = restate.service({
         .workflowClient(myWorkflow, "wf-id")
         .run("Hi", restate.rpc.opts({ limitKey: "premium/user42" }));
 
-      // Scoped Virtual Object calls need
-      // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
       const objResponse = await ctx
         .scope("tenant-123")
         .objectClient(myObject, "Mary")
