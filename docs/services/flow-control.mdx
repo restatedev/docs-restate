@@ -45,11 +45,6 @@ You attach a scope to an invocation by sending it through a [scoped ingress endp
 
 A scope value follows a restricted format: only the characters `[a-zA-Z0-9_.-]`, non-empty, and at most 36 characters long.
 
-<Tip title="Choose scopes with enough cardinality">
-    A scope doubles as a **sharding key**: Restate shards an invocation's flow-control state under a hash of its scope.
-    A scope with very low cardinality (a single constant, or a handful of distinct values) concentrates all of that traffic and scheduling onto a few partitions, which can create a hot spot.
-</Tip>
-
 ## Limit keys
 
 Within a scope, a **limit key** gives you a finer, hierarchical level of concurrency control.
@@ -71,6 +66,30 @@ A limit key always requires a scope. Restate rejects an invocation that carries 
 </Note>
 
 Each level of a limit key follows the same restricted value format as a scope: only the characters `[a-zA-Z0-9_.-]`, non-empty, and at most 36 characters long.
+
+## Choosing scopes
+
+### One scope, one partition
+
+Every invocation that carries a scope is processed by the partition that owns that scope, together with its journal, state and locks.
+A scope is therefore a **sharding key**: all of its work goes through one partition processor, which bounds the throughput of a single scope.
+Choose scopes with enough cardinality, such as tenants, organizations or users, so that traffic spreads across partitions.
+A scope with very low cardinality (a single constant, or a handful of distinct values) concentrates all of that traffic on a few partitions and creates a hot spot.
+
+### Scoped or unscoped Virtual Objects
+
+A Virtual Object key is only unique within a scope.
+`Cart` `"a"` without a scope, under scope `bob` and under scope `joe` are three objects with separate state, separate queues and separate locks.
+A call without a scope always reaches the unscoped object.
+
+- Scope a Virtual Object when it belongs to the scope, for example a per-tenant cart or a per-user session, and its work should count against that scope's concurrency budget.
+- Keep a Virtual Object unscoped when the virtual object key cardinality is high and no flow control is needed.
+
+### Limit keys and ordering
+
+Invocations to the same Virtual Object instance that carry the same limit key run in arrival order.
+Across different limit keys, the order is not guaranteed: each limit key has its own queue, and when one limit key is held back by its concurrency limit, a later invocation with another limit key can acquire the object and run first.
+If you rely on the ordering of calls to one object, give those calls the same limit key.
 
 ## Configuring concurrency limits
 
@@ -185,12 +204,15 @@ A limit key always requires a scope: sending one without a `scope/{scopeKey}` se
 ### From an SDK handler
 
 Service-to-service calls made from a handler can carry a scope and limit key too, so the invocations they trigger count against the same rule book.
-Each SDK exposes a scoped client for this:
+Each SDK exposes a scoped client for this, starting from the following versions:
 
-- [TypeScript](/develop/ts/service-communication#flow-control-scope-and-limit-key)
-- [Python](/develop/python/service-communication#flow-control-scope-and-limit-key)
-- [Java / Kotlin](/develop/java/service-communication#flow-control-scope-and-limit-key)
-- [Go](/develop/go/service-communication#flow-control-scope-and-limit-key)
+| SDK | Minimum version |
+| --- | --- |
+| [TypeScript](/develop/ts/service-communication#flow-control-scope-and-limit-key) | 1.15.0 |
+| [Python](/develop/python/service-communication#flow-control-scope-and-limit-key) | 1.0.0 |
+| [Java / Kotlin](/develop/java/service-communication#flow-control-scope-and-limit-key) | 2.9.1 |
+| [Go](/develop/go/service-communication#flow-control-scope-and-limit-key) | 1.0.0 |
+| Rust | 0.11.0 |
 
 ## Example: a multi-tenant inference platform
 
@@ -227,8 +249,9 @@ Several SQL system tables let you inspect the scheduler, queues, and concurrency
 | --- | --- |
 | `sys_rules` | The configured rule book: one row per rule with its pattern, concurrency limit, description, disabled flag, version, and last-modified time. |
 | `sys_user_limits` | Concurrency counters at every level (scope, L1, and L2): the scope and limit-key components, the hierarchy level, current usage, configured limit, available capacity, and the matching rule pattern. |
-| `sys_vqueues` | One row per entry across all queue stages, with its status, attempt counters, and lifecycle timestamps. |
-| `sys_vqueue_meta` | Aggregate statistics per queue: scope, service name, per-stage entry counts, and timing averages. |
-| `sys_scheduler` | Real-time scheduler state for each queue's head entry: queue depth, scheduler status, and what it is blocked on. |
+| `sys_vqueues` | Entries of each queue, by stage: one row per entry in a queue stage (inbox, running, paused, suspended or finished). |
+| `sys_vqueue_entry_status` | Status of every queue entry: one row per invocation or state mutation, with its stage, its attempts and how long it was blocked on each resource. |
+| `sys_vqueue_meta` | Metadata and statistics of each queue: entries per stage, latest activity timestamps, and moving averages of wait, run and blocking times. |
+| `sys_scheduler` | Scheduler state of each queue: whether it is dormant, blocked or scheduled, what its head entry is waiting on, and how long it waited on each resource. |
 
 See [introspection](/services/introspection) for how to query the system tables.
