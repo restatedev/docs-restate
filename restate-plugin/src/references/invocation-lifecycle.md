@@ -34,7 +34,7 @@ Each SDK provides a typed client for invoking services from external code (outsi
 
 Common pattern: a web server or frontend calls Restate services via the SDK client or HTTP, then uses attach or polling to get results.
 
-For Restate 1.7 scope-based concurrency limits, scoped invocation identity, and limit keys, load `references/flow-control-and-scopes.md`.
+For scope-based concurrency limits, scoped invocation identity, and limit keys, load `references/flow-control-and-scopes.md`.
 
 ## Invoking via Kafka
 
