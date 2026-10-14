@@ -8,9 +8,9 @@ description: "Shape and limit concurrent invocations with scope-based concurrenc
 Flow control lets you shape the traffic flowing through Restate instead of letting invocations run unbounded.
 As soon as many invocations compete for the same downstream resources, you need a way to put a ceiling on how much runs at once.
 
-<Note title="Opt-in feature">
-    Flow control is an opt-in feature and is disabled by default.
-    Its configuration and APIs may change in future releases.
+<Note title="Requires Restate 1.8">
+    Flow control is available by default since Restate 1.8.
+    On Restate 1.7, it is an experimental opt-in feature; see [Enabling flow control](#enabling-flow-control).
 </Note>
 
 ## Why flow control
@@ -44,7 +44,7 @@ You choose what a scope represents. For example, you might scope by:
 A scope is more than a concurrency bucket. It becomes **part of the identity of every invocation and resource inside it**, so the same thing addressed under two different scopes is isolated:
 
 - **Idempotency is tracked per scope.** The same idempotency key deduplicates only within one scope. Reused under a different scope, it starts a separate invocation.
-- **Virtual Object and Workflow keys are per scope.** A `Cart` object with key `"a"` under scope `bob` is a different instance, with its own state and queue, from `Cart` `"a"` under scope `joe`. (Routing scoped calls to Virtual Objects requires the [extra opt-in](#enabling-flow-control).)
+- **Virtual Object and Workflow keys are per scope.** A `Cart` object with key `"a"` under scope `bob` is a different instance, with its own state and queue, from `Cart` `"a"` under scope `joe`.
 
 You attach a scope to an invocation by sending it through a [scoped ingress endpoint](#applying-concurrency-limits), and you define limits per scope through the [rule book](#configuring-concurrency-limits).
 
@@ -79,7 +79,9 @@ Each level of a limit key follows the same restricted value format as a scope: o
 
 ## Enabling flow control
 
-Flow control is disabled by default. Enable it in your server configuration:
+Since Restate 1.8, flow control is enabled by default and needs no configuration.
+
+On Restate 1.7, flow control is an experimental opt-in feature. Enable it in your server configuration:
 
 ```toml restate.toml
 experimental-enable-protocol-v7 = true
@@ -97,8 +99,10 @@ RESTATE_EXPERIMENTAL_ENABLE_VQUEUES=true
 RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true
 ```
 
+These options were removed in Restate 1.8 and no longer have any effect there.
+
 <Note title="Existing clusters require Restate 1.7.3 or later">
-    Starting with Restate 1.7.3, you can enable flow control on an existing cluster.
+    Starting with Restate 1.7.3, you can enable flow control on an existing 1.7 cluster.
     When you enable vqueues, Restate automatically migrates the cluster's existing invocations to vqueues.
     Restate 1.7.0 through 1.7.2 only support enabling vqueues on fresh clusters with no in-flight invocations.
 </Note>
@@ -252,7 +256,7 @@ Her effective limit is the strictest of these, so alice runs at most 10 concurre
 
 ## Observing flow control
 
-When flow control is enabled, several SQL system tables let you inspect the scheduler, queues, and concurrency limits directly:
+Several SQL system tables let you inspect the scheduler, queues, and concurrency limits directly:
 
 | Table | What it shows |
 | --- | --- |
@@ -262,5 +266,4 @@ When flow control is enabled, several SQL system tables let you inspect the sche
 | `sys_vqueue_meta` | Aggregate statistics per queue: scope, service name, per-stage entry counts, and timing averages. |
 | `sys_scheduler` | Real-time scheduler state for each queue's head entry: queue depth, scheduler status, and what it is blocked on. |
 
-These tables are populated only when flow control is enabled.
 See [introspection](/services/introspection) for how to query the system tables.
