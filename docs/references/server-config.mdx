@@ -524,9 +524,9 @@ Since v1.7.0 (renamed from `rocksdb-bg-threads`)
 
 <ResponseField name="rocksdb-max-write-rate-per-second" type="string" post={['pattern: ^\\d+(\\.\\d+)? ?[KMG]B$','minLength: 1','toml: rocksdb-max-write-rate-per-second','env: RESTATE_ROCKSDB_MAX_WRITE_RATE_PER_SECOND']} default="7.0 GiB">
     Rocksdb global disk write rate limiter: This lets Rocksdb calibrates its IO operations to make the best use out of
-the available IO bandwidth of the underlying storage device. Rocksdb will
-auto-tune the rate according to the actual background IO workload and will
-use this value as an upper bound.
+the available IO bandwidth of the underlying storage device. By default, Rocksdb
+auto-tunes the rate according to the actual background IO workload and uses this
+value as an upper bound; see `rocksdb-write-rate-limiter-mode`.
 
 You can use a tool like `fio` to measure the actual IO bandwidth of your storage
 device (use block size of 64k, direct IO, and iodepth of 32 across 4 jobs to get a
@@ -594,6 +594,24 @@ This value will be sanitized to 1.0 if outside the valid bounds.
 
 </ResponseField>
 
+<ResponseField name="rocksdb-write-rate-limiter-mode" type="string" post={['toml: rocksdb-write-rate-limiter-mode','env: RESTATE_ROCKSDB_WRITE_RATE_LIMITER_MODE']} default="auto-tuned">
+    Rocksdb write rate limiter mode: How the global write rate limiter applies `rocksdb-max-write-rate-per-second`.
+
+Takes effect on restart.
+
+Since v1.8.0
+
+    
+    - `"auto-tuned"` : Rocksdb adjusts the rate to the recent background IO demand, between 1/20 of
+`rocksdb-max-write-rate-per-second` and the full value. Under sustained demand the
+rate can increase by 5% roughly every 10 seconds, so after a quiet period a sudden
+write burst can start near the lower bound and take minutes to reach the full rate.
+    - `"fixed"` : Flushes and compactions share a fixed aggregate limit of
+`rocksdb-max-write-rate-per-second`, with no ramp-up. It does not guarantee throughput
+or reserve bandwidth for flushes. Use it when write bursts arrive faster than the
+auto-tuner ramps up, and set the limit to what the storage device can sustain.
+</ResponseField>
+
 <ResponseField name="roles" type="array" post={['toml: roles','env: RESTATE_ROLES']} default="[&quot;http-ingress&quot;,&quot;admin&quot;,&quot;worker&quot;,&quot;log-server&quot;,&quot;metadata-server&quot;]">
     Defines the roles which this Restate node should run, by default the node
 starts with all roles.
@@ -640,48 +658,20 @@ built with tokio-console support, it'll listen on `[::]:6669`.
 </ResponseField>
 
 <ResponseField name="tracing-endpoint" type="string | null" post={['toml: tracing-endpoint','env: RESTATE_TRACING_ENDPOINT']}>
-    Tracing Endpoint: This is a shortcut to set both [`Self::tracing_runtime_endpoint`], and [`Self::tracing_services_endpoint`].
+    Tracing Endpoint: Default endpoint for user-invocation traces. Overridden by
+[`Self::tracing_services_endpoint`].
 
-Specify the tracing endpoint to send runtime traces to.
+Specify the tracing endpoint to send user-invocation traces to.
 Traces will be exported using [OTLP gRPC](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc)
 through [opentelemetry_otlp](https://docs.rs/opentelemetry-otlp/0.12.0/opentelemetry_otlp/).
 
 To configure the sampling, please refer to the [opentelemetry autoconfigure docs](https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#sampler).
-
-</ResponseField>
-
-<ResponseField name="tracing-filter" type="string" required post={['toml: tracing-filter','env: RESTATE_TRACING_FILTER']}>
-    Tracing Filter: Distributed tracing exporter filter.
-Check the [`RUST_LOG` documentation](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) for more details how to configure it.
 
 </ResponseField>
 
 <ResponseField name="tracing-headers" type="object" post={['toml: tracing-headers','env: RESTATE_TRACING_HEADERS']}>
     Additional tracing headers: Specify additional headers you want the system to send to the tracing endpoint (e.g.
 authentication headers).
-
-</ResponseField>
-
-<ResponseField name="tracing-json-path" type="string | null" post={['toml: tracing-json-path','env: RESTATE_TRACING_JSON_PATH']}>
-    Distributed Tracing JSON Export Path: If set, an exporter will be configured to write traces to files using the Jaeger JSON format.
-Each trace file will start with the `trace` prefix.
-
-If unset, no traces will be written to file.
-
-It can be used to export traces in a structured format without configuring a Jaeger agent.
-
-To inspect the traces, open the Jaeger UI and use the Upload JSON feature to load and inspect them.
-
-</ResponseField>
-
-<ResponseField name="tracing-runtime-endpoint" type="string | null" post={['toml: tracing-runtime-endpoint','env: RESTATE_TRACING_RUNTIME_ENDPOINT']}>
-    Runtime Tracing Endpoint: Overrides [`Self::tracing_endpoint`] for runtime traces
-
-Specify the tracing endpoint to send runtime traces to.
-Traces will be exported using [OTLP gRPC](https://opentelemetry.io/docs/specs/otlp/#otlpgrpc)
-through [opentelemetry_otlp](https://docs.rs/opentelemetry-otlp/0.12.0/opentelemetry_otlp/).
-
-To configure the sampling, please refer to the [opentelemetry autoconfigure docs](https://github.com/open-telemetry/opentelemetry-java/blob/main/sdk-extensions/autoconfigure/README.md#sampler).
 
 </ResponseField>
 
@@ -1382,6 +1372,36 @@ the ingress will reply immediately with an appropriate status code. Default is u
 
 </ResponseField>
 
+<ResponseField name="http2-keep-alive-interval" type="string" post={['minLength: 1','toml: ingress.http2-keep-alive-interval','env: RESTATE_INGRESS__HTTP2_KEEP_ALIVE_INTERVAL']} default="40s">
+    HTTP/2 Keep-alive interval: Interval at which HTTP/2 PING frames are sent on inbound ingress connections, to keep
+them alive and to detect clients that have become unreachable.
+
+`0` disables keep-alive pings entirely.
+
+Since v1.8.0
+
+Human-readable duration: Duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D" or "0"
+
+</ResponseField>
+
+<ResponseField name="http2-keep-alive-timeout" type="string" post={['minLength: 1','toml: ingress.http2-keep-alive-timeout','env: RESTATE_INGRESS__HTTP2_KEEP_ALIVE_TIMEOUT']} default="20s">
+    HTTP/2 Keep-alive timeout: How long to wait for a client to acknowledge a keep-alive PING. If the acknowledgement
+does not arrive within this timeout, the connection is closed.
+
+Only meaningful when `http2-keep-alive-interval` is not zero.
+
+Since v1.8.0
+
+Non-zero human-readable duration: Non-zero duration string in either jiff human friendly or ISO8601 format. Check https://docs.rs/jiff/latest/jiff/struct.Span.html#parsing-and-printing for more details.
+
+Examples:
+"10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+</ResponseField>
+
 <ResponseField name="http2-max-concurrent-streams" type="integer | null" post={['format: uint32','minimum: 1','toml: ingress.http2-max-concurrent-streams','env: RESTATE_INGRESS__HTTP2_MAX_CONCURRENT_STREAMS']}>
     HTTP/2 max concurrent streams: Caps the number of concurrent HTTP/2 streams accepted per inbound ingress connection.
 If unset, Restate does not configure this limit and leaves it at hyper's runtime default.
@@ -1551,6 +1571,40 @@ Examples:
 
 </Tab>
 </Tabs>
+
+### ingress.ingestion-api
+
+Ingestion API options: Settings for the experimental gRPC ingestion API.
+
+Configuration file section `[ingress.ingestion-api]`, environment variable prefix `RESTATE_INGRESS__INGESTION_API__`.
+
+<ResponseField name="disable" type="boolean" post={['toml: ingress.ingestion-api.disable','env: RESTATE_INGRESS__INGESTION_API__DISABLE']} default="false">
+    Disable the gRPC ingestion API: Disable the experimental gRPC ingestion API on the ingress endpoint.
+
+Since v1.8.0
+
+</ResponseField>
+
+<ResponseField name="max-concurrent-streams" type="integer" post={['format: uint','minimum: 1','toml: ingress.ingestion-api.max-concurrent-streams','env: RESTATE_INGRESS__INGESTION_API__MAX_CONCURRENT_STREAMS']} default="1000">
+    Maximum concurrent streams: Maximum number of ingestion streams may have in flight before the server
+start rejecting them
+
+Since v1.8.0
+
+</ResponseField>
+
+<ResponseField name="max-window-size" type="string" post={['pattern: ^\\d+(\\.\\d+)? ?[KMG]B$','minLength: 1','toml: ingress.ingestion-api.max-window-size','env: RESTATE_INGRESS__INGESTION_API__MAX_WINDOW_SIZE']} default="128.0 KiB">
+    Maximum ingestion window size: Maximum number of bytes an ingestion stream may have in flight before the server
+applies back pressure.
+
+Values below 32KiB, the minimum window defined by the ingestion
+protocol, are rounded up to 32KiB
+
+Value is clipped at [`u32::MAX`]
+
+Since v1.8.0
+
+</ResponseField>
 
 ## log-server
 
@@ -2046,10 +2100,17 @@ Examples:
 
 <ResponseField name="path" type="string" required post={['toml: metadata-client.path','env: RESTATE_METADATA_CLIENT__PATH']}>
     Object store path for metadata storage: This location will be used to persist cluster metadata. Takes the form of a URL
-with `s3://` as the protocol and bucket name as the authority, plus an optional
-prefix specified as the path component.
+with `s3://` or `gs://` as the protocol and bucket name as the authority, plus
+an optional prefix specified as the path component.
 
-Example: `s3://bucket/prefix`
+Examples: `s3://bucket/prefix`, `gs://bucket/prefix`
+
+For `gs://`, credentials come from the environment: a service account key named by
+`GOOGLE_SERVICE_ACCOUNT` or given inline in `GOOGLE_SERVICE_ACCOUNT_KEY`, else
+Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` or the `gcloud`
+default file), else the instance metadata server. Workload identity federation
+(`external_account`) credential files are not supported. The `aws-*` options apply
+to `s3://` only.
 
 </ResponseField>
 
@@ -2402,18 +2463,28 @@ Examples:
 
 </ResponseField>
 
-<ResponseField name="data-stream-window-size" type="string" post={['pattern: ^\\d+(\\.\\d+)? ?[KMG]B$','minLength: 1','toml: networking.data-stream-window-size','env: RESTATE_NETWORKING__DATA_STREAM_WINDOW_SIZE']} default="2.0 MiB">
-    Data Stream Window Size: Controls the number of bytes the can be sent on every data stream before inducing
-back pressure. Data streams are used for sending messages between nodes.
+<ResponseField name="data-stream-window-size" type="string" post={['pattern: ^\\d+(\\.\\d+)? ?[KMG]B$','minLength: 1','toml: networking.data-stream-window-size','env: RESTATE_NETWORKING__DATA_STREAM_WINDOW_SIZE']} default="4.0 MiB">
+    Data Stream Window Size: Controls how many bytes a node can send to another node before the receiving node has
+processed them. Beyond that, the sender waits, which applies back pressure.
 
-The value should is often derived from BDP (Bandwidth Delay Product) of the network. For
-instance, if the network has a bandwidth of 10 Gbps with a round-trip time of 5 ms, the BDP
-is 10 Gbps * 0.005 s = 6.25 MB. This means that the window size should be at least 6.25 MB
-to fully utilize the network bandwidth assuming the latency is constant. Our recommendation
-is to set the window size to 2x the BDP to account for any variations in latency.
+The value is best derived from the bandwidth-delay product (BDP) of the network. For
+instance, if the network has a bandwidth of 10 Gbps and a round-trip time of 5 ms, the BDP
+is 10 Gbps * 0.005 s = 6.25 MB. The window should be at least the BDP to fully utilize the
+bandwidth, assuming the latency is constant. We recommend twice the BDP to account for
+variations in latency.
 
-If network latency is high, it's recommended to set this to a higher value.
-Maximum theoretical value is 2^31-1 (2 GiB - 1), but we will sanitize this value to 500 MiB.
+At 10 Gbps, the default of 4 MiB is twice the BDP of a round trip of about 1.7 ms, which
+covers typical networks within a data center. On high-latency links, the window limits
+throughput to about one window per round trip, for example about 40 MiB/s at 100 ms, so
+raise it there. Each connection can buffer up to one window of data that the receiving
+node has not processed yet.
+
+Windows above 4 MiB also need larger TCP buffers on every node, because the kernel limits
+each connection's buffers independently of this setting. On Linux, raise the maximum
+(third) values of `net.ipv4.tcp_wmem` and `net.ipv4.tcp_rmem`.
+
+The maximum theoretical value is 2^31-1 (2 GiB - 1), but values above 500 MiB are reduced
+to 500 MiB. Since v1.8.0, the default is 4 MiB (previously 2 MiB).
 
 </ResponseField>
 
@@ -2441,8 +2512,11 @@ Examples:
 
 </ResponseField>
 
-<ResponseField name="http2-adaptive-window" type="boolean" post={['toml: networking.http2-adaptive-window','env: RESTATE_NETWORKING__HTTP2_ADAPTIVE_WINDOW']} default="true">
-    HTTP/2 Adaptive Window
+<ResponseField name="http2-adaptive-window" type="boolean | null" post={['toml: networking.http2-adaptive-window','env: RESTATE_NETWORKING__HTTP2_ADAPTIVE_WINDOW']}>
+    HTTP/2 Adaptive Window: Deprecated and has no effect. Node-to-node connections use fixed HTTP/2 flow-control
+windows sized by `data-stream-window-size`.
+
+Since v1.8.0 (deprecated)
 
 </ResponseField>
 
@@ -2571,6 +2645,22 @@ Non-zero human-readable duration: Non-zero duration string in either jiff human 
 
 Examples:
 "10 hours" or "5 days" or "5d" or "1h 4m" or "P40D"
+
+</ResponseField>
+
+<ResponseField name="cleanup-max-in-flight-purges" type="integer" post={['format: uint32','minimum: 1','toml: worker.cleanup-max-in-flight-purges','env: RESTATE_WORKER__CLEANUP_MAX_IN_FLIGHT_PURGES']}>
+    Cleanup max in-flight purges: The maximum number of purges the cleanup procedure keeps in flight per partition, i.e.
+proposed to the log but not yet applied. Higher values let the cleanup procedure purge
+completed invocations faster, but can increase tail latencies of other operations in
+the system while it's being processed.
+
+If purging is not keeping up with the rate of completed invocations, consider increasing
+this value further. This is mostly relevant in deployments with high (100ms+) base write to read
+latency baseline (e.g. multi-regional deployments).
+
+Default: 32
+
+Since v1.8.0
 
 </ResponseField>
 
@@ -2704,6 +2794,16 @@ Examples:
 
 </ResponseField>
 
+<ResponseField name="vqueue-metadata-cache-size" type="integer" post={['format: uint32','toml: worker.vqueue-metadata-cache-size','env: RESTATE_WORKER__VQUEUE_METADATA_CACHE_SIZE']}>
+    VQueue metadata cache size: The target number of VQueue metadata entries to cache per partition. Each entry uses
+approximately 300 bytes. Active VQueues remain cached even when this target is exceeded.
+
+Default: 32,000 (approximately 9 MiB per partition)
+
+Since v1.8.0
+
+</ResponseField>
+
 ### worker.invoker
 
 Invoker options: Configuration for the HTTP/2 keep-alive mechanism, using PING frames.
@@ -2748,8 +2848,12 @@ the `default` profile.
 
 </ResponseField>
 
-<ResponseField name="concurrent-invocations-limit" type="integer | null" post={['format: uint','minimum: 1','toml: worker.invoker.concurrent-invocations-limit','env: RESTATE_WORKER__INVOKER__CONCURRENT_INVOCATIONS_LIMIT']} default="1000">
-    Limit number of concurrent invocations from this node: Number of concurrent invocations that can be processed by the invoker.
+<ResponseField name="concurrent-invocations-limit" type="integer | null" post={['format: uint','minimum: 1','toml: worker.invoker.concurrent-invocations-limit','env: RESTATE_WORKER__INVOKER__CONCURRENT_INVOCATIONS_LIMIT']} default="24000">
+    Limit number of concurrent invocations from this node: Number of invocations that can be concurrently processed by this node.
+
+Note: Default has been increased from 1000 to 24000 since v1.8.0. This value
+sets the limit on per restate-server node level. In prior versions, the limit
+was applied per-partition.
 
 </ResponseField>
 
@@ -2901,13 +3005,6 @@ Default: 128
 
 </ResponseField>
 
-<ResponseField name="in-memory-queue-length-limit" type="integer" post={['format: uint','minimum: 1','toml: worker.invoker.in-memory-queue-length-limit','env: RESTATE_WORKER__INVOKER__IN_MEMORY_QUEUE_LENGTH_LIMIT']} default="66049">
-    Spill invocations to disk: Defines the threshold after which queues invocations will spill to disk at
-the path defined in `tmp-dir`. In other words, this is the number of invocations
-that can be kept in memory before spilling to disk. This is a per-partition limit.
-
-</ResponseField>
-
 <ResponseField name="inactivity-timeout" type="string" post={['minLength: 1','toml: worker.invoker.inactivity-timeout','env: RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT']} default="1m">
     Inactivity timeout: This timer guards against stalled service/handler invocations. Once it expires,
 Restate triggers a graceful termination by asking the service invocation to
@@ -3036,12 +3133,6 @@ Parsed public keys will be logged at INFO level in the same format that SDKs exp
 
 </ResponseField>
 
-<ResponseField name="tmp-dir" type="string | null" post={['toml: worker.invoker.tmp-dir','env: RESTATE_WORKER__INVOKER__TMP_DIR']} default="null">
-    Temporary directory to use for the invoker temporary files.
-If empty, the system temporary directory will be used instead.
-
-</ResponseField>
-
 #### worker.invoker.action-throttling
 
 Action throttling: Configures rate limiting for service actions at the node level.
@@ -3067,6 +3158,31 @@ Default to the rate value if not specified.
 
 Syntax: `&lt;rate&gt;/&lt;unit&gt;` where `&lt;unit&gt;` is `s|sec|second`, `m|min|minute`, or `h|hr|hour`.
 unit defaults to per second if not specified.
+
+</ResponseField>
+
+#### worker.invoker.gcp-federation
+
+GCP workload identity federation: Enables minting Google ID tokens for deployments that set `workload_identity_provider` in
+their `auth` block, using an operator-configured AWS federation role. New federated
+registrations also require `experimental-enable-gcp-workload-identity-federation = true`.
+Unset by default: deployments requesting this authentication fail registration and mint
+with an actionable error until this block is configured.
+
+Since v1.8.0
+
+Configuration file section `[worker.invoker.gcp-federation]`, environment variable prefix `RESTATE_WORKER__INVOKER__GCP_FEDERATION__`.
+
+<ResponseField name="aws-role-arn" type="string" required post={['toml: worker.invoker.gcp-federation.aws-role-arn','env: RESTATE_WORKER__INVOKER__GCP_FEDERATION__AWS_ROLE_ARN']}>
+    AWS role ARN: The AWS IAM role Restate assumes to obtain the AWS identity used to sign the GCP workload
+identity federation subject token. This role is shared by every federated deployment in
+the process.
+
+</ResponseField>
+
+<ResponseField name="aws-role-session-name" type="string" required post={['toml: worker.invoker.gcp-federation.aws-role-session-name','env: RESTATE_WORKER__INVOKER__GCP_FEDERATION__AWS_ROLE_SESSION_NAME']}>
+    AWS role session name: The `RoleSessionName` used when assuming `aws_role_arn`. This value alone grants no
+isolation between tenants; the role's trust policy controls which sessions may assume it.
 
 </ResponseField>
 
@@ -3251,8 +3367,9 @@ set this to any string, such as `us-east-1`.
 </ResponseField>
 
 <ResponseField name="destination" type="string | null" post={['toml: worker.snapshots.destination','env: RESTATE_WORKER__SNAPSHOTS__DESTINATION']} default="null">
-    Snapshot destination URL: Base URL for cluster snapshots. Currently only supports the `s3://` protocol scheme.
-S3-compatible object stores must support ETag-based conditional writes.
+    Snapshot destination URL: Base URL for cluster snapshots, using the `s3://`, `gs://` or `az://` protocol scheme.
+S3-compatible object stores must support ETag-based conditional writes. For `gs://`,
+credentials come from the environment, as for a `gs://` metadata path.
 
 Default: `None`
 
