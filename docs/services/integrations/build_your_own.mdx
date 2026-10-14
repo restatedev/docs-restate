@@ -18,7 +18,7 @@ Add [`dev.restate:integration-client`](https://central.sonatype.com/artifact/dev
 
 Create one client for your Restate ingress URL and close it when your integration shuts down:
 
-```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#client"}
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#client"} 
 try (IntegrationClient client = IntegrationClient.builder("http://localhost:8080").build()) {
   // Use client
 }
@@ -30,7 +30,7 @@ Use `Producer` when your source does not provide stable offsets that you can rep
 The client assigns an offset to each invocation.
 Call `flush()` before closing the producer to wait until Restate has durably committed everything you sent:
 
-```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer"}
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer"} 
 try (Producer producer = client.newProducer()) {
   for (SourceRecord record : records) {
     producer.send(
@@ -40,7 +40,7 @@ try (Producer producer = client.newProducer()) {
             .putHeader("content-type", "application/json")
             .setBody(record.payload()));
   }
-  producer.flush().get();
+  producer.flush();
 }
 ```
 
@@ -50,7 +50,7 @@ Use `ExactlyOnceProducer` when your source provides stable, strictly increasing 
 and choose a producer ID that remains stable across restarts and is unique to that offset sequence.
 After `flush()` returns, you can checkpoint the returned offset in your source:
 
-```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#exactly_once_producer"}
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#exactly_once_producer"} 
 try (ExactlyOnceProducer producer = client.newExactlyOnceProducer("orders/partition-0")) {
   for (SourceRecord record : sourceRecords) {
     producer.send(
@@ -61,7 +61,7 @@ try (ExactlyOnceProducer producer = client.newExactlyOnceProducer("orders/partit
             .putHeader("content-type", "application/json")
             .setBody(record.payload()));
   }
-  producer.flush().get();
+  return producer.flush();
 }
 ```
 
@@ -72,7 +72,7 @@ Set defaults to avoid sending over and over the same fields in every invocation.
 
 Fields set on an individual invocation override these defaults.
 
-```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer_defaults"}
+```java Java {"CODE_LOAD::java/integration-client/BuildYourOwnIntegration.java#producer_defaults"} 
 InvocationMetadata defaults =
     InvocationMetadata.create()
         .setServiceName("OrderService")
