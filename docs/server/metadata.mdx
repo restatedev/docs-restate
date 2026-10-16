@@ -30,7 +30,7 @@ Restate supports three metadata storage providers, each suited to different depl
 
 1. **Replicated** (Default) - Built-in Raft-based consensus metadata server
 2. **Etcd** - External etcd cluster integration
-3. **Amazon S3** - We strongly recommend against using other S3-compatible stores for metadata
+3. **Object store** - Amazon S3, or Google Cloud Storage since Restate v1.8.0
 
 ## When to Use Each Provider
 
@@ -78,32 +78,37 @@ Use an external etcd cluster as the metadata store. This is ideal if you already
 - ⚠️ Network latency to etcd can affect cluster operations
 - ⚠️ Requires etcd operations expertise
 
-### Object Store (Amazon S3)
+### Object Store (Amazon S3 or Google Cloud Storage)
 
-Use Amazon S3 as a metadata store. This provides a lightweight alternative to running metadata servers while keeping all data in object storage.
+Use Amazon S3 or, since Restate v1.8.0, Google Cloud Storage (GCS) as a metadata store. This provides a lightweight alternative to running metadata servers while keeping all data in object storage.
 
 **Use cases:**
-- AWS deployments with existing S3 infrastructure
+- AWS or Google Cloud deployments with existing S3 or GCS infrastructure
 - Minimizing stateful components
-- Environments optimizing for S3 as primary storage
+- Environments optimizing for object storage as primary storage
 
 **Requirements:**
-- Amazon S3 bucket (not S3-compatible alternatives)
-- IAM permissions for S3 operations
-- Very low-latency access to S3 (same region recommended)
+- An Amazon S3 or GCS bucket (not S3-compatible alternatives)
+- Permissions to read, create and overwrite objects in the bucket
+- Very low-latency access to the bucket (same region recommended)
 
 **Trade-offs:**
 - ✅ No metadata servers to manage
-- ✅ Integrates with existing S3 buckets
+- ✅ Integrates with existing S3 or GCS buckets
 - ✅ Simple backup and recovery
-- ⚠️ **Only Amazon S3 is tested and supported** (notably, MinIO is not supported for metadata)
+- ⚠️ **Only Amazon S3 and GCS are tested and supported** (notably, MinIO and Azure Blob Storage are not supported for metadata)
 - ⚠️ Tied to a single region!
-- ⚠️ Network latency to S3 directly affects cluster operations
+- ⚠️ Network latency to the bucket directly affects cluster operations
 - ⚠️ Must ensure very low-latency access (typically same region)
+- ⚠️ GCS allows about one write per second to a single object, so sustained bursts of metadata updates to the same key are throttled where S3 is not
 
 <Warning>
-    For object store metadata: Only Amazon S3 is currently tested and supported. Using S3-compatible alternatives is not supported and may lead to correctness issues. MinIO in particular is known to be incompatible as a metadata backend.
+    For object store metadata: Only Amazon S3 and Google Cloud Storage are currently tested and supported. Using S3-compatible alternatives is not supported and may lead to correctness issues. MinIO in particular is known to be incompatible as a metadata backend. Azure Blob Storage is not supported for metadata, although it can be used for [snapshots](/server/snapshots).
 </Warning>
+
+<Info title="GCS maturity">
+    GCS metadata passes Restate's Jepsen linearizability tests against a real bucket, with network partitions, process kills and pauses, and no violations were found. While we are confident in the implementation, be aware that we do not yet have extensive production experience with it.
+</Info>
 
 ## Configuration Examples
 
@@ -202,6 +207,39 @@ aws-region = "us-east-1"
     Object store metadata requires low-latency access to S3. Deploy your Restate cluster in the same AWS region as your S3 bucket to minimize latency impact on cluster operations.
 </Warning>
 
+### Object Store (Google Cloud Storage)
+
+Since Restate v1.8.0, you can store metadata in a GCS bucket:
+
+```toml restate.toml
+# No metadata-server role needed
+roles = [
+    "worker",
+    "log-server",
+    "admin",
+    "http-ingress"
+]
+
+[metadata-client]
+type = "object-store"
+# GCS bucket and optional prefix
+path = "gs://restate-metadata-bucket/cluster-prod"
+```
+
+GCS credentials come from the environment rather than the configuration file. Restate uses the first of these it finds:
+
+- A service account key file named by `GOOGLE_SERVICE_ACCOUNT`, or the key's JSON contents in `GOOGLE_SERVICE_ACCOUNT_KEY`
+- An [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) file named by `GOOGLE_APPLICATION_CREDENTIALS`, or else the file written by `gcloud auth application-default login`
+- The instance metadata server when running on Google Cloud, including GKE Workload Identity
+
+Credentials files must be service account keys or `gcloud` user credentials. Workload identity federation configuration files (`"type": "external_account"`) are not supported. The `aws-*` options apply to `s3://` paths only, and the `GOOGLE_*` variables apply to every `gs://` path in the process, including snapshot destinations.
+
+The service account needs `storage.objects.get`, `storage.objects.create` and `storage.objects.delete` on the bucket; GCS requires the delete permission to overwrite an object.
+
+<Warning>
+    As with S3, deploy your Restate cluster in the same region as your GCS bucket to minimize latency impact on cluster operations.
+</Warning>
+
 ## Migrating Between Providers
 
 Restate supports migrating metadata from the replicated provider to external providers (etcd, or object-store) using the `restatectl metadata migrate` command. This allows you to change metadata providers without losing cluster state.
@@ -221,7 +259,7 @@ Before starting the migration:
 
 1. **Target metadata store must be accessible and ready:**
    - Etcd: Cluster running and accessible
-   - Object Store: S3 bucket created and accessible
+   - Object Store: S3 or GCS bucket created and accessible
 
 2. **Prepare target configuration:**
    - Have your target `[metadata-client]` configuration ready in TOML format
@@ -244,8 +282,11 @@ etcdctl endpoint health
 
 For Object Store:
 ```bash
-# Ensure S3 bucket exists and is accessible
+# Ensure the S3 bucket exists and is accessible
 aws s3 ls s3://restate-metadata-bucket/
+
+# Or, for GCS
+gcloud storage ls gs://restate-metadata-bucket/
 ```
 
 </Step>
