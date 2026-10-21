@@ -194,7 +194,9 @@ Each record carries within this map the following entries:
 The [old Kafka support](/services/invocation/kafka) runs the consumer inside the Restate server and is configured with the `restate kafka-clusters` and `restate subscriptions` CLI commands.
 This integration runs as a separate container instead, so migrating means moving that configuration into the container and stopping the old subscription.
 
-Kafka tracks committed offsets per consumer group, so if the integration uses the **same `group.id`** as your existing subscription, the new consumer resumes exactly where the old one stopped, with no gap and no reprocessing.
+Kafka tracks committed offsets per consumer group, so if the integration uses the **same `group.id`** as your existing subscription, it resumes from the offsets the old subscription committed.
+Since Restate v1.8.1, deleting a subscription drains the records it already read and logs the last ingested offset of every topic partition.
+By checking these offsets before you start the integration, you hand over the topic with no record processed twice and none skipped.
 
 <Steps>
 
@@ -210,18 +212,43 @@ restate subscriptions list
 restate subscriptions describe sub_11XHoawrCiWtv8kzhEyGtsR
 ```
 
-You can set the `group.id` explicitly with the `group.id` option when creating a subscription. Otherwise Restate assigns one.
+If the `group.id` option was not set when the subscription was created, the group id is the subscription id.
 
 </Step>
 
-<Step title="Stop the old subscription">
+<Step title="Delete the old subscription and wait for it to drain">
 
-Delete the existing subscription so the old consumer stops.
-Its committed offsets remain in Kafka under the group id.
+Delete the existing subscription.
+Restate stops reading new records and waits up to 5 minutes for the records it already read to be ingested.
 
 ```bash
 restate subscriptions delete sub_11XHoawrCiWtv8kzhEyGtsR
 ```
+
+Wait until every Restate node logs `Kafka subscription drained`.
+Before that, each partition logs one of the following lines:
+
+- `Kafka partition drained, last offset ingested into Restate: <offset>`
+- `Kafka partition drained, no records were ingested since the partition was assigned`
+- `Draining the Kafka partition failed`, together with its last ingested offset
+
+Restate also logs the committed consumer group offsets in lines starting with `Committed Kafka consumer group offsets of the draining subscription`.
+A partition can appear in several of these lines. The last one that mentions it shows its committed offset.
+
+</Step>
+
+<Step title="Check the committed offsets">
+
+For every partition that logged a last ingested offset, the committed offset must be **the last ingested offset + 1**, because a committed offset is the next offset to read.
+
+If the offsets do not match, the partition has no commit line, or the commit line reports an error for it, set the consumer group offset of that partition before starting the integration:
+
+```bash
+kafka-consumer-groups.sh --bootstrap-server <broker> --group <group> \
+    --topic <topic>:<partition> --reset-offsets --to-offset <ingested offset + 1> --execute
+```
+
+Partitions that logged `no records were ingested` can keep their current offset.
 
 </Step>
 
@@ -248,4 +275,11 @@ docker run --rm \
     Do not run the old subscription and the integration against the same topic with the same `group.id` at the same time.
     They would join the same consumer group and split partitions between them, mixing the two delivery semantics.
     Stop the old subscription before starting the integration.
+</Warning>
+
+<Warning>
+    Draining is best effort. If the server crashes, or the drain does not finish within 5 minutes (logged as `did not finish draining`), partitions without a `drained` or `failed` line may have had records in flight.
+    Starting the integration from an older offset then re-delivers those records as duplicate invocations, and starting from a newer one skips them.
+    To avoid this, you can retry the drain by recreating the subscription under the same id with `restate subscriptions create --id <subscription id>`.
+    See the [Restate v1.8.1 release notes](https://github.com/restatedev/restate/blob/main/release-notes/v1.8.1.md#kafka-subscriptions-drain-in-flight-records-on-deletion) for the full procedure.
 </Warning>
