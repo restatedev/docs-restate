@@ -1,0 +1,347 @@
+---
+title: "Durable Coroutines"
+sidebarTitle: "Gen SDK: Durable Coroutines"
+description: "Build concurrent, recoverable programs within one durable function with the Gen SDK."
+icon: "code-branch"
+---
+
+Use Durable Coroutines and the [Gen SDK](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen) for applications benefitting from in-process concurrency.
+Each coroutine runs its own sequence of durable steps within a single [durable function](/foundations/key-concepts).
+
+Example use cases:
+- AI agents that run parallel tools (with durable guardrail and tool steps), subagents, and wait for steering signals. And/or benefit from reusing local resources such as warm clients, caches, and connections across concurrent, durable steps.
+- Highly concurrent multi-step workflows.
+- Any application with parallel tasks with multiple durable steps.
+
+The Gen SDK uses TypeScript generators to coordinate these routines and replay their execution after failures.
+
+<Note>
+    The standard TypeScript SDK lets you run tasks concurrently, but does not allow you to do durables steps within those parallel tasks.
+    The Gen SDK solves this shortcoming for use cases that need it.
+</Note>
+
+## Getting started
+
+Follow the [TypeScript prerequisites](/develop/ts/services#prerequisites), then create a project from the Gen SDK template:
+
+```bash
+npx @restatedev/restate example typescript-hello-world-gen
+```
+
+Alternatively, if you already have a project, install both packages:
+
+```bash
+npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
+```
+
+Import the functions you need from the Gen SDK:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#imports"} 
+import * as restate from "@restatedev/restate-sdk-gen";
+```
+
+## Defining a handler
+
+Use the Gen SDK's `service` helper to define handlers as generator methods. `Operation<T>` describes the handler's result type, and `yield*` waits for a durable operation and retrieves its result:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#basic"} 
+export const userService = restate.service({
+  name: "UserService",
+  handlers: {
+    *greet(userId: string): Operation<string> {
+      const user = yield* restate.run(() => fetchUser(userId), {
+        name: "fetch-user",
+      });
+      return `Hello, ${user.name}!`;
+    },
+  },
+});
+```
+
+Here, `fetchUser` represents your API or database call. `run` records its result, like [`ctx.run`](/develop/ts/durable-steps), so completed calls are not repeated during replay. Serve and register the service as described in [Serving](/develop/ts/serving).
+
+## Composing durable steps
+
+Use `gen` to create a reusable coroutine with several durable steps. This coroutine loads a user, then their orders:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#routine"} 
+type UserSummary = { name: string; orderCount: number };
+
+function loadUserSummary(userId: string): Operation<UserSummary> {
+  return restate.gen(function* () {
+    const user = yield* restate.run(() => fetchUser(userId), {
+      name: "fetch-user",
+    });
+    const orders = yield* restate.run(() => fetchOrders(user.id), {
+      name: "fetch-orders",
+    });
+    return { name: user.name, orderCount: orders.length };
+  });
+}
+```
+
+`fetchUser` and `fetchOrders` stand in for your application APIs. Each call has its own journal entry. `yield*` pauses the coroutine until a result is available.
+
+Keep external I/O and other nondeterministic work inside `run`. Its callback can use `async` and `await`, and receives an `AbortSignal` that you can pass to APIs such as `fetch` for cancellation.
+
+<Note>
+Call Gen SDK operations such as `run`, `sleep`, and `spawn` from inside the generator body. Do not call them from a `run` callback or an unrelated asynchronous callback. As with `ctx.run`, a `run` callback must not perform Restate context operations.
+</Note>
+
+## Running concurrent coroutines
+
+Use `spawn` to start a coroutine and get a `Task<T>` representing its result. You can then use `all` to collect their results in input order:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#parallel"} 
+*summaries(userIds: string[]): Operation<UserSummary[]> {
+  const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
+  const summaries = yield* restate.all(tasks);
+  return summaries;
+},
+```
+
+Each coroutine runs a set of durable steps. All coroutines execute within the same invocation.
+
+Coroutines can share local resources, but those resources are not automatically persisted. Recreate connections, clients, and caches after a restart.
+
+### Operations and futures
+
+The Gen SDK distinguishes between a description of work and work that has started:
+
+| Type | Behavior | How to use it |
+| --- | --- | --- |
+| `Operation<T>` | Lazy and consumed once. `gen` creates an operation without running its body. | Use `yield*` to run it in the current coroutine, or `spawn` to start a concurrent coroutine. Create a fresh operation for each execution. |
+| `Future<T>` | Starts eagerly and remembers its result. Primitives such as `run` and `sleep` return futures. | Use `yield*` to retrieve the result. You can yield the same future more than once without repeating the work. |
+| `Task<T>` | A future returned by `spawn`, with an additional `interrupt` method. | Wait for the coroutine's result or interrupt it. |
+
+Use the Gen SDK combinators for these futures, rather than native `Promise` combinators. For a group of individual side effects, create `run` futures and pass them directly to `all`. Use `spawn` when each task consists of multiple steps, as in `loadUserSummary`.
+
+## Combining results
+
+Use these combinators inside a generator handler or coroutine. They accept futures from durable operations, spawned coroutines, or a mix of both.
+
+### Wait for all results
+
+`all` returns results in input order. If an input fails, it throws that error:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#all"} 
+const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
+const summaries = yield* restate.all(tasks);
+```
+
+### Wait for the first result
+
+`race` returns the first result or throws the first error. To also identify which branch finished, use [`select`](#identify-which-branch-finished-first):
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#race"} 
+const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
+const first = yield* restate.race(tasks);
+```
+
+### Wait for the first successful result
+
+`any` returns the first successful result, even if other inputs fail. If every input fails, it throws an `AggregateError` containing their errors:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#any"} 
+const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
+const firstSuccessful = yield* restate.any(tasks);
+```
+
+### Wait for all results and errors
+
+`allSettled` waits for every input and returns its outcome in input order. Each entry has either `status: "fulfilled"` and a `value`, or `status: "rejected"` and a `reason`:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#all_settled"} 
+const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
+const results = yield* restate.allSettled(tasks);
+```
+
+### Identify which branch finished first
+
+`select` returns the `tag` and `future` of the first branch to finish. The tag is the key you gave that branch: `"first"` or `"second"` in this example. Switch on `winner.tag` to handle each branch, then yield its future to retrieve the result or throw its error:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#select"} 
+const winner = yield* restate.select({
+  first: restate.spawn(loadUserSummary(firstId)),
+  second: restate.spawn(loadUserSummary(secondId)),
+});
+switch (winner.tag) {
+  case "first":
+    return { tag: "first", summary: yield* winner.future };
+  case "second":
+    return { tag: "second", summary: yield* winner.future };
+}
+```
+
+`race`, `any`, and `select` do not interrupt losing coroutines. They can continue while the main operation runs. See [Coroutine lifetime](#coroutine-lifetime) for what happens when it finishes.
+
+## Timeouts
+
+Inside a handler, use `select` with a durable timer to limit how long you wait for a result. Here, `budgetSeconds` sets the timeout, and `winner.tag` is `"done"` when the summary finishes first, or `"timeout"` when the timer finishes first:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#timeout"} 
+const summary = restate.spawn(loadUserSummary(userId));
+const winner = yield* restate.select({
+  done: summary,
+  timeout: restate.sleep({ seconds: budgetSeconds }),
+});
+if (winner.tag === "timeout") {
+  throw new TerminalError("Loading the summary timed out");
+}
+return yield* winner.future;
+```
+
+This limits how long the handler waits for the summary. It does not undo external work that has already started. A losing coroutine can continue while the main operation is running; the default execution behavior abandons it when the main operation finishes.
+
+## Sharing values between coroutines
+
+Use `contextLocal` to share values such as a request ID or tenant with nested helpers and spawned coroutines, without passing them through every function.
+
+Define the storage at module scope, then read and write it inside generator code. This helper reads the request ID before calling an external audit service:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#context_local"} 
+const requestId = restate.contextLocal<string>("unknown");
+
+function loadAuditedSummary(userId: string): Operation<UserSummary> {
+  return restate.gen(function* () {
+    const id = requestId.get();
+    yield* restate.run(() => recordAudit(id, userId), { name: "audit" });
+    return yield* loadUserSummary(userId);
+  });
+}
+```
+
+Inside the handler, set the request ID from the input before spawning the coroutines:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#context_handler"} 
+requestId.set(id);
+const tasks = userIds.map((id) => restate.spawn(loadAuditedSummary(id)));
+return yield* restate.all(tasks);
+```
+
+All coroutines in this invocation see the same value. Other invocations have their own values, even when they run in the same process. `get()` returns the supplied default until you call `set`, or `undefined` if you did not supply a default.
+
+Context local values live in memory. Set them from input or a journaled result so replay reconstructs the same values. Use [durable state](/develop/ts/state) for values that must persist across invocations.
+
+<Note>
+Call `get` and `set` in generator code, outside `run` callbacks. The value is shared by all coroutines in the invocation, so a later `set` changes what the other coroutines read.
+</Note>
+
+## Errors and retries
+
+`run` uses the SDK's [error handling and retries](/develop/ts/error-handling). Configure retries through its `retry` option, using fields such as `maxAttempts`, `maxDuration`, and `initialInterval`. When the retry policy is exhausted, the operation throws a `TerminalError` at `yield*`.
+
+Use `try`/`catch` around `yield*` to handle a failure or perform compensation with additional durable steps. Throw a `TerminalError` from the callback for failures that should not be retried. See the [Sagas guide](/guides/sagas) for compensation patterns.
+
+## Using an existing SDK handler
+
+You can also call `execute(ctx, operation)` from a standard SDK handler. It returns a promise with the operation's result:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines_exec.ts#execute"} 
+import * as restate from "@restatedev/restate-sdk";
+import {execute} from "@restatedev/restate-sdk-gen";
+
+export const existingService = restate.service({
+    name: "ExistingService",
+    handlers: {
+        summary: async (ctx: restate.Context, userId: string) =>
+            execute(ctx, loadUserSummary(userId)),
+    },
+});
+```
+
+You can also call `execute` from Virtual Object and Workflow handlers.
+
+## Coroutine lifetime
+
+By default, execution finishes when the main operation returns or throws, both for generator handlers and when using `execute`. Any unfinished spawned coroutines are abandoned: they are no longer resumed, and their `catch` and `finally` blocks do not run. Durable work already performed remains in the journal.
+
+To ensure a coroutine finishes, yield its task before returning, as `all(tasks)` does above. Alternatively, pass `{ onMainExit: "join" }` as the third argument to `execute` to wait for all spawned coroutines. With this option, a coroutine waiting indefinitely also keeps the handler running indefinitely.
+
+<Warning>
+A spawned coroutine is not guaranteed to complete after the main operation finishes. For work that must continue independently of this invocation, use a [one way service call](/develop/ts/service-communication#sending-messages).
+</Warning>
+
+### Interrupting a coroutine
+
+Call `task.interrupt()` to throw an `InterruptedError` at the coroutine's next yield point and abort its in flight `run` I/O. You can pass a custom error. Interruption also propagates to coroutines spawned by that task, and the coroutine can catch the error to perform cleanup or recover.
+
+After interrupting, yield the task and handle its error to let its cleanup run. Interrupting and immediately returning from the main operation can abandon the task before its `catch` or `finally` executes.
+
+In this example, the task records an audit entry in `finally` before the caller catches the interruption:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#interrupt_cleanup"} 
+const work = restate.gen(function* () {
+  try {
+    yield* restate.sleep({ minutes: 1 });
+  } finally {
+    yield* restate.run(() => recordAudit("cleanup", userId), {
+      name: "cleanup",
+    });
+  }
+});
+const task = restate.spawn(work);
+
+task.interrupt();
+try {
+  yield* task; // Wait for the finally block to finish.
+} catch (error) {
+  if (!(error instanceof restate.InterruptedError)) throw error;
+}
+```
+
+### Cooperative cancellation with a stop channel
+
+Use a stop channel to let a coroutine finish its current work and return partial results. This worker checks for a stop before each summary:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#stop_worker"} 
+function summarizeUntilStopped(
+  userIds: string[],
+  stop: restate.Channel<void>
+): Operation<UserSummary[]> {
+  return restate.gen(function* () {
+    const results: UserSummary[] = [];
+    for (const userId of userIds) {
+      const next = yield* restate.select({
+        stop: stop.receive,
+        ready: restate.sleep({ milliseconds: 100 }),
+      });
+      if (next.tag === "stop") break;
+      results.push(yield* loadUserSummary(userId));
+    }
+    return results;
+  });
+}
+```
+
+`next.tag` identifies whether the stop request or delay finished first. The handler below sends a stop when `winner.tag` is `"timeout"`, then yields the worker so it can finish:
+
+```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#stop_handler"} 
+const stop = restate.channel<void>();
+const worker = restate.spawn(summarizeUntilStopped(userIds, stop));
+const winner = yield* restate.select({
+  done: worker,
+  timeout: restate.sleep({ seconds: budgetSeconds }),
+});
+if (winner.tag === "timeout") {
+  yield* stop.send();
+}
+return yield* worker;
+```
+
+Stopping is cooperative, meaning the current summary can finish, so the budget is not a strict deadline.
+
+A channel resolves once and stays resolved. It is shared only within this invocation and reconstructed during replay. For stop requests from other handlers or systems, use an [external event](/develop/ts/external-events), then send on the local channel.
+
+## Using other Restate features
+
+The Gen SDK also provides functions for common context operations:
+
+* `client` and `sendClient` call other Services, Virtual Objects, and Workflows.
+* `state` and `sharedState` access durable state from handlers with the corresponding state access permissions.
+* `awakeable` creates an awakeable, a convenient shorthand for a one shot signal with a generated ID that can be completed through the SDK or Restate HTTP API.
+* `workflowPromise` accesses a named workflow promise, resolved once and retrievable during workflow retention.
+
+See the [Gen SDK reference](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-gen/README.md) for the full API, retry options, and ingress clients.
+
+For more examples, follow the [Gen SDK tutorial](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen/examples/tutorial/src), including retries, compensation, state, and service calls.
