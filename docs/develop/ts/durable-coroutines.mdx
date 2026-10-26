@@ -83,7 +83,9 @@ function loadUserSummary(userId: string): Operation<UserSummary> {
 
 `fetchUser` and `fetchOrders` stand in for your application APIs. Each call has its own journal entry. `yield*` pauses the coroutine until a result is available.
 
-Keep external I/O and other nondeterministic work inside `run`. Its callback can use `async` and `await`, and receives an `AbortSignal` that you can pass to APIs such as `fetch` for cancellation.
+Keep external I/O and other nondeterministic work inside `run`. Its callback can use `async` and `await`, and receives `{ signal }`, where `signal` is an `AbortSignal` you can pass to APIs such as `fetch` for cancellation.
+
+Give each `run` a name with `{ name: "fetch-user" }`, or pass a named function. Anonymous callbacks require an explicit name.
 
 <Note>
 Call Gen SDK operations such as `run`, `sleep`, and `spawn` from inside the generator body. Do not call them from a `run` callback or an unrelated asynchronous callback. As with `ctx.run`, a `run` callback must not perform Restate context operations.
@@ -111,9 +113,11 @@ The Gen SDK distinguishes between a description of work and work that has starte
 
 | Type | Behavior | How to use it |
 | --- | --- | --- |
-| `Operation<T>` | Lazy and consumed once. `gen` creates an operation without running its body. | Use `yield*` to run it in the current coroutine, or `spawn` to start a concurrent coroutine. Create a fresh operation for each execution. |
-| `Future<T>` | Starts eagerly and remembers its result. Primitives such as `run` and `sleep` return futures. | Use `yield*` to retrieve the result. You can yield the same future more than once without repeating the work. |
+| `Operation<T>` | Lazy. `gen` creates a fresh generator each time you execute the operation. | Use `yield*` to run it in the current coroutine, or `spawn` to start a concurrent coroutine. Executing it again repeats its body. |
+| `Future<T>` | Remembers its outcome. Primitives such as `run` and `sleep` start eagerly and return futures. | Use `yield*` to retrieve the result. You can yield the same future more than once without repeating the work. |
 | `Task<T>` | A future returned by `spawn`, with an additional `interrupt` method. | Wait for the coroutine's result or interrupt it. |
+
+A raw generator instance can only be consumed once. Use `gen` with a generator factory when you want to execute the same operation again.
 
 Use the Gen SDK combinators for these futures, rather than native `Promise` combinators. For a group of individual side effects, create `run` futures and pass them directly to `all`. Use `spawn` when each task consists of multiple steps, as in `loadUserSummary`.
 
@@ -225,7 +229,7 @@ const tasks = userIds.map((userId) =>
 return yield* restate.all(tasks);
 ```
 
-All coroutines in this invocation see the same value. Other invocations have their own values, even when they run in the same process. `get()` returns the supplied default until you call `set`, or `undefined` if you did not supply a default.
+All coroutines in this generator handler share the value. Other invocations have their own values, even in the same process. If you use `execute` directly, each call has its own storage. `get()` returns the supplied default until you call `set`, or `undefined` if you did not supply a default.
 
 Context local values live in memory. Set them from input or a journaled result so replay reconstructs the same values. Use [durable state](/develop/ts/state) for values that must persist across invocations.
 
@@ -270,7 +274,9 @@ A spawned coroutine is not guaranteed to complete after the main operation finis
 
 ### Interrupting a coroutine
 
-Call `task.interrupt()` to throw an `InterruptedError` at the coroutine's next yield point and abort its in flight `run` I/O. You can pass a custom error. Interruption also propagates to coroutines spawned by that task, and the coroutine can catch the error to perform cleanup or recover.
+Call `task.interrupt()` (with a custom error) to throw an `InterruptedError` at the coroutine's next yield point and abort the signal passed to its active `run` callback. Pass that signal to external APIs that support cancellation, otherwise those run blocks will continue.
+
+Interruption also propagates to coroutines spawned by that task, and the coroutine can catch the error to perform cleanup or recover.
 
 After interrupting, yield the task and handle its error to let its cleanup run. Interrupting and immediately returning from the main operation can abandon the task before its `catch` or `finally` executes.
 
@@ -348,6 +354,6 @@ The Gen SDK also provides functions for common context operations:
 * `awakeable` creates an awakeable, a convenient shorthand for a one shot signal with a generated ID that can be completed through the SDK or Restate HTTP API.
 * `workflowPromise` accesses a named workflow promise, resolved once and retrievable during workflow retention.
 
-See the [Gen SDK reference](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-gen/README.md) for the full API, retry options, and ingress clients.
+See the [Gen SDK reference](https://github.com/restatedev/sdk-typescript/blob/main/packages/libs/restate-sdk-gen/README.md) for API definitions, retry options, and ingress clients.
 
 For more examples, follow the [Gen SDK tutorial](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen/examples/tutorial/src), including retries, compensation, state, and service calls.

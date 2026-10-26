@@ -27,7 +27,7 @@ Use the Gen SDK namespace for generator operations. Import the `Operation` type 
 
 ## Generator handlers and reusable routines
 
-Generator handlers receive the application input directly, without a `ctx` argument. Use `yield*`, not `await`, to retrieve a Gen SDK operation's result. `fetchUser` and `fetchOrders` below stand in for application APIs.
+Serve Gen SDK definitions with `serve` from `@restatedev/restate-sdk`. Generator handlers receive the application input directly, without a `ctx` argument. Use `yield*`, not `await`, to retrieve a Gen SDK operation's result. `fetchUser` and `fetchOrders` below stand in for application APIs.
 
 ```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#basic"}
 ```
@@ -45,11 +45,11 @@ Create a reusable operation with a generator factory:
 
 ## Concurrent execution
 
-`Operation<T>` is lazy and consumed once. Create a fresh operation for each execution. `Future<T>` starts eagerly and remembers its outcome; it can be yielded repeatedly. `spawn` starts an operation and returns a `Task<T>`, a future with an `interrupt` method.
+`Operation<T>` is lazy. `gen` creates a fresh generator each time the operation executes, so executing it again repeats its body. A raw generator instance can only be consumed once. `Future<T>` remembers its outcome and can be yielded repeatedly; `run` and `sleep` start eagerly. `spawn` starts an operation and returns a `Task<T>`, a future with an `interrupt` method.
 
 Inside a generator handler, spawn one routine per input and join the results:
 
-```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#all"}
+```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#parallel"}
 ```
 
 Use Gen SDK combinators, not native `Promise` combinators or standard SDK `RestatePromise`, for these futures:
@@ -73,7 +73,7 @@ A race does not interrupt losing tasks or undo external work. Only one coroutine
 
 By default, the main operation returning or throwing abandons unfinished coroutines. Abandoned coroutines do not run `catch` or `finally`. Yield tasks before returning when their results or cleanup matter. Use a durable service send for work that must outlive this invocation.
 
-`task.interrupt()` injects `InterruptedError` at the next yield, aborts the task's in-flight `run` signal, and propagates to its spawned descendants. A task can catch it and recover. Interrupt, then yield the task to let cleanup finish:
+`task.interrupt()` injects `InterruptedError` at the next yield, aborts the task's in-flight `run` signal, and propagates to its spawned descendants. Pass that signal to external APIs that support cancellation; I/O that ignores it can continue. A task can catch the interruption and recover. Interrupt, then yield the task to let cleanup finish:
 
 ```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#interrupt_cleanup"}
 ```
@@ -84,7 +84,7 @@ Channels resolve once, retain the same resolved receive future, and ignore later
 
 ## Context local values
 
-Define a `contextLocal<T>()` handle at module scope and use `get`/`set` in generator code. It shares values across all coroutines in one invocation while isolating concurrent invocations. A default is optional; without one, an unset value is `undefined`.
+Define a `contextLocal<T>()` handle at module scope and use `get`/`set` in generator code. It shares values across all coroutines in one `execute` call while isolating separate calls. Each generator handler invocation uses its own `execute` call. A default is optional; without one, an unset value is `undefined`.
 
 ```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#context_local"}
 ```
