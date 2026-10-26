@@ -1,11 +1,10 @@
 ---
 title: "Gen SDK: Durable Coroutines"
-sidebarTitle: "Gen SDK: Durable Coroutines"
 description: "Build concurrent, recoverable programs within one durable function with the Gen SDK."
 icon: "code-branch"
 ---
 
-Use Durable Coroutines and the [Gen SDK](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen) for applications benefitting from in-process concurrency.
+Use Durable Coroutines and the [Gen SDK](https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen) for applications benefiting from in-process concurrency.
 Each coroutine runs its own sequence of durable steps within a single [durable function](/foundations/key-concepts).
 
 Example use cases:
@@ -16,8 +15,8 @@ Example use cases:
 The Gen SDK uses TypeScript generators to coordinate these routines and replay their execution after failures.
 
 <Note>
-    The standard TypeScript SDK lets you run tasks concurrently, but does not allow you to do durables steps within those parallel tasks.
-    The Gen SDK solves this shortcoming for use cases that need it.
+    The standard TypeScript SDK lets you run individual durable operations concurrently, but not concurrent tasks that each contain multiple durable steps.
+    The Gen SDK fills this gap for use cases that need it.
 </Note>
 
 ## Getting started
@@ -59,6 +58,8 @@ export const userService = restate.service({
 ```
 
 Here, `fetchUser` represents your API or database call. `run` records its result, like [`ctx.run`](/develop/ts/durable-steps), so completed calls are not repeated during replay. Serve and register the service as described in [Serving](/develop/ts/serving).
+
+Use `restate.object` and `restate.workflow` in the same way to define Virtual Objects and Workflows with generator handlers.
 
 ## Composing durable steps
 
@@ -122,11 +123,14 @@ Use these combinators inside a generator handler or coroutine. They accept futur
 
 ### Wait for all results
 
-`all` returns results in input order. If an input fails, it throws that error:
+`all` returns results in input order. If an input fails, it throws that error. This example runs two side effects concurrently:
 
 ```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#all"} 
-const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
-const summaries = yield* restate.all(tasks);
+const user = restate.run(() => fetchUser(userId), { name: "fetch-user" });
+const orders = restate.run(() => fetchOrders(userId), {
+  name: "fetch-orders",
+});
+const [userData, orderList] = yield* restate.all([user, orders]);
 ```
 
 ### Wait for the first result
@@ -215,7 +219,9 @@ Inside the handler, set the request ID from the input before spawning the corout
 
 ```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#context_handler"} 
 requestId.set(id);
-const tasks = userIds.map((id) => restate.spawn(loadAuditedSummary(id)));
+const tasks = userIds.map((userId) =>
+  restate.spawn(loadAuditedSummary(userId))
+);
 return yield* restate.all(tasks);
 ```
 
@@ -239,14 +245,14 @@ You can also call `execute(ctx, operation)` from a standard SDK handler. It retu
 
 ```typescript {"CODE_LOAD::ts/src/develop/durable_coroutines_exec.ts#execute"} 
 import * as restate from "@restatedev/restate-sdk";
-import {execute} from "@restatedev/restate-sdk-gen";
+import { execute } from "@restatedev/restate-sdk-gen";
 
 export const existingService = restate.service({
-    name: "ExistingService",
-    handlers: {
-        summary: async (ctx: restate.Context, userId: string) =>
-            execute(ctx, loadUserSummary(userId)),
-    },
+  name: "ExistingService",
+  handlers: {
+    summary: async (ctx: restate.Context, userId: string) =>
+      execute(ctx, loadUserSummary(userId)),
+  },
 });
 ```
 

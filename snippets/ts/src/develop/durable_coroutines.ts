@@ -44,13 +44,22 @@ export const summaryService = restate.service({
   handlers: {
     // <start_parallel>
     *summaries(userIds: string[]): Operation<UserSummary[]> {
-      // <start_all>
       const tasks = userIds.map((id) => restate.spawn(loadUserSummary(id)));
       const summaries = yield* restate.all(tasks);
-      // <end_all>
       return summaries;
     },
     // <end_parallel>
+
+    *profile(userId: string): Operation<UserSummary> {
+      // <start_all>
+      const user = restate.run(() => fetchUser(userId), { name: "fetch-user" });
+      const orders = restate.run(() => fetchOrders(userId), {
+        name: "fetch-orders",
+      });
+      const [userData, orderList] = yield* restate.all([user, orders]);
+      // <end_all>
+      return { name: userData.name, orderCount: orderList.length };
+    },
 
     *firstResult(userIds: string[]): Operation<UserSummary> {
       // <start_race>
@@ -181,7 +190,9 @@ export const coordinationService = restate.service({
       const { requestId: id, userIds } = req;
       // <start_context_handler>
       requestId.set(id);
-      const tasks = userIds.map((id) => restate.spawn(loadAuditedSummary(id)));
+      const tasks = userIds.map((userId) =>
+        restate.spawn(loadAuditedSummary(userId))
+      );
       return yield* restate.all(tasks);
       // <end_context_handler>
     },
