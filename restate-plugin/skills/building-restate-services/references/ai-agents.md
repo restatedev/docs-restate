@@ -20,9 +20,9 @@ Do not call an unsupported agent framework directly from replayable handler code
 
 ## TypeScript concurrency
 
-For parallel model calls or individual tool steps, the standard SDK's `RestatePromise` combinators are sufficient. Use the [Gen SDK](ts/gen-sdk.md) when tools or subagents each need multiple durable steps in the same invocation, or when an agent coordinates background work and steering input while reusing local resources.
+For parallel model calls or individual tool steps, the standard SDK's `RestatePromise` combinators are sufficient. Use the [Durable Coroutines](ts/durable-coroutines.md) when tools or subagents each need multiple durable steps in the same invocation, or when an agent coordinates background work and steering input while reusing local resources.
 
-With the Gen SDK, wrap model and tool I/O in named `run` steps, use `spawn` for concurrent routines, and set bounded retry policies on expensive calls. Do not put coroutine operations inside a `run` callback. Local clients and connections must be recreated after a restart; sharing them does not make them durable.
+With Durable Coroutines, wrap model and tool I/O in named `run` steps, use `spawn` for concurrent routines, and set bounded retry policies on expensive calls. Do not put coroutine operations inside a `run` callback. Local clients and connections must be recreated after a restart; sharing them does not make them durable.
 
 ## Choose the Restate service type
 

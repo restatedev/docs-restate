@@ -1,10 +1,10 @@
-# TypeScript Gen SDK and Durable Coroutines
+# TypeScript Durable Coroutines
 
 ## When to use it
 
 Use `@restatedev/restate-sdk-gen` for concurrent routines that each contain multiple durable steps within one invocation. Examples include parallel agent tools with guardrails, subagents sharing a sandbox connection, or background work coordinated with user input.
 
-Use the standard SDK for sequential logic, parallel individual steps, or concurrent calls to separate Restate handlers. Both SDKs support Services, Virtual Objects, and Workflows. The Gen SDK does not change their state access or handler exclusivity rules.
+Use the standard SDK for sequential logic, parallel individual steps, or concurrent calls to separate Restate handlers. Coroutines work in Services, Virtual Objects, and Workflows without changing state access or handler exclusivity rules.
 
 ## Setup
 
@@ -20,17 +20,19 @@ For an existing project:
 npm install @restatedev/restate-sdk @restatedev/restate-sdk-gen
 ```
 
-Use the Gen SDK namespace for generator operations. Import the `Operation` type from that package and `TerminalError` from `@restatedev/restate-sdk` when needed.
+Use the coroutine package namespace for generator operations. Import the `Operation` type from that package and `TerminalError` from `@restatedev/restate-sdk` when needed.
 
 ```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#imports"}
 ```
 
-## Generator handlers and reusable routines
+## Use in existing handlers
 
-Serve Gen SDK definitions with `serve` from `@restatedev/restate-sdk`. Generator handlers receive the application input directly, without a `ctx` argument. Use `yield*`, not `await`, to retrieve a Gen SDK operation's result. `fetchUser` and `fetchOrders` below stand in for application APIs.
+Call `execute(ctx, operation)` from an existing async handler. It returns a promise with the result. Use this to add coroutines without rewriting the rest of the handler.
 
-```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#basic"}
+```ts {"CODE_LOAD::ts/src/develop/durable_coroutines_exec.ts#execute"}
 ```
+
+Use `yield*` inside a coroutine to retrieve an operation's result. `fetchUser` and `fetchOrders` below stand in for application APIs.
 
 Create a reusable operation with a generator factory:
 
@@ -39,7 +41,7 @@ Create a reusable operation with a generator factory:
 
 - Keep external I/O and nondeterminism inside `run`. Its callback can use native async/await.
 - Give every `run` a deterministic journal name using `{ name: "..." }`, or pass a named function. Anonymous callbacks require an explicit name.
-- Do not call Gen SDK operations or context methods from a `run` callback.
+- Do not call coroutine operations or context methods from a `run` callback.
 - Pass the callback's `{ signal }` to APIs that accept an `AbortSignal` for cancellation.
 - Configure bounded retries for expensive operations through `run` options: `retry: { maxAttempts, maxDuration, initialInterval, maxInterval, exponentiationFactor }`. Exhaustion throws `TerminalError` at the yield site. Throw `TerminalError` for permanent failures.
 
@@ -47,12 +49,12 @@ Create a reusable operation with a generator factory:
 
 `Operation<T>` is lazy. `gen` creates a fresh generator each time the operation executes, so executing it again repeats its body. A raw generator instance can only be consumed once. `Future<T>` remembers its outcome and can be yielded repeatedly; `run` and `sleep` start eagerly. `spawn` starts an operation and returns a `Task<T>`, a future with an `interrupt` method.
 
-Inside a generator handler, spawn one routine per input and join the results:
+Inside an existing handler, spawn one routine per input and join the results:
 
-```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#parallel"}
+```ts {"CODE_LOAD::ts/src/develop/durable_coroutines_exec.ts#execute_parallel"}
 ```
 
-Use Gen SDK combinators, not native `Promise` combinators or standard SDK `RestatePromise`, for these futures:
+Use coroutine combinators, not native `Promise` combinators or standard SDK `RestatePromise`, for these futures:
 
 | Combinator | Behavior |
 | --- | --- |
@@ -96,15 +98,20 @@ Set it before spawning routines:
 
 Read the value before entering a `run` callback; `get` and `set` cannot run inside that callback. Set values deterministically from input or journaled results so replay reconstructs them. All coroutines share writes to the same handle; this is not per-coroutine storage. Use `state` for data that must persist across invocations. Recreate local connections and caches after restart.
 
-## Standard SDK interop and other APIs
+## Generator handlers and other APIs
 
-Use `execute(ctx, operation)` inside an existing standard SDK handler. Its promise resolves with the operation's result. The optional third argument `{ onMainExit: "join" }` waits for all spawned coroutines; a task that never finishes then keeps the invocation running.
+You can also define whole handlers as generators with the coroutine package's `service`, `object`, and `workflow` helpers. Generator handlers receive input directly, without `ctx`. Serve these definitions with `serve` from `@restatedev/restate-sdk`.
 
-Use the Gen SDK's `client`/`sendClient` for calls from coroutines and `clients.connect` with `clients.client`/`clients.sendClient` for external calls. Do not assume standard SDK ingress clients infer generator-handler types. Other primitives include `state`, `sharedState`, `sleep`, `awakeable`, `signal`, and `workflowPromise`. Use exact signatures from the installed package or current docs; older guide examples may use obsolete names.
+```ts {"CODE_LOAD::ts/src/develop/durable_coroutines.ts#basic"}
+```
+
+The optional third argument to `execute`, `{ onMainExit: "join" }`, waits for all spawned coroutines; a task that never finishes then keeps the invocation running.
+
+Use the coroutine package's `client`/`sendClient` for calls from coroutines and `clients.connect` with `clients.client`/`clients.sendClient` for external calls. Do not assume standard SDK ingress clients infer generator-handler types. Other primitives include `state`, `sharedState`, `sleep`, `awakeable`, `signal`, and `workflowPromise`. Use exact signatures from the installed package or current docs; older guide examples may use obsolete names.
 
 ## Validation and reference
 
-Typecheck snippets against the installed Gen SDK. Test handler changes with `RestateTestEnvironment.start({ services, alwaysReplay: true })`. Cover concurrency, terminal failures, timeouts, cleanup after interruption, and context isolation where relevant.
+Typecheck snippets against the installed coroutine package. Test handler changes with `RestateTestEnvironment.start({ services, alwaysReplay: true })`. Cover concurrency, terminal failures, timeouts, cleanup after interruption, and context isolation where relevant.
 
-- Documentation: https://docs.restate.dev/develop/ts/durable-coroutines
+- Documentation: https://docs.restate.dev/develop/ts/concurrent-tasks#durable-coroutines
 - API and tutorial: https://github.com/restatedev/sdk-typescript/tree/main/packages/libs/restate-sdk-gen

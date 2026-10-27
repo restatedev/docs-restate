@@ -140,7 +140,7 @@ Execute a sequence of steps. Track completed steps. On `TerminalError`, execute 
 
 Launch parallel work using Restate concurrency combinators (`RestatePromise.all` in TypeScript, `restate.gather` in Python, `DurableFuture.all` in Java, `restate.Wait` in Go). Parallel branches can be durable service calls or individual durable steps. Collect results after all branches complete.
 
-For TypeScript branches with multiple durable steps that should run in the same invocation, use [Gen SDK coroutines](ts/gen-sdk.md). For example, each parallel agent tool can run a guardrail and then an API call as separate durable steps while sharing local clients with other tools.
+For TypeScript branches with multiple durable steps that should run in the same invocation, use [durable coroutines](ts/durable-coroutines.md). For example, each parallel agent tool can run a guardrail and then an API call as separate durable steps while sharing local clients with other tools.
 
 ### Cron (self-scheduling)
 

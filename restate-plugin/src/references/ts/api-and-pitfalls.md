@@ -1,10 +1,10 @@
 # TypeScript SDK Reference: API and Pitfalls
 
-## Standard SDK or Gen SDK?
+## When to use Durable Coroutines
 
-Use the standard SDK for sequential workflows, parallel individual durable steps, and concurrent calls to other Restate handlers. Use the Gen SDK when each concurrent routine needs multiple durable steps within one invocation, such as parallel tools with guardrails or subagents sharing a sandbox connection.
+Use the standard SDK for sequential workflows, parallel individual durable steps, and concurrent calls to other Restate handlers. Use Durable Coroutines when each concurrent routine needs multiple durable steps within one invocation, such as parallel tools with guardrails or subagents sharing a sandbox connection.
 
-If the project uses `@restatedev/restate-sdk-gen`, or you choose this model, load [Gen SDK and durable coroutines](gen-sdk.md). The `ctx` and `RestatePromise` examples below use the standard SDK; generator handlers use the APIs in that reference. Preserve the project's existing SDK choice unless the task requires changing it.
+If the project uses `@restatedev/restate-sdk-gen`, or you choose this model, load [Durable Coroutines](durable-coroutines.md). The `ctx` and `RestatePromise` examples below use the standard SDK; coroutine bodies use the APIs in that reference. Preserve the project's existing SDK choice unless the task requires changing it.
 
 ## Setup
 
@@ -204,7 +204,7 @@ Durable promises allow communication between a workflow's `run` handler and its 
 
 ## Concurrency
 
-In standard SDK handlers, use `RestatePromise` (imported from `@restatedev/restate-sdk`), not native `Promise`, to combine durable operations. For Gen SDK coroutines, use its own combinators instead:
+In standard SDK handlers, use `RestatePromise` (imported from `@restatedev/restate-sdk`), not native `Promise`, to combine durable operations. For durable coroutines, use the coroutine combinators instead:
 
 ```ts {"CODE_LOAD::ts/src/develop/skillsmd/actions.ts#promise_import"}
 ```
@@ -295,7 +295,7 @@ Use `@restatedev/restate-sdk-clients` to call Restate handlers from outside a Re
 
 ## TypeScript-Specific Pitfalls
 
-- **Use SDK concurrency combinators**: `RestatePromise` for standard SDK handlers, or Gen SDK combinators for coroutines. Do not coordinate durable operations with native `Promise` combinators.
+- **Use SDK concurrency combinators**: `RestatePromise` for standard SDK handlers, or coroutine combinators for coroutines. Do not coordinate durable operations with native `Promise` combinators.
 - **Return values from `ctx.run()` must be JSON-serializable** (no functions, circular references, or class instances without custom serde).
 - **Never use `setTimeout`, `Math.random()`, `Date.now()`, or `new Date()`** -- use Restate Context actions instead.
 - **Never use global mutable variables for state** -- use Restate's K/V store for durable state.
