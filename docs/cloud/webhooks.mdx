@@ -1,6 +1,6 @@
 ---
 title: "Incoming webhooks"
-description: "Let GitHub, Linear, Slack, and other systems invoke a handler in your Restate Cloud environment through a webhook URL."
+description: "Give a handler in your Restate Cloud environment its own URL, so other systems can call it."
 icon: "webhook"
 ---
 
@@ -8,8 +8,8 @@ icon: "webhook"
     Incoming webhooks are in preview.
 </Note>
 
-An incoming webhook is a URL that lets an external system, such as GitHub, Linear, or Slack, invoke one handler of a service in your Restate Cloud environment.
-Every `POST` request to the URL starts an invocation of that handler, with the request body as its input.
+An incoming webhook gives one handler its own URL.
+Hand that URL to any system that sends webhooks, and every `POST` to it starts an invocation of the handler, with the request body as its input.
 
 <Warning>
     Anyone who has the URL can invoke the handler.
@@ -31,12 +31,12 @@ Choose the service, the handler, and the [delivery mode](#choose-a-delivery-mode
 </Step>
 <Step title="Give the URL to the sender">
 Copy the webhook URL and paste it into the sender's webhook settings.
-Admins can copy the URL again later.
+You can copy it again later from the webhook list, with an admin role.
 </Step>
 </Steps>
 
 A webhook is bound to the names of its service and handler.
-If you remove or rename the service or handler, deliveries fail with `503`. The webhook list in the Restate Cloud UI marks the webhook, but Restate Cloud doesn't notify you.
+If you remove or rename the service or handler, deliveries fail with `503`. The webhook list in the Restate Cloud UI flags the broken webhook, but nothing notifies you.
 To point the sender at a renamed handler, create a new webhook and give its URL to the sender.
 
 Deleting a webhook stops its deliveries.
@@ -45,52 +45,68 @@ Requests usually stop reaching your handler within 30 seconds. If the Restate Cl
 ## Choose a delivery mode
 
 You choose the delivery mode when you create the webhook, and you can't change it later.
-To switch modes, create a new webhook and give its URL to the sender.
+Switching modes means a new webhook, and a new URL for the sender.
 
 | | Async | Sync |
 |---|---|---|
 | **The sender receives** | `202 Accepted` as soon as Restate has accepted the invocation, never the handler's result | The handler's response, as for a regular [HTTP call](/services/invocation/http): `200` with the return value, or the handler's error status with a generic message |
-| **Time limit** | None | The handler must respond within 30 seconds |
+| **Time limit** | None | The handler must respond within 60 seconds. Most senders stop waiting after a few seconds, so answer fast and [hand slow work off](#handle-retries-and-slow-work) |
 | **Use it for** | Senders that only need an acknowledgement, and long-running handlers | Senders that need a reply or exactly HTTP `200`, such as Linear, Slack URL verification, and Slack slash commands |
-
-## How requests reach your handler
-
-- Webhooks accept only `POST` requests.
-- The body can be up to 1 MiB and needs a `Content-Length` header. Restate Cloud refuses chunked bodies without one.
-- The URL path must be exactly as issued.
-- Restate Cloud forwards the query string, except the `delay` and `limit-key` parameters. Your handler can read the query string at the end of the `x-restate-ingress-path` header.
-- Your handler receives the body byte for byte.
-- Your handler reads the sender's headers from `ctx.request().headers`, with lower-case names.
-- Restate Cloud drops `Authorization`, `Cookie`, hop-by-hop headers such as `Connection` and `Transfer-Encoding`, and headers that start with `x-restate-` or `x-restatecloud-`.
-- Restate stores the forwarded headers with the invocation, signature headers included.
-- Restate Cloud adds the `x-restatecloud-webhook-id` header, which holds the ID of the webhook that received the request.
-- Each webhook is rate limited to 100 requests per second, with bursts of up to 200.
-
-The sender receives one of these responses:
-
-| Status | Meaning |
-|---|---|
-| `202` | Async mode: Restate accepted the invocation. The body is `{"invocationId": "...", "status": "Accepted"}`. |
-| `200` or the handler's error status | Sync mode: the handler's response. |
-| `404` | The URL is wrong, or the webhook was deleted. |
-| `405` | The request is not a `POST`. |
-| `411` | The request has no `Content-Length` header. |
-| `413` | The body is larger than 1 MiB. |
-| `429` | The webhook's rate limit is exceeded. Retry after the number of seconds in `Retry-After`. |
-| `502` | Your environment is unreachable or failed to accept the request, or, in sync mode, the handler's result is larger than 1 MiB. |
-| `503` | The target service or handler is not registered, or Restate Cloud can't look up the webhook right now. |
-| `504` | Sync mode: the handler didn't respond within 30 seconds. The invocation keeps running. |
 
 ## Write the handler
 
 The examples on this page use the TypeScript SDK.
-A webhook handler differs from a regular handler in three ways:
 
-- **It accepts any content type and receives the raw body.** Declare the input as `restate.serde.binary` and set `accept: "*/*"`. Senders post JSON, form-encoded data, or other formats, and a handler that only accepts JSON rejects everything else. The raw bytes are also exactly what the sender signed.
-- **It verifies the sender.** Compute the signature over the raw body and compare it with the one in the request headers, in constant time. If they don't match, throw a [terminal error](/develop/ts/error-handling#terminal-errors) with `errorCode: 401`. Restate doesn't retry the invocation, and in sync mode the sender receives the `401`.
-- **It hands off the work and returns.** See [Handle retries and slow work](#handle-retries-and-slow-work).
+Before your handler trusts a request, it checks that the sender really sent it.
+Senders sign each request: they compute a signature over the exact bytes of the body and put it in a header.
+To check it, the handler needs two things: the raw body and the headers.
 
-This handler receives GitHub pull request events:
+- Declare the input as `restate.serde.binary` and set `accept: "*/*"`. The handler then receives the body byte for byte, whether the sender posts JSON, form data, or anything else.
+- Read the headers from `ctx.request().headers`. Their names are lower case.
+
+If the signature doesn't match, throw a [terminal error](/develop/ts/error-handling#terminal-errors) with `errorCode: 401`.
+Restate doesn't retry the invocation, and in sync mode the sender gets the `401` back.
+
+### Verify with the sender's library
+
+Most senders publish a library that checks their signature for you, for example [`@octokit/webhooks-methods`](https://github.com/octokit/webhooks-methods.js) for GitHub, `LinearWebhookClient` from `@linear/sdk/webhooks` for Linear, and `isValidSlackRequest` from `@slack/bolt` for Slack.
+Give it the raw body and the signature header, then hand off the work as in the next example:
+
+```typescript TypeScript {"CODE_LOAD::ts/src/cloud/webhooks.ts#sdk"} 
+import { verify } from "@octokit/webhooks-methods";
+
+const gitHubWebhookWithSdk = restate.service({
+  name: "GitHubWebhook",
+  handlers: {
+    receive: restate.handlers.handler(
+      // Accept any content type and receive the body as raw bytes
+      { input: restate.serde.binary, accept: "*/*" },
+      async (ctx: restate.Context, body: Uint8Array) => {
+        // The sender's headers, with lower-case names
+        const headers = ctx.request().headers;
+
+        const signed = await verify(
+          process.env.GITHUB_WEBHOOK_SECRET!,
+          new TextDecoder().decode(body),
+          headers.get("x-hub-signature-256") ?? ""
+        );
+        if (!signed) {
+          throw new restate.TerminalError("Invalid signature", {
+            errorCode: 401,
+          });
+        }
+
+        // Then hand off the work, as in the next example, and return
+      }
+    ),
+  },
+});
+```
+
+### Verify it yourself
+
+Without a library, compute the signature over the raw body with your signing secret, and compare it with the header in constant time.
+This handler receives GitHub pull request events, verifies them, and [hands off the work](#handle-retries-and-slow-work):
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/cloud/webhooks.ts#github"} 
 // Compares a computed signature with the one the sender sent, in constant time
@@ -142,7 +158,7 @@ const gitHubWebhook = restate.service({
 ## Handle retries and slow work
 
 Senders retry deliveries that fail or time out, and each retry starts a new invocation of your handler.
-Senders also stop waiting after a few seconds, so in sync mode a slow handler makes the sender retry.
+Most stop waiting after a few seconds, so in sync mode a slow handler gets retried too.
 
 To process each delivery once:
 
@@ -150,7 +166,7 @@ To process each delivery once:
 2. [Send](/develop/ts/service-communication#sending-messages) the actual work to another handler, with an [idempotency key](/develop/ts/service-communication#using-an-idempotency-key) built from the sender's delivery ID. Restate starts the work once per key, so a retried delivery doesn't run it again.
 3. Return right away.
 
-To process the events of one issue, pull request, or channel one at a time and in order, send them to a [virtual object](/foundations/services#virtual-object) keyed by that ID, as the examples on this page do.
+To handle the events of each issue, pull request or channel in order, one at a time, send them to a [virtual object](/foundations/services#virtual-object) keyed by its ID, as the examples on this page do.
 
 | Sender | Delivery ID | Response time limit | Retries |
 |---|---|---|---|
@@ -161,18 +177,51 @@ To process the events of one issue, pull request, or channel one at a time and i
 If a sender sets an `Idempotency-Key` header, Restate deduplicates requests to the same webhook that carry the same key, so a retry doesn't start a second invocation.
 In async mode, the sender then receives `"status": "PreviouslyAccepted"`.
 
+## How requests reach your handler
+
+What Restate Cloud accepts:
+
+- `POST` requests only.
+- Bodies up to 1 MiB, with a `Content-Length` header. Chunked bodies without one are refused.
+- The exact path of the issued URL. Extra path segments get a `404`.
+- Up to 100 requests per second per webhook, with bursts of up to 200.
+
+What your handler sees:
+
+- The body, byte for byte.
+- The sender's headers in `ctx.request().headers`, with lower-case names. Restate Cloud drops `Authorization`, `Cookie`, hop-by-hop headers such as `Connection` and `Transfer-Encoding`, and headers that start with `x-restate-` or `x-restatecloud-`.
+- An added `x-restatecloud-webhook-id` header, with the ID of the webhook that received the request.
+- The query string, at the end of the `x-restate-ingress-path` header, without the `delay` and `limit-key` parameters.
+
+Restate keeps the forwarded headers, signature headers included, with the invocation, so they're visible wherever you can inspect it.
+
+The sender receives one of these responses:
+
+| Status | Meaning |
+|---|---|
+| `202` | Async mode: Restate accepted the invocation. The body is `{"invocationId": "...", "status": "Accepted"}`. |
+| `200` or the handler's error status | Sync mode: the handler's response. |
+| `404` | The URL is wrong, or the webhook was deleted. |
+| `405` | The request is not a `POST`. |
+| `411` | The request has no `Content-Length` header. |
+| `413` | The body is larger than 1 MiB. |
+| `429` | The webhook's rate limit is exceeded. Retry after the number of seconds in `Retry-After`. |
+| `502` | Your environment is unreachable or failed to accept the request, or, in sync mode, the handler's result is larger than 1 MiB. |
+| `503` | The target service or handler is not registered, or Restate Cloud can't look up the webhook right now. |
+| `504` | Sync mode: the handler didn't respond within 60 seconds. The invocation keeps running. |
+
 ## Senders
 
 ### GitHub
 
 1. In your repository or organization settings, add a webhook with the webhook URL as the **Payload URL**.
 2. Set **Content type** to `application/json`.
-3. Set a **Secret**, and give your service the same value, `GITHUB_WEBHOOK_SECRET` in the [example above](#write-the-handler).
+3. Set a **Secret** and give your service the same value; the [example above](#write-the-handler) reads it from `GITHUB_WEBHOOK_SECRET`.
 
 Both delivery modes work, because GitHub accepts any `2xx` response.
 GitHub signs each delivery in the `x-hub-signature-256` header: `sha256=` followed by the hex HMAC-SHA256 of the body.
 
-GitHub doesn't retry failed deliveries automatically. You can redeliver them from the webhook's settings in GitHub, and the redelivery keeps its `x-github-delivery` ID.
+To retry a failed delivery, redeliver it from the webhook's settings in GitHub; the redelivery keeps its `x-github-delivery` ID.
 
 ### Linear
 
@@ -226,14 +275,14 @@ const linearWebhook = restate.service({
 ```
 
 Linear recommends rejecting deliveries whose `webhookTimestamp` is more than a minute old.
-Your handler can start later than the delivery arrived, for example if your deployment was unavailable, so widen `MAX_AGE_MS` if this rejects deliveries you want to keep.
+Your handler may run some time after the delivery arrived, for example if your deployment was down, so widen `MAX_AGE_MS` if this rejects deliveries you want to keep.
 `ctx.date.now()` records the time on the first attempt, so a retry of the same invocation compares against the same time.
 
 ### Slack
 
 Use **sync** mode. Slack verifies an Events API request URL by sending a challenge that your handler must return, and it shows the response to a slash command as the reply.
 
-The example below uses one handler per Slack request URL: create a webhook for the `events` handler and use it as the Events API request URL, and one for the `command` handler and use it as the slash command's request URL. One handler can also serve both URLs if it tells JSON events from form-encoded commands.
+The example uses one handler per Slack request URL, so create two webhooks: one for `events`, used as the Events API request URL, and one for `command`, used as the slash command's request URL. A single handler could serve both if it told JSON events apart from form-encoded commands.
 
 Slack signs each request in the `x-slack-signature` header: `v0=` followed by the hex HMAC-SHA256 of `v0:<timestamp>:<body>`, keyed with your app's signing secret.
 `<timestamp>` is the value of the `x-slack-request-timestamp` header. Slack recommends rejecting requests that are more than five minutes old.
@@ -306,8 +355,10 @@ const slackWebhook = restate.service({
 });
 ```
 
-- `events` answers the `url_verification` request by returning `{ challenge }`, and forwards message events with their `event_id` as the idempotency key. Slack expects a response within 3 seconds.
-- `command` receives the form-encoded slash command and returns the reply, which Slack expects within 3 seconds. For longer work, send it to another handler and post the result to the command's `response_url` later.
+Slack expects both replies within 3 seconds.
+
+- `events` answers the `url_verification` request by returning `{ challenge }`, and forwards message events with their `event_id` as the idempotency key.
+- `command` receives the form-encoded slash command and returns the reply. For longer work, send it to another handler and post the result to the command's `response_url` later.
 
 ## Limitations
 

@@ -16,6 +16,37 @@ const pullRequest = restate.object({
   },
 });
 
+// <start_sdk>
+import { verify } from "@octokit/webhooks-methods";
+
+const gitHubWebhookWithSdk = restate.service({
+  name: "GitHubWebhook",
+  handlers: {
+    receive: restate.handlers.handler(
+      // Accept any content type and receive the body as raw bytes
+      { input: restate.serde.binary, accept: "*/*" },
+      async (ctx: restate.Context, body: Uint8Array) => {
+        // The sender's headers, with lower-case names
+        const headers = ctx.request().headers;
+
+        const signed = await verify(
+          process.env.GITHUB_WEBHOOK_SECRET!,
+          new TextDecoder().decode(body),
+          headers.get("x-hub-signature-256") ?? ""
+        );
+        if (!signed) {
+          throw new restate.TerminalError("Invalid signature", {
+            errorCode: 401,
+          });
+        }
+
+        // Then hand off the work, as in the next example, and return
+      }
+    ),
+  },
+});
+// <end_sdk>
+
 // <start_github>
 // Compares a computed signature with the one the sender sent, in constant time
 function signatureMatches(expected: string, received: string | undefined) {
@@ -211,3 +242,4 @@ restate.serve({
     slackChannel,
   ],
 });
+export { gitHubWebhookWithSdk };
