@@ -70,7 +70,7 @@ Restate doesn't retry the invocation, and in sync mode the sender gets the `401`
 ### Verify with the sender's library
 
 Most senders publish a library that checks their signature for you, for example [`@octokit/webhooks-methods`](https://github.com/octokit/webhooks-methods.js) for GitHub, `LinearWebhookClient` from `@linear/sdk/webhooks` for Linear, and `isValidSlackRequest` from `@slack/bolt` for Slack.
-Give it the raw body and the signature header, then hand off the work as in the next example:
+Give it the raw body and the signature header, in the form it asks for: Linear's client takes the bytes as they are, Octokit takes them as a string. Then hand off the work as in the next example:
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/cloud/webhooks.ts#sdk"} 
 import { verify } from "@octokit/webhooks-methods";
@@ -85,6 +85,8 @@ const gitHubWebhookWithSdk = restate.service({
         // The sender's headers, with lower-case names
         const headers = ctx.request().headers;
 
+        // Octokit takes the body as a string. GitHub sends UTF-8 JSON, so
+        // decoding it keeps the exact bytes GitHub signed.
         const signed = await verify(
           process.env.GITHUB_WEBHOOK_SECRET!,
           new TextDecoder().decode(body),
