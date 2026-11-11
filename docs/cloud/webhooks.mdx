@@ -36,7 +36,7 @@ Admins can copy the URL again later.
 </Steps>
 
 A webhook is bound to the names of its service and handler.
-If you remove or rename the service or handler, deliveries fail with `503`, and Restate Cloud gives no warning.
+If you remove or rename the service or handler, deliveries fail with `503`. The webhook list in the Restate Cloud UI marks the webhook, but Restate Cloud doesn't notify you.
 To point the sender at a renamed handler, create a new webhook and give its URL to the sender.
 
 Deleting a webhook stops its deliveries.
@@ -49,7 +49,7 @@ To switch modes, create a new webhook and give its URL to the sender.
 
 | | Async | Sync |
 |---|---|---|
-| **The sender receives** | `202 Accepted` as soon as Restate has accepted the invocation, never the handler's result | The handler's response, as for a regular [HTTP call](/services/invocation/http): `200` with the return value, or the handler's error status |
+| **The sender receives** | `202 Accepted` as soon as Restate has accepted the invocation, never the handler's result | The handler's response, as for a regular [HTTP call](/services/invocation/http): `200` with the return value, or the handler's error status with a generic message |
 | **Time limit** | None | The handler must respond within 30 seconds |
 | **Use it for** | Senders that only need an acknowledgement, and long-running handlers | Senders that need a reply or exactly HTTP `200`, such as Linear, Slack URL verification, and Slack slash commands |
 
@@ -77,8 +77,9 @@ The sender receives one of these responses:
 | `411` | The request has no `Content-Length` header. |
 | `413` | The body is larger than 1 MiB. |
 | `429` | The webhook's rate limit is exceeded. Retry after the number of seconds in `Retry-After`. |
-| `502` | Your environment is unreachable or failed to accept the request. |
+| `502` | Your environment is unreachable or failed to accept the request, or, in sync mode, the handler's result is larger than 1 MiB. |
 | `503` | The target service or handler is not registered, or Restate Cloud can't look up the webhook right now. |
+| `504` | Sync mode: the handler didn't respond within 30 seconds. The invocation keeps running. |
 
 ## Write the handler
 
@@ -232,7 +233,7 @@ Your handler can start later than the delivery arrived, for example if your depl
 
 Use **sync** mode. Slack verifies an Events API request URL by sending a challenge that your handler must return, and it shows the response to a slash command as the reply.
 
-Each Slack request URL needs its own webhook: create one for the `events` handler below and use it as the Events API request URL, and one for the `command` handler and use it as the slash command's request URL.
+The example below uses one handler per Slack request URL: create a webhook for the `events` handler and use it as the Events API request URL, and one for the `command` handler and use it as the slash command's request URL. One handler can also serve both URLs if it tells JSON events from form-encoded commands.
 
 Slack signs each request in the `x-slack-signature` header: `v0=` followed by the hex HMAC-SHA256 of `v0:<timestamp>:<body>`, keyed with your app's signing secret.
 `<timestamp>` is the value of the `x-slack-request-timestamp` header. Slack recommends rejecting requests that are more than five minutes old.
