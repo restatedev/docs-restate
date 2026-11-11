@@ -30,7 +30,7 @@ const gitHubWebhookWithSdk = restate.service({
         const headers = ctx.request().headers;
 
         // Octokit takes the body as a string. GitHub sends UTF-8 JSON, so
-        // decoding it keeps the exact bytes GitHub signed.
+        // the string re-encodes to the exact bytes GitHub signed.
         const signed = await verify(
           process.env.GITHUB_WEBHOOK_SECRET!,
           new TextDecoder().decode(body),

@@ -50,7 +50,7 @@ Switching modes means a new webhook, and a new URL for the sender.
 | | Async | Sync |
 |---|---|---|
 | **The sender receives** | `202 Accepted` as soon as Restate has accepted the invocation, never the handler's result | The handler's response, as for a regular [HTTP call](/services/invocation/http): `200` with the return value, or the handler's error status with a generic message |
-| **Time limit** | None | The handler must respond within 60 seconds. Most senders stop waiting after a few seconds, so answer fast and [hand slow work off](#handle-retries-and-slow-work) |
+| **Time limit** | None | 60 seconds, then the sender gets `504` |
 | **Use it for** | Senders that only need an acknowledgement, and long-running handlers | Senders that need a reply or exactly HTTP `200`, such as Linear, Slack URL verification, and Slack slash commands |
 
 <Warning>
@@ -75,8 +75,8 @@ Restate doesn't retry the invocation, and in sync mode the sender gets the `401`
 
 ### Verify with the sender's library
 
-Most senders publish a library that checks their signature for you, for example [`@octokit/webhooks-methods`](https://github.com/octokit/webhooks-methods.js) for GitHub, `LinearWebhookClient` from `@linear/sdk/webhooks` for Linear, and `isValidSlackRequest` from `@slack/bolt` for Slack.
-Give it the raw body and the signature header, in the form it asks for: Linear's client takes the bytes as they are, Octokit takes them as a string. Then hand off the work as in the next example:
+Many senders publish a library that checks their signature for you, for example [`@octokit/webhooks-methods`](https://github.com/octokit/webhooks-methods.js) for GitHub, `LinearWebhookClient` from `@linear/sdk/webhooks` for Linear, and `isValidSlackRequest` from `@slack/bolt` for Slack.
+Give it the raw body and the signature header, in the form it asks for: Linear's client takes the bytes as they are; Octokit takes them as a string. With Octokit:
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/cloud/webhooks.ts#sdk"} 
 import { verify } from "@octokit/webhooks-methods";
@@ -92,7 +92,7 @@ const gitHubWebhookWithSdk = restate.service({
         const headers = ctx.request().headers;
 
         // Octokit takes the body as a string. GitHub sends UTF-8 JSON, so
-        // decoding it keeps the exact bytes GitHub signed.
+        // the string re-encodes to the exact bytes GitHub signed.
         const signed = await verify(
           process.env.GITHUB_WEBHOOK_SECRET!,
           new TextDecoder().decode(body),
@@ -165,8 +165,8 @@ const gitHubWebhook = restate.service({
 
 ## Handle retries and slow work
 
-Senders retry deliveries that fail or time out, and each retry starts a new invocation of your handler.
-Most stop waiting after a few seconds, so in sync mode a slow handler gets retried too.
+Senders retry deliveries that fail or time out, and unless the sender sets an `Idempotency-Key` header (see below), each retry starts a new invocation of your handler.
+In sync mode a handler that outlasts the sender's wait (see the table below) gets retried too.
 
 To process each delivery once:
 
@@ -374,4 +374,4 @@ Slack expects both replies within 3 seconds.
 - Bodies larger than 1 MiB are refused, even if the sender allows larger ones. GitHub, for example, sends payloads of up to 25 MB.
 - A sync webhook waits at most 60 seconds for the handler, then answers `504`. See [Choose a delivery mode](#choose-a-delivery-mode).
 - Senders that sign the full URL, such as Twilio and Square, need extra work: your handler never sees the webhook URL, so read it from your own configuration to verify the signature.
-- Virtual objects and workflows can't be targets. Point the webhook at a service handler that forwards to the object.
+- Virtual objects and workflows can't be targets. Point the webhook at a service handler that [forwards to the object](#handle-retries-and-slow-work).
