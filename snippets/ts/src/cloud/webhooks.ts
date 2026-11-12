@@ -42,7 +42,7 @@ const gitHubWebhookWithSdk = restate.service({
           });
         }
 
-        // Then hand off the work, as in the next example, and return
+        // Forward the event to another handler, as shown in the next example
       }
     ),
   },
@@ -77,7 +77,7 @@ const gitHubWebhook = restate.service({
           });
         }
 
-        // Forward the work, once per delivery, and return right away
+        // Forward the event with a delivery ID for deduplication
         if (headers.get("x-github-event") === "pull_request") {
           const event: PullRequestEvent = JSON.parse(
             new TextDecoder().decode(body)
