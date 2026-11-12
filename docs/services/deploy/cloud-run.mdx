@@ -71,16 +71,25 @@ The `--attribute-condition` is required. It ensures that only the Restate Cloud 
 
 ### Allow your environment to mint ID tokens
 
-Grant your environment's subject permission to mint ID tokens as the service account that invokes your Cloud Run service. Repeat this for each environment:
+Create the service account that Restate will impersonate to invoke your Cloud Run service, if you don't have one yet:
+
+```shell
+gcloud iam service-accounts create <INVOKER_SA> \
+  --project=<YOUR_PROJECT> \
+  --display-name="Restate Cloud invoker"
+```
+
+Grant your environment's subject permission to mint ID tokens as that service account. Repeat this for each environment:
 
 ```shell
 gcloud iam service-accounts add-iam-policy-binding \
   <INVOKER_SA>@<YOUR_PROJECT>.iam.gserviceaccount.com \
+  --project=<YOUR_PROJECT> \
   --role=roles/iam.serviceAccountOpenIdTokenCreator \
   --member="principal://iam.googleapis.com/projects/<YOUR_PROJECT_NUMBER>/locations/global/workloadIdentityPools/restate-cloud/subject/arn:aws:sts::<RESTATE_AWS_ACCOUNT_ID>:assumed-role/RestateCloudGcpFederation/<ENVIRONMENT_NAMESPACE>"
 ```
 
-IAM changes can take a minute to propagate. A `403 PERMISSION_DENIED` immediately after granting usually resolves without further action.
+IAM changes can take a minute or two to propagate. Until this grant does, registration fails with `403 PERMISSION_DENIED` on `iam.serviceAccounts.getOpenIdToken`.
 
 ### Allow the service account to invoke your service
 
@@ -90,6 +99,8 @@ gcloud run services add-iam-policy-binding <YOUR_SERVICE> \
   --role=roles/run.invoker \
   --member="serviceAccount:<INVOKER_SA>@<YOUR_PROJECT>.iam.gserviceaccount.com"
 ```
+
+This grant can also take a minute or two to propagate. Until it does, registration fails with a `403 Forbidden` from Cloud Run during discovery.
 
 ### Register the deployment
 
