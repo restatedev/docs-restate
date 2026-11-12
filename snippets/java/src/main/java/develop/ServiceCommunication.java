@@ -133,8 +133,6 @@ public class ServiceCommunication {
             .call(MyWorkflow::run, request, InvocationOptions.limitKey("premium/user42"))
             .await();
 
-    // Scoped Virtual Object calls need
-    // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
     String objResponse =
         Restate.scope("tenant-123").virtualObject(MyObject.class, objectKey).myHandler(request);
     // <end_scope>

@@ -30,11 +30,25 @@ node scripts/loadScripts.js
 
 
 ### Restate configuration schema
-To update the Restate configuration JSON schema, add it as `snippets/schemas/restate-server-configuration-schema.json` and run:
+To update the Restate configuration JSON schema, add it as `docs/schemas/restate-server-configuration-schema.json` and run, from the repository root:
 
 ```shell
 node scripts/generate-restate-config-viewer.js
 ```
+
+For a complete generated-reference refresh, use the workflow below, which also regenerates the configuration schema from the runtime.
+
+### Updating generated documentation
+
+Use the [Pre-release updates workflow](https://github.com/restatedev/docs-restate/actions/workflows/pre-release.yml) to refresh runtime references, update SDK versions and examples, or prepare documentation for an upcoming release.
+
+When you supply `restateVersion`, the workflow checks out the corresponding runtime tag and regenerates the Admin OpenAPI document, configuration schema and reference, default configuration, SQL introspection reference, and error reference. It also validates the Admin OpenAPI document. SDK version inputs update the corresponding version references and example dependencies. The workflow opens or updates a PR with the generated changes.
+
+1. Open the workflow, select **Run workflow**, and choose the documentation branch to update.
+2. Provide the version inputs you want to update, leaving the others empty. For runtime references, set `restateVersion` **without the leading `v`**; the corresponding tag must already exist in `restatedev/restate`. SDK-only updates can leave `restateVersion` empty.
+3. Review the workflow results and generated PR before merging.
+
+The workflow uses [`.tools/generate.sh`](.tools/generate.sh). The individual generators are [Admin OpenAPI](.tools/generate_openapi_admin_spec.sh) and [SQL introspection](.tools/generate_sql_introspection_page.sh); for rendering a configuration schema you already have, follow [Restate configuration schema](#restate-configuration-schema) above.
 
 ## Adding guides 
 
@@ -60,30 +74,30 @@ node loadScripts.js
 
 For TS:
 ```
-cd code_snippets/ts
+cd snippets/ts
 npm run format
 ```
 
 For Java:
 ```
-cd code_snippets/java
+cd snippets/java
 ./gradlew spotlessApply
 ```
 
 For Kotlin:
 ```
-cd code_snippets/kotlin
+cd snippets/kotlin
 ./gradlew spotlessApply
 ```
 
 For Go:
 ```
-cd code_snippets/go
-go fmt
+cd snippets/go
+go fmt ./...
 ```
 
 For Python:
 ```
-cd code_snippets/python
+cd snippets/python
 python3 -m black .
 ```

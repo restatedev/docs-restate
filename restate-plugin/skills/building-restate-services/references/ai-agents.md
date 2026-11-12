@@ -2,6 +2,10 @@
 
 Load this reference for every AI agent task, then load the framework-specific reference when one exists.
 
+## Reference architecture
+
+Use [restatedev/agent](https://github.com/restatedev/agent) as a complete TypeScript reference when you need to combine durable turns, human approvals, sandboxed tools, subagents, memory, and schedules. Its `Agent` Virtual Object owns the controller state, while `AgentSession` runs the turn and owns the conversation log. This separation lets you steer a running turn and respond to approvals while it works.
+
 ## Choose the durability boundary
 
 Prefer the narrowest integration that journals each expensive or side-effecting step:
@@ -13,6 +17,12 @@ Prefer the narrowest integration that journals each expensive or side-effecting 
 | Entire agent in one context action | No fine-grained integration is possible | Coarse recovery only. A failure reruns the whole agent action, and no Restate context operation may run inside it. |
 
 Do not call an unsupported agent framework directly from replayable handler code. Either integrate its model and tool boundaries or treat the entire execution as one context action.
+
+## TypeScript concurrency
+
+For parallel model calls or individual tool steps, the standard SDK's `RestatePromise` combinators are sufficient. Use the [Durable Coroutines](ts/durable-coroutines.md) when tools or subagents each need multiple durable steps in the same invocation, or when an agent coordinates background work and steering input while reusing local resources.
+
+With Durable Coroutines, wrap model and tool I/O in named `run` steps, use `spawn` for concurrent routines, and set bounded retry policies on expensive calls. Do not put coroutine operations inside a `run` callback. Local clients and connections must be recreated after a restart; sharing them does not make them durable.
 
 ## Choose the Restate service type
 
@@ -35,7 +45,7 @@ Do not call an unsupported agent framework directly from replayable handler code
 - Set a bounded retry policy for model calls and expensive tools. Do not inherit infinite retries for paid APIs without an explicit decision.
 - Convert invalid input, denied actions, unsupported requests, and other permanent failures to terminal errors.
 - Use idempotency keys at ingress when a caller may resubmit the same agent job.
-- Use Restate 1.7 scopes and limit keys for tenant, team, or user concurrency budgets. Load `references/flow-control-and-scopes.md` before choosing those identities.
+- Use scopes and limit keys for tenant, team, or user concurrency budgets. Load `references/flow-control-and-scopes.md` before choosing those identities.
 - Add a maximum agent-step count or another termination condition so a model cannot loop indefinitely.
 
 ## Manage sessions deliberately

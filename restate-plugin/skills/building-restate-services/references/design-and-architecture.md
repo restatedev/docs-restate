@@ -35,7 +35,7 @@ Concrete examples:
 
 The key is the entity identity. All state for a key is isolated from other keys. Exclusive handlers queue per key.
 
-When a call carries a Restate 1.7 scope, the scope is also part of the identity. The same Virtual Object or Workflow key under two different scopes addresses two isolated instances with separate state and queues. Use this intentionally for tenant isolation. Do not add scopes only as labels.
+When a call carries a scope, the scope is also part of the identity. The same Virtual Object or Workflow key under two different scopes addresses two isolated instances with separate state and queues. Use this intentionally for tenant isolation. Do not add scopes only as labels.
 
 Scopes are also sharding keys. Avoid one constant scope or a very small set of scopes for high-volume workloads because that concentrates scheduling on a small number of partitions. See `references/flow-control-and-scopes.md` before introducing scopes or limit keys.
 
@@ -138,7 +138,9 @@ Execute a sequence of steps. Track completed steps. On `TerminalError`, execute 
 
 ### Fan-out / fan-in
 
-Launch parallel work using Restate concurrency combinators (`CombineablePromise.all` in TypeScript, `restate.gather` in Python, `DurableFuture.all` in Java, `restate.Wait` in Go). Each parallel branch is a durable service call. Collect results after all branches complete.
+Launch parallel work using Restate concurrency combinators (`RestatePromise.all` in TypeScript, `restate.gather` in Python, `DurableFuture.all` in Java, `restate.Wait` in Go). Parallel branches can be durable service calls or individual durable steps. Collect results after all branches complete.
+
+For TypeScript branches with multiple durable steps that should run in the same invocation, use [durable coroutines](ts/durable-coroutines.md). For example, each parallel agent tool can run a guardrail and then an API call as separate durable steps while sharing local clients with other tools.
 
 ### Cron (self-scheduling)
 

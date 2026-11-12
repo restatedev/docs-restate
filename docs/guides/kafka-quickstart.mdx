@@ -16,16 +16,31 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
     Any handler can be connected to Kafka.
 
 </Step>
-<Step title="Start the Kafka cluster">
+<Step title="Running Restate Server">
 
-    Let's start a Kafka cluster with a single broker, and create a topic named `greetings`.
+    Start the Restate Server:
 
-    You can run your Kafka cluster in your preferred way. Here, we will use Docker Compose to start a Kafka cluster.
+    ```shell
+    restate-server
+    ```
+</Step>
+<Step title="Register the service">
+
+    Let the Restate Server know about the Greeter service by registering it:
+
+    ```shell
+    restate deployments register localhost:9080
+    ```
+</Step>
+<Step title="Start Kafka and the Kafka ingress integration">
+
+    Let's start a Kafka cluster with a single broker, create a topic named `greetings`, and run the Kafka ingress integration next to it.
+
+    You can run your Kafka cluster in your preferred way. Here, we will use Docker Compose.
 
     Create a `docker-compose.yaml` file with the following content:
 
     ```yaml docker-compose.yaml expandable
-    version: '3'
     services:
         broker:
             image: confluentinc/cp-kafka:7.5.0
@@ -63,51 +78,32 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
 
                 echo -e 'Successfully created the following topics:'
                 kafka-topics --bootstrap-server broker:29092 --list"
+
+        restate-kafka-integration:
+            image: ghcr.io/restatedev/ingress-integration-kafka:latest
+            depends_on:
+                init-kafka:
+                    condition: service_completed_successfully
+            extra_hosts:
+                - "host.docker.internal:host-gateway"
+            environment:
+                KAFKA_BOOTSTRAP_SERVERS: broker:29092
+                KAFKA_GROUP_ID: greetings-to-restate
+                KAFKA_TOPICS: greetings
+                KAFKA_AUTO_OFFSET_RESET: earliest
+                RESTATE_INGRESS_URL: http://host.docker.internal:8080
+                RESTATE_RECORD_MAPPER_SERVICE: Greeter
+                RESTATE_RECORD_MAPPER_HANDLER: greet
     ```
 
-    Start the Kafka broker:
+    The `restate-kafka-integration` container consumes the `greetings` topic and invokes `Greeter/greet` for each record.
+    It reaches the Restate Server running on your machine via `host.docker.internal`.
+
+    Start the containers:
 
     ```shell
     docker compose up
     ```
-</Step>
-<Step title="Running Restate Server">
-
-    Now, let's start the Restate Server:
-
-    ```shell
-    restate-server
-    ```
-</Step>
-<Step title="Register the Kafka cluster">
-
-    Let the Restate Server know about the Kafka cluster by registering it via the CLI:
-
-    ```shell
-    restate kafka-clusters create my-cluster bootstrap.servers=localhost:9092
-    ```
-</Step>
-<Step title="Register the service">
-
-    Let the Restate Server know about the Greeter service by registering it:
-
-    ```shell
-    restate deployments register localhost:9080
-    ```
-</Step>
-<Step title="Connect the handler to the topic">
-
-    Now, we need to make Restate subscribe to the Kafka topics and tell it where it should push the events that arrive on the topic.
-
-    Execute the following command to create a subscription, and invoke the handler for each event:
-
-    ```shell
-    restate subscriptions create kafka://my-cluster/greetings service://Greeter/greet auto.offset.reset=earliest
-    ```
-
-    For Go, you need to capitalize the handler name: `service://Greeter/Greet`.
-
-    This command tells Restate to invoke the `greet` handler of the `Greeter` service for each event that arrives on the `greetings` topic in the `my-cluster` Kafka cluster.
 </Step>
 <Step title="Invoke the handler by publishing an event">
 
@@ -128,46 +124,20 @@ This way, you can use Restate to process events in a lightweight, flexible, tran
 <Step stepLabel="🥳" title="We invoked a Restate service over Kafka">
     You now see your handler getting invoked.
 
-    The way this worked is that Restate reads the message off the Kafka topic and durably persisted it, similar to what it does for HTTP invocations.
+    The way this worked is that the Kafka ingress integration consumed the record from the topic and sent it to Restate, which durably persisted it, similar to what it does for HTTP invocations.
 
     It then **pushed** the message to the handler, as opposed to the pull mechanism that you would have with a Kafka consumer.
 
     If the handler fails, Restate will retry the request until it eventually succeeds.
 
-    When invoking Basic Services, Restates ignores the key of the message.
-
-    When invoking Virtual Objects, Restate uses the key of the Kafka message as the Virtual Object key.
-    Whereas a Kafka partition contains multiple keys, Restate effectively keeps track of a queue per key.
-
+    Have a look at the [Kafka ingress integration docs](/services/integrations/kafka) to learn how to map Kafka records to Restate invocations, connect to secured clusters, and read record metadata in your handler.
     Have a look at the [Event Processing use case page](/use-cases/event-processing) to learn about what you can do with Restate and event processing.
 
-</Step>
-<Step title="Cleanup: removing the subscription">
-
-    You can see the subscriptions that are active via the CLI:
-
-    ```shell
-    restate subscriptions list
-    ```
-
-    Example output:
-    ```text
-     ID                           SOURCE                        SINK                     OPTIONS
-     sub_11XHoawrCiWtv8kzhEyGtsR  kafka://my-cluster/greetings  service://Greeter/greet  3
-    ```
-
-    As you can see, subscriptions have an ID that starts with `sub_`.
-
-    Now you can use the subscription ID to delete the subscription:
-
-    ```shell
-    restate subscriptions delete sub_11XHoawrCiWtv8kzhEyGtsR
-    ```
 </Step>
 </Steps>
 
 ## Related resources
 - [Event processing use cases](/use-cases/event-processing): Have a look at examples of how Restate gives you lightweight, transactional event processing.
 - Have a look at [the examples](https://github.com/restatedev/examples). There, you can find examples on Durable Execution and event processing.
-- [Reference docs for invoking over Kafka](/services/invocation/kafka)
+- [Kafka ingress integration reference](/services/integrations/kafka)
 - [Blog post on Kafka integration](https://restate.dev/blog/restate--kafka-event-driven-apps-where-event-driven-is-an-implementation-detail/)

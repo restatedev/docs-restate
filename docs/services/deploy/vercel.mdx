@@ -1,9 +1,14 @@
 ---
 title: "Vercel"
 description: "Run your TypeScript services on Vercel"
+icon: "/img/cloud-providers/vercel.svg"
 ---
 
-import CustomVars from "/snippets/custom-variables.mdx";
+import RequestIdentityValidationServerless from '/snippets/common/request-identity-validation-serverless.mdx';
+import RequestIdentityKeyGen from '/snippets/common/request-identity-key-gen.mdx';
+import RegisterDeploymentViaUi from '/snippets/common/register-deployment-via-ui.mdx';
+import SendGreeterRequest from '/snippets/common/send-greeter-request.mdx';
+import VercelCicdWorkflow from '/snippets/common/vercel-cicd-workflow.mdx';
 
 Deploy your Restate services on Vercel.
 This guide covers project configuration, service registration, and security setup.
@@ -12,12 +17,14 @@ This guide covers project configuration, service registration, and security setu
     Follow the [quickstart](/quickstart) to try Next.js and Restate locally.
 </Tip>
 
-## Set up your project
+## Deploying to Vercel
+
+<Steps titleSize="h3">
+<Step title={"Set up your project"}>
 
 <Tabs>
     <Tab title="New project">
-        Start from the [vercel-template](https://github.com/restatedev/vercel-template).
-
+        Start from the [template](https://github.com/restatedev/vercel-template):
         <Card
             title="Create your Restate + Vercel repository"
             icon="github"
@@ -59,9 +66,25 @@ export const { GET, POST } = serve();
     </Tab>
 </Tabs>
 
-## Configure Vercel project
+</Step>
 
-With the GitHub repository set up, go over to [the Vercel dashboard](https://vercel.com/new) to create the project.
+<Step title={"Secure your service with request identity validation"}>
+
+Vercel deployments are public HTTP endpoints. Secure your service with request identity validation so that it only accepts requests from the Restate environment you trust.
+
+
+<RequestIdentityKeyGen/>
+
+Clone the project locally and configure the key in your Restate SDK endpoint before deploying.
+
+<RequestIdentityValidationServerless/>
+
+The public key is not secret, so it is safe to include it directly in your service source code or configuration files.
+</Step>
+
+<Step title={"Deploy your project to Vercel"}>
+
+Create and deploy the project from [the Vercel dashboard](https://vercel.com/new).
 
 For Restate to push requests to the Vercel project, you need Vercel Generated URLs to be accessible by Restate.
 You have two alternatives:
@@ -70,88 +93,65 @@ You have two alternatives:
 ![Vercel Authentication](/img/services/deploy/vercel-disable-authentication.png)
 * Enable [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation). This makes the URLs accessible only if the `x-vercel-protection-bypass` header is provided with the right value.
 
-## Register the service to Restate
+</Step>
 
-In order for Restate to push requests to your services, you need to [register the service to Restate](/services/versioning) using the CLI or UI.
-Make sure to register the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) so that Restate can address specific Vercel deployments:
+<Step title={"Get your Commit URL"}>
 
-```shell
-npx @restatedev/restate deployments register \
-  --use-http1.1 \
-  https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
-```
 
-<Tip>
-    `--use-http1.1` is required to interact with Next.js projects.
-</Tip>
+Go to your Vercel deployment and copy the [Commit URL](https://vercel.com/docs/deployments/generated-urls#generated-from-git) (highlighted in black on the screenshot).
 
-If you set up **Protection Bypass for Automation** as described above, pass the additional header as an argument:
+    <Frame>
+        <img src="/img/services/deploy/vercel-commit-url.png" alt="Vercel Commit URL"/>
+    </Frame>
 
-```shell
-npx @restatedev/restate deployments register \
-    --use-http1.1 \
-    --extra-header x-vercel-protection-bypass=<token> \
-    https://<project-name>-<unique-hash>-<scope-slug>.vercel.app/restate
-```
+    This lets that Restate address specific Vercel deployments, and handle [versioning](/services/versioning) for you.
 
-You're set up. Head over to the **Overview page > Greeter > Playground** and start sending requests to your service.
+</Step>
+<Step title={"Register the service to Restate"}>
+    <RegisterDeploymentViaUi/>
+    <Frame>
+        <img src="/img/services/deploy/vercel-register-url.png" alt="Vercel Registration"/>
+    </Frame>
 
-## Restate identity keys (for Restate Cloud)
+    In the advanced options, enable HTTP1.1 and optionally, set the header for the deployment protection bypass:
+    <Frame>
+        <img src="/img/services/deploy/vercel-register-advanced.png" alt="Vercel Registration Advanced"/>
+    </Frame>
 
-In order to make sure only a specific Restate Cloud environment can push requests to your Vercel deployment,
-head over to your Restate Cloud Dashboard to set up Restate identity keys.
+    <Tip>Read the [CICD Automation section](#ci%2Fcd-automation) to set up automatic service registration on push to main.</Tip>
 
-<Card
-    title="Restate Cloud > Developers > Security"
-    icon="lock"
-    href="https://cloud.restate.dev/to/developers/integration#http-endpoints"
-    arrow="true"
-    horizontal
->
-    Set up Restate identity keys
-</Card>
+</Step>
+<Step title={"Send your first request"}>
+    <SendGreeterRequest/>
+</Step>
+
+</Steps>
 
 ## CI/CD Automation
 
-You can set up automation to automatically register new [Restate service versions](/services/versioning) every time a Vercel deployment gets promoted:
+You can set up automation to automatically register new [Restate service versions](/services/versioning) every time a Vercel deployment gets promoted.
 
-```yml
-name: Register to Restate
+<Tip>
+If you've followed the steps above, then you already have the GitHub Actions workflow set up. All you need to do is to add the secrets below to your project.
+</Tip>
 
-# React to vercel.deployment.promoted event
-on:
-  repository_dispatch:
-    types:
-      - 'vercel.deployment.promoted'
-jobs:
-  deploy-to-restate:
-    if: github.event_name == 'repository_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Register Restate deployment
-        env:
-          # In your Restate Cloud dashboard, go to Developers > API Keys > Create API Key, and make sure to select **Admin** for the role
-          RESTATE_ADMIN_URL: ${{ secrets.RESTATE_ADMIN_URL }}
-          # You can find this out in Developers > Admin URL.
-          RESTATE_AUTH_TOKEN: ${{ secrets.RESTATE_AUTH_TOKEN }}
+<Tabs>
+<Tab title={"Restate Cloud / BYOC"} icon={"/logo/restate-cloud-mini.svg"}>
+<VercelCicdWorkflow/>
 
-        # Run service registration
-        run: |
-          npx -y @restatedev/restate deployment register -y \
-            --use-http1.1 \
-            ${{ secrets.VERCEL_PROTECTION_BYPASS_TOKEN && format('--extra-header x-vercel-protection-bypass={0}', secrets.VERCEL_PROTECTION_BYPASS_TOKEN) }} \
-            ${{ github.event.client_payload.url }}/restate
-```
-
-For this workflow to execute, you need to add the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
 - `RESTATE_ADMIN_URL`: The Admin URL. You can find it in [Developers > Admin URL](https://cloud.restate.dev/to/developers/integration#admin)
-- `RESTATE_AUTH_TOKEN`: Your Restate Cloud auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+- `RESTATE_AUTH_TOKEN`: Your Restate Cloud or BYOC auth token. To get one, go to [Developers > API Keys > Create API Key](https://cloud.restate.dev/to/developers/integration?createApiKey=true&createApiKeyDescription=deployment-key&createApiKeyRole=rst:role::AdminAccess), and make sure to select **Admin** for the role
+    <Accordion title="View"><img src="/img/services/deploy/deployment-token.png" alt="Token setup" width="50%" /></Accordion>
 
-![Token setup](/img/services/deploy/deployment-token.png)
+- `VERCEL_PROTECTION_BYPASS_TOKEN`: Only if you set up the Protection Bypass for Automation as described above.
+</Tab>
+<Tab title={"Restate OSS"} icon={"/logo/restate-mini.svg"}>
+<VercelCicdWorkflow/>
 
-- If you set up the Protection Bypass for Automation as described above, add the secret `VERCEL_PROTECTION_BYPASS_TOKEN` with the token value
-
-<Accordion title="Self-hosted Restate">
-    You can use this workflow with Self-hosted Restate as well,
-    just make sure to correctly set up `RESTATE_AUTH_TOKEN` and `RESTATE_ADMIN_URL` to reach your Restate cluster.
-</Accordion>
+This workflow needs the following [**GitHub Actions repository secrets**](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets):
+- `RESTATE_ADMIN_URL`: The URL through which GitHub Actions can reach your Restate Admin API
+- `RESTATE_AUTH_TOKEN`: Set this token if GitHub Actions reaches the Admin API through a reverse proxy that accepts bearer token authentication.
+- `VERCEL_PROTECTION_BYPASS_TOKEN`: Only if you set up the Protection Bypass for Automation as described above.
+</Tab>
+</Tabs>

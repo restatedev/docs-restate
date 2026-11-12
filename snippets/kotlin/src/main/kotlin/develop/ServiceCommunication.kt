@@ -95,8 +95,6 @@ class ServiceCommunication {
             .call()
             .await()
 
-    // Scoped Virtual Object calls need
-    // RESTATE_EXPERIMENTAL_ENABLE_SCOPED_VIRTUAL_OBJECTS=true on the server
     val objResponse = scope("tenant-123").virtualObject<MyObject>(objectKey).myHandler(request)
     // <end_scope>
 

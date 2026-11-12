@@ -2,6 +2,7 @@
 Title: "Deploying Restate on Kubernetes"
 sidebarTitle: "Kubernetes"
 description: "Deploy the Restate Server on Kubernetes."
+icon: "/img/cloud-providers/kubernetes.svg"
 ---
 
 import InstallRestateOperator from '/snippets/common/install-restate-operator.mdx';
@@ -37,7 +38,7 @@ The Restate Operator introduces Custom Resource Definitions (CRDs) to Kubernetes
 It includes the following CRDs:
 - `RestateCluster`: defines a Restate cluster deployment, including storage, networking, and configuration options.
 - `RestateDeployment`: defines a Restate service deployment, including container image, resource requirements, and registration options ([learn more](/services/deploy/kubernetes)).
-- `RestateCloudEnvironment`: defines a connection between a Kubernetes service deployment and a Restate Cloud Environment ([learn more](/cloud/connecting-services)).
+- `RestateCloudEnvironment`: defines a connection between a Kubernetes service deployment and a Restate Cloud Environment ([learn more](/services/deploy/kubernetes)).
 
 ### Operator deployment
 
@@ -73,10 +74,6 @@ This will deploy the Restate cluster in its own namespace, called `restate-test`
 
 To learn more about the `RestateCluster` spec options, see the [`RestateCluster` pkl definition](https://github.com/restatedev/restate-operator/blob/main/crd/RestateCluster.pkl) (or the less-readable [yaml version](https://github.com/restatedev/restate-operator/blob/main/crd/restateclusters.yaml)).
 
-<Info>
-    Follow [the guide](/guides/restate-on-kind-with-operator) to experiment with deploying a Restate cluster and services on a local kind cluster.
-</Info>
-
 ### Replicated cluster deployment
 
 Deploy a multi-node Restate cluster by:
@@ -106,7 +103,7 @@ spec:
         "http-ingress",
     ]
     auto-provision = true
-    default-num-partitions = 128
+    default-num-partitions = 24
     default-replication = 2
 
     [metadata-client]
@@ -131,7 +128,9 @@ spec:
 This example deploys a 3-node Restate cluster with snapshots and metadata stored in S3.
 
 Restate uses RocksDB to store state.
-In the Restate Server settings, set the RocksDB memory limit to align with pod memory request and limit. Typically, the RocksDB memory limit should be 75% of pod requests. For example, add to your `restate-config.toml` the following line: `rocksdb-total-memory-size = "3 GiB"`.
+Set `rocksdb-total-memory-size` to fit within the pod's memory limit. Allocating 40-50% of the pod's memory to RocksDB is a good starting point, leaving room for the query engine, the Bifrost record cache, and other components.
+For example, with an 8 GiB pod, add `rocksdb-total-memory-size = "4 GiB"` to the `config` field.
+See [Memory configuration](/server/memory#recommendations) for details.
 
 S3 is the only supported object store for metadata storage. Other S3-compatible stores (such as MinIO) can be used for snapshots, but not for metadata storage.
 You can find more information about configuring MinIO with your Restate cluster [here](https://github.com/restatedev/restate-operator/blob/main/docs/minio.md).
@@ -149,6 +148,13 @@ kubectl apply -f restate-cluster.yaml
 <Tip>
 Have a look at the [cluster documentation](/server/clusters) to learn how to operate your clusters.
 </Tip>
+
+### Rolling updates
+
+Use the [rolling-update procedure](/server/upgrading#rolling-updates) when changing the
+server version or restarting pods for configuration changes. Wait for every assigned
+partition on the returning node to finish startup catch-up before replacing the next pod.
+A process or HTTP readiness check alone does not establish partition recovery.
 
 ### Custom pod annotations and labels
 
@@ -178,10 +184,6 @@ helm install restate oci://ghcr.io/restatedev/restate-helm --namespace restate -
 
 [View the default values.yaml](https://github.com/restatedev/restate/blob/main/charts/restate-helm/values.yaml)
 
-
-<Info>
-    Follow [the guide](/guides/restate-on-kind-with-helm) to experiment with deploying Restate with Helm on a local kind cluster.
-</Info>
 
 ### Replicated cluster deployment
 
@@ -218,10 +220,16 @@ Key values you can customize in your own `values.yaml`:
       memory: 4Gi
     requests:
       cpu: 500m
-      memory: 1Gi
+      memory: 4Gi
   ```
 
-In the Restate Server settings, set the RocksDB memory limit to align with pod memory request and limit. Typically, the RocksDB memory limit should be 75% of pod requests. For example, add to your `restate-config.toml` the following line: `rocksdb-total-memory-size = "3 GiB"`.
+- **RocksDB memory**: Set `RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE` to fit within the pod's memory limit. Allocating 40-50% of the pod's memory to RocksDB is a good starting point. For example, with the 4 GiB pod above:
+  ```yaml values.yaml
+  env:
+    - name: RESTATE_ROCKSDB_TOTAL_MEMORY_SIZE
+      value: "2 GiB"
+  ```
+  Setting `env` replaces the chart's default `env` list, so also copy over the other entries (such as `RESTATE_LOG_FORMAT` and `RESTATE_CLUSTER_NAME`) from the [values.yaml](https://github.com/restatedev/restate/blob/main/charts/restate-helm/values.yaml) or [replicated-values.yaml](https://github.com/restatedev/restate/blob/main/charts/restate-helm/replicated-values.yaml) you deploy with. See [Memory configuration](/server/memory#recommendations) for details.
 
 - **Storage**: Set persistent volume size and storage class
   ```yaml values.yaml

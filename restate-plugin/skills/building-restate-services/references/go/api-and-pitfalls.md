@@ -84,7 +84,7 @@ Start the service, then register and invoke:
 restate deployments register http://localhost:9080
 
 # Invoke the handler
-curl localhost:8080/MyService/MyHandler --json '"World"'
+curl localhost:8080/restate/call/MyService/MyHandler --json '"World"'
 ```
 
 ---
@@ -264,7 +264,7 @@ restate.ServiceSend(ctx, "MyService", "MyHandler").Send(request, restate.WithDel
 
 ### Scopes and limit keys
 
-For Restate 1.7 scope-based concurrency limits, load `references/flow-control-and-scopes.md`. Go SDK 1.0 uses `restate.WithScope(...)` on the client and `restate.WithLimitKey(...)` on the request or send.
+For scope-based concurrency limits, load `references/flow-control-and-scopes.md`. Go SDK 1.0 uses `restate.WithScope(...)` on the client and `restate.WithLimitKey(...)` on the request or send.
 
 ## Side effects (restate.Run)
 

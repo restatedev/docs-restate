@@ -5,7 +5,7 @@ icon: "globe"
 ---
 
 The Restate SDK is served as a HTTP handler. You can choose to run this in a
-standalone HTTP2 server, or connect the handler into a FaaS system like Lambda.
+standalone HTTP2 server, connect to Restate Cloud/BYOC through an in-process tunnel, or use a FaaS system like Lambda.
 
 ## Creating a HTTP2 server
 1. Create the Restate Server
@@ -50,6 +50,62 @@ if err != nil {
     stuck.
 </Accordion>
 
+## Connecting to Restate Cloud or BYOC
+
+You can connect your service to Restate Cloud or BYOC through an outbound tunnel without exposing an inbound HTTP endpoint. Your service and handler implementations stay the same.
+
+Install the tunnel package:
+
+```bash
+go get github.com/restatedev/sdk-go/x/tunnel
+```
+
+Keep your service bindings and replace the HTTP server's with the tunnel client.
+
+```go {"CODE_LOAD::go/develop/tunnel_operator.go#operator_in_process_tunnel"}
+import (
+  "context"
+  "log/slog"
+  "os"
+  "os/signal"
+  "syscall"
+
+  restate "github.com/restatedev/sdk-go"
+  "github.com/restatedev/sdk-go/server"
+  "github.com/restatedev/sdk-go/x/tunnel"
+)
+
+func serve() {
+  ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+  defer stop()
+
+  srv := server.NewRestate().
+    Bind(restate.Reflect(MyService{}))
+
+  // The Restate Operator injects the env vars for connecting to Cloud
+  // Start blocks until ctx is cancelled (SIGINT/SIGTERM), then drains and closes.
+  err := tunnel.NewTunnel(srv).Start(ctx)
+  if err != nil {
+    slog.Error("tunnel exited with error", "err", err.Error())
+    os.Exit(1)
+  }
+}
+```
+
+This example reads its configuration from environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `RESTATE_INPROC_ENVIRONMENT_ID` | Your Restate Cloud environment ID |
+| `RESTATE_INPROC_CLOUD_REGION` | Your environment's region identifier |
+| `RESTATE_INPROC_TUNNEL_NAME` | The tunnel name for this deployment |
+| `RESTATE_INPROC_SIGNING_PUBLIC_KEY` | Your environment's request signing public key |
+| `RESTATE_INPROC_AUTH_TOKEN_FILE` | Path to a file containing your Restate Cloud API key |
+
+On Kubernetes, the Restate operator supplies the environment ID, region, tunnel name, and signing public key when you use `tunnelMode: in-process`. Follow the [Kubernetes deployment guide](/services/deploy/kubernetes#deploy-a-service-to-restate-cloud-or-byoc) to mount the API key and configure the deployment.
+
+Outside Kubernetes, you can set these variables yourself, or pass the configuration explicitly as shown in the [Containers and VMs guide](/services/deploy/standalone). That guide also covers creating credentials and registering the tunnel deployment.
+
 ## Creating a Lambda handler
 
 To register your service as a Lambda function change the endpoint into a Lambda handler
@@ -70,7 +126,7 @@ lambda.Start(handler)
 
 Have a look at the [deployment section](/services/deploy/lambda) for guidance on how to deploy your services on AWS Lambda.
 
-The implementation of your services and handlers remains the same for both deployment options.
+The implementation of your services and handlers remains the same across these deployment options.
 
 ## Validating request identity
 

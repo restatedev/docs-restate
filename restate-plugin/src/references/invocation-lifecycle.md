@@ -8,22 +8,22 @@ All Restate services are reachable via HTTP through the Restate ingress (default
 
 ```bash
 # Service handler
-curl localhost:8080/MyService/myHandler --json '"input"'
+curl localhost:8080/restate/call/MyService/myHandler --json '"input"'
 
 # Virtual Object handler (keyed by entity ID)
-curl localhost:8080/MyObject/myKey/myHandler --json '"input"'
+curl localhost:8080/restate/call/MyObject/myKey/myHandler --json '"input"'
 
 # Workflow run handler (keyed by workflow ID)
-curl localhost:8080/MyWorkflow/myWorkflowId/run --json '"input"'
+curl localhost:8080/restate/call/MyWorkflow/myWorkflowId/run --json '"input"'
 
 # Fire-and-forget (returns immediately, invocation runs in background)
-curl localhost:8080/MyService/myHandler/send --json '"input"'
+curl localhost:8080/restate/send/MyService/myHandler --json '"input"'
 
 # Delayed invocation (executes after delay)
-curl "localhost:8080/MyService/myHandler/send?delay=10s" --json '"input"'
+curl "localhost:8080/restate/send/MyService/myHandler?delay=10s" --json '"input"'
 
 # With idempotency key (deduplicates for 24h by default)
-curl localhost:8080/MyService/myHandler -H 'idempotency-key: my-unique-key' --json '"input"'
+curl localhost:8080/restate/call/MyService/myHandler -H 'idempotency-key: my-unique-key' --json '"input"'
 ```
 
 For the OpenAPI spec of registered services: `curl localhost:9070/services/MyService/openapi`
@@ -34,7 +34,7 @@ Each SDK provides a typed client for invoking services from external code (outsi
 
 Common pattern: a web server or frontend calls Restate services via the SDK client or HTTP, then uses attach or polling to get results.
 
-For Restate 1.7 scope-based concurrency limits, scoped invocation identity, and limit keys, load `references/flow-control-and-scopes.md`.
+For scope-based concurrency limits, scoped invocation identity, and limit keys, load `references/flow-control-and-scopes.md`.
 
 ## Invoking via Kafka
 
@@ -79,20 +79,11 @@ After workflow retention expires, shared handlers return errors and state is ina
 
 Docs: [Service configuration](https://docs.restate.dev/services/configuration)
 
-## CLI quick reference
+## Managing invocations with the CLI
 
-```bash
-restate deployments register http://localhost:9080 [--force]
-restate deployments list
-restate invocations list [--status backing-off] [--service MyService]
-restate invocations describe <id>
-restate invocations cancel <id|service|service/handler>
-restate invocations kill <id>          # Last resort, no compensation
-restate invocations pause <id>
-restate invocations resume <id>
-restate sql "SELECT * FROM sys_invocation WHERE target_service_name = 'MyService'"
-restate kv get <SERVICE> <KEY>
-```
+Use the Restate CLI (see the Restate CLI section of the skill) to list, describe, cancel, kill, pause, resume, purge or restart invocations.
+Run `restate invocations --help` for the available commands, and `restate invocations <command> --help` for how to select invocations and the examples.
+Prefer `cancel` over `kill`: kill stops the invocation immediately, without running compensations.
 
 ## Key documentation
 

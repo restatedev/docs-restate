@@ -4,7 +4,8 @@ description: >
   Design, build, run, and test Restate durable services, virtual objects,
   workflows, and AI agents across TypeScript, Python, Java, and Go.
   This skill should be used when the user mentions "restate", "durable execution",
-  "virtual object", "restate service", "restate workflow", or "durable agent"
+  "virtual object", "restate service", "restate workflow", "durable agent",
+  "durable coroutines"
   or wants to build resilient backend services, AI agents, or workflows
   with automatic failure recovery. Also use when converting existing applications
   or migrating from workflow orchestrators to Restate.
@@ -21,6 +22,7 @@ Restate is a durable execution runtime. It records every step of a handler in a 
 Scan the project to determine the SDK and context:
 
 1. **Detect SDK**:
+   - `package.json` with `@restatedev/restate-sdk-gen` -> TypeScript Durable Coroutines; load both `references/ts/api-and-pitfalls.md` and `references/ts/durable-coroutines.md`
    - `package.json` with `@restatedev/restate-sdk` -> TypeScript
    - `requirements.txt` or `pyproject.toml` with `restate-sdk` -> Python
    - `pom.xml` or `build.gradle` with `dev.restate` -> Java
@@ -43,6 +45,7 @@ After detecting the SDK, always load the SDK reference:
 
 | Context | Reference |
 |---------|-----------|
+| Durable Coroutines or concurrent routines with multiple durable steps in one invocation | `references/ts/durable-coroutines.md` |
 | Design a new application, choose service types | `references/design-and-architecture.md` |
 | Add concurrency limits, multi-tenant fairness, cost controls, scopes, or limit keys | `references/flow-control-and-scopes.md` |
 | Convert from a workflow orchestrator or existing app | `references/translate-to-restate.md` |
@@ -54,8 +57,28 @@ After detecting the SDK, always load the SDK reference:
 | Build AI agent with Pydantic AI | `references/python/restate-pydantic-ai-agents.md` |
 | Build AI agent with LangChain or LangGraph | `references/python/restate-langchain-agents.md` |
 | Debug errors, stuck invocations, journal mismatches | `references/debug-applications.md` |
+| Register deployments, inspect or manage invocations, read or edit state, query the server | [Restate CLI](#restate-cli) |
 | Testing, deployment, server config, Kafka, advanced topics | Use the bundled **restate-docs** MCP server |
-| Code examples and templates | `github.com/restatedev/examples`, `github.com/restatedev/ai-examples` |
+| Code examples and templates | `restate example --list --json`, `github.com/restatedev/examples`, `github.com/restatedev/ai-examples` |
+| Complete TypeScript agent reference architecture | [restatedev/agent](https://github.com/restatedev/agent) |
+
+## Restate CLI
+
+Use the `restate` CLI to operate a running Restate Server: register deployments, inspect and manage invocations, read and edit state, and query the server's internals with SQL.
+The CLI describes itself, so ask it what to run instead of guessing commands or flags:
+
+- `restate --help` explains how agents should use the CLI. `restate <command> --help` shows the flags of a command, with examples.
+- `restate search <what you want to do>` finds the command, flag or SQL table for a task, e.g. `restate search retry a failed invocation`.
+- `restate sql --help` lists the SQL introspection tables, `restate sql describe <table>` shows their columns.
+- `restate openapi` prints the Admin API spec, for anything the commands don't cover.
+
+When running it:
+
+- Always pass `--json`. The output, errors included, is a single JSON document on stdout, and the command never prompts. Errors carry a `kind` and often `next_steps` with the commands to run next.
+- Commands that change something (register, cancel, kill, purge, state edits, ...) don't apply the change with `--json` alone: they print the planned changes with `"applied": false` and an `apply_command`, and exit with code 3. Show the plan to the user, and only then run it again with `--yes`. Use `--dry-run` to preview without applying.
+- Run `restate whoami --json` to check which server the CLI talks to. By default it's the local server (admin API on `localhost:9070`).
+
+These features require CLI version 1.8 or later. If `restate search` doesn't exist, ask the user to upgrade the CLI.
 
 ## Before-you-design checklist
 
@@ -74,10 +97,10 @@ Before designing any Restate service architecture, check:
 
 **All checks below are mandatory**.
 
-- [ ] All side effects, external I/O, and DB calls wrapped in `ctx.run()`
-- [ ] No native random, time, sleep, or UUID -- use ctx helpers
-- [ ] Restate concurrency combinators only (no `Promise.all`, `asyncio.gather`/`wait`, `CompletableFuture`, goroutines + channels, `select`)
-- [ ] No ctx operations inside `ctx.run()`
+- [ ] All side effects, external I/O, and DB calls wrapped in a durable step (`ctx.run()` or coroutine `run`)
+- [ ] No native random, time, sleep, or UUID in replayable code; use the selected SDK's deterministic helpers
+- [ ] Restate concurrency combinators only in replayable code: use `RestatePromise` for standard TypeScript or coroutine combinators for coroutines; no native `Promise.all`, `asyncio.gather`/`wait`, `CompletableFuture`, or Go goroutines/channels/select
+- [ ] No Restate context operations inside `ctx.run()` or coroutine `run` callbacks
 - [ ] `TerminalError` raised for non-retryable failures
 - [ ] Python: no bare `except:`
 - [ ] AI agents: load `references/ai-agents.md`, journal every LLM call and tool side effect, and set bounded retry policies
@@ -86,7 +109,7 @@ Before designing any Restate service architecture, check:
 
 ### Replay test - required on any handler logic change
 
-Any change to handler business logic (new `ctx` operations, reordered steps, new `ctx.run()` blocks, new branches) must be covered by a Testcontainers test with **always-replay** enabled, and that test must pass before declaring the work done. Always-replay forces every journaled step to replay on every invocation, so non-determinism fails the test instead of failing in production on retry.
+Any change to handler business logic (new `ctx` operations, reordered steps, new `ctx.run()` blocks, coroutine operations, new branches) must be covered by a Testcontainers test with **always-replay** enabled, and that test must pass before declaring the work done. Always-replay forces every journaled step to replay on every invocation, so non-determinism fails the test instead of failing in production on retry.
 
 - TypeScript: `alwaysReplay: true` in `RestateTestEnvironment.start`
 - Python: `always_replay=True` in `restate.create_test_harness`

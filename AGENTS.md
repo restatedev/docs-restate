@@ -106,6 +106,9 @@ To learn about Mintlify, visit https://www.mintlify.com/docs/llms.txt
 - description: Concise summary for SEO/navigation
 
 ## Writing standards
+
+When writing, editing, or reviewing documentation in this repository, read and apply the [restate-docs-style skill](.agents/skills/restate-docs-style/SKILL.md). It defines the preferred prose style with concrete examples and applies to page content and explanatory snippet comments.
+
 - Second-person voice ("you")
 - Prerequisites at start of procedural content
 - Test all code examples before publishing

@@ -53,6 +53,49 @@ Restate uses two complementary replication mechanisms to ensure both availabilit
 **What it controls:**
 - How many log-server nodes store copies of each log segment
 
+### Sequencers and Nodesets
+
+There is one log per partition. Each log is a chain of segments over time, called loglets, with
+exactly one active loglet at any moment. Every loglet has two placement properties, both visible
+in `restatectl logs list`:
+
+- **Sequencer** — the single node that accepts all appends for that loglet. Restate keeps the
+  sequencer co-located with the partition's leader, so sequencer placement follows partition
+  leadership automatically.
+- **Nodeset** — the set of log-server nodes eligible to store that loglet's records. The sequencer
+  sends each append to a subset of the nodeset members and acknowledges once enough of them confirm
+  it to satisfy the log replication property.
+
+A nodeset is normally wider than the replication property, so writes can still be acknowledged when
+a member is slow or briefly unavailable. Only nodes whose log-server storage state is `read-write`
+are eligible for a new nodeset.
+
+```shell
+restatectl logs list
+```
+
+```shell
+Logs v15
+└ Logs Provider: replicated
+ ├ Log replication: {node: 2}
+ └ Nodeset size: 0
+ L-ID  SEGMENTS  FROM  KIND        LOGLET-ID  REPLICATION  SEQUENCER  NODESET
+ 0     2         3     replicated  0_1        {node: 2}    N3:1       [N1, N2, N3]
+```
+
+`Nodeset size: 0` is the default and means Restate picks a suitable nodeset size from the effective
+replication property whenever it builds a new nodeset. You can override it with
+`restatectl config set --log-default-nodeset-size`, but leaving it at `0` is recommended.
+
+<Info title="Nodesets are chosen per segment, not per cluster">
+    A nodeset is fixed for the life of a segment. Restate only picks a new one when it creates a new
+    segment — which happens when a log is reconfigured, for example because the sequencer moved, a
+    node became ineligible, or an operator asked for it. Existing segments are never rewritten.
+
+    This has a practical consequence when the cluster changes size, covered in
+    [Growing clusters](#growing-clusters) and in the section on removing nodes below.
+</Info>
+
 ### Replication Properties
 
 Both partition and log replication use the same **replication property** format, which can be either:
@@ -219,6 +262,35 @@ Finally, nodes that run the `http-ingress` role will accept external invocation 
     Without it, newly added nodes may not be fully utilized by the system.
 </Info>
 
+### Choosing the number of partitions
+
+Partitions, not nodes, are the unit of parallelism in Restate. Each partition has exactly one
+leader processing invocations at a time, so **the partition count is the ceiling on how far a
+cluster can scale out**: with N partitions, at most N nodes can hold a partition leader. Nodes
+beyond that still serve ingress and can hold log data, but will not process invocations.
+
+<Warning>
+    The number of partitions is fixed when the cluster is provisioned. `restatectl config set`
+    cannot change it, and there is no online resharding yet. Raising it later means provisioning a new
+    cluster and migrating to it, so choose with room to grow.
+</Warning>
+
+The default is 24 partitions, set with `default-num-partitions` in the server configuration or
+`restatectl provision --num-partitions`. Size it against the largest cluster you would ever want to
+run rather than the one you are starting with. Check the current value at any time with:
+
+```shell
+restatectl config get
+```
+
+### Autoscaling
+
+Restate clusters are not designed to be resized by a Kubernetes HorizontalPodAutoscaler or a
+similar autoscaler. Both directions need operator involvement: growing a cluster may require
+[reconfiguring logs](#growing-clusters) so new nodes take a share of log writes, and shrinking one
+requires draining nodes, snapshotting and trimming before they are removed, or the log is left
+under-replicated. An autoscaler doing either automatically can leave the cluster degraded.
+Size the cluster for its expected peak instead, and treat resizing as a deliberate operation.
 
 ## Cluster provisioning
 
@@ -260,11 +332,14 @@ By default, using an older version of `restatectl` to provision the cluster, wil
 
 ## Controlling clusters with `restatectl`
 
+When upgrading or restarting nodes, follow the [rolling-update procedure](/server/upgrading#rolling-updates)
+and wait for the returning node's assigned partitions to recover before stopping the next node.
+
 Restate includes a command line utility tool to connect to and control running Restate servers called `restatectl`.
 This tool is specifically designed for system operators to manage Restate servers and is particularly useful in a cluster environment.
 
 <Info>
-    Follow the [installation instructions](/installation#advanced%3A-installing-restatectl) to get `restatectl` set up on your machine.
+    Follow the [installation instructions](/installation#advanced-installing-restatectl) to get `restatectl` set up on your machine.
 </Info>
 
 The `restatectl` tool communicates with Restate at the advertised address specified in the [server configuration](/references/server-config) - by default TCP port 5122.
@@ -275,9 +350,53 @@ The `restatectl` tool communicates with Restate at the advertised address specif
     ```shell
     restatectl status
     ```
-    Optionally, specify the addresses via `--addresses http://localhost:5122/`:
+
+    Optionally, specify the addresses via `--addresses http://localhost:5122/`.
+
+    Output:
+
+    ```shell
+    Node Configuration (v12)
+     NODE-ID  NAME    UPTIME  METADATA  LEADER  FOLLOWER  NODESET-MEMBER  SEQUENCER  ROLES
+     N1:2     node-1  33s     Member    9       8         24              9          admin | http-ingress | log-server | metadata-server | worker
+     N2:1     node-2  32s     Member    6       8         24              6          admin | http-ingress | log-server | metadata-server | worker
+     N3:1     node-3  31s     Member    9       8         24              9          admin | http-ingress | log-server | metadata-server | worker
+    ```
+
+    This is one row per node, and the four counters in the middle are the quickest way to see
+    whether work is spread evenly across the cluster:
+
+    | Column | Meaning |
+    |--------|---------|
+    | `LEADER` | Partitions for which this node runs the leader partition processor, actively processing invocations |
+    | `FOLLOWER` | Partitions for which this node runs a follower, applying the log as a hot standby |
+    | `NODESET-MEMBER` | Logs whose current nodeset includes this node, meaning it stores log records for them |
+    | `SEQUENCER` | Logs for which this node is the sequencer, accepting all appends |
+
+    In a balanced cluster each node holds roughly the same number of leaders and followers.
+    The distribution is statistical rather than exactly enforced, so the 9 / 6 / 9 leader split
+    above is normal for 24 partitions across 3 nodes and is not something to correct.
+
+    `SEQUENCER` tracks `LEADER` closely because Restate keeps each log's sequencer co-located
+    with that partition's leader.
+
+    <Info>
+    View the full cluster state via
+    
+    ```shell
+    restatectl status --extra
+    ```
+
+    This prints four sections: the node configuration with storage and worker states, the log
+    configuration with each log's sequencer and nodeset, every partition processor with its
+    applied/durable/archived LSNs, and the metadata service members.
+
+    The log section shows only each log's **current** segment. To inspect a log's full segment
+        chain, including historic nodesets, use `restatectl logs describe <LOG_ID>`.
+    </Info>
 
 </Accordion>
+
 <Accordion title="Provisioning clusters">
 Check out the [cluster deployment documentation](/server/clusters)
 </Accordion>
@@ -496,6 +615,58 @@ You can expand an existing cluster by adding new nodes after it has been started
     If the update takes longer than expected, check the node logs for errors or warnings.
 
 </Step>
+
+<Step title="Verify the new nodes are being used">
+
+    Check how work is distributed once the new nodes have joined:
+
+    ```shell
+    restatectl status
+    ```
+
+    ```shell
+     NODE-ID  NAME    UPTIME  METADATA  LEADER  FOLLOWER  NODESET-MEMBER  SEQUENCER  ROLES
+     N1:2     node-1  1m 27s  Member    7       7         23              7          admin | http-ingress | log-server | metadata-server | worker
+     N2:1     node-2  1m 26s  Member    5       4         21              5          admin | http-ingress | log-server | metadata-server | worker
+     N3:1     node-3  1m 25s  Member    7       6         23              7          admin | http-ingress | log-server | metadata-server | worker
+     N4:1     node-4  53s     Member    5       7         5               5          admin | http-ingress | log-server | metadata-server | worker
+    ```
+
+    Partition work rebalances on its own: `node-4` has picked up leaders, followers and sequencers
+    with no operator action.
+
+    Log storage does not. A nodeset is fixed for the life of a segment, so `node-4` has only joined
+    the nodesets of the five logs whose sequencer moved onto it, while the original nodes sit at
+    21–23 of 24. The other logs keep writing to the nodes they were already using, so a new node can
+    carry partition work while taking only a small share of the log write traffic. This evens out on
+    its own as segments are reconfigured for other reasons, such as later leadership changes.
+
+    <Accordion title="Eagerly moving logs onto new nodes">
+    If you would rather not wait for that, you can move a log onto the new nodes yourself by
+    reconfiguring it. Pass the nodeset you want explicitly — without `--nodeset` the new segment
+    simply reuses the one it sealed, so nothing changes:
+
+    ```shell
+    restatectl logs reconfigure --log-id 2 --nodeset N2,N3,N4
+    ```
+
+    The nodes you list are a preference rather than an instruction: Restate gives the log's current
+    sequencer top priority and only picks nodes whose storage state is `read-write`. Check the
+    result with `restatectl logs list`.
+
+    <Note>
+        Reconfiguring seals the log's current segment and opens a new one, which briefly pauses
+        appends to that log, so work through the logs in small batches rather than all at once.
+    </Note>
+
+    <Info>
+        This applies only to growing a cluster. When a node is taken out of service by setting its
+        storage state to `read-only`, the cluster controller moves logs off it automatically within
+        seconds, as described under "Removing Nodes & Shrinking Clusters" below.
+    </Info>
+    </Accordion>
+
+</Step>
 </Steps>
 
 ## Managing Replicated Logs
@@ -546,7 +717,7 @@ The `read-only` and `disabled` states are of particular interest to operators. L
 Use the `set-storage-state` sub-command to manually update the log server state, for example to prevent log servers from being included in new nodesets. Consider the following example:
 
 ```shell
-restatectl replicated-loglet set-storage-state --node N.. --storage-state read-only
+restatectl nodes set-storage-state --nodes N.. --storage-state read-only
 ```
 
 <Accordion title="Output">
@@ -715,7 +886,7 @@ You may need to permanently remove nodes from a cluster, whether to replace fail
     </Warning>
 
     ```shell
-    restatectl replicated-loglet set-storage-state --node N.. --storage-state 'read-write' --force
+    restatectl nodes set-storage-state --nodes N.. --storage-state 'read-write' --force
     ```
 
     <Accordion title="Output">

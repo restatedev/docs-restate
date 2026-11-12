@@ -11,7 +11,6 @@ func (CoordinationService) WaitForApproval(ctx restate.Context) (bool, error) {
 	return approval, err
 }
 
-
 // <start_wait>
 func (CoordinationService) ReviseUntilDone(ctx restate.Context, topic string) (string, error) {
 	draft := "Research notes for " + topic
@@ -40,4 +39,3 @@ func (CoordinationService) SteerInvocation(ctx restate.Context, req SteerRequest
 	// <end_resolve>
 	return nil
 }
-
