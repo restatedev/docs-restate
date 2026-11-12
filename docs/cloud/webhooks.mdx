@@ -1,15 +1,18 @@
 ---
 title: "Incoming webhooks"
-description: "Give a handler in your Restate Cloud environment its own URL, so other systems can call it."
-icon: "webhook"
+description: "Invoke service handlers through incoming webhooks in Restate Cloud and BYOC."
 ---
+
+<Info>
+    Incoming webhooks are available only in [Restate Cloud](/cloud/getting-started) and [Restate BYOC](/byoc/overview).
+</Info>
 
 <Note>
     Incoming webhooks are in preview.
 </Note>
 
-An incoming webhook gives one handler its own URL.
-Hand that URL to any system that sends webhooks, and every `POST` to it starts an invocation of the handler, with the request body as its input.
+Incoming webhooks let external systems invoke a service handler in your Restate Cloud or BYOC environment through a dedicated URL.
+Configure the sender with this URL. Each `POST` request invokes the handler with the request body as input.
 
 <Warning>
     Anyone who has the URL can invoke the handler.
@@ -29,15 +32,15 @@ Virtual objects and workflows can't be webhook targets. To process events per ke
 In the Restate Cloud UI, open your environment's **Integration & API keys** page and create an incoming webhook.
 Choose the service, the handler, and the [delivery mode](#choose-a-delivery-mode).
 </Step>
-<Step title="Give the URL to the sender">
+<Step title="Configure the sender">
 Copy the webhook URL and paste it into the sender's webhook settings.
 You can copy it again later from the webhook list, with an admin role.
 </Step>
 </Steps>
 
 A webhook is bound to the names of its service and handler.
-If you remove or rename the service or handler, deliveries fail with `503`. The webhook list in the Restate Cloud UI flags the broken webhook, but nothing notifies you.
-To point the sender at a renamed handler, create a new webhook and give its URL to the sender.
+If you remove or rename the service or handler, deliveries fail with `503`. The webhook list in the Restate Cloud UI flags the broken webhook, but Restate Cloud does not send a notification.
+To invoke a renamed handler, create a new webhook and configure the sender with its URL.
 
 Deleting a webhook stops its deliveries.
 Requests usually stop reaching your handler within 30 seconds. If the Restate Cloud control plane is unavailable, this can take up to an hour.
@@ -45,38 +48,38 @@ Requests usually stop reaching your handler within 30 seconds. If the Restate Cl
 ## Choose a delivery mode
 
 You choose the delivery mode when you create the webhook, and you can't change it later.
-Switching modes means a new webhook, and a new URL for the sender.
+To switch modes, create a new webhook and update the sender's URL.
 
 | | Async | Sync |
 |---|---|---|
 | **The sender receives** | `202 Accepted` as soon as Restate has accepted the invocation, never the handler's result | The handler's response, as for a regular [HTTP call](/services/invocation/http): `200` with the return value, or the handler's error status with a generic message |
-| **Time limit** | None | 60 seconds, then the sender gets `504` |
+| **Time limit** | None | 60 seconds, then the sender receives `504` |
 | **Use it for** | Senders that only need an acknowledgement, and long-running handlers | Senders that need a reply or exactly HTTP `200`, such as Linear, Slack URL verification, and Slack slash commands |
 
 <Warning>
     A sync webhook waits at most 60 seconds for your handler.
-    After that, the sender gets `504 Gateway Timeout` and never sees the result, even though the invocation keeps running.
-    Most senders give up much sooner, often after 3 to 10 seconds, so keep sync handlers fast and [hand slow work off](#handle-retries-and-slow-work) to another handler.
+    After that, the sender receives `504 Gateway Timeout` without the handler's result, even though the invocation keeps running.
+    Most senders time out much sooner, often after 3 to 10 seconds, so keep sync handlers fast and [forward slow work](#handle-retries-and-slow-work) to another handler.
 </Warning>
 
 ## Write the handler
 
 The examples on this page use the TypeScript SDK.
 
-Before your handler trusts a request, it checks that the sender really sent it.
-Senders sign each request: they compute a signature over the exact bytes of the body and put it in a header.
-To check it, the handler needs two things: the raw body and the headers.
+Verify the sender's signature before processing the request.
+Senders sign each request by computing a signature over the exact bytes of the body and including it in a header.
+To verify the signature, use the raw body and the request headers:
 
 - Declare the input as `restate.serde.binary` and set `accept: "*/*"`. The handler then receives the body byte for byte, whether the sender posts JSON, form data, or anything else.
 - Read the headers from `ctx.request().headers`. Their names are lower case.
 
 If the signature doesn't match, throw a [terminal error](/develop/ts/error-handling#terminal-errors) with `errorCode: 401`.
-Restate doesn't retry the invocation, and in sync mode the sender gets the `401` back.
+Restate doesn't retry the invocation, and in sync mode the sender receives `401`.
 
 ### Verify with the sender's library
 
 Many senders publish a library that checks their signature for you, for example [`@octokit/webhooks-methods`](https://github.com/octokit/webhooks-methods.js) for GitHub, `LinearWebhookClient` from `@linear/sdk/webhooks` for Linear, and `isValidSlackRequest` from `@slack/bolt` for Slack.
-Give it the raw body and the signature header, in the form it asks for: Linear's client takes the bytes as they are; Octokit takes them as a string. With Octokit:
+Pass the raw body and the signature header to the library in its required format. Linear's client accepts raw bytes; Octokit accepts a string. For example, with Octokit:
 
 ```typescript TypeScript {"CODE_LOAD::ts/src/cloud/webhooks.ts#sdk"} 
 import { verify } from "@octokit/webhooks-methods";
@@ -166,13 +169,13 @@ const gitHubWebhook = restate.service({
 ## Handle retries and slow work
 
 Senders retry deliveries that fail or time out, and unless the sender sets an `Idempotency-Key` header (see below), each retry starts a new invocation of your handler.
-In sync mode a handler that outlasts the sender's wait (see the table below) gets retried too.
+In sync mode, senders may also retry if your handler exceeds their response time limit (see the table below).
 
 To process each delivery once:
 
 1. Verify the request.
 2. [Send](/develop/ts/service-communication#sending-messages) the actual work to another handler, with an [idempotency key](/develop/ts/service-communication#using-an-idempotency-key) built from the sender's delivery ID. Restate starts the work once per key, so a retried delivery doesn't run it again.
-3. Return right away.
+3. Return immediately.
 
 To handle the events of each issue, pull request or channel in order, one at a time, send them to a [virtual object](/foundations/services#virtual-object) keyed by its ID, as the examples on this page do.
 
