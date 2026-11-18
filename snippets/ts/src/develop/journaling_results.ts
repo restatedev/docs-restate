@@ -19,6 +19,21 @@ const service = restate.service({
       // <end_side_effect>
     },
 
+    stopWhenAttemptEnds: async (ctx: restate.Context, orderId: string) => {
+      // <start_attempt_signal>
+      const signal = ctx.request().attemptCompletedSignal;
+      const charge = await ctx.run("charge", async () => {
+        const response = await fetch("https://payments.example.com/charges", {
+          method: "POST",
+          headers: { "Idempotency-Key": `${ctx.request().id}/charge` },
+          body: JSON.stringify({ orderId }),
+          signal,
+        });
+        return response.json();
+      });
+      // <end_attempt_signal>
+    },
+
     promiseCombinatorsAll: async (ctx: restate.Context, name: string) => {
       // <start_all>
       // import { RestatePromise } from "@restatedev/restate-sdk";
