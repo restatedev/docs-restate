@@ -1,0 +1,79 @@
+---
+title: "Testing"
+description: "Test agents against a real Restate server with a fixture model and forced replay."
+icon: "flask"
+---
+
+Test agents with a fixture model instead of a paid model, in a Restate server that forces replay.
+Forced replay runs your handler again from its journal at every suspension point. Code that takes different steps on replay fails with a journal mismatch, and side effects outside journaled steps run again, which your assertions can catch.
+
+<Info>
+**Prerequisites**: Docker, to run the Restate Server in a container.
+</Info>
+
+Install the test dependencies:
+
+```shell
+npm install --save-dev vitest @restatedev/restate-sdk-testcontainers @restatedev/restate-sdk-clients
+```
+
+## Fixture models
+
+A fixture model returns fixed responses based on the request. Wrap it with `journaledModel`, so its responses are journaled like real model calls:
+
+```typescript {"CODE_LOAD::agentlib/src/testing/fixture-model.ts#fixture"} 
+import {journaledModel, type ModelResponse} from "@restatedev/agentlib";
+
+export const fixtureModel = journaledModel(async (request): Promise<ModelResponse> => {
+  const hasLookup = request.tools.some((tool) => tool.name === "lookupTicket");
+  if (hasLookup && request.step === 1) {
+    return {type: "tool_calls", calls: [{id: "t1", name: "lookupTicket", input: {ticketId: "T-42"}}]};
+  }
+  return {type: "final", text: "Ticket T-42 is open."};
+});
+```
+
+The request contains the `messages`, the available `tools`, and `maxOutputTokens`, and, when they apply, the `instructions`, the `step` number, and the `outputSchema` for typed output. For typed output, return `{type: "final", text: "", output}`.
+The fixture also answers the summary call of a stopped or interrupted run, which has no `step` and no tools.
+
+## Integration tests
+
+Replace the model provider with the fixture, start the services in a Restate container, and call them through the Restate client:
+
+```typescript {"CODE_LOAD::agentlib/src/testing/ticket-desk.test.ts#test"} 
+import {afterAll, beforeAll, expect, it, vi} from "vitest";
+import {connect} from "@restatedev/restate-sdk-clients";
+import {RestateContainer, RestateTestEnvironment} from "@restatedev/restate-sdk-testcontainers";
+import {ticketDesk} from "../tools.js";
+
+// Replace only the model provider. The services under test stay unchanged.
+vi.mock("@restatedev/agentlib/provider", async () => {
+  const {fixtureModel} = await import("./fixture-model.js");
+  return {aiModel: () => fixtureModel};
+});
+
+let env: RestateTestEnvironment;
+
+beforeAll(async () => {
+  env = await RestateTestEnvironment.start({
+    services: [ticketDesk],
+    container: () => new RestateContainer().alwaysReplay().disableRetries(),
+  });
+}, 60_000);
+
+afterAll(async () => {
+  await env?.stop();
+});
+
+it("looks up the ticket before it answers", async () => {
+  const restate = connect({url: env.baseUrl()});
+  const answer = await restate.client(ticketDesk).ask("What is the status of T-42?");
+  expect(answer).toBe("Ticket T-42 is open.");
+});
+```
+
+- `vi.mock` replaces `aiModel` with the fixture, so the test imports the same services that your application serves.
+- `alwaysReplay()` makes Restate replay the invocation at every suspension point. `disableRetries()` sets the server's default retry policy to one attempt, so an invocation that fails with a retryable error is killed immediately. Retry policies of an `asyncTool`, a model, or a service still apply.
+
+Assert on observable effects: a tool that must run once runs once, an approval blocks the run until it's resolved, and the losing run of a race is cleaned up.
+The [agentlib integration tests](https://github.com/restatedev/agentlib/blob/main/packages/tests/src/examples.integration.ts) test the tutorial lessons this way.

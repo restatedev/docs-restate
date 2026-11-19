@@ -1,0 +1,171 @@
+---
+title: "Quickstart"
+description: "Run the agentlib template, a weather agent in a Restate service, and invoke it over HTTP."
+icon: "rocket"
+---
+
+import {GitHubLink} from "/snippets/blocks/github-link.mdx";
+import InstallRestate from "/snippets/common/install-server-without-running-cli.mdx";
+
+This guide shows you how to run the agentlib template, a weather agent in a Restate service, on a local Restate Server.
+You need [Node.js](https://nodejs.org/en/) 22.21.1 or later and an OpenAI API key.
+
+## Start from a prompt
+
+Paste this prompt into your coding agent, such as Claude Code or Codex.
+The coding agent installs the Restate skills, downloads the template and the Restate Server, and runs the weather agent.
+
+<Prompt description="Set up and run the agentlib template on a local Restate Server." icon="robot" actions={["copy"]}>
+Set up the Restate agentlib template and run it on a local Restate Server:
+
+1. Download the template with `npx @restatedev/restate example typescript-agentlib-template`, and install its dependencies with `npm install` in `./typescript-agentlib-template`.
+2. In `./typescript-agentlib-template`, install the Restate skills with `npx skills add restatedev/skills --yes`. Read the skills before you change any code.
+3. Start a local Restate Server in the background with `npx @restatedev/restate-server`.
+4. Start the service in the background with `npm run dev`. The service needs the `OPENAI_API_KEY` environment variable. If it isn't set, ask me to set it.
+5. Register the service with `npx @restatedev/restate deployments register http://localhost:9080 --yes`.
+6. Send a test request with `curl localhost:8080/restate/call/agent/run --json '{"prompt": "What is the weather in San Francisco?"}'`.
+
+Then explain how `src/agent.ts` works, and tell me where to find the invocation in the Restate UI at `http://localhost:9070`.
+</Prompt>
+
+## Start manually
+
+<Steps>
+<Step title="Install Restate Server and CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the template">
+Download the template and install its dependencies:
+
+```shell
+restate example typescript-agentlib-template && cd typescript-agentlib-template
+npm install
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/agentlib/template"}/>
+
+The template enables the Restate plugin for Claude Code and Codex. To add the Restate skills to another coding agent, run `npx skills add restatedev/skills`.
+</Step>
+
+<Step title="Look at the agent">
+`src/agent.ts` defines a weather agent with one tool, and a service that runs it:
+
+```typescript src/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/agentlib/template/src/agent.ts"} 
+import { openai } from "@ai-sdk/openai";
+import { agent, asyncTool } from "@restatedev/agentlib";
+import { aiModel } from "@restatedev/agentlib/provider";
+import * as restate from "@restatedev/restate-sdk-gen";
+import { z } from "zod";
+
+const weatherAgent = agent({
+  model: aiModel({
+    model: openai(process.env.AGENT_MODEL ?? "gpt-5.4"),
+    retry: { maxAttempts: 3 },
+  }),
+  instructions:
+    "You provide weather updates. Use getWeather for each city requested and explain that the readings are demo data.",
+  maxSteps: 5,
+  tools: {
+    getWeather: asyncTool({
+      description: "Get demo weather for a city (not a live forecast).",
+      input: z.object({ city: z.string().min(1) }),
+      retry: { maxAttempts: 3 },
+      async execute({ city }) {
+        // Replace this mock with a weather API call. asyncTool journals the
+        // result and applies the retry policy; no extra run wrapper is needed.
+        return { city, temperature: 23, unit: "celsius", description: "Sunny and warm", demo: true };
+      },
+    }),
+  },
+});
+
+export const weatherService = restate.service({
+  name: "agent",
+  handlers: {
+    run: restate.schemas(
+      {
+        input: z.object({
+          prompt: z.string().min(1).default("What's the weather in San Francisco?"),
+        }),
+        output: z.string(),
+      },
+      function* ({ prompt }) {
+        const result = yield* weatherAgent.run(prompt);
+        return result.status === "completed" ? result.output : result.output ?? result.reason;
+      },
+    ),
+  },
+});
+```
+
+- `agent()` defines the agent at module scope, with an OpenAI model, instructions, and a limit of five steps.
+- `getWeather` is an `asyncTool`. Restate journals its result, so a replay returns the journaled result instead of running `execute` again.
+- The `run` handler of the `agent` service runs the agent and returns its answer. Each request starts a new run without conversation history.
+
+`src/app.ts` serves the service on port 9080.
+</Step>
+
+<Step title="Run the service">
+Export your OpenAI API key and start the service:
+
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+npm run dev
+```
+</Step>
+
+<Step title="Register the service">
+Tell Restate where the service is running:
+
+```shell
+restate deployments register http://localhost:9080
+```
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](/cloud/getting-started), your service must be reachable from your Restate environment.
+You can use a public endpoint or connect a private service through a supported [secure tunnel](/services/deploy/standalone#connecting-private-services-to-restate-cloud-or-byoc).
+</Accordion>
+</Step>
+
+<Step title="Invoke the agent">
+Send a request to the `run` handler:
+
+```shell
+curl localhost:8080/restate/call/agent/run --json '{"prompt": "What is the weather in San Francisco?"}'
+```
+
+Open the Restate UI at `http://localhost:9070` and select the invocation to see the journal entries of the model calls and the tool call.
+Stop and restart the service during a request: Restate replays the journal, and the agent continues without repeating the completed calls.
+</Step>
+</Steps>
+
+The template also contains an integration test that runs the agent with a fixture model and forced replay. With Docker running, run `npm test`. See [Testing](/agentlib/testing).
+
+## Generator SDK
+
+agentlib runs on Restate's generator SDK, `@restatedev/restate-sdk-gen`, which differs from the promise-based TypeScript SDK in a few ways:
+
+- Handlers are generator functions, such as `function* ({prompt})`. Use `yield*` to wait for each durable operation, such as an agent run, a call to another service, or a timer.
+- Durable operations are functions of the `restate` module, such as `restate.run()`, `restate.state()`, and `restate.client()`. Handlers don't receive a `ctx` parameter.
+- Use `restate.all`, `restate.any`, and `restate.spawn` for concurrent work instead of `Promise.all`. Use `await` only inside a `restate.run` callback or an `asyncTool`.
+
+[Durable Coroutines](/develop/ts/concurrent-tasks#durable-coroutines) explains the generator model in more detail.
+
+## Next steps
+
+<CardGroup cols={2}>
+<Card title="Agents" icon="robot" href="/agentlib/agents">
+    Configure instructions, typed output, and limits.
+</Card>
+<Card title="Tools" icon="wrench" href="/agentlib/tools">
+    Let the agent call APIs and Restate services.
+</Card>
+<Card title="Sessions" icon="comments" href="/agentlib/sessions">
+    Keep conversation history between requests.
+</Card>
+<Card title="Tutorial" icon="github" href="https://github.com/restatedev/agentlib/tree/main/packages/examples">
+    Follow the numbered lessons, from tools to multi-agent workflows.
+</Card>
+</CardGroup>

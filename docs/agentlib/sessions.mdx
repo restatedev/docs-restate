@@ -1,0 +1,116 @@
+---
+title: "Sessions"
+description: "Keep conversation history between runs, and keep long runs within the model's context window."
+icon: "comments"
+---
+
+A run starts without history unless you pass one. To continue a conversation across requests, run the agent in a [Virtual Object](/foundations/services#virtual-object) and store the conversation under the object's key.
+
+## Conversation history
+
+Pass a `LazyStateConversation` to `run`. The run loads the conversation from the object's state when it starts, and saves its new messages when it ends:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#conversation"} 
+export const chatSession = restate.object({
+  name: "ChatSession",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* assistant.run(message, {conversation: new LazyStateConversation()});
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+    *history() {
+      return yield* new LazyStateConversation().page();
+    },
+  },
+  options: {handlers: {history: {shared: true}}},
+});
+```
+
+- Each object key has its own conversation, so `ChatSession/bob` and `ChatSession/alice` are separate.
+- Restate runs one exclusive handler per key at a time, so the runs of a session never interleave.
+- A run that throws saves nothing, so the next run starts from the history before the failed run. A stopped or interrupted run saves its messages.
+- Read the history from a shared handler with `page(from, limit)`, which returns up to `limit` messages (default 100, at most 1000) and `next`, the offset of the following page.
+
+To keep several conversations in one object, give each `LazyStateConversation` its own `stateKey`. The default is `conversation`.
+
+## Chunking
+
+`LazyStateConversation` stores the messages in chunks of 32, each under its own state key (`conversation/0`, `conversation/1`, and so on), next to a metadata entry.
+A run writes only the chunk that it extends, the new chunks, and the metadata, so the size of each write depends on the new messages, not on the length of the conversation.
+After [compaction](#between-runs), a run loads only the messages after the summary.
+
+## Compaction
+
+Compaction replaces older messages with a summary in the requests sent to the model. The object state, `page`, and `result.messages` keep every message. Each summary costs a model call.
+
+### Between runs
+
+Pass `compaction` to `LazyStateConversation` to summarize the conversation when a run starts:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#conversation_compaction"} 
+const conversation = new LazyStateConversation({
+  compaction: {model, policy: {maxMessages: 64, maxChars: 64000, retainMessages: 12}}, // the default policy
+});
+const result = yield* assistant.run(message, {conversation});
+```
+
+When the messages since the last summary exceed `maxMessages` or `maxChars`, the run summarizes the older messages. It keeps at least the newest `retainMessages` unchanged, starting at a user message. From then on, the model receives the summary followed by the newer messages.
+
+If compaction fails, the run logs a warning and continues with the history it loaded. The next run tries again.
+
+### Within a run
+
+A single run can exceed the model's context window as tool results accumulate. Set `compaction` on the agent to summarize the run's older messages:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#run_compaction"} 
+const researcher = agent({
+  model,
+  maxSteps: 40,
+  compaction: {maxTokens: 100000, retainTokens: 25000}, // the defaults
+});
+```
+
+Before each model call, once the request exceeds `maxTokens`, the run replaces its older messages with a summary and keeps the newest messages that fit in `retainTokens`.
+The summary uses the agent's model, unless you set `compaction.model`. If the summary fails, the run truncates the older messages instead.
+
+## Tool result previews
+
+Tool result previews are on by default. For a tool result larger than `maxTokens`, the model receives the beginning and the end, `previewTokens` in total, with a reference to the full result. The model reads the rest with the built-in `read_tool_result` tool:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#tool_results"} 
+const crawler = agent({
+  model,
+  toolResults: {maxTokens: 5000, previewTokens: 2500}, // the defaults; false sends results in full
+});
+```
+
+Set `toolResults: false` to send every result in full. `result.messages` and the saved conversation always keep every result in full.
+
+## Context window
+
+Set `contextWindow` on the agent to the model's context window in tokens, for example `contextWindow: 200000`. Before each model call, the run shrinks a request that wouldn't fit: it summarizes the older messages when `compaction` is set, and truncates them otherwise.
+
+If the provider reports a context overflow, the run shrinks the request once and sends it again. If that request overflows too, the run fails.
+agentlib recognizes an overflow only from a structured signal, such as OpenAI's `context_length_exceeded` code or HTTP `413`.
+
+## Manual storage
+
+To control how and where the history is stored, pass `messages` to `run` and store `result.messages` yourself:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#messages"} 
+export const manualChat = restate.object({
+  name: "ManualChat",
+  handlers: {
+    *ask(message: string) {
+      const messages = (yield* restate.state().get<Message[]>("messages")) ?? [];
+      const result = yield* assistant.run(message, {messages});
+      restate.state().set("messages", result.messages);
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+  },
+});
+```
+
+This approach doesn't chunk the history or compact it between runs: each run loads and writes the whole history as one state value. Tool result previews, compaction within a run, and `contextWindow` still apply, because they're agent options.

@@ -1,0 +1,107 @@
+---
+title: "Overview"
+description: "Build durable AI agents in TypeScript that run inside Restate service handlers."
+icon: "book-open"
+---
+
+Restate agentlib (`@restatedev/agentlib`) is a TypeScript library for building AI agents on Restate, a durable runtime for AI agents and backends.
+An agentlib agent runs inside a Restate service handler, so it can use all of Restate's building blocks:
+
+- **Durable execution**: Restate journals every model call, the durable steps of each tool call, and every approval. After a crash, the run resumes without repeating completed calls.
+- **Concurrent tool calls**: The tool calls of one step run concurrently as [Durable Coroutines](/develop/ts/concurrent-tasks#durable-coroutines). Background tools, including background sub-agents, keep running while the model continues.
+- **Stateful sessions**: [Virtual Objects](/foundations/services#virtual-object) store each conversation under a key and process one request per key at a time.
+- **Durable RPC**: Tools call other services and agents with retries and idempotency.
+- **Human approval and long waits**: A run can wait for an approval, a webhook, or a timer for days without occupying a process.
+- **Flow control**: [Concurrency limits](/services/flow-control) cap how many agent invocations run at once, for example to control model spend.
+- **Observability and control**: The Restate UI and CLI show every model call and tool call, and let you [cancel, pause, resume, or restart](/services/invocation/managing-invocations) an invocation.
+
+Use agentlib when you want the agent loop and your application logic in one durable program that also uses state, service calls, and workflows.
+If you already build agents with another framework, such as the Vercel AI SDK or the OpenAI Agents SDK, see the [SDK integrations](/ai/sdk-integrations/vercel-ai-sdk) instead.
+
+## Features
+
+| Feature | Description |
+|---|---|
+| [Models](/agentlib/models) | OpenAI, Anthropic, Amazon Bedrock, Google, and other Vercel AI SDK providers, or your own client. Includes retries, prompt caching, reasoning, and token usage. |
+| [Typed output](/agentlib/agents#typed-output) | Final answers validated against a Zod schema |
+| [Tools](/agentlib/tools) | Async functions, generator functions, and Restate handlers as tools, with journaled results |
+| [MCP tools](/agentlib/tools#mcp-servers) | The tools of an MCP server, loaded in a handler |
+| [Tool search](/agentlib/tools#tool-search) | Tools that stay hidden until the model searches for them, for large tool catalogs |
+| [Code mode](/agentlib/tools#code-mode) | JavaScript programs that call several tools in a sandbox |
+| [Background tools](/agentlib/tools#background-tools) | Tool calls that run while the model continues |
+| [Skills](/agentlib/agents#skills) | Instructions that the model loads when a task needs them |
+| [Sessions](/agentlib/sessions) | Conversation history per Virtual Object key, stored in chunks, with optional compaction |
+| [Context window](/agentlib/sessions#context-window) | Tool result previews, compaction, and truncation for long runs |
+| [Human approval](/agentlib/human-approval) | Tool calls that wait for a person's decision |
+| [Guardrails](/agentlib/guardrails) | Checks and redaction for input, tool calls, tool output, and answers |
+| [Steering and interruption](/agentlib/steering-and-progress#steering-and-interruption) | New input for a running agent, or a stop with a summary |
+| [Progress events and streaming](/agentlib/steering-and-progress#progress-events) | Run events and model text for clients |
+| [Multi-agent](/agentlib/multi-agent) | Routing, review loops, races, worker services, sub-agents, handoffs, and forks |
+| [Limits](/agentlib/agents#limits) | Maximum steps, tool calls, nesting depth, and output size per run |
+| [Testing](/agentlib/testing) | Fixture models and forced replay against a real Restate Server |
+
+## How it works
+
+You define an agent once, at module scope, with `agent()`.
+A handler runs it with `yield* agent.run(input)`.
+The handler controls everything around the run: where the conversation is stored, who approves tool calls, and what happens with the result.
+The agent runs the loop of model calls and tool calls.
+
+```mermaid
+flowchart LR
+  http([HTTP client]) --> restate
+  sdk([SDK client]) --> restate
+  webhook([Webhook]) --> restate
+  kafka([Kafka]) --> restate
+  restate[Restate Server] --> run
+  subgraph service [Your service]
+    run["handler<br/>agent.run()"]
+  end
+  run <--> llm[LLM]
+  run <--> tools[Tools]
+  run <--> sandbox[Sandbox]
+```
+
+When a run is interrupted, agentlib cancels its unfinished tool calls.
+
+## Key concepts
+
+| Term | Meaning |
+|---|---|
+| Agent definition | Reusable configuration of a model, instructions, tools, and policies. One definition serves many runs. |
+| Run | One execution of an agent, from the input to a completed, stopped, or interrupted result. |
+| Step | One model call within a run, together with the tool calls that the model requested. |
+| Tool call | A request from the model to execute one tool with a specific input. |
+| Conversation | The messages accumulated across runs: user messages, assistant messages, and tool calls with their results. |
+| Session | A group of runs that share a conversation, usually stored under a [Virtual Object](/foundations/services#virtual-object) key. |
+| Invocation | One durable execution of a Restate handler. An invocation can contain several runs. |
+
+## Coding agent plugin
+
+The [Restate plugin](/develop/ai-assistant) adds skills for agentlib and Restate's generator SDK to your coding agent, and connects the Restate documentation MCP server.
+
+<CodeGroup>
+```shell Claude Code
+/plugin marketplace add restatedev/skills
+/plugin install restatedev@restatedev-plugin
+```
+```shell Codex
+codex plugin marketplace add restatedev/skills
+```
+```shell Other agents
+npx skills add restatedev/skills
+```
+</CodeGroup>
+
+In Codex, install the plugin from `/plugins` after you add the marketplace. `npx skills add` installs only the skills, so configure the documentation MCP server yourself. See [Develop with AI](/develop/ai-assistant).
+
+## Next steps
+
+<CardGroup cols={2}>
+<Card title="Quickstart" icon="rocket" href="/agentlib/quickstart">
+    Run your first agent in a Restate service.
+</Card>
+<Card title="Tutorial" icon="github" href="https://github.com/restatedev/agentlib/tree/main/packages/examples">
+    Follow the numbered lessons, from one agent to multi-agent workflows.
+</Card>
+</CardGroup>

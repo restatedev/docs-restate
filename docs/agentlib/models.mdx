@@ -1,0 +1,144 @@
+---
+title: "Models"
+description: "Connect agents to model providers, and configure retries, caching, and reasoning."
+icon: "microchip"
+---
+
+agentlib journals each model call as one durable step with its own retry policy.
+Creating a model adapter requires no credentials, so importing your services has no side effects.
+
+| Model | Adapter |
+|---|---|
+| OpenAI, Anthropic, Amazon Bedrock, Google, and other [Vercel AI SDK](https://ai-sdk.dev) providers | `aiModel` from `@restatedev/agentlib/provider` |
+| A model served by another Restate handler | `modelGateway` from `@restatedev/agentlib/provider` |
+| Your own client, or a test fixture | `journaledModel` from `@restatedev/agentlib` |
+
+## Providers
+
+agentlib connects to providers through the Vercel AI SDK. The AI SDK implements each provider's API, and agentlib runs the agent loop, the tools, the retries, and the journaling.
+
+1. Install the provider package, for example `@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/amazon-bedrock`, `@ai-sdk/google`, `@ai-sdk/mistral`, or `@openrouter/ai-sdk-provider`.
+2. Create the provider's model and wrap it with `aiModel`:
+
+```typescript {"CODE_LOAD::agentlib/src/models.ts#openai"} 
+import {openai} from "@ai-sdk/openai";
+import {aiModel} from "@restatedev/agentlib/provider";
+
+const model = aiModel({model: openai("gpt-5.6-luna")});
+```
+
+The provider reads its credentials, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, when the agent makes its first model call.
+To pass an API key, a base URL, or a custom `fetch` explicitly, create the provider with its factory function, such as `createOpenAI` or `createAmazonBedrock`.
+
+The OpenAI provider uses the Responses API. For a server that implements only the Chat Completions API, use `createOpenAI({baseURL, apiKey}).chat(modelId)`.
+
+## Retries
+
+A model call makes three attempts by default. When the attempts run out, the agent run throws a `TerminalError`. Pass `retry` to change the policy:
+
+```typescript {"CODE_LOAD::agentlib/src/models.ts#anthropic"} 
+import {anthropic} from "@ai-sdk/anthropic";
+
+const claude = aiModel({
+  model: anthropic("claude-sonnet-5-5"),
+  retry: {maxAttempts: 5, initialInterval: {milliseconds: 500}, exponentiationFactor: 2},
+});
+```
+
+`aiModel` turns off the AI SDK's own retries, so the `retry` policy controls all attempts.
+When the provider throttles a call, the next attempt waits for the delay that the provider requests, for example in a `retry-after` header.
+
+Some failures can't be fixed by retrying, such as a missing API key, a feature that the provider doesn't support, or a request that the provider rejects.
+`aiModel` fails these calls immediately, and `run` throws a `TerminalError`.
+
+A response that the model can fix goes back to the model instead: an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, or a reply that announces tool calls without making any.
+agentlib discards the reply, adds a note with the reason, and starts the next step. See [Error handling](/agentlib/error-handling#model-call-failures).
+
+## Prompt caching
+
+Prompt caching is on by default.
+For Anthropic and Bedrock, `aiModel` marks the instructions, the newest message, and the end of the previous request as cache points, so each step reads the previous step's prefix from the cache.
+Other providers cache prefixes automatically and ignore these markers.
+Pass `caching: false` to send no cache points, for example for a Bedrock model without prompt caching.
+
+## Reasoning models
+
+Enable reasoning through the provider's options. OpenAI reasoning models and Gemini 3 reason by default. Claude needs thinking turned on:
+
+```typescript {"CODE_LOAD::agentlib/src/models.ts#reasoning"} 
+const thinkingModel = aiModel({
+  model: anthropic("claude-sonnet-5-5"),
+  providerOptions: {anthropic: {thinking: {type: "adaptive"}}},
+});
+```
+
+For OpenAI, set `reasoningEffort`. For Gemini, set `thinkingConfig`.
+
+`aiModel` keeps the model's reasoning and sends it back on later requests, across the steps of a run and the runs of a conversation.
+Don't edit the stored reasoning: providers reject reasoning that was changed.
+
+<Warning>
+    For OpenAI, `aiModel` sets `store: false` by default.
+    If you set `providerOptions: {openai: {store: true}}`, the conversation refers to reasoning that OpenAI stores and deletes after about 30 days.
+    Once OpenAI deletes it, every later run of the conversation fails with `Item with id 'rs_…' not found`.
+    Keep the default for long-lived conversations.
+</Warning>
+
+## OpenAI structured output
+
+OpenAI structured output uses strict mode, which requires every property in the schema:
+
+- Use `.nullable()` instead of `.optional()` in an `output` schema.
+- For open-ended keys, such as `z.record()` or `.passthrough()`, pass `providerOptions: {openai: {strictJsonSchema: false}}`.
+
+agentlib still validates each tool's input against its Zod schema and the final answer against the `output` schema.
+
+## Token usage
+
+`result.usage` sums the tokens of every model call in the run, including the summary of a stopped run, compaction within the run, sub-agents run with `agentTool`, and forks. It doesn't count the compaction of a `LazyStateConversation` or model calls that tools or hooks make:
+
+| Field | Description |
+|---|---|
+| `inputTokens` | Input tokens, including cache reads and writes |
+| `outputTokens` | Output tokens |
+| `totalTokens` | `inputTokens + outputTokens` |
+| `cachedInputTokens` | Input tokens read from the cache |
+| `cacheWriteInputTokens` | Input tokens written to the cache |
+
+When `run` throws, `usageOf(error)` returns the totals up to the failure.
+Record them only for a `TerminalError`: Restate retries other errors, and the replay counts the same calls again.
+
+## Model gateway
+
+`modelGateway` sends model requests to another Restate handler. Use it to keep provider keys, quotas, or routing in one service:
+
+```typescript {"CODE_LOAD::agentlib/src/models.ts#gateway"} 
+import {modelGateway} from "@restatedev/agentlib/provider";
+
+// A service that owns the provider keys, quotas, and routing.
+export const modelService = restate.service({
+  name: "ModelService",
+  handlers: {
+    *generate(request: ModelRequest) {
+      return yield* model(request);
+    },
+  },
+});
+
+// Agents in other services send their model requests to it.
+const viaGateway = modelGateway((request) => restate.client(modelService).generate(request));
+```
+
+## Custom models
+
+A model is a generator function that takes a `ModelRequest` and returns a `ModelResponse`. Wrap any other client with `journaledModel`, which journals each call:
+
+```typescript {"CODE_LOAD::agentlib/src/models.ts#custom"} 
+const customModel = journaledModel(async (request, {signal}) => {
+  const response = await myLlmClient.complete(request, {signal});
+  return {type: "final", text: response.text};
+});
+```
+
+A response is either `{type: "final", text}` or `{type: "tool_calls", calls}`. Throw a `TerminalError` for a failure that the next call would repeat; the run then fails.
+Include `usage` in the response, so that `result.usage` counts the call's tokens.

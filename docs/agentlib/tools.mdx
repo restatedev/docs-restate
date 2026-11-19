@@ -1,0 +1,256 @@
+---
+title: "Tools"
+description: "Let agents call APIs, Restate handlers, and MCP servers through durable tool calls."
+icon: "wrench"
+---
+
+You pass tools as a map, on the agent definition (`tools: {name: tool}`) or on a single run (`run(input, {tools})`).
+The map key is the tool name that the model uses.
+Tool inputs are Zod schemas, and agentlib validates the model's arguments before the tool runs. For `serviceTool`, the called handler validates the input.
+
+| Tool | Use it to |
+|---|---|
+| `asyncTool` | Call an API or a database with an async function |
+| `tool` | Compose Restate operations, such as service calls, timers, and state |
+| `handlerTool`, `serviceTool` | Let the model call Restate handlers |
+| `mcpTools` | Load the tools of an MCP server |
+| `agentTool`, `forkAgentTool`, `handoff` | Delegate work to other agents. See [Multi-agent](/agentlib/multi-agent). |
+
+## Async tools
+
+`asyncTool` runs an async function as a journaled step:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#async_tool"} 
+const lookupTicket = asyncTool({
+  description: "Look up a ticket's status.",
+  input: z.object({ticketId: z.string()}),
+  retry: {maxAttempts: 5, initialInterval: {milliseconds: 250}, exponentiationFactor: 2},
+  async execute({ticketId}, {signal}) {
+    const ticket = await fetchTicket(ticketId, {signal});
+    if (!ticket) throw new ToolError(`No ticket ${ticketId}`, "not_found");
+    return ticket;
+  },
+});
+
+const support = agent({
+  model,
+  instructions: "Use lookupTicket to answer questions about tickets.",
+  tools: {lookupTicket},
+});
+```
+
+- agentlib journals the result once `execute` succeeds. On replay, the tool returns the journaled result without running `execute` again. The result must be JSON.
+- A thrown `Error` is retried under `retry`, which defaults to three attempts. `retry: {maxAttempts: 1}` turns off these retries, but a crash before agentlib journals the result still runs `execute` again. Make external writes idempotent.
+- A `TerminalError`, or a `ToolError` with a code such as `not_found`, isn't retried. The model receives the error as the tool result, and the run continues. An `AgentTerminalError` stops the run instead. See [Error handling](/agentlib/error-handling).
+- `signal` aborts when the tool call is cancelled, for example because the run is interrupted. Pass it to APIs such as `fetch`. `callId` is stable across retries. Combine it with `invocationId` and `name` into an idempotency key for external writes, for example `${invocationId}:${name}:${callId}`.
+
+## Generator tools
+
+`tool` takes a generator `execute`, so the tool can call other services, sleep, wait for signals, and use state:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#tool"} 
+const reserve: Tool<Order> = tool({
+  description: "Reserve stock for the current order.",
+  input: z.object({sku: z.string(), quantity: z.number().int().positive()}),
+  *execute({sku, quantity}, {context}) {
+    // awaitChild cancels the call if the run is interrupted
+    const reserved = yield* awaitChild(restate.client(inventory, sku).reserve(quantity));
+    if (!reserved) throw new ToolError(`Not enough stock for ${sku}`, "out_of_stock");
+    return {sku, quantity, orderId: context.orderId};
+  },
+});
+```
+
+Code in the generator body runs again on replay. Put external calls in `restate.run` or in an `asyncTool`.
+Wrap service calls in `awaitChild`, so interrupting the run cancels the call. Without it, the called handler keeps running.
+
+## Restate handler tools
+
+`handlerTool` exposes one handler with the arguments you define. `serviceTool` exposes every handler of a service, and the model chooses the handler:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#handler_tools"} 
+const orderAgent = agent<Order>({
+  model,
+  tools: {
+    // One handler, with the arguments you choose.
+    sendEmail: handlerTool({
+      description: "Send an email to the customer.",
+      input: z.object({to: z.string(), body: z.string()}),
+      call: (input) => restate.client(emails).send(input),
+    }),
+    // Every handler of a service, from its interface.
+    refunds: serviceTool(refundIface),
+    reserve,
+  },
+});
+```
+
+`serviceTool` reads the handler names, descriptions, and input schemas from a `restate.iface` interface.
+An interface declares the handlers of a service without their implementation, so your agent's service doesn't need to import the code of the service that it calls.
+The called service implements the interface with `restate.implement`. To expose a single handler, pass `{iface, handler}`:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#iface"} 
+// The interface declares the handlers with their schemas and descriptions.
+export const refundIface = restate.iface.service("RefundService", {
+  getPolicy: restate.iface.schemas({
+    input: z.object({}),
+    output: z.object({refundWindowDays: z.number()}),
+    description: "Read the refund policy.",
+  }),
+  issueRefund: restate.iface.schemas({
+    input: z.object({orderId: z.string(), amountCents: z.number().int().positive()}),
+    output: z.object({refundId: z.string()}),
+    description: "Issue a refund for an order. The amount is in cents.",
+  }),
+});
+
+// The refund service implements the interface.
+export const refundService = restate.implement(refundIface, {
+  handlers: {
+    *getPolicy() {
+      return {refundWindowDays: 30};
+    },
+    *issueRefund({orderId}) {
+      return {refundId: `re_${orderId}`};
+    },
+  },
+});
+
+// A tool for the issueRefund handler only
+const issueRefund = serviceTool({iface: refundIface, handler: "issueRefund"});
+```
+
+- For a Virtual Object or a Workflow, declared with `restate.iface.object` or `restate.iface.workflow`, also pass a `key`: a string, or a function that returns the key for the handler input.
+- agentlib doesn't validate `serviceTool` input. The called handler validates it against the input schema of its `iface.schemas`.
+- Each tool call is a durable child invocation. Interrupting the run cancels it.
+- If the handler throws a `ToolError`, the model receives its code. Configure retries with the [retry policy](/services/configuration#retries) of the called handler.
+
+## Run context
+
+A tool reads the [run context](/agentlib/agents#run-context) for data that the model must not control, such as customer IDs, prices, and clients:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#context"} 
+type Ctx = {customerId: string};
+
+const listOrders: Tool<Ctx> = asyncTool({
+  description: "List the current customer's orders.",
+  input: z.object({}),
+  async execute(_input, {context}) {
+    // The customer ID comes from the application, not from the model.
+    return {customerId: context.customerId, orders: ["O-1", "O-2"]};
+  },
+});
+
+const accountAgent = agent<Ctx>({model, tools: {listOrders}});
+// in a handler: yield* accountAgent.run(question, {context: {customerId}});
+```
+
+Inside `agent<Ctx>({tools: {...}})`, the tool's `context` is typed from the agent. A tool defined on its own needs the `Tool<Ctx>` type on its variable.
+
+## MCP servers
+
+Load an MCP server's tools inside a handler and pass them to the run:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#mcp"} 
+export const docsGuide = restate.service({
+  name: "DocsGuide",
+  handlers: {
+    *ask(question: string) {
+      // The tool catalog is fetched once and journaled.
+      const docs = yield* mcpTools({
+        url: "https://docs.restate.dev/mcp",
+        namespace: "docs",
+        protocol: "stateless",
+        allow: (name) => name !== "submit_feedback",
+      });
+      const result = yield* guide.run(question, {tools: docs.tools});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+});
+```
+
+| Option | Description |
+|---|---|
+| `namespace` | Prefix for the tool names: `docs` turns `search` into `docs_search`. 1 to 24 letters, digits, `_`, or `-`. |
+| `protocol` | `stateless` for servers that support stateless MCP, or `stateful` for servers that require sessions. Call `close()` when you're done with a stateful session. |
+| `deferred` | Hide the tools until the model finds them with [tool search](#tool-search). Default: `true`. |
+| `allow` | Filter the tools by their name on the server, before the namespace prefix. |
+| `token` | A generator function that returns a bearer token. |
+| `onAuthorizationRequired` | A generator function that refreshes the credentials when the server requires authorization. Without it, the call fails. |
+| `retry` | Retry policy for tool calls. Default: three attempts. Each call sends an `Idempotency-Key` header. |
+| `timeoutMs` | Timeout per request. Default: 60000. |
+
+agentlib skips server tools with an invalid name or an unsupported input schema, and lists them in the result's `warnings`.
+
+## Tool search
+
+Tool search is on by default. A tool with `deferred: true` isn't listed in the model request until the model finds it with the built-in `search_tools` tool. This keeps large tool catalogs out of every request.
+Tools from an MCP server are deferred by default.
+
+To list deferred tools from the start, set `toolSearch: false`:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#tool_search"} 
+const catalogAgent = agent({
+  model,
+  tools: {lookupTicket, refunds: serviceTool(refundIface)},
+  toolSearch: false, // list deferred tools from the start
+});
+```
+
+The name `search_tools` is reserved while tool search is on.
+
+## Code mode
+
+Code mode is on by default. The built-in `run_program` tool lets the model write one JavaScript program that calls several tools. Only the program's result is added to the model's context.
+Programs run in a QuickJS sandbox without network or file system access. Their tool calls go through the same guardrails and approvals as direct calls, and count toward `maxToolCalls`.
+
+To limit which tools a program can call, add a `programTool` from `@restatedev/agentlib/program`. It replaces the built-in `run_program`. Set `codeMode: false` to turn code mode off:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#code_mode"} 
+const ticketAgent = agent({
+  model,
+  tools: {
+    lookupTicket,
+    issueRefund,
+    // Programs can call only lookupTicket, at most 20 times per program
+    program: programTool({tools: ["lookupTicket"], limits: {maxToolCalls: 20}}),
+  },
+});
+
+const directAgent = agent({model, tools: {lookupTicket}, codeMode: false}); // no run_program
+```
+
+The name `run_program` is reserved while code mode is on.
+
+## Background tools
+
+With `background: true`, the model receives a pending result and continues without waiting for the tool. The tool's result arrives in a later step:
+
+```typescript {"CODE_LOAD::agentlib/src/tools.ts#background"} 
+const researcher = agent({
+  model,
+  tools: {
+    crawlSite: asyncTool({
+      description: "Crawl a website and return its pages. Takes several minutes.",
+      input: z.object({url: z.string()}),
+      background: true,
+      async execute({url}) {
+        return {url, pages: 42};
+      },
+    }),
+    sleep: sleepTool(),
+    cancel: cancelOperationTool(),
+  },
+});
+```
+
+`sleepTool` lets the model wait durably, and `cancelOperationTool` lets it cancel a background tool call.
+
+A run doesn't return while background calls are pending: a final answer waits for their results. If the run reaches `maxSteps` first, it cancels the pending calls and stops.
+
+## Tools for one run
+
+`run(input, {tools})` adds tools to one run, next to the agent's own tools.
+Use this for tools that depend on the request, such as the MCP tools above, or tools that a client UI provides.
+The [AG-UI lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/18_ag_ui.ts) turns the tools of an AG-UI client into run tools.

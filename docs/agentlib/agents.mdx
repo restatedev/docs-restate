@@ -1,0 +1,176 @@
+---
+title: "Agents"
+description: "Define an agent, run it in a handler, and handle its result."
+icon: "robot"
+---
+
+An agent definition combines a model, instructions, tools, and limits. You define it once and run it from any handler.
+
+## Define an agent
+
+Create the agent at module scope with `agent()`:
+
+```typescript {"CODE_LOAD::agentlib/src/agents.ts#define"} 
+const assistant = agent({
+  model,
+  instructions: "Answer support questions briefly.",
+  maxSteps: 6,
+});
+```
+
+The main options are:
+
+| Option | Description |
+|---|---|
+| `model` | The model adapter. See [Models](/agentlib/models). |
+| `instructions` | The system prompt, as a string or a generator function that reads the [run context](#run-context). |
+| `tools` | A map of tool name to tool. See [Tools](/agentlib/tools). |
+| `output` | A Zod schema for [typed output](#typed-output). |
+| `maxSteps`, `maxToolCalls` | Maximum number of model calls and tool calls per run. See [Limits](#limits). |
+
+## Run an agent
+
+Run the agent with `yield* agent.run(input)`:
+
+```typescript {"CODE_LOAD::agentlib/src/agents.ts#run"} 
+export const support = restate.service({
+  name: "Support",
+  handlers: {
+    *ask(question: string) {
+      const result = yield* assistant.run(question);
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+  },
+});
+```
+
+Each call to `run` starts a new run without conversation history. To keep history between requests, see [Sessions](/agentlib/sessions).
+
+## Run results
+
+`run` returns a `RunResult` with one of three statuses:
+
+| Status | Meaning |
+|---|---|
+| `completed` | The model returned a final answer. `output` holds the answer. |
+| `stopped` | The run reached `maxSteps` or `maxToolCalls`. `reason` is `max_steps` or `max_tool_calls`. |
+| `interrupted` | The application [interrupted](/agentlib/steering-and-progress#steering-and-interruption) the run. `reason` holds the interrupt reason. |
+
+Read `output` as the answer only when the status is `completed`.
+For a stopped or interrupted run, agentlib makes one more model call, without tools, that summarizes the run, and puts the summary in `output`.
+Configure that call with `finalize`, which defaults to the agent's model, or set `finalize: false` to skip it.
+
+Every result also includes the number of `steps`, the run's `messages`, and its token `usage`. `messages` is the full history: the messages you passed to the run, followed by the messages of this run.
+
+## Typed output
+
+Give the agent a Zod `output` schema. agentlib asks the model for output that matches the schema, validates the response, and asks again if the response doesn't match:
+
+```typescript {"CODE_LOAD::agentlib/src/agents.ts#output"} 
+const triage = agent({
+  model,
+  instructions: "Classify the support request and summarize it in one sentence.",
+  output: z.object({
+    category: z.enum(["billing", "technical", "other"]),
+    summary: z.string(),
+  }),
+});
+
+export const ticketTriage = restate.service({
+  name: "TicketTriage",
+  handlers: {
+    *classify(message: string) {
+      const result = yield* triage.run(message);
+      if (result.status !== "completed") {
+        throw new TerminalError(`Triage ${result.status}: ${result.reason}`);
+      }
+      return result.output; // {category, summary}
+    },
+  },
+});
+```
+
+`result.output` has the type that the schema defines. The schema must convert to JSON Schema, so Zod transforms aren't supported.
+For OpenAI models, see [structured output with OpenAI](/agentlib/models#openai-structured-output).
+
+When the output feeds the next step of your code, throw a `TerminalError` for a stopped or interrupted run, as in the example. Otherwise, a summary might pass as a successful result.
+
+## Run context
+
+Declare a context type on the agent and pass the context to `run`.
+agentlib passes the context to the `instructions` function, to every tool, and to every guardrail, but never sends it to the model:
+
+```typescript {"CODE_LOAD::agentlib/src/agents.ts#context"} 
+type Customer = {customerId: string; plan: "free" | "pro"};
+
+const accountAgent = agent<Customer>({
+  model,
+  *instructions({context}) {
+    return `You help customer ${context.customerId}, who is on the ${context.plan} plan.`;
+  },
+});
+
+export const accounts = restate.object({
+  name: "Accounts",
+  handlers: {
+    *ask(question: string) {
+      const customerId = restate.handlerRequest().key!;
+      const plan = (yield* restate.state().get<"free" | "pro">("plan")) ?? "free";
+      const result = yield* accountAgent.run(question, {context: {customerId, plan}});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+});
+```
+
+When the agent declares a context type, `run` requires the `context` option.
+Use the context for trusted data, such as user IDs, prices, and limits, instead of letting the model supply these values as tool arguments.
+
+## Run names
+
+If a handler runs the same agent several times, for example in a loop or a race, give each run a distinct `name`:
+
+```typescript
+const draft = yield* writer.run(task, {name: `write-${i}`});
+```
+
+agentlib includes the name in the run's approval signal names, so an approval for one run can't resolve a tool call in another. See [Multi-agent](/agentlib/multi-agent#review-loop) for a complete example.
+
+## Limits
+
+| Option | Default | Effect |
+|---|---|---|
+| `maxSteps` | 10 | Model calls per run, including the final answer. The run stops with `max_steps` when it reaches the limit. |
+| `maxToolCalls` | 128 | Tool calls per run, including calls made from [code mode](/agentlib/tools#code-mode). The run stops with `max_tool_calls` when it reaches the limit. |
+| `maxToolDepth` | 16 | Depth of nested tool calls. A deeper call fails with the code `depth_limit`. |
+| `maxOutputTokens` | 4096 | Tokens per model reply. A reply cut off at the limit goes back to the model with a note. |
+| `maxOutputChars` | 128000 | Characters of model text, tool output, and final output. A tool output over the limit fails the tool call with the code `output_limit`. |
+
+Reaching `maxSteps` or `maxToolCalls` stops the run with a result, not an error.
+Retries are configured separately on the [model](/agentlib/models#retries) and on each [tool](/agentlib/tools#async-tools).
+
+## Skills
+
+A skill holds instructions for one kind of task. The model receives the name and description of each skill, and loads a skill's instructions with the built-in `load_skill` tool when a task matches:
+
+```typescript {"CODE_LOAD::agentlib/src/agents.ts#skills"} 
+const writer = agent({
+  model,
+  instructions: "You write for a software team.",
+  skills: skills([
+    {
+      name: "release-notes",
+      description: "Write release notes from a list of changes.",
+      instructions: "Group the changes into Added, Changed, and Fixed. Follow the layout in template.md.",
+      files: {"template.md": "## <version>\n### Added\n...\n### Changed\n...\n### Fixed\n..."},
+    },
+  ]),
+});
+```
+
+Skill names contain lowercase letters, digits, and hyphens. The model reads a skill's files with the built-in `read_skill_file` tool.
+
+To load skills from files, a repository, or a database, pass your own `SkillSource` with the async functions `list`, `load`, and optionally `read`.
+agentlib journals each call. `list` runs once per run, so the skill list stays the same for the whole run.
+The [skills lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/19_skills.ts) shows a source that reads a folder of `SKILL.md` files.

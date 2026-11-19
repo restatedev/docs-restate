@@ -1,0 +1,160 @@
+---
+title: "Steering and progress"
+description: "Steer or interrupt a running agent, and report its progress to clients."
+icon: "sliders"
+---
+
+While an agent runs, your application can send it new input, stop it, and report its progress to clients.
+
+## Steering and interruption
+
+Name a steering signal and an interrupt signal on the run. Shared handlers then send [signals](/develop/ts/external-events) to the running invocation while the exclusive handler holds the object's lock:
+
+```typescript {"CODE_LOAD::agentlib/src/steering.ts#steering"} 
+export const supportSession = restate.object({
+  name: "SupportSession",
+  handlers: {
+    *chat(message: string) {
+      restate.state().set("active", {invocationId: restate.handlerRequest().id});
+      try {
+        const result = yield* support.run(message, {
+          conversation: new LazyStateConversation(),
+          steeringSignal: "steering",
+          interruptSignal: "interrupt",
+        });
+        if (result.status !== "completed") return result.output ?? result.reason;
+        return result.output;
+      } finally {
+        restate.state().clear("active");
+      }
+    },
+    *steer(message: string) {
+      return yield* signalActiveTurn("steering", message);
+    },
+    *interrupt(reason: string) {
+      return yield* signalActiveTurn("interrupt", reason);
+    },
+  },
+  options: {handlers: {steer: {shared: true}, interrupt: {shared: true}}},
+});
+
+function* signalActiveTurn(name: string, value: string): restate.Operation<boolean> {
+  const active = yield* restate.sharedState().get<ActiveTurn>("active");
+  if (!active) return false;
+  restate.invocation(active.invocationId).signal(name).resolve(value);
+  return true;
+}
+```
+
+- **Steering:** The run adds the message as a user message before its next step. The model receives it after the current tool calls finish. Steering doesn't undo tool calls that already started. A message that arrives during a model call discards that call's response, and the run asks the model again.
+- **Interruption:** The run cancels unfinished tool calls and the child invocations of `handlerTool`, `serviceTool`, and `awaitChild`, and returns `{status: "interrupted", reason, output}`, with a summary in `output`.
+
+The `chat` handler stores its invocation ID in state, so `steer` and `interrupt` know which invocation to signal. It clears the ID in `finally`, so a failed run leaves no stale ID behind.
+
+Interrupting a run is different from [cancelling the invocation](/services/invocation/managing-invocations#cancel): cancellation fails the handler instead of returning a result. See [Error handling](/agentlib/error-handling#cancellation).
+
+To check or redact steering messages before the run uses them, add a `beforeSteering` [guardrail](/agentlib/guardrails).
+To control the run from your own code instead of signals, pass `controls: {steering, interrupt}` to `run`. `steering` is a function that returns a future for the next message, and `interrupt` is a future that resolves to the reason.
+
+## Progress events
+
+`onProgress` receives the run's progress events:
+
+```typescript {"CODE_LOAD::agentlib/src/steering.ts#progress"} 
+const feed = restate.sendClient(progressFeed, job);
+const result = yield* auditor.run(request, {
+  *onProgress(event) {
+    feed.publish(event); // a one-way send: the run does not wait for subscribers
+  },
+});
+```
+
+| Event | Reports |
+|---|---|
+| `step` | The start of a step |
+| `tool-start`, `tool-info`, `tool-progress`, `tool-end` | A tool call starting, updating its display information, reporting progress, and finishing |
+| `steering`, `steering-rejected` | A steering message that the run accepted or rejected |
+| `handoff` | A [handoff](/agentlib/multi-agent#sub-agents-and-handoffs) to another agent |
+| `compaction` | A summarized or truncated request, or a summary that failed |
+| `error-note` | An error that the model received as a note instead of failing the run |
+
+On replay, the run delivers the same events again. Use journaled operations in `onProgress`, such as the one-way send in the example, so a replay doesn't publish an event twice.
+The run waits for `onProgress` before it continues, so start slow work with a one-way send instead of waiting for it.
+The [progress feed lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/16_progress_feed.ts) implements the `ProgressFeed` object that clients subscribe to.
+
+A tool reports partial progress with `context.progress(value)`:
+
+```typescript {"CODE_LOAD::agentlib/src/steering.ts#tool_progress"} 
+const auditor = agent({
+  model,
+  instructions: "Count stock with countStock, then name the warehouse with the least stock.",
+  tools: {
+    countStock: tool({
+      description: "Count stock in the given warehouses.",
+      input: z.object({warehouses: z.array(z.string()).max(10)}),
+      *execute({warehouses}, context) {
+        const counts: Record<string, number> = {};
+        for (const warehouse of warehouses) {
+          counts[warehouse] = warehouse.length * 7;
+          yield* context.progress(`counted ${warehouse}`);
+        }
+        return counts;
+      },
+    }),
+  },
+});
+```
+
+Sub-agents and forks report their events as progress of the parent's tool call.
+
+## Streaming
+
+To show the model's text while the provider generates it, pass `onChunk` to `aiModel`. `aiModel` then streams each model call instead of waiting for the complete response:
+
+```typescript {"CODE_LOAD::agentlib/src/steering.ts#stream"} 
+import {openai} from "@ai-sdk/openai";
+import {aiModel} from "@restatedev/agentlib/provider";
+
+const streamingModel = aiModel({
+  model: openai("gpt-5.6-luna"),
+  async onChunk(event, {step}) {
+    if (event.type === "start") await clearText(step); // a retried call starts over
+    if (event.type === "text-delta") await publishText(step, event.text);
+  },
+});
+```
+
+Each attempt of a model call delivers a `start` event, then a `text-delta` or `reasoning-delta` event for each new piece of text, and a `finish` event after a complete response.
+The second argument contains the request's `step` and the call's abort `signal`.
+Only `aiModel` supports `onChunk`.
+
+### Durability
+
+Restate doesn't journal chunks.
+`aiModel` passes each chunk to `onChunk` as it arrives. When the stream ends, `aiModel` builds the complete response from it: the text, tool calls, reasoning, structured output, and token usage. Restate journals that response as one entry.
+Until then, the chunks exist only in the memory of the service process.
+
+| Situation | Result |
+|---|---|
+| The process crashes or the provider fails during the stream | The model call has no journaled response, so Restate runs it again from the beginning. `onChunk` receives a new `start` for the same step, followed by the complete text. |
+| The process crashes after the response is journaled | On replay, Restate returns the journaled response without calling the provider. `onChunk` receives no events for that step. |
+| A client disconnects during the stream and reconnects | Restate has no chunks to resend. The client receives only what your handler stores or sends, such as progress events or the run's result. |
+
+### Chunk events
+
+- A step can receive several `start` events, one per attempt. When a `start` arrives, discard the text of the step's earlier attempt.
+- `finish` arrives only after a complete response. If the provider fails, the response is cut off, `onChunk` throws, or steering discards the call, no `finish` arrives. The next event is a `start` for a retry of the same step or for the next step.
+- Chunks arrive before the run checks the response. Text that the run discards later has already reached `onChunk`, for example output that doesn't match the `output` schema, an answer that `afterRun` rejects, or a response that steering discards. If a [guardrail](/agentlib/guardrails) must check text before users see it, don't stream that text.
+- Text and reasoning stream, but tool call arguments don't. With `output`, the `text-delta` events contain the raw JSON text.
+- Every call through the model streams, including summaries: the summary of a stopped run, and compaction summaries that use the same model. These calls have no step, so `onChunk` receives them with `step` 0.
+
+### Writing `onChunk`
+
+- `onChunk` runs inside the journaled model call, not in the handler, so it can't use Restate operations such as state, service calls, or signals. Write chunks directly to a system outside Restate, such as a WebSocket or a pub/sub service.
+- `aiModel` waits for each `onChunk` call before it reads the next chunk, so a slow callback slows down the model call.
+- An error thrown from `onChunk` fails the attempt, and Restate [retries](/agentlib/models#retries) the model call.
+- `onChunk` belongs to the model, not to a run, and receives only the step number. Chunks from runs that share the model arrive at the same callback, which can't tell them apart.
+
+For updates that a client must receive after a crash or a reconnect, use [progress events](#progress-events).
+They follow the journal, and `onProgress` runs in the handler, so it can store or send each event with a journaled operation. Progress events report steps and tool calls, not the model's text.
+The [AG-UI lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/18_ag_ui.ts) stores progress events in object state, so a client that reconnects receives the conversation so far and then follows the run in progress.
