@@ -1,0 +1,108 @@
+---
+title: "Future AGI"
+sidebarTitle: "Future AGI"
+icon: "magnifying-glass"
+description: "Trace Restate invocations and the model and tool calls inside them in Future AGI Observe."
+---
+
+Send Restate Server spans and your service's model and tool spans to [Future AGI](https://futureagi.com) to inspect each durable invocation as one trace.
+You can follow every attempt of an invocation, with the model calls, tool calls, prompts, responses and token counts made inside it.
+
+<Card title="Future AGI integration guide" icon="link" href="https://docs.futureagi.com/docs/integrations/frameworks/restate">
+  Route traces through an OpenTelemetry Collector, set privacy defaults, see retries, or troubleshoot the integration.
+</Card>
+
+## Instrumentation setup
+
+Create a Future AGI tracer provider and pass a `RestateTracerProvider` to the traceAI OpenAI instrumentor, so every model call becomes a child of the running Restate invocation attempt. These lines are the tracing setup from the example's `agent_service.py`:
+
+```python agent_service.py {"CODE_LOAD::python/src/ai/futureagi_telemetry.py"} 
+import os
+
+from fi_instrumentation import FITracer, TraceConfig, register  # type: ignore[import-untyped]
+from fi_instrumentation.fi_types import ProjectType  # type: ignore[import-untyped]
+from openai import AsyncOpenAI
+from restate.ext.tracing import RestateTracerProvider
+from traceai_openai import OpenAIInstrumentor
+
+# 1. A Future AGI tracer provider. Not registered globally: only the Restate-aware wrapper below uses it.
+tracer_provider = register(
+    project_name=os.environ.get("FI_PROJECT_NAME", "restate-agent"),
+    project_type=ProjectType.OBSERVE,
+    set_global_tracer_provider=False,
+    verbose=False,
+)
+# 2. Every span created through this wrapper becomes a child of the Restate invocation attempt
+#    that is running, and no span is created while Restate replays already-journaled steps.
+restate_tracer_provider = RestateTracerProvider(tracer_provider)
+OpenAIInstrumentor().instrument(tracer_provider=restate_tracer_provider)
+tracer = FITracer(restate_tracer_provider.get_tracer(__name__), config=TraceConfig())
+
+# Restate retries failed steps itself, so the OpenAI client should not retry on its own.
+client = AsyncOpenAI(max_retries=0)
+```
+
+Run each model call and tool call in its own `ctx.run` step. A completed step is journaled, so Restate does not run it again on replay and it is not traced twice.
+
+<Accordion title="Run the example" icon="laptop">
+
+**Prerequisites**: Python 3.11 to 3.13, [uv](https://docs.astral.sh/uv/getting-started/installation/), a [Future AGI account with an API key and secret key](https://docs.futureagi.com/docs/admin-settings/api-keys), an OpenAI API key, and [Restate installed](/installation).
+
+Get the weather agent example, a Virtual Object that calls a model and a `get_weather` tool in `ctx.run` steps:
+
+```bash
+mkdir restate-weather-agent && cd restate-weather-agent
+curl -O https://raw.githubusercontent.com/future-agi/docs/main/examples/frameworks/restate/agent_service.py
+```
+
+Create a virtual environment and install the Restate SDK, traceAI and the OpenAI client:
+
+```bash
+uv venv -p 3.13
+uv pip install 'restate-sdk==1.0.5' hypercorn fi-instrumentation-otel traceai-openai openai
+```
+
+Export `FI_API_KEY` and `FI_SECRET_KEY` with your Future AGI keys, and `OPENAI_API_KEY` with your OpenAI key. Name the Observe project:
+
+```bash
+export FI_PROJECT_NAME=restate-agent
+```
+
+Start the agent service. It serves on port 9080:
+
+```bash
+uv run agent_service.py
+```
+
+Start Restate Server and export its spans straight to Future AGI, in the same project as the service spans:
+
+```bash
+OTEL_RESOURCE_ATTRIBUTES="project_name=restate-agent,project_type=observe" \
+RESTATE_TRACING_HEADERS="{X-Api-Key=\"$FI_API_KEY\", X-Secret-Key=\"$FI_SECRET_KEY\"}" \
+restate-server --tracing-endpoint otlp+https://api.futureagi.com/tracer/v1/traces
+```
+
+Register the agent service:
+
+```bash
+restate deployments register --yes http://localhost:9080
+```
+
+Invoke the agent through Restate:
+
+```bash
+curl localhost:8080/WeatherAgent/user-1/ask -H 'content-type: application/json' \
+  -d '{"question": "What is the weather in Lisbon today?"}'
+```
+
+</Accordion>
+
+## Inspect traces in Future AGI
+
+Open **Observe** in Future AGI and select the `restate-agent` project. Each invocation is one trace: the Restate `ingress`, `invocation-start`, `invocation-attempt` and `invocation-end` spans, with the `ChatCompletion` and `get_weather` spans from your service under the attempt that ran them.
+
+<Frame>
+  <img src="/img/ai/ecosystem-integrations/future-agi.png" alt="Future AGI trace tree showing Restate invocation spans with ChatCompletion and get_weather spans under the invocation attempt" />
+</Frame>
+
+Direct export sends span data as recorded, including prompts, responses, host names and Virtual Object keys. To remove them before they leave your network, route both exporters through the OpenTelemetry Collector setup in the Future AGI guide.
