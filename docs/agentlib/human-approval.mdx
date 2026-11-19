@@ -34,46 +34,45 @@ When the model calls the tool, agentlib:
 2. Waits on a durable [signal](/develop/ts/external-events) for the decision.
 3. Runs the tool if the decision is `true`. If the decision is `false`, the tool doesn't run, and the model receives a denied result.
 
-Run the agent in a Virtual Object that stores the request and resolves the signal:
+Publish each request to your review system from `onApproval`. Wrap the notification in `restate.run` so Restate journals it. The review system calls `approve` when the reviewer makes a decision:
 
-```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_object"} 
-export const ticketApproval = restate.object({
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_service"}
+export const ticketApproval = restate.service({
   name: "TicketApproval",
   handlers: {
     *ask(message: string) {
-      try {
-        const result = yield* support.run(message, {
-          *onApproval(request) {
-            // Publish the request: store it, or notify a person through restate.run.
-            restate.state().set("approval", request);
-          },
-        });
-        if (result.status !== "completed") return result.output ?? result.reason;
-        return result.output;
-      } finally {
-        restate.state().clear("approval");
-      }
-    },
-    *status() {
-      return yield* restate.sharedState().get<ApprovalRequest>("approval");
+      const result = yield* support.run(message, {
+        *onApproval(request) {
+          yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+        },
+      });
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
     },
     *approve({invocationId, signalName, approved}: {invocationId: string; signalName: string; approved: boolean}) {
       restate.invocation(invocationId).signal(signalName).resolve(approved);
       return true;
     },
   },
-  options: {handlers: {status: {shared: true}, approve: {shared: true}}},
 });
 ```
 
-`status` and `approve` are shared handlers, so they run while `ask` waits. The `finally` block clears the request when the run ends, including when it fails.
-This example stores one request. If the model can call several tools that need approval in one step, store each request under its `signalName`.
+`notifyReviewer` is a mock for your review system's notification API:
 
-To approve a request, read it and send the decision:
+```typescript {"CODE_LOAD::agentlib/src/services.ts#notify_reviewer"}
+export async function notifyReviewer(request: ApprovalRequest) {
+  // Replace this mock with your review system's notification API.
+  console.log("Review requested:", request);
+}
+```
+
+Use `invocationId` and `signalName` together as an idempotency key for the notification, since a crash before Restate journals its result can cause it to be sent again.
+Each approval request has its own signal name, so the review system can return decisions independently when several tool calls need approval.
+
+The review system sends the decision to `approve`, using the `invocationId` and `signalName` from the notification:
 
 ```shell
-curl localhost:8080/restate/call/TicketApproval/t1/status
-curl localhost:8080/restate/call/TicketApproval/t1/approve \
+curl localhost:8080/restate/call/TicketApproval/approve \
   --json '{"invocationId": "inv_...", "signalName": "...", "approved": true}'
 ```
 
@@ -110,12 +109,14 @@ const refunds = asyncTool({
 `onHumanApproval` replaces the built-in wait and returns the decision. Any `onApproval` handlers still publish the request first.
 To deny a request that nobody answers in time, race the signal against a timer:
 
-```typescript {"CODE_LOAD::agentlib/src/approval.ts#timeout"} 
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#timeout"}
 const timedSupport = agent({
   model,
   tools: {refunds},
+  *onApproval(request) {
+    yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+  },
   *onHumanApproval(request) {
-    restate.state().set("approval", request);
     const {tag, future} = yield* restate.select({
       decision: restate.signal<boolean>(request.signalName),
       timeout: restate.sleep({hours: 24}),
@@ -126,7 +127,7 @@ const timedSupport = agent({
 });
 ```
 
-The example stores the request in object state, so run the agent from a Virtual Object handler, as in the `TicketApproval` object above.
+The review system sends its decision to the same `approve` handler shown above.
 You can also use `onHumanApproval` to call an approval service with `restate.client` instead of waiting for a signal.
 
 ## Approval tool
