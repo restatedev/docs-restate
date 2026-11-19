@@ -139,8 +139,8 @@ const guide = agent({model, instructions: "Answer questions about Restate from i
 // <start_tool_search>
 const catalogAgent = agent({
   model,
-  tools: {lookupTicket, refunds: serviceTool(refundIface)},
-  toolSearch: false, // list deferred tools from the start
+  tools: {lookupTicket, refunds: serviceTool({iface: refundIface, deferred: true})},
+  toolSearch: false, // list the deferred refunds tool from the start
 });
 // <end_tool_search>
 

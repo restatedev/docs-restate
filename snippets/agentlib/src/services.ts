@@ -1,6 +1,13 @@
 // Stub services and clients that the agent snippets call.
 import * as restate from "@restatedev/restate-sdk-gen";
-import type {JsonValue} from "@restatedev/agentlib";
+import type {ApprovalRequest, JsonValue} from "@restatedev/agentlib";
+
+// <start_notify_reviewer>
+export async function notifyReviewer(request: ApprovalRequest) {
+  // Replace this mock with your review system's notification API.
+  console.log("Review requested:", request);
+}
+// <end_notify_reviewer>
 
 export const inventory = restate.object({
   name: "Inventory",

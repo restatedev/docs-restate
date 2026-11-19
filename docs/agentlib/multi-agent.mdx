@@ -4,7 +4,7 @@ description: "Compose agents in code, over service calls, or within a single run
 icon: "users"
 ---
 
-Multi-agent systems in agentlib are ordinary Restate code. Your handler decides the control flow, and each agent run is a durable step that returns a result.
+Multi-agent systems in agentlib are ordinary Restate code. Your handler decides the control flow, and each agent run journals its model calls and tool calls and returns a result.
 
 ## Patterns
 
@@ -66,37 +66,102 @@ return code;
 Run agents concurrently, keep the first successful answer, and cancel the other runs:
 
 ```typescript {"CODE_LOAD::agentlib/src/multi_agent.ts#race"} 
-function* answerWith(name: string, candidate: Agent<undefined>, question: string) {
-  const result = yield* candidate.run(question, {name});
+function* answerWith(name: string, candidate: Agent<undefined>, question: string, messages: readonly Message[] = []) {
+  const result = yield* candidate.run(question, {name, messages});
   if (result.status !== "completed") throw new TerminalError(`${name} ${result.status}`);
-  return result.output;
+  return result;
+}
+
+function* firstSuccess<T>(tasks: restate.Task<T>[]) {
+  try {
+    return yield* restate.any(tasks); // the first success wins
+  } catch (error) {
+    // Every run failed terminally: stop retrying the handler
+    const failures: unknown[] = error instanceof AggregateError ? error.errors : [];
+    if (failures.length && failures.every((e) => e instanceof TerminalError)) {
+      throw new TerminalError("No agent produced an answer");
+    }
+    throw error;
+  } finally {
+    for (const task of tasks) task.interrupt(); // cancel the other runs
+    yield* restate.allSettled(tasks);
+  }
 }
 
 export const racingAgents = restate.service({
   name: "RacingAgents",
   handlers: {
     *ask(question: string) {
-      const tasks = [
+      const winner = yield* firstSuccess([
         restate.spawn(answerWith("fast", fast, question)),
         restate.spawn(answerWith("thorough", thorough, question)),
-      ];
-      try {
-        return yield* restate.any(tasks); // the first success wins
-      } catch (error) {
-        // Every run failed: stop retrying the handler
-        if (error instanceof AggregateError) throw new TerminalError("No agent produced an answer");
-        throw error;
-      } finally {
-        for (const task of tasks) task.interrupt(); // cancel the other run
-        yield* restate.allSettled(tasks);
-      }
+      ]);
+      return winner.output;
     },
   },
 });
 ```
 
-`restate.any` returns the first successful result and ignores failed runs. If every run fails, it throws an `AggregateError`, which Restate would retry, so the handler converts it to a `TerminalError`.
+`restate.any` returns the first successful result and ignores failed runs. If every run fails, it throws an `AggregateError`, which Restate retries. When every run failed with a `TerminalError`, a retry would fail the same way, so `firstSuccess` throws a `TerminalError` instead.
 Interrupting the losing task cancels its model call and tools, and `restate.allSettled` waits until the cleanup finishes.
+
+## Conversations
+
+A [`LazyStateConversation`](/agentlib/sessions#conversation-history) accepts the messages of one run at a time. A run loads the conversation when it starts and saves its messages when it ends. Two runs that share a conversation in one handler load the same version: the first run saves, and the second throws `ConversationConflictError`, which fails the handler. The messages of the first run stay in state.
+
+### Parallel runs
+
+Give each run its own conversation with `stateKey`:
+
+```typescript {"CODE_LOAD::agentlib/src/multi_agent.ts#parallel_conversations"} 
+export const tripSession = restate.object({
+  name: "TripSession",
+  handlers: {
+    *plan(request: string) {
+      const [flights, hotels] = yield* restate.all([
+        restate.spawn(flightAgent.run(request, {
+          name: "flights",
+          conversation: new LazyStateConversation({stateKey: "conversation/flights"}),
+        })),
+        restate.spawn(hotelAgent.run(request, {
+          name: "hotels",
+          conversation: new LazyStateConversation({stateKey: "conversation/hotels"}),
+        })),
+      ]);
+      return {flights: flights.output, hotels: hotels.output};
+    },
+  },
+});
+```
+
+Each agent receives only its own earlier messages. See [Storage layout](/agentlib/sessions#storage-layout) for the keys that each conversation uses.
+
+### Racing runs
+
+Racing runs can't share a conversation either: a run that stops early, for example at `maxSteps`, saves its messages, and the run that would win then fails with a conflict. To keep one history that contains the winning answer, load the conversation once, pass its messages to every run, and save only the winner's messages. The handler uses `answerWith` and `firstSuccess` from [Racing](#racing):
+
+```typescript {"CODE_LOAD::agentlib/src/multi_agent.ts#race_conversation"} 
+export const racingSession = restate.object({
+  name: "RacingSession",
+  handlers: {
+    *ask(question: string) {
+      const conversation = new LazyStateConversation();
+      const {messages, version} = yield* conversation.load();
+      const winner = yield* firstSuccess([
+        restate.spawn(answerWith("fast", fast, question, messages)),
+        restate.spawn(answerWith("thorough", thorough, question, messages)),
+      ]);
+      // Save only the winner's turn: its messages after the loaded history
+      yield* conversation.append(winner.messages.slice(messages.length), version);
+      return winner.output;
+    },
+  },
+});
+```
+
+- `load` returns the messages and the version. `append` saves the new messages if the version is unchanged.
+- The runs receive `messages` instead of the conversation, so the losing runs save nothing.
+- A run that receives `messages` doesn't [compact](/agentlib/sessions#between-runs) the conversation. If you set `compaction` on the `LazyStateConversation`, call `yield* conversation.compact()` before `load`.
 
 ## Worker services
 
@@ -150,7 +215,7 @@ const lead = agent({
 ```
 
 - **`agentTool`:** The sub-agent receives the task as a new conversation, together with the parent's `context`. Its answer becomes the tool result, and its token usage counts toward the parent's usage. Its progress events reach the parent as `tool-progress` events, and its approval requests reach the parent's `onApproval` handlers. The sub-agent's own `onHumanApproval` and guardrails apply to its tool calls, not the parent's. A sub-agent that stops early returns a tool error with the code `agent_stopped`. Pass `background: true` to let the parent continue while the sub-agent runs.
-- **`handoff`:** After the current tool calls finish, the target agent's model, instructions, and tools take over the same run and its history. Tools that you passed to `run` stay available. The output schema, limits, `beforeRun`, and `afterRun` of the agent that started the run stay in effect.
+- **`handoff`:** After the current tool calls finish, the target agent's model, instructions, and tools take over the same run and its history. Tools that you passed to `run` stay available. The output schema, limits, `beforeRun`, `beforeSteering`, and `afterRun` of the agent that started the run stay in effect, and its `beforeStep`, `beforeTool`, and `afterTool` keep running together with the target's.
 
 ## Forks
 

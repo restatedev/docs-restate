@@ -46,7 +46,7 @@ function* signalActiveTurn(name: string, value: string): restate.Operation<boole
 }
 ```
 
-- **Steering:** The run adds the message as a user message before its next step. The model receives it after the current tool calls finish. Steering doesn't undo tool calls that already started. A message that arrives during a model call discards that call's response, and the run asks the model again.
+- **Steering:** The run records the message in its history as a user message, with the steering text in a JSON note, and the conversation saves it. The model receives it in the next step, after the current tool calls finish. A running `run_program` call doesn't delay it: the program continues in the background, and the model receives its result in a later step. Steering doesn't undo tool calls that already started. A message that arrives during a model call discards that call's response, and the run asks the model again in a new step, which counts toward `maxSteps`.
 - **Interruption:** The run cancels unfinished tool calls and the child invocations of `handlerTool`, `serviceTool`, and `awaitChild`, and returns `{status: "interrupted", reason, output}`, with a summary in `output`.
 
 The `chat` handler stores its invocation ID in state, so `steer` and `interrupt` know which invocation to signal. It clears the ID in `finally`, so a failed run leaves no stale ID behind.
@@ -82,7 +82,7 @@ On replay, the run delivers the same events again. Use journaled operations in `
 The run waits for `onProgress` before it continues, so start slow work with a one-way send instead of waiting for it.
 The [progress feed lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/16_progress_feed.ts) implements the `ProgressFeed` object that clients subscribe to.
 
-A tool reports partial progress with `context.progress(value)`:
+A `tool` reports partial progress with `context.progress(value)`. The context of an `asyncTool` has no `progress`:
 
 ```typescript {"CODE_LOAD::agentlib/src/steering.ts#tool_progress"} 
 const auditor = agent({
@@ -136,7 +136,7 @@ Until then, the chunks exist only in the memory of the service process.
 
 | Situation | Result |
 |---|---|
-| The process crashes or the provider fails during the stream | The model call has no journaled response, so Restate runs it again from the beginning. `onChunk` receives a new `start` for the same step, followed by the complete text. |
+| The process crashes, or the provider fails with a retryable error, during the stream | The model call has no journaled response, so Restate runs it again from the beginning. `onChunk` receives a new `start` for the same step, followed by the complete text. |
 | The process crashes after the response is journaled | On replay, Restate returns the journaled response without calling the provider. `onChunk` receives no events for that step. |
 | A client disconnects during the stream and reconnects | Restate has no chunks to resend. The client receives only what your handler stores or sends, such as progress events or the run's result. |
 

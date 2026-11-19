@@ -24,6 +24,52 @@ export const chatSession = restate.object({
 });
 // <end_conversation>
 
+// The handlers of the lazy state example, as on the steering page.
+function* doTurn(message: string) {
+  restate.state().set("active", {invocationId: restate.handlerRequest().id});
+  try {
+    const result = yield* assistant.run(message, {
+      conversation: new LazyStateConversation(),
+      steeringSignal: "steering",
+      interruptSignal: "interrupt",
+    });
+    if (result.status !== "completed") return result.output ?? result.reason;
+    return result.output;
+  } finally {
+    restate.state().clear("active");
+  }
+}
+
+function* history() {
+  return yield* new LazyStateConversation().page();
+}
+
+function* signalActiveTurn(name: string, value: string): restate.Operation<boolean> {
+  const active = yield* restate.sharedState().get<{invocationId: string}>("active");
+  if (!active) return false;
+  restate.invocation(active.invocationId).signal(name).resolve(value);
+  return true;
+}
+
+function* steer(message: string) {
+  return yield* signalActiveTurn("steering", message);
+}
+
+function* interrupt(reason: string) {
+  return yield* signalActiveTurn("interrupt", reason);
+}
+
+// <start_lazy_state>
+export const aiSession = restate.object({
+  name: "AiSession",
+  handlers: {doTurn, history, steer, interrupt},
+  options: {
+    state: {preload: false}, // fetch conversation chunks when they are read
+    handlers: {history: {shared: true}, steer: {shared: true}, interrupt: {shared: true}},
+  },
+});
+// <end_lazy_state>
+
 export const compactedChat = restate.object({
   name: "CompactedChat",
   handlers: {

@@ -5,7 +5,7 @@ icon: "wrench"
 ---
 
 You pass tools as a map, on the agent definition (`tools: {name: tool}`) or on a single run (`run(input, {tools})`).
-The map key is the tool name that the model uses.
+The map key is the tool name that the model uses: 1 to 64 letters, digits, `_`, or `-`.
 Tool inputs are Zod schemas, and agentlib validates the model's arguments before the tool runs. For `serviceTool`, the called handler validates the input.
 
 | Tool | Use it to |
@@ -40,9 +40,9 @@ const support = agent({
 ```
 
 - agentlib journals the result once `execute` succeeds. On replay, the tool returns the journaled result without running `execute` again. The result must be JSON.
-- A thrown `Error` is retried under `retry`, which defaults to three attempts. `retry: {maxAttempts: 1}` turns off these retries, but a crash before agentlib journals the result still runs `execute` again. Make external writes idempotent.
+- A thrown `Error` is retried under `retry`, which defaults to three attempts. `retry: {maxAttempts: 1}` turns off these retries, but a crash before agentlib journals the result still runs `execute` again. Make external writes idempotent. After the last attempt, the model receives the error with the code `tool_failed`.
 - A `TerminalError`, or a `ToolError` with a code such as `not_found`, isn't retried. The model receives the error as the tool result, and the run continues. An `AgentTerminalError` stops the run instead. See [Error handling](/agentlib/error-handling).
-- `signal` aborts when the tool call is cancelled, for example because the run is interrupted. Pass it to APIs such as `fetch`. `callId` is stable across retries. Combine it with `invocationId` and `name` into an idempotency key for external writes, for example `${invocationId}:${name}:${callId}`.
+- `signal` aborts when the tool call is cancelled, for example because the run is interrupted, and when the invocation attempt ends. Pass it to APIs such as `fetch`. `callId` is stable across retries. Combine it with `invocationId` and the run's `name` into an idempotency key for external writes, for example `${invocationId}:${name}:${callId}`.
 
 ## Generator tools
 
@@ -121,7 +121,7 @@ const issueRefund = serviceTool({iface: refundIface, handler: "issueRefund"});
 ```
 
 - For a Virtual Object or a Workflow, declared with `restate.iface.object` or `restate.iface.workflow`, also pass a `key`: a string, or a function that returns the key for the handler input.
-- agentlib doesn't validate `serviceTool` input. The called handler validates it against the input schema of its `iface.schemas`.
+- agentlib doesn't validate `serviceTool` input. The called handler validates it against the input schema of its `iface.schemas`. If the input doesn't match, the call fails, and the model receives the error.
 - Each tool call is a durable child invocation. Interrupting the run cancels it.
 - If the handler throws a `ToolError`, the model receives its code. Configure retries with the [retry policy](/services/configuration#retries) of the called handler.
 
@@ -178,10 +178,12 @@ export const docsGuide = restate.service({
 | `allow` | Filter the tools by their name on the server, before the namespace prefix. |
 | `token` | A generator function that returns a bearer token. |
 | `onAuthorizationRequired` | A generator function that refreshes the credentials when the server requires authorization. Without it, the call fails. |
-| `retry` | Retry policy for tool calls. Default: three attempts. Each call sends an `Idempotency-Key` header. |
+| `retry` | Retry policy for tool calls. Default: three attempts. Each call sends an `Idempotency-Key` header, but a server that ignores the header runs a retried call again. |
 | `timeoutMs` | Timeout per request. Default: 60000. |
 
-agentlib skips server tools with an invalid name or an unsupported input schema, and lists them in the result's `warnings`.
+agentlib renames a server tool whose prefixed name isn't a valid tool name, by replacing invalid characters and adding a hash.
+It skips tools with a duplicate name, an input schema over 64000 characters, or an unsupported input schema, and lists them in the result's `warnings`.
+`mcpTools` fails with a `TerminalError` if the server lists more than 128 tools, before `allow` filters them.
 
 ## Tool search
 
@@ -193,8 +195,8 @@ To list deferred tools from the start, set `toolSearch: false`:
 ```typescript {"CODE_LOAD::agentlib/src/tools.ts#tool_search"} 
 const catalogAgent = agent({
   model,
-  tools: {lookupTicket, refunds: serviceTool(refundIface)},
-  toolSearch: false, // list deferred tools from the start
+  tools: {lookupTicket, refunds: serviceTool({iface: refundIface, deferred: true})},
+  toolSearch: false, // list the deferred refunds tool from the start
 });
 ```
 
@@ -247,10 +249,10 @@ const researcher = agent({
 
 `sleepTool` lets the model wait durably, and `cancelOperationTool` lets it cancel a background tool call.
 
-A run doesn't return while background calls are pending: a final answer waits for their results. If the run reaches `maxSteps` first, it cancels the pending calls and stops.
+A run doesn't complete while background calls are pending. If the model returns a final answer, the run discards it, waits for the next background result, and calls the model again. If the run reaches `maxSteps` first, it cancels the pending calls and stops with `max_steps`.
 
 ## Tools for one run
 
-`run(input, {tools})` adds tools to one run, next to the agent's own tools.
+`run(input, {tools})` adds tools to one run, next to the agent's own tools. A run tool can't use the name of an agent tool.
 Use this for tools that depend on the request, such as the MCP tools above, or tools that a client UI provides.
 The [AG-UI lesson](https://github.com/restatedev/agentlib/blob/main/packages/examples/src/lessons/18_ag_ui.ts) turns the tools of an AG-UI client into run tools.

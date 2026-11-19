@@ -1,7 +1,8 @@
 import * as restate from "@restatedev/restate-sdk-gen";
-import {agent, asyncTool, humanApprovalTool, type ApprovalRequest} from "@restatedev/agentlib";
+import {agent, asyncTool, humanApprovalTool} from "@restatedev/agentlib";
 import {z} from "zod";
 import {model} from "./model.js";
+import {notifyReviewer} from "./services.js";
 
 // <start_needs_approval>
 const support = agent({
@@ -20,35 +21,26 @@ const support = agent({
 });
 // <end_needs_approval>
 
-// <start_approval_object>
-export const ticketApproval = restate.object({
+// <start_approval_service>
+export const ticketApproval = restate.service({
   name: "TicketApproval",
   handlers: {
     *ask(message: string) {
-      try {
-        const result = yield* support.run(message, {
-          *onApproval(request) {
-            // Publish the request: store it, or notify a person through restate.run.
-            restate.state().set("approval", request);
-          },
-        });
-        if (result.status !== "completed") return result.output ?? result.reason;
-        return result.output;
-      } finally {
-        restate.state().clear("approval");
-      }
-    },
-    *status() {
-      return yield* restate.sharedState().get<ApprovalRequest>("approval");
+      const result = yield* support.run(message, {
+        *onApproval(request) {
+          yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+        },
+      });
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
     },
     *approve({invocationId, signalName, approved}: {invocationId: string; signalName: string; approved: boolean}) {
       restate.invocation(invocationId).signal(signalName).resolve(approved);
       return true;
     },
   },
-  options: {handlers: {status: {shared: true}, approve: {shared: true}}},
 });
-// <end_approval_object>
+// <end_approval_service>
 
 // <start_conditional>
 const refunds = asyncTool({
@@ -67,8 +59,10 @@ const refunds = asyncTool({
 const timedSupport = agent({
   model,
   tools: {refunds},
+  *onApproval(request) {
+    yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+  },
   *onHumanApproval(request) {
-    restate.state().set("approval", request);
     const {tag, future} = yield* restate.select({
       decision: restate.signal<boolean>(request.signalName),
       timeout: restate.sleep({hours: 24}),

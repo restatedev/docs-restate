@@ -51,7 +51,7 @@ When the provider throttles a call, the next attempt waits for the delay that th
 Some failures can't be fixed by retrying, such as a missing API key, a feature that the provider doesn't support, or a request that the provider rejects.
 `aiModel` fails these calls immediately, and `run` throws a `TerminalError`.
 
-A response that the model can fix goes back to the model instead: an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, or a reply that announces tool calls without making any.
+A response that the model can fix goes back to the model instead: an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, a reply that announces tool calls without making any, or text longer than `maxOutputChars`.
 agentlib discards the reply, adds a note with the reason, and starts the next step. See [Error handling](/agentlib/error-handling#model-call-failures).
 
 ## Prompt caching
@@ -73,6 +73,7 @@ const thinkingModel = aiModel({
 ```
 
 For OpenAI, set `reasoningEffort`. For Gemini, set `thinkingConfig`.
+OpenAI counts reasoning tokens toward the reply limit, which is the agent's `maxOutputTokens` (default 4096). Raise it if replies are cut off.
 
 `aiModel` keeps the model's reasoning and sends it back on later requests, across the steps of a run and the runs of a conversation.
 Don't edit the stored reasoning: providers reject reasoning that was changed.
@@ -95,7 +96,7 @@ agentlib still validates each tool's input against its Zod schema and the final 
 
 ## Token usage
 
-`result.usage` sums the tokens of every model call in the run, including the summary of a stopped run, compaction within the run, sub-agents run with `agentTool`, and forks. It doesn't count the compaction of a `LazyStateConversation` or model calls that tools or hooks make:
+`result.usage` sums the tokens of every model call in the run, including the summary of a stopped or interrupted run, compaction within the run, sub-agents run with `agentTool`, and forks. It doesn't count the compaction of a `LazyStateConversation` or model calls that tools or hooks make:
 
 | Field | Description |
 |---|---|
@@ -140,5 +141,5 @@ const customModel = journaledModel(async (request, {signal}) => {
 });
 ```
 
-A response is either `{type: "final", text}` or `{type: "tool_calls", calls}`. Throw a `TerminalError` for a failure that the next call would repeat; the run then fails.
+A response is either `{type: "final", text}` or `{type: "tool_calls", calls}`. Throw a `TerminalError` for a failure that a retry would repeat, such as an invalid API key. The run then fails instead of retrying.
 Include `usage` in the response, so that `result.usage` counts the call's tokens.

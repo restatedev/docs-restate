@@ -36,7 +36,7 @@ When the model calls the tool, agentlib:
 
 Publish each request to your review system from `onApproval`. Wrap the notification in `restate.run` so Restate journals it. The review system calls `approve` when the reviewer makes a decision:
 
-```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_service"}
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_service"} 
 export const ticketApproval = restate.service({
   name: "TicketApproval",
   handlers: {
@@ -59,7 +59,7 @@ export const ticketApproval = restate.service({
 
 `notifyReviewer` is a mock for your review system's notification API:
 
-```typescript {"CODE_LOAD::agentlib/src/services.ts#notify_reviewer"}
+```typescript {"CODE_LOAD::agentlib/src/services.ts#notify_reviewer"} 
 export async function notifyReviewer(request: ApprovalRequest) {
   // Replace this mock with your review system's notification API.
   console.log("Review requested:", request);
@@ -85,7 +85,9 @@ An `ApprovalRequest` contains:
 | `question` | A question for the approver, when the request has one |
 | `details` | Application data, for example the policy that asked for approval |
 
-You can also set `onApproval` on the agent definition instead of on each run.
+If the agent runs in a Virtual Object, make `approve` a shared handler, so the decision doesn't wait for the object's lock, which the waiting run holds.
+
+You can also set `onApproval` on the agent definition. If both the agent and the run set it, agentlib calls both.
 
 ## Conditional approval
 
@@ -109,7 +111,7 @@ const refunds = asyncTool({
 `onHumanApproval` replaces the built-in wait and returns the decision. Any `onApproval` handlers still publish the request first.
 To deny a request that nobody answers in time, race the signal against a timer:
 
-```typescript {"CODE_LOAD::agentlib/src/approval.ts#timeout"}
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#timeout"} 
 const timedSupport = agent({
   model,
   tools: {refunds},
@@ -145,4 +147,4 @@ const planner = agent({
 `onApproval` receives the request, with the model's question in `question`.
 The tool runs in the background: the model receives a pending result, and the decision in a later step. To block a specific tool until a person approves it, use `needsApproval` on that tool.
 
-A tool [guardrail](/agentlib/guardrails), `before` or `beforeTool`, can also ask for approval with `yield* context.approve(input, {question, details})`.
+A tool's `before` guardrail or the agent's `beforeTool` hook can also ask for approval with `yield* ctx.approve(input, {question, details})`, where `ctx` is the hook's second argument. See [Guardrails](/agentlib/guardrails).

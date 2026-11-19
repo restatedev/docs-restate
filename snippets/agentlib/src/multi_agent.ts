@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk-gen";
 import {TerminalError} from "@restatedev/restate-sdk";
-import {agent, agentTool, forkAgentTool, handoff, type Agent} from "@restatedev/agentlib";
+import {agent, agentTool, forkAgentTool, handoff, LazyStateConversation, type Agent, type Message} from "@restatedev/agentlib";
 import {z} from "zod";
 import {model} from "./model.js";
 
@@ -67,34 +67,84 @@ const fast = agent({model, instructions: "Answer quickly and briefly."});
 const thorough = agent({model, instructions: "Answer thoroughly."});
 
 // <start_race>
-function* answerWith(name: string, candidate: Agent<undefined>, question: string) {
-  const result = yield* candidate.run(question, {name});
+function* answerWith(name: string, candidate: Agent<undefined>, question: string, messages: readonly Message[] = []) {
+  const result = yield* candidate.run(question, {name, messages});
   if (result.status !== "completed") throw new TerminalError(`${name} ${result.status}`);
-  return result.output;
+  return result;
+}
+
+function* firstSuccess<T>(tasks: restate.Task<T>[]) {
+  try {
+    return yield* restate.any(tasks); // the first success wins
+  } catch (error) {
+    // Every run failed terminally: stop retrying the handler
+    const failures: unknown[] = error instanceof AggregateError ? error.errors : [];
+    if (failures.length && failures.every((e) => e instanceof TerminalError)) {
+      throw new TerminalError("No agent produced an answer");
+    }
+    throw error;
+  } finally {
+    for (const task of tasks) task.interrupt(); // cancel the other runs
+    yield* restate.allSettled(tasks);
+  }
 }
 
 export const racingAgents = restate.service({
   name: "RacingAgents",
   handlers: {
     *ask(question: string) {
-      const tasks = [
+      const winner = yield* firstSuccess([
         restate.spawn(answerWith("fast", fast, question)),
         restate.spawn(answerWith("thorough", thorough, question)),
-      ];
-      try {
-        return yield* restate.any(tasks); // the first success wins
-      } catch (error) {
-        // Every run failed: stop retrying the handler
-        if (error instanceof AggregateError) throw new TerminalError("No agent produced an answer");
-        throw error;
-      } finally {
-        for (const task of tasks) task.interrupt(); // cancel the other run
-        yield* restate.allSettled(tasks);
-      }
+      ]);
+      return winner.output;
     },
   },
 });
 // <end_race>
+
+const flightAgent = agent({model, instructions: "Find flights for the trip."});
+const hotelAgent = agent({model, instructions: "Find hotels for the trip."});
+
+// <start_parallel_conversations>
+export const tripSession = restate.object({
+  name: "TripSession",
+  handlers: {
+    *plan(request: string) {
+      const [flights, hotels] = yield* restate.all([
+        restate.spawn(flightAgent.run(request, {
+          name: "flights",
+          conversation: new LazyStateConversation({stateKey: "conversation/flights"}),
+        })),
+        restate.spawn(hotelAgent.run(request, {
+          name: "hotels",
+          conversation: new LazyStateConversation({stateKey: "conversation/hotels"}),
+        })),
+      ]);
+      return {flights: flights.output, hotels: hotels.output};
+    },
+  },
+});
+// <end_parallel_conversations>
+
+// <start_race_conversation>
+export const racingSession = restate.object({
+  name: "RacingSession",
+  handlers: {
+    *ask(question: string) {
+      const conversation = new LazyStateConversation();
+      const {messages, version} = yield* conversation.load();
+      const winner = yield* firstSuccess([
+        restate.spawn(answerWith("fast", fast, question, messages)),
+        restate.spawn(answerWith("thorough", thorough, question, messages)),
+      ]);
+      // Save only the winner's turn: its messages after the loaded history
+      yield* conversation.append(winner.messages.slice(messages.length), version);
+      return winner.output;
+    },
+  },
+});
+// <end_race_conversation>
 
 const planner = agent({
   model,

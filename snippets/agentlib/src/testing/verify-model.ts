@@ -16,7 +16,8 @@ export const verifyModel = journaledModel(async (request): Promise<ModelResponse
   }
   if (toolMessages.length === 0) {
     if (names.includes("closeTicket")) {
-      return {type: "tool_calls", calls: [{id: "c1", name: "closeTicket", input: {ticketId: "T-42"}}]};
+      const ticketIds = input.match(/T-\d+/g) ?? ["T-42"];
+      return {type: "tool_calls", calls: ticketIds.map((ticketId, i) => ({id: `c${i + 1}`, name: "closeTicket", input: {ticketId}}))};
     }
     if (names.includes("bookHotel")) {
       return {type: "tool_calls", calls: [{id: "b1", name: "bookHotel", input: {hotelId: input}}]};
@@ -26,6 +27,9 @@ export const verifyModel = journaledModel(async (request): Promise<ModelResponse
     }
   }
   if (toolMessages.length > 0) {
+    if (names.includes("closeTicket")) {
+      return {type: "final", text: JSON.stringify(toolMessages.map((message) => message.result))};
+    }
     const last = toolMessages.at(-1)!;
     return {type: "final", text: last.role === "tool" ? JSON.stringify(last.result) : ""};
   }

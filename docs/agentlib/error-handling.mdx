@@ -1,17 +1,17 @@
 ---
 title: "Error handling"
-description: "Decide whether the model handles a failure, the run stops, or Restate retries."
+description: "Decide whether the model handles a failure, the run fails, or Restate retries."
 icon: "triangle-exclamation"
 ---
 
-The type of an error decides what happens to it: the model handles it, the run stops, or Restate retries it.
+The type of an error decides what happens to it: the model handles it, the run fails, or Restate retries it.
 The same rule applies in tools, in handlers that tools call, in sub-agents, and in guardrails.
 
 ## Error types
 
-| Error | Retried by | What happens |
+| Error | Handled by | What happens |
 |---|---|---|
-| `TerminalError`, or `ToolError` with a code | The model | The model receives the error, as the tool result or as a note before its next step, and decides what to do next. |
+| `TerminalError` or `ToolError` | The model | The model receives the error, as the tool result or as a note before its next step, and decides what to do next. |
 | `AgentTerminalError` | Nobody | The run fails, and so does every agent run that encloses it. The handler fails too, unless it catches the error. |
 | Any other error | Restate | Restate retries the step or the invocation. |
 
@@ -33,8 +33,8 @@ const refund: Tool<{customerId: string}> = asyncTool({
 
 - Throw `TerminalError` (from `@restatedev/restate-sdk`) when the model should handle a failure, for example by trying another approach.
 - Throw `ToolError` (from `@restatedev/agentlib`) to also give the model an error code, such as `not_found`.
-- Throw `AgentTerminalError` when the run must stop, for example because the request it serves is no longer valid.
-- Let other errors propagate. In an `asyncTool`, they're retried under the tool's `retry` policy, three attempts by default, and the model receives `tool_failed` once the attempts run out. Model calls are retried under the model's [retry policy](#model-call-failures). In a `tool`, a guardrail, or another hook, the error fails the run, and Restate retries the invocation under the policy configured at the [service or handler level](/services/configuration#retries), or otherwise the [Restate server's default policy](/guides/error-handling#at-invocation-level).
+- Throw `AgentTerminalError` when the run must fail, for example because the request it serves is no longer valid.
+- Let other errors propagate. In an `asyncTool`, they're retried under the tool's `retry` policy, three attempts by default, and the model receives `tool_failed` once the attempts run out. Model calls are retried under the model's [retry policy](/agentlib/models#retries). In a `tool`, a guardrail, or another hook, the error fails the run, and Restate retries the invocation under the policy configured at the [service or handler level](/services/configuration#retries), or otherwise the [Restate server's default policy](/guides/error-handling#at-invocation-level).
 
 ## What the model receives
 
@@ -50,8 +50,8 @@ A tool call that a guardrail or an approver rejects returns `{"status": "denied"
 A `TerminalError` from elsewhere in the run, such as a `beforeRun` guardrail, is passed to the model as a note before its next model call.
 Notes aren't saved to the conversation. Each note emits an `error-note` [progress event](/agentlib/steering-and-progress#progress-events) with the error's origin, code, and message.
 
-Some failures can't be passed to the model, because no model step follows them. They fail the run instead: a failed model call, a failure to load or save the conversation or to list skills, an `afterRun` rejection or error for a stopped or interrupted run, and an error in `onProgress` for a run event or a `tool-end` event.
-An error in `onProgress` for another tool event fails only that tool call. A `TerminalError` in `beforeSteering` drops the steering message instead of reaching the model.
+Some failures fail the run instead of reaching the model: a failed model call, a failure to load or save the conversation or to list skills, an `afterRun` rejection or error for a stopped or interrupted run, and an error in `onProgress` for a run event or a `tool-end` event.
+A `TerminalError` in `onProgress` for another tool event fails only that tool call. A `TerminalError` in `beforeSteering` drops the steering message instead of reaching the model.
 
 Common codes:
 
@@ -99,7 +99,7 @@ Pass `{errorCode}` to `AgentTerminalError` to set the status code that the handl
 ## Model call failures
 
 A model response that the model can fix goes back to the model: agentlib discards the response, adds a note with the reason, and starts the next step.
-This covers an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, and text longer than `maxOutputChars`.
+This covers an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, a reply that announces tool calls without making any, and text longer than `maxOutputChars`.
 Each such step counts toward `maxSteps`.
 
 A model call that fails is retried under the model's [retry policy](/agentlib/models#retries). If the attempts run out, or the failure can't be fixed by retrying, `run` throws a `TerminalError`.
@@ -109,4 +109,4 @@ A context overflow is handled separately: see [Sessions](/agentlib/sessions#cont
 
 - **Invocation cancellation:** When you [cancel the invocation](/services/invocation/managing-invocations#cancel), the run stops at its next durable operation. Unfinished tool calls are interrupted, child invocations are cancelled, nothing is saved, and the handler fails with a `CancelledError`. The model never receives the cancellation.
 - **Interruption:** An [interrupted](/agentlib/steering-and-progress#steering-and-interruption) run isn't an error. It returns the status `interrupted`, and unfinished tool calls are recorded as cancelled.
-- **Background tool cancellation:** When the model cancels a background tool call with `cancelOperationTool`, the call's result is `{status: "cancelled", message}`, with the model's reason as the message.
+- **Background tool cancellation:** When the model cancels a background tool call with `cancelOperationTool`, the call's result is `{status: "cancelled", message}`, with the model's reason as the message, or `Cancelled by the agent` if the model gives no reason.

@@ -1,15 +1,15 @@
 ---
-title: "Guardrails and Hooks"
+title: "Guardrails and hooks"
 description: "Enforce policies on tool calls, inputs, and answers, and keep sensitive data out of the conversation."
 icon: "shield-halved"
 ---
 
-Guardrails are functions that check data as it enters a run: the input, steering messages, tool calls, tool output, and the final answer.
+Guardrails are functions that check a run's input, steering messages, tool calls, tool output, and final answer.
 The model can't bypass them, because they run in your code.
 
 ## Tool guardrails
 
-Add `before` to a tool. Return a string to deny the call with that reason, `false` to deny it without a reason, and nothing or `true` to allow it:
+Add `before` to a tool. Return a string to deny the call with that reason, `false` to deny it with a generic reason, and nothing or `true` to allow it:
 
 ```typescript {"CODE_LOAD::agentlib/src/guardrails.ts#tool_before"} 
 type Quote = {hotelId: string; quotedTotalCents: number; maxTotalCents: number};
@@ -90,13 +90,14 @@ const assistant = agent<{role: "customer" | "admin"}>({
 });
 ```
 
-To ask a person instead of rejecting, call `yield* ctx.approve(call.input, {question, details})` in `beforeTool` or in a tool's `before`, and return a rejection if it returns `false`. See [Human approval](/agentlib/human-approval).
+To ask a person instead of rejecting, call `yield* ctx.approve(input, {question, details})` in a tool's `before` or in `beforeTool`, where `ctx` is the hook's second argument and `input` is the tool input to show the approver. Return a rejection if it returns `false`. See [Human approval](/agentlib/human-approval).
 
-`beforeStep(request, ctx)` runs before each model call and changes that one request, for example to add retrieved documents. Unlike the other hooks, it doesn't change what the run records.
+`beforeStep(request, ctx)` runs before the model call of each step and changes that one request, for example to add retrieved documents. Unlike the other hooks, it doesn't change what the run records.
+Summary calls, such as the summary of a stopped run and compaction summaries, don't run `beforeStep`, so don't use it to remove sensitive data.
 
 ## Sensitive data
 
-A rejection doesn't remove data: a rejected input stays in the run's history.
+A rejection doesn't remove data: an input that `beforeRun` rejects stays in the run's history, and so do the arguments of a denied tool call.
 To keep data away from the model and out of the saved conversation, replace it where it enters the run:
 
 ```typescript {"CODE_LOAD::agentlib/src/guardrails.ts#redact"} 
@@ -123,7 +124,7 @@ To keep data out of the journal, remove it inside the tool before the tool retur
 ## Writing hooks
 
 - **Return the decision.** A rejection or replacement that the hook builds but doesn't return has no effect.
-- **Reject by returning, not by throwing.** A thrown `TerminalError` means that the check itself failed, for example because a policy service is down. The model receives the error, except from `beforeSteering`, which drops the message. From `beforeTool` and `afterTool`, an error without its own code gets the code `guardrail_failed`. Throw `AgentTerminalError` to stop the run. See [Error handling](/agentlib/error-handling).
+- **Reject by returning, not by throwing.** A thrown `TerminalError` means that the check itself failed, for example because a policy service is down. The model receives the error, except from `beforeSteering`, which drops the message, and from `afterRun` on a stopped or interrupted run, which fails the run. From `beforeTool` and `afterTool`, an error without its own code gets the code `guardrail_failed`. Throw `AgentTerminalError` to stop the run. See [Error handling](/agentlib/error-handling).
 - **Return the same decision on replay.** Hooks run again when Restate replays the handler. Compute decisions deterministically, or inside `restate.run`, which journals the result.
 - **Don't modify the input.** Hooks receive the run's messages without a copy. Return a replacement instead.
 
