@@ -153,6 +153,30 @@ default-replication = 2
 
 This cluster requires 2 nodes to become operational. With 3 nodes, it can tolerate 1 node failure while maintaining both availability of the system and durability of the data.
 
+### Log server fsync
+
+By default, every log server fsyncs its write-ahead log for each batch of log records before it acknowledges them.
+With log replication of 2 or more, durability comes from the copies on several log servers, so we recommend turning off this fsync:
+
+```toml restate.toml
+[log-server]
+rocksdb-disable-wal-fsync = true
+```
+
+The log server still writes every record to its write-ahead log before acknowledging it, and leaves writing the data to disk to the operating system.
+This removes a disk flush from every append, which lowers append latency.
+
+What this means for durability:
+- A crash or restart of the Restate process does not lose acknowledged records, because they are already in the operating system's page cache.
+- An acknowledged record is lost only if every log server that stored it fails at the operating system level, for example through a power loss or a kernel crash, before the operating system has written the record to disk.
+- With [location-aware replication](#location-aware-replication) such as `{zone: 2}`, the copies are in different zones, which makes such a correlated failure unlikely.
+- Seals of log segments are always fsynced.
+
+<Warning>
+    Keep the default for single-node deployments and whenever log replication is 1: the local disk then holds the only copy of the log.
+    If you raise the log replication of an existing cluster, turn off the fsync only after `restatectl logs list` shows the new replication for the current segments of all logs.
+</Warning>
+
 
 ## Deploying Restate clusters
 
@@ -201,6 +225,11 @@ bind-port = ADMIN_BIND_PORT
 [ingress]
 # Make sure it does not conflict with other nodes when running multiple nodes on same host
 bind-port = INGRESS_BIND_PORT
+
+[log-server]
+# With log replication of 2 or more, durability comes from the copies on several log servers,
+# so the log server does not need to fsync every batch. See "Log server fsync" above.
+rocksdb-disable-wal-fsync = true
 ```
 
 <Info>
@@ -276,8 +305,23 @@ beyond that still serve ingress and can hold log data, but will not process invo
 </Warning>
 
 The default is 24 partitions, set with `default-num-partitions` in the server configuration or
-`restatectl provision --num-partitions`. Size it against the largest cluster you would ever want to
-run rather than the one you are starting with. Check the current value at any time with:
+`restatectl provision --num-partitions`.
+
+Each partition runs one partition processor per partition replica: the leader and its followers.
+With partition replication 2, each partition has two processors, so the cluster runs
+`2 * num-partitions` partition processors. Size the number of partitions with two rules:
+
+1. For good performance, aim for 2 partition processors per CPU core in the cluster you start with.
+2. Keep at least 1 partition processor per CPU core in the largest cluster you anticipate scaling out to.
+
+If you expect to grow the cluster to more than twice its starting size, the second rule asks for more partitions than the first.
+
+For example, with partition replication 2, a cluster of 3 nodes with 16 cores each has 48 cores.
+Two processors per core makes 96 processors, so 48 partitions. This still gives one processor per
+core when the cluster grows to 6 such nodes. If you anticipate growing to 12 such nodes (192 cores),
+use 96 partitions instead. The default of 24 partitions fits 3 nodes with 8 cores each.
+
+Check the current value at any time with:
 
 ```shell
 restatectl config get
