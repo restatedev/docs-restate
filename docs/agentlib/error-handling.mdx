@@ -48,7 +48,7 @@ The code is the `ToolError`'s code, or `tool_failed` for any other `TerminalErro
 A tool call that a guardrail or an approver rejects returns `{"status": "denied", "message": "..."}` instead.
 
 A `TerminalError` from elsewhere in the run, such as a `beforeRun` guardrail, is passed to the model as a note before its next model call.
-Notes aren't saved to the conversation. Each note emits an `error-note` [progress event](/agentlib/steering-and-progress#progress-events) with the error's origin, code, and message.
+These error notes aren't saved to the conversation. Each note emits an `error-note` [progress event](/agentlib/steering-and-progress#progress-events) with the error's origin, code, and message.
 
 Some failures fail the run instead of reaching the model: a failed model call, a failure to load or save the conversation or to list skills, an `afterRun` rejection or error for a stopped or interrupted run, and an error in `onProgress` for a run event or a `tool-end` event.
 A `TerminalError` in `onProgress` for another tool event fails only that tool call. A `TerminalError` in `beforeSteering` drops the steering message instead of reaching the model.
@@ -73,7 +73,7 @@ Common codes:
 
 The model never receives an `AgentTerminalError`. Wherever it's thrown, it fails the run:
 
-- The other tool calls in the batch are interrupted, and nothing is saved to the conversation.
+- The other tool calls in the batch are interrupted. The conversation keeps the failed turn, with a note on the failure, and `messagesOf(error)` returns the same history. See [Failed runs](/agentlib/sessions#failed-runs). If `beforeRun` throws the error, the run saves nothing, not even its input.
 - Every enclosing agent run fails too, including a parent that called this agent through `agentTool`, and the agent whose tool called the handler that threw the error.
 - The handler fails with the error, unless it catches it.
 
@@ -107,6 +107,6 @@ A context overflow is handled separately: see [Sessions](/agentlib/sessions#cont
 
 ## Cancellation
 
-- **Invocation cancellation:** When you [cancel the invocation](/services/invocation/managing-invocations#cancel), the run stops at its next durable operation. Unfinished tool calls are interrupted, child invocations are cancelled, nothing is saved, and the handler fails with a `CancelledError`. The model never receives the cancellation.
+- **Invocation cancellation:** When you [cancel the invocation](/services/invocation/managing-invocations#cancel), the run stops at its next durable operation. Unfinished tool calls are interrupted, child invocations are cancelled, and the handler fails with a `CancelledError`. The conversation keeps the turn, with a `run-cancelled` note. The model of the cancelled run never receives the cancellation.
 - **Interruption:** An [interrupted](/agentlib/steering-and-progress#steering-and-interruption) run isn't an error. It returns the status `interrupted`, and unfinished tool calls are recorded as cancelled.
 - **Background tool cancellation:** When the model cancels a background tool call with `cancelOperationTool`, the call's result is `{status: "cancelled", message}`, with the model's reason as the message, or `Cancelled by the agent` if the model gives no reason.

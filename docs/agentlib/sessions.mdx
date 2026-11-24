@@ -8,7 +8,7 @@ A run starts without history unless you pass one. To continue a conversation acr
 
 ## Conversation history
 
-Pass a `LazyStateConversation` to `run`. The run loads the conversation from the object's state when it starts, and saves its new messages when it ends:
+Pass a `LazyStateConversation` to `run`. The run loads the conversation from the object's state when it starts, and saves its new messages while it runs and when it ends:
 
 ```typescript {"CODE_LOAD::agentlib/src/sessions.ts#conversation"} 
 export const chatSession = restate.object({
@@ -19,8 +19,8 @@ export const chatSession = restate.object({
       if (result.status !== "completed") return result.output ?? result.reason;
       return result.output;
     },
-    *history() {
-      return yield* new LazyStateConversation().page();
+    *history({from, limit}: {from?: number; limit?: number}) {
+      return yield* new LazyStateConversation().page(from, limit);
     },
   },
   options: {handlers: {history: {shared: true}}},
@@ -29,12 +29,46 @@ export const chatSession = restate.object({
 
 - Each object key has its own conversation, so `ChatSession/bob` and `ChatSession/alice` are separate.
 - Restate runs one exclusive handler per key at a time, so the runs of a session never interleave.
-- A run that throws saves nothing, so the next run starts from the history before the failed run. A stopped or interrupted run saves its messages.
-- Read the history from a shared handler with `page(from, limit)`, which returns up to `limit` messages (default 100, at most 1000) and `next`, the offset of the following page.
+- A shared handler such as `history` can read the turn that is running. See [Saving progress](#saving-progress).
+- Read the history from a shared handler with `page(from, limit)`, which returns up to `limit` messages (default 100, at most 1000) and `next`, the offset of the following page. Call `history` with `{}` for the first page, then pass `next` as `from` in subsequent requests until the page is empty.
 
 <Tip>
 By default, every invocation of the object receives the whole conversation from Restate, including invocations of shared handlers. For long conversations or large messages, turn on [lazy state](#lazy-state), so each invocation fetches only the chunks that it reads.
 </Tip>
+
+## Saving progress
+
+A run saves to its conversation at these points:
+
+- **After each model call that requests tool calls.** The run saves the calls before they run, together with the results of the previous calls. While the tools run, the saved history ends with calls that have no results yet.
+- **After each accepted steering message.** A message that arrives while tool calls run is saved with the next save, after the results of those calls.
+- **When the run ends**, with the final answer. A stopped or interrupted run saves its messages too.
+
+Tool results are saved with the next save, so `page` returns the history as of the last save. To show tool results as they happen, use [progress events](/agentlib/steering-and-progress#progress-events).
+Error notes and answers that `afterRun` rejects are never saved.
+
+### Failed runs
+
+When a terminal error fails the run, including a cancellation of the invocation, the run saves what it recorded before it rethrows the error:
+
+- Each unfinished tool call gets a `cancelled` result with the reason.
+- A note follows the turn, so the next run's model knows what happened:
+
+  ```json
+  {"source": "agent-runtime", "type": "run-failed", "message": "The model is unavailable"}
+  ```
+
+  For a cancelled invocation, the type is `run-cancelled`.
+
+The run saves no note when:
+
+- **The error is retryable.** Restate retries the invocation, and the run continues from its journal.
+- **`beforeRun` throws `AgentTerminalError`.** The run saves nothing, not even its input.
+- **The run fails with `ConversationConflictError`.** Another run changed the conversation, so another save would fail too.
+
+The run saves its input with its first save. If a client sends the same request again after a failure, the conversation gets a new turn after the failed one. To retry a request without adding a turn, send it with an [idempotency key](/services/invocation/http#using-an-idempotency-key).
+
+A [killed](/services/invocation/managing-invocations#kill) invocation runs no more code, so tool calls that it saved can stay without results. The next run gives each of them a `cancelled` result, which says that the call was interrupted and may have taken effect. Cancel instead of killing when you can: a cancelled run closes its calls itself, with the reason.
 
 ## Storage layout
 
@@ -48,7 +82,8 @@ By default, every invocation of the object receives the whole conversation from 
 | `conversation/2` | Messages 64 to 69 |
 
 - A run writes only the chunk that it extends, the new chunks, and the metadata, so the size of each write depends on the new messages, not on the length of the conversation.
-- `count` is the number of stored messages and serves as the conversation's version. A run loads the conversation when it starts. Before it saves, it checks that `count` hasn't changed since. If another run saved in the meantime, the run throws `ConversationConflictError`, a `TerminalError`.
+- `count` is the number of stored messages and serves as the conversation's version. Before each save, a run checks that `count` hasn't changed since it loaded the conversation or saved last. If another run saved in the meantime, the run throws `ConversationConflictError`, a `TerminalError`.
+- Within one invocation, `LazyStateConversation` reads each state key at most once and keeps the values that it read and wrote, so the saves of a run don't read the chunks again. A shared handler that calls `page` twice in one invocation receives the values from its first read, so call it once per invocation.
 - [Compaction](#between-runs) sets `summary`. A run then receives the summary instead of the messages before `through`, and reads only the chunks after it. The messages stay in state, so `page` still returns every message.
 - `LazyStateConversation` reads with shared state and writes with exclusive state. A shared handler can read the conversation while a run is in progress, but only an exclusive handler can save to it.
 
@@ -147,13 +182,22 @@ export const manualChat = restate.object({
   handlers: {
     *ask(message: string) {
       const messages = (yield* restate.state().get<Message[]>("messages")) ?? [];
-      const result = yield* assistant.run(message, {messages});
-      restate.state().set("messages", result.messages);
-      if (result.status !== "completed") return result.output ?? result.reason;
-      return result.output;
+      try {
+        const result = yield* assistant.run(message, {messages});
+        restate.state().set("messages", result.messages);
+        if (result.status !== "completed") return result.output ?? result.reason;
+        return result.output;
+      } catch (error) {
+        // Keep the failed turn, with a note on why it failed. Restate retries other errors.
+        const failed = messagesOf(error);
+        if (failed && error instanceof TerminalError) restate.state().set("messages", failed);
+        throw error;
+      }
     },
   },
 });
 ```
+
+A run that throws returns no result. `messagesOf(error)` returns its history up to the failure, with the [note](#failed-runs) on why it failed. Save it only for a `TerminalError`, because Restate retries other errors.
 
 This approach doesn't chunk the history or compact it between runs: each run loads and writes the whole history as one state value. Tool result previews, compaction within a run, and `contextWindow` still apply, because they're agent options.

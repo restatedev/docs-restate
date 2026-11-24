@@ -48,24 +48,49 @@ it("keeps conversation history per key", async () => {
   await ingress().client(chatSession, "bob").ask("one");
   expect(await ingress().client(chatSession, "bob").ask("two")).toBe("the|users:2|two");
   expect(await ingress().client(chatSession, "alice").ask("one")).toBe("the|users:1|one");
-  const page = await ingress().client(chatSession, "bob").history();
+  const page = await ingress().client(chatSession, "bob").history({});
   expect(page.messages.map((m: {role: string}) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
   await ingress().client(manualChat, "bob").ask("one");
   expect(await ingress().client(manualChat, "bob").ask("two")).toBe("the|users:2|two");
 });
 
-it("stores long conversations across chunks", async () => {
-  for (let i = 1; i <= 17; i++) await ingress().client(chatSession, "carol").ask(`m${i}`);
-  const first = await ingress().client(chatSession, "carol").history();
-  expect(first.messages).toHaveLength(34); // two runs past the 32-message chunk
-  expect(first.next).toBe(34);
-  expect(await ingress().client(chatSession, "carol").ask("last")).toBe("the|users:18|last");
+it("keeps a failed turn with a note on the failure", async () => {
+  const chat = ingress().client(chatSession, "gina");
+  await chat.ask("one");
+  await expect(chat.ask("unanswerable")).rejects.toThrow("The model is unavailable");
+  const page = await chat.history({});
+  expect(page.messages.map((m: {role: string}) => m.role)).toEqual(["user", "assistant", "user", "user"]);
+  expect(JSON.parse((page.messages[3] as {content: string}).content)).toMatchObject({source: "agent-runtime", type: "run-failed"});
+  expect(await chat.ask("two")).toBe("the|users:4|two");
+  const manual = ingress().client(manualChat, "gina");
+  await manual.ask("one");
+  await expect(manual.ask("unanswerable")).rejects.toThrow("The model is unavailable");
+  expect(await manual.ask("two")).toBe("the|users:4|two");
+});
+
+it("paginates long conversations across chunks", async () => {
+  const client = ingress().client(chatSession, "carol");
+  for (let i = 1; i <= 51; i++) await client.ask(`m${i}`);
+  const first = await client.history({});
+  expect(first.messages).toHaveLength(100);
+  expect(first.next).toBe(100);
+  const second = await client.history({from: first.next, limit: 1});
+  expect(second.messages).toEqual([{role: "user", content: "m51"}]);
+  expect(second.next).toBe(101);
+  const third = await client.history({from: second.next});
+  expect(third.messages).toEqual([{role: "assistant", content: "the|users:51|m51"}]);
+  expect(third.next).toBe(102);
+  expect(await client.history({from: third.next})).toEqual({messages: [], next: 102});
+  expect(await client.ask("last")).toBe("the|users:52|last");
 });
 
 it("reads the conversation with lazy state", async () => {
   for (let i = 1; i <= 17; i++) await ingress().client(aiSession, "erin").doTurn(`m${i}`);
-  const page = await ingress().client(aiSession, "erin").history();
+  const page = await ingress().client(aiSession, "erin").history({});
   expect(page.next).toBe(34); // two runs past the 32-message chunk
+  expect(await ingress().client(aiSession, "erin").history({from: 31, limit: 2})).toEqual({
+    messages: page.messages.slice(31, 33), next: 33,
+  });
   expect(await ingress().client(aiSession, "erin").doTurn("last")).toBe("the|users:18|last");
 });
 
@@ -74,8 +99,11 @@ it("compacts the conversation when a run starts", async () => {
   // 66 messages exceed maxMessages: the run summarizes all but the newest 12
   const answer = await ingress().client(compactedChat, "dave").ask("last");
   expect(answer).toBe("the|users:8|last"); // summary + 6 retained user messages + input
-  const page = await ingress().client(compactedChat, "dave").history();
+  const page = await ingress().client(compactedChat, "dave").history({});
   expect(page.next).toBe(68); // the state keeps every message
+  expect(await ingress().client(compactedChat, "dave").history({from: 31, limit: 2})).toEqual({
+    messages: page.messages.slice(31, 33), next: 33,
+  });
 }, 120_000);
 
 it("routes to a specialist", async () => {

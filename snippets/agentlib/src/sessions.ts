@@ -1,5 +1,6 @@
 import * as restate from "@restatedev/restate-sdk-gen";
-import {agent, LazyStateConversation, type Message} from "@restatedev/agentlib";
+import {TerminalError} from "@restatedev/restate-sdk";
+import {agent, LazyStateConversation, messagesOf, type Message} from "@restatedev/agentlib";
 import {model} from "./model.js";
 
 const assistant = agent({
@@ -16,8 +17,8 @@ export const chatSession = restate.object({
       if (result.status !== "completed") return result.output ?? result.reason;
       return result.output;
     },
-    *history() {
-      return yield* new LazyStateConversation().page();
+    *history({from, limit}: {from?: number; limit?: number}) {
+      return yield* new LazyStateConversation().page(from, limit);
     },
   },
   options: {handlers: {history: {shared: true}}},
@@ -40,8 +41,8 @@ function* doTurn(message: string) {
   }
 }
 
-function* history() {
-  return yield* new LazyStateConversation().page();
+function* history({from, limit}: {from?: number; limit?: number}) {
+  return yield* new LazyStateConversation().page(from, limit);
 }
 
 function* signalActiveTurn(name: string, value: string): restate.Operation<boolean> {
@@ -82,8 +83,8 @@ export const compactedChat = restate.object({
       // <end_conversation_compaction>
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
-    *history() {
-      return yield* new LazyStateConversation().page();
+    *history({from, limit}: {from?: number; limit?: number}) {
+      return yield* new LazyStateConversation().page(from, limit);
     },
   },
   options: {handlers: {history: {shared: true}}},
@@ -110,10 +111,17 @@ export const manualChat = restate.object({
   handlers: {
     *ask(message: string) {
       const messages = (yield* restate.state().get<Message[]>("messages")) ?? [];
-      const result = yield* assistant.run(message, {messages});
-      restate.state().set("messages", result.messages);
-      if (result.status !== "completed") return result.output ?? result.reason;
-      return result.output;
+      try {
+        const result = yield* assistant.run(message, {messages});
+        restate.state().set("messages", result.messages);
+        if (result.status !== "completed") return result.output ?? result.reason;
+        return result.output;
+      } catch (error) {
+        // Keep the failed turn, with a note on why it failed. Restate retries other errors.
+        const failed = messagesOf(error);
+        if (failed && error instanceof TerminalError) restate.state().set("messages", failed);
+        throw error;
+      }
     },
   },
 });

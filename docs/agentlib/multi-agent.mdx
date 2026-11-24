@@ -107,7 +107,7 @@ Interrupting the losing task cancels its model call and tools, and `restate.allS
 
 ## Conversations
 
-A [`LazyStateConversation`](/agentlib/sessions#conversation-history) accepts the messages of one run at a time. A run loads the conversation when it starts and saves its messages when it ends. Two runs that share a conversation in one handler load the same version: the first run saves, and the second throws `ConversationConflictError`, which fails the handler. The messages of the first run stay in state.
+A [`LazyStateConversation`](/agentlib/sessions#conversation-history) accepts the messages of one run at a time. A run loads the conversation when it starts and [saves](/agentlib/sessions#saving-progress) while it runs and when it ends. Two runs that share a conversation in one handler load the same version: the first one to save succeeds, and the other one throws `ConversationConflictError` at its next save, which fails the handler. The saved messages stay in state.
 
 ### Parallel runs
 
@@ -138,7 +138,7 @@ Each agent receives only its own earlier messages. See [Storage layout](/agentli
 
 ### Racing runs
 
-Racing runs can't share a conversation either: a run that stops early, for example at `maxSteps`, saves its messages, and the run that would win then fails with a conflict. To keep one history that contains the winning answer, load the conversation once, pass its messages to every run, and save only the winner's messages. The handler uses `answerWith` and `firstSuccess` from [Racing](#racing):
+Racing runs can't share a conversation either: the first run to save, for example at its first tool call or because it stopped early, makes the other runs fail at their next save, even if it doesn't produce the answer. To keep one history that contains the winning answer, load the conversation once, pass its messages to every run, and save only the winner's messages. The handler uses `answerWith` and `firstSuccess` from [Racing](#racing):
 
 ```typescript {"CODE_LOAD::agentlib/src/multi_agent.ts#race_conversation"} 
 export const racingSession = restate.object({
@@ -234,6 +234,7 @@ const investigator = agent({
 ```
 
 - The fork copies the run's history, agent, instructions, policies, limits, and tools as of the step that called the tool. The provider can serve the shared part of the request from its prompt cache.
+- The fork skips `beforeRun` and `afterRun`. Use the parent's `beforeTool` and `afterTool` hooks to check the fork's task and reply.
 - Only the fork's plain-text reply returns to the parent. Its tool calls stay out of the parent's history.
 - A fork can't start forks or sub-agents. Such a call returns an error with the code `fork_nested`.
 - `maxConcurrent` (default 6) limits how many forks of one fork tool run at once. A call over the limit returns an error with the code `fork_limit`.
