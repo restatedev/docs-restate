@@ -90,6 +90,28 @@ export const compactedChat = restate.object({
 });
 // <end_conversation_compaction>
 
+// <start_compaction_instructions>
+const supportAgent = agent({
+  model,
+  instructions: "You help customers with their orders.",
+  compaction: {
+    instructions:
+      "Keep the customer's open requests, the order IDs, the refunds issued, and the promises made to the customer. " +
+      "Leave out greetings and small talk. Keep the summary under 500 words.",
+  },
+});
+// <end_compaction_instructions>
+
+export const customSummaryChat = restate.object({
+  name: "CustomSummaryChat",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* supportAgent.run(message, {conversation: new LazyStateConversation()});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+});
+
 // <start_run_compaction>
 const researcher = agent({
   model,

@@ -5,7 +5,7 @@ import {RestateContainer, RestateTestEnvironment} from "@restatedev/restate-sdk-
 import type {ApprovalRequest} from "@restatedev/agentlib";
 import {support, ticketTriage} from "../agents.js";
 import {ticketApproval} from "../approval.js";
-import {aiSession, chatSession, compactedChat, manualChat} from "../sessions.js";
+import {aiSession, chatSession, compactedChat, customSummaryChat, manualChat} from "../sessions.js";
 import {racingAgents, racingSession, supportRouter, tripSession} from "../multi_agent.js";
 import {hotelBooking} from "../guardrails.js";
 import {refunds} from "../errors.js";
@@ -25,7 +25,7 @@ let env: RestateTestEnvironment;
 
 beforeAll(async () => {
   env = await RestateTestEnvironment.start({
-    services: [support, ticketTriage, ticketApproval, aiSession, chatSession, compactedChat, manualChat, supportRouter, racingAgents, racingSession, tripSession, hotelBooking, refunds],
+    services: [support, ticketTriage, ticketApproval, aiSession, chatSession, compactedChat, customSummaryChat, manualChat, supportRouter, racingAgents, racingSession, tripSession, hotelBooking, refunds],
     container: () => new RestateContainer().alwaysReplay().disableRetries(),
   });
 }, 60_000);
@@ -107,6 +107,17 @@ it("stores a run's summary in the conversation", async () => {
   expect(await ask(6)).toMatch(/^the\|users:3\|m6 /);
   const after = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
   expect((after["conversation/0"] as unknown[]).length).toBe(12); // the state keeps every message
+}, 120_000);
+
+it("summarizes with custom compaction instructions", async () => {
+  const chat = ingress().client(customSummaryChat, "frank");
+  // About 15,000 tokens per turn: the eighth turn's request exceeds the default maxTokens (100,000)
+  for (let i = 1; i <= 7; i++) await chat.ask(`m${i} ${"x".repeat(30_000)}`);
+  const before = await env.stateOf(customSummaryChat, "frank").getAll<Record<string, unknown>>();
+  expect(before["conversation/meta"]).toEqual({count: 14});
+  await chat.ask(`m8 ${"x".repeat(30_000)}`);
+  const state = await env.stateOf(customSummaryChat, "frank").getAll<Record<string, unknown>>();
+  expect((state["conversation/meta"] as {summary?: {text: string}}).summary?.text).toBe("Open requests and order IDs");
 }, 120_000);
 
 it("routes to a specialist", async () => {

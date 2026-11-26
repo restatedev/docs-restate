@@ -4,6 +4,7 @@ import {agent, skills} from "@restatedev/agentlib";
 import {z} from "zod";
 import {model} from "./model.js";
 
+// <start_overview>
 // <start_define>
 const assistant = agent({
   model,
@@ -24,6 +25,7 @@ export const support = restate.service({
   },
 });
 // <end_run>
+// <end_overview>
 
 // <start_output>
 const triage = agent({

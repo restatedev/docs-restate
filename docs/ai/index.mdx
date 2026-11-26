@@ -1,119 +1,83 @@
 ---
-title: "AI / Agents with Restate"
+title: "AI agents with Restate"
 sidebarTitle: "Overview"
 icon: "book-open"
-description: "Build durable AI agents and workflows that recover from failures, maintain state, and scale to production."
+description: "Build durable AI agents on Restate with agentlib, an agent SDK integration, or your own agent loop."
 ---
 
-Restate makes AI agents and workflows innately resilient. It provides the reliability infrastructure you need to run AI workloads in production, from simple LLM chains to complex multi-agent systems.
+Restate is an open-source, durable runtime for agents and backends.  It provides the reliability infrastructure you need to run AI workloads in production, from simple LLM chains to complex multi-agent systems.
+Restate runs the agent and everything around it, such as its sessions, sub-agents, and the workflows that it starts, on one durability layer, so you operate one system instead of several.
 
-<img src="/img/ai/restate-ai-stack.png" alt="Restate in the AI stack" width={"80%"} />
+You can build agents on Restate in three ways:
 
-<Card title="AI Agent Quickstart" icon="rocket" href="/ai-quickstart" horizontal>
-    Build and run your first durable AI agent in minutes.
-</Card>
+<img src="/img/ai/restate-ai-build-options.png" alt="Three ways to build agents on the Restate runtime: a custom harness, agentlib, or an agent SDK integration" width={"80%"} />
 
-<Card title="Agent Reference Architecture" icon="code" href="https://github.com/restatedev/agent" horizontal>
-    Build on a complete TypeScript agent with human approvals, sandboxed tools, subagents, memory, and schedules. Explore how these features fit together on Restate.
-</Card>
-
+| Approach | Use it when |
+|---|---|
+| [agentlib](#restate-agentlib) | A modern agent harness with best-in-class durability and a fast and responsive architecture, built natively on durable execution |
+| [Agent SDK integrations](#agent-sdk-integrations) | Use Restate with popular SDKs like Vercel AI SDK, OpenAI Agents SDK, Google ADK, Pydantic AI, or LangChain |
+| [Custom harness](#build-your-own-harness) | An off-the-shelf harness limits you, and you write your own agent loop in any language with a Restate SDK |
 
 ## Why Restate?
-Restate is the foundation for AI workflows, agents, and agentic platforms, written as plain code in your language of choice:
-- ✅ **Durable Execution**: Retry and recover from failures without repeating completed steps.
-- ✅ **State & session coordination**: Built-in multi-turn, persistent sessions. Scale out to thousands of concurrent sessions with built-in concurrency control
-- ✅ **Communication & flow control**: Route tasks between distributed agents, humans, and MCP servers, and shape traffic with concurrency control
-- ✅ **Observability & control**: Inspect detailed execution journals, and pause, cancel, kill, or roll back stuck agents
-- ✅ **Production safety**: Approvals, timeouts, rollbacks, and escalation without callback plumbing
 
-Restate handles the complexity of distributed execution so you can focus on your AI logic.
+Agents in production run for minutes or hours, call tools with side effects, wait for people, and hand work to other agents. Whichever way you build, Restate gives you:
 
-## SDK integrations
+- **Recover work after failures, without paying a large durability overhead.** Restate adds only milliseconds per step, so every model call, guardrail check, step inside a tool, and parallel branch recovers on its own. After a crash or a deploy, only the steps that were running start again: you don't pay twice for completed model calls, finished tool work isn't redone, and the agent stays on the path it took.
+- **No queue, workflow engine, or session database to run next to your agents.** Sessions, workflows, calls between agents, timers, and concurrency limits are all part of Restate, a single binary. You deploy and debug one system, without glue code that keeps several systems consistent when a request fails halfway. Each session handles one request at a time, so concurrent messages can't mix up the conversation.
+- **Wait days for an approval without keeping the agent running.** Restate suspends an agent while it waits for a person, a webhook, or a timer, and resumes it when the answer arrives, also on serverless platforms such as AWS Lambda. You write no polling loops and no code to save the agent's progress.
+- **See what a running agent does, and step in when it goes wrong.** The Restate UI shows each model call and tool call as it happens. You can [cancel, pause, resume, or restart](/services/invocation/managing-invocations) a running agent, and [concurrency limits](/services/flow-control) cap how many agents run at once, for example to control model spend.
+- **Switch agent frameworks without rewriting your backend.** Sessions, workflows, and service calls don't depend on the harness, so you can move from an agent SDK to agentlib or your own harness and keep the rest of your application.
 
-**Any LLM SDK** — write the agent loop yourself with OpenAI, Anthropic, Vercel AI SDK, Google Gen AI, LiteLLM, or any other SDK. Wrap LLM calls in `ctx.run()` for durability.
+## Restate Agentlib
 
-<CardGroup cols={3}>
-    <Card title="Vercel AI SDK" icon="/img/ai/sdk-integrations/vercel.svg" href="/ai/sdk-integrations/vercel-ai-sdk" horizontal/>
-    <Card title="LiteLLM" icon="/img/ai/sdk-integrations/lite-llm_icon.webp" href="/ai/sdk-integrations/litellm" horizontal/>
-    <Card title="Any other SDK" horizontal icon="puzzle-piece"/>
+[agentlib](/agentlib) is a modern agent harness with best-in-class durability and a fast and responsive architecture, built natively on durable execution
+
+<CardGroup cols={2}>
+<Card title="agentlib overview" icon="book-open" href="/agentlib">
+    See how agentlib works, and find the page for each feature.
+</Card>
+<Card title="Quickstart" icon="rocket" href="/ai-quickstart">
+    Run a weather agent built with agentlib on a local Restate Server.
+</Card>
 </CardGroup>
 
-**Agent frameworks** — higher-level APIs for a faster start.
+## Agent SDK integrations
+
+Keep the agent framework that you use. The integration runs the agent in a Restate handler and makes its model calls and tool calls durable steps. Each integration page starts with a quickstart.
 
 <CardGroup cols={3}>
     <Card title="Vercel AI SDK" icon="/img/ai/sdk-integrations/vercel.svg" href="/ai/sdk-integrations/vercel-ai-sdk" horizontal/>
     <Card title="OpenAI Agents SDK" icon="/img/ai/sdk-integrations/openai.webp" href="/ai/sdk-integrations/openai-agents-sdk" horizontal/>
-    <Card title="Google ADK" href="/ai/sdk-integrations/google-adk" icon="/img/ai/sdk-integrations/google-adk.png" horizontal/>
-    <Card title="Pydantic AI" href="/ai/sdk-integrations/pydantic-ai" icon="/img/ai/sdk-integrations/pydantic-ai.png" horizontal/>
-    <Card title="LangChain" href="/ai/sdk-integrations/langchain" icon="/img/ai/sdk-integrations/langchain.svg" horizontal/>
-    <Card title="Integrating with other SDKs" href="/ai/sdk-integrations/integration-guide" icon={"puzzle-piece"} horizontal/>
+    <Card title="Google ADK" icon="/img/ai/sdk-integrations/google-adk.png" href="/ai/sdk-integrations/google-adk" horizontal/>
+    <Card title="Pydantic AI" icon="/img/ai/sdk-integrations/pydantic-ai.png" href="/ai/sdk-integrations/pydantic-ai" horizontal/>
+    <Card title="LangChain" icon="/img/ai/sdk-integrations/langchain.svg" href="/ai/sdk-integrations/langchain" horizontal/>
+    <Card title="Integrating with other SDKs" icon="puzzle-piece" href="/ai/sdk-integrations/integration-guide" horizontal/>
 </CardGroup>
 
 Want another integration? Reach out on [Discord](https://discord.restate.dev) or [Slack](https://slack.restate.dev).
 
-## Getting Started
+## Build your own harness
 
-The following pages give you a tour of how to build durable AI agents and workflows with Restate:
+When an off-the-shelf harness limits you, build your own on Restate, so you don't have to rebuild fault tolerance yourself.
+Start from the agent reference architecture: a complete TypeScript agent on Restate with human approvals, sandboxed tools, subagents, memory, and schedules.
+Its skills teach your coding agent how to extend the agent and how to write the Restate code that it's built from.
 
 <CardGroup cols={2}>
-    <Card
-        title="1. Durable Agents"
-        href="/ai/patterns/durable-agents"
-        icon="shield-halved"
-        horizontal
-    >
-        Implement agents that survive crashes and recover automatically. Every LLM call and tool execution is durably persisted.
-    </Card>
-    <Card
-        title="2. Durable Sessions"
-        href="/ai/patterns/sessions"
-        icon="comments"
-        horizontal
-    >
-        Add persistent sessions keyed by ID with built-in concurrency control. Conversation state survives crashes and restarts.
-    </Card>
-    <Card
-        title="3. Approvals with Pause & Resume"
-        href="/ai/patterns/human-in-the-loop"
-        icon="user-check"
-        horizontal
-    >
-        Add resilient human approvals that pause the agent and resume when the response arrives, even across restarts.
-    </Card>
-    <Card
-        title="4. Multi-Agent Orchestration"
-        href="/ai/patterns/multi-agent"
-        icon="users"
-        horizontal
-    >
-        Route tasks between specialized agents with durable routing decisions. Coordinate via handoffs, tools, or remote calls.
-    </Card>
-    <Card
-        title="5. Observability & Control"
-        href="/ai/patterns/observability-control"
-        icon="eye"
-        horizontal
-    >
-        Inspect agent execution step by step, export traces, and cancel or kill stuck agents.
-    </Card>
-
+<Card title="Agent reference architecture" icon="github" href="/ai/reference-architecture">
+    Explore the code and documentation of the reference agent.
+</Card>
+<Card title="Skills for coding agents" icon="wand-magic-sparkles" href="https://github.com/restatedev/agent#skills-for-coding-agents">
+    Install the skills in Claude Code, Codex, or another coding agent.
+</Card>
 </CardGroup>
 
-## Implementation Guides
+## Examples
 
-The following pages provide detailed implementation guides for common AI patterns:
-
-<CardGroup cols={3}>
-    <Card title="Parallel Tool Calls" href="/ai/patterns/parallelization" icon="bolt" horizontal />
-    <Card
-        title="Workflows"
-        href="/ai/patterns/workflow-sequential"
-        icon="diagram-project"
-        horizontal
-    >
-    </Card>
-    <Card title="Workflows as Tools" href="/ai/patterns/tools" icon="wrench" horizontal />
-    <Card title="Remote Agents" href="/ai/patterns/remote-agents" icon="network-wired" horizontal />
-    <Card title="Retries & Error Handling" href="/ai/patterns/error-handling" icon="triangle-exclamation" horizontal />
+<CardGroup cols={2}>
+<Card title="Examples" icon="lightbulb" href="/ai/ai-examples">
+    Browse example agents and templates for each SDK.
+</Card>
+<Card title="Agent reference architecture" icon="code" href="https://github.com/restatedev/agent">
+    Explore a complete TypeScript agent with human approvals, sandboxed tools, subagents, memory, and schedules.
+</Card>
 </CardGroup>
-
