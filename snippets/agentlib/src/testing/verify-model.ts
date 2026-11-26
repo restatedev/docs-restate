@@ -8,6 +8,7 @@ export const verifyModel = journaledModel(async (request): Promise<ModelResponse
   const users = request.messages.filter((message) => message.role === "user");
   const input = users.at(-1)?.content ?? "";
   if (input === "unanswerable") throw new TerminalError("The model is unavailable");
+  if (request.name === "Compact context") return {type: "final", text: "Earlier turns, summarized"};
   if (request.outputSchema) {
     if (request.instructions?.startsWith("Choose the one specialist")) {
       return {type: "final", text: "", output: {specialist: "billing"}};

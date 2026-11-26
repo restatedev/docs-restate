@@ -51,8 +51,21 @@ When the provider throttles a call, the next attempt waits for the delay that th
 Some failures can't be fixed by retrying, such as a missing API key, a feature that the provider doesn't support, or a request that the provider rejects.
 `aiModel` fails these calls immediately, and `run` throws a `TerminalError`.
 
-A response that the model can fix goes back to the model instead: an empty reply, a reply cut off at `maxOutputTokens` or by a content filter, a reply that announces tool calls without making any, or text longer than `maxOutputChars`.
-agentlib discards the reply, adds a note with the reason, and starts the next step. See [Error handling](/agentlib/error-handling#model-call-failures).
+A response that the model can fix goes back to the model instead: an empty reply, a reply stopped by a content filter, a reply that announces tool calls without making any, or text longer than `maxOutputChars`.
+agentlib discards the reply, adds a note with the reason, and starts the next step. A reply cut off at the [reply limit](#reply-limit) fails the run instead. See [Error handling](/agentlib/error-handling#model-call-failures).
+
+## Reply limit
+
+`maxOutputTokens` on the agent limits the tokens of each model reply. When it's unset, requests carry no limit, and the AI SDK provider chooses one:
+
+| Provider | Limit when `maxOutputTokens` is unset |
+|---|---|
+| `@ai-sdk/anthropic` | The model's maximum from the provider's own table, such as 128,000 for recent Claude models, or 4,096 for a model that the table doesn't list. The provider also lowers a `maxOutputTokens` above a known maximum, with a warning. |
+| `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/amazon-bedrock`, `@ai-sdk/openai-compatible` | The default of the model's API, because the request carries no limit |
+| `@ai-sdk/gateway` | Vercel AI Gateway chooses the limit |
+
+A reply cut off at the limit fails the run with an `AgentTerminalError`, because a new attempt would most likely be cut off too. Set `maxOutputTokens` when you expect long replies. A cut-off reply can also mean that the model is looping.
+See [Model call failures](/agentlib/error-handling#model-call-failures) for what the run keeps of a cut-off reply.
 
 ## Prompt caching
 
@@ -73,7 +86,7 @@ const thinkingModel = aiModel({
 ```
 
 For OpenAI, set `reasoningEffort`. For Gemini, set `thinkingConfig`.
-OpenAI counts reasoning tokens toward the reply limit, which is the agent's `maxOutputTokens` (default 4096). Raise it if replies are cut off.
+OpenAI counts reasoning tokens toward the [reply limit](#reply-limit). If you set `maxOutputTokens`, leave room for the reasoning.
 
 `aiModel` keeps the model's reasoning and sends it back on later requests, across the steps of a run and the runs of a conversation.
 Don't edit the stored reasoning: providers reject reasoning that was changed.
@@ -96,7 +109,7 @@ agentlib still validates each tool's input against its Zod schema and the final 
 
 ## Token usage
 
-`result.usage` sums the tokens of every model call in the run, including the summary of a stopped or interrupted run, compaction within the run, sub-agents run with `agentTool`, and forks. It doesn't count the compaction of a `LazyStateConversation` or model calls that tools or hooks make:
+`result.usage` sums the tokens of every model call in the run, including the summary of a stopped or interrupted run, compaction summaries, sub-agents run with `agentTool`, and forks. It doesn't count model calls that tools or hooks make:
 
 | Field | Description |
 |---|---|
@@ -141,7 +154,7 @@ const customModel = journaledModel(async (request, {signal}) => {
 });
 ```
 
-A response is either `{type: "final", text}` or `{type: "tool_calls", calls}`. Throw a `TerminalError` for a failure that a retry would repeat, such as an invalid API key. The run then fails instead of retrying.
+A response is either `{type: "final", text}` or `{type: "tool_calls", calls}`. For a reply cut off at the output token limit, return `{type: "cut_off", text, calls}` with the tool calls whose arguments are complete, and the run fails as it does with `aiModel`. Throw a `TerminalError` for a failure that a retry would repeat, such as an invalid API key. The run then fails instead of retrying.
 Include `usage` in the response, so that `result.usage` counts the call's tokens.
 
-In the Restate UI, each step's model call appears as a journal entry named `Ask model`. Summary calls set the request's `name`: `Summarize stopped run`, `Compact context` for compaction within a run, and `Summarize conversation` for the compaction of a `LazyStateConversation`. `journaledModel` names the entry after the request's `name`, then its own `name` option, then `Ask model`.
+In the Restate UI, each step's model call appears as a journal entry named `Ask model`. Summary calls set the request's `name`: `Summarize stopped run`, and `Compact context` for [compaction](/agentlib/sessions#compaction). `journaledModel` names the entry after the request's `name`, then its own `name` option, then `Ask model`.

@@ -71,24 +71,24 @@ export const aiSession = restate.object({
 });
 // <end_lazy_state>
 
+// <start_conversation_compaction>
+const longChat = agent({
+  model,
+  instructions: "Use the conversation to remember what the user told you.",
+  compaction: {maxTokens: 64000},
+});
+
 export const compactedChat = restate.object({
   name: "CompactedChat",
   handlers: {
     *ask(message: string) {
-      // <start_conversation_compaction>
-      const conversation = new LazyStateConversation({
-        compaction: {model, policy: {maxMessages: 64, maxChars: 64000, retainMessages: 12}}, // the default policy
-      });
-      const result = yield* assistant.run(message, {conversation});
-      // <end_conversation_compaction>
+      // The run stores its summaries in the conversation
+      const result = yield* longChat.run(message, {conversation: new LazyStateConversation()});
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
-    *history({from, limit}: {from?: number; limit?: number}) {
-      return yield* new LazyStateConversation().page(from, limit);
-    },
   },
-  options: {handlers: {history: {shared: true}}},
 });
+// <end_conversation_compaction>
 
 // <start_run_compaction>
 const researcher = agent({

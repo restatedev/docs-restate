@@ -94,16 +94,19 @@ it("reads the conversation with lazy state", async () => {
   expect(await ingress().client(aiSession, "erin").doTurn("last")).toBe("the|users:18|last");
 });
 
-it("compacts the conversation when a run starts", async () => {
-  for (let i = 1; i <= 33; i++) await ingress().client(compactedChat, "dave").ask(`m${i}`);
-  // 66 messages exceed maxMessages: the run summarizes all but the newest 12
-  const answer = await ingress().client(compactedChat, "dave").ask("last");
-  expect(answer).toBe("the|users:8|last"); // summary + 6 retained user messages + input
-  const page = await ingress().client(compactedChat, "dave").history({});
-  expect(page.next).toBe(68); // the state keeps every message
-  expect(await ingress().client(compactedChat, "dave").history({from: 31, limit: 2})).toEqual({
-    messages: page.messages.slice(31, 33), next: 33,
-  });
+it("stores a run's summary in the conversation", async () => {
+  const chat = ingress().client(compactedChat, "dave");
+  // About 7,500 tokens per message: the fifth turn's request exceeds maxTokens (64,000)
+  const ask = (i: number) => chat.ask(`m${i} ${"x".repeat(30_000)}`);
+  for (let i = 1; i <= 4; i++) expect(await ask(i)).toMatch(new RegExp(`^the\\|users:${i}\\|m${i} `));
+  // The run summarizes all but the newest two messages: summary + m5
+  expect(await ask(5)).toMatch(/^the\|users:2\|m5 /);
+  const state = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
+  expect(state["conversation/meta"]).toEqual({count: 10, summary: {through: 7, text: "Earlier turns, summarized"}});
+  // The next run starts from the stored summary: summary + m5 + m6
+  expect(await ask(6)).toMatch(/^the\|users:3\|m6 /);
+  const after = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
+  expect((after["conversation/0"] as unknown[]).length).toBe(12); // the state keeps every message
 }, 120_000);
 
 it("routes to a specialist", async () => {

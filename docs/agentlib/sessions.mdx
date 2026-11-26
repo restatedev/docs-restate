@@ -84,7 +84,7 @@ A [killed](/services/invocation/managing-invocations#kill) invocation runs no mo
 - A run writes only the chunk that it extends, the new chunks, and the metadata, so the size of each write depends on the new messages, not on the length of the conversation.
 - `count` is the number of stored messages and serves as the conversation's version. Before each save, a run checks that `count` hasn't changed since it loaded the conversation or saved last. If another run saved in the meantime, the run throws `ConversationConflictError`, a `TerminalError`.
 - Within one invocation, `LazyStateConversation` reads each state key at most once and keeps the values that it read and wrote, so the saves of a run don't read the chunks again. A shared handler that calls `page` twice in one invocation receives the values from its first read, so call it once per invocation.
-- [Compaction](#between-runs) sets `summary`. A run then receives the summary instead of the messages before `through`, and reads only the chunks after it. The messages stay in state, so `page` still returns every message.
+- [Compaction](#compaction-in-conversations) sets `summary`. A run then receives the summary instead of the messages before `through`, and reads only the chunks after it. The messages stay in state, so `page` still returns every message.
 - `LazyStateConversation` reads with shared state and writes with exclusive state. A shared handler can read the conversation while a run is in progress, but only an exclusive handler can save to it.
 
 ### Several conversations
@@ -119,26 +119,7 @@ To keep small keys preloaded, list them, for example `state: {preload: ["active"
 
 ## Compaction
 
-Compaction replaces older messages with a summary in the requests sent to the model. The object state and `page` keep every message. Each summary costs a model call.
-
-### Between runs
-
-Pass `compaction` to `LazyStateConversation` to summarize the conversation when a run starts:
-
-```typescript {"CODE_LOAD::agentlib/src/sessions.ts#conversation_compaction"} 
-const conversation = new LazyStateConversation({
-  compaction: {model, policy: {maxMessages: 64, maxChars: 64000, retainMessages: 12}}, // the default policy
-});
-const result = yield* assistant.run(message, {conversation});
-```
-
-When the messages since the last summary exceed `maxMessages` or `maxChars`, the run summarizes the older messages. It keeps at least the newest `retainMessages` unchanged, starting at a user message. From then on, the model receives the summary followed by the newer messages, and `result.messages` starts with the summary.
-
-If compaction fails, the run logs a warning and continues with the history it loaded. The next run tries again.
-
-### Within a run
-
-A single run can exceed the model's context window as tool results accumulate. Set `compaction` on the agent to summarize the run's older messages:
+Compaction replaces older messages with a summary in the requests sent to the model. Each summary costs a model call, so compaction is off by default. Set `compaction` on the agent to turn it on:
 
 ```typescript {"CODE_LOAD::agentlib/src/sessions.ts#run_compaction"} 
 const researcher = agent({
@@ -148,9 +129,39 @@ const researcher = agent({
 });
 ```
 
+A run's request grows with each step as tool results accumulate, and with each turn of a conversation.
 Before each model call, once the request exceeds `maxTokens`, the run replaces its older messages with a summary and keeps the newest messages that fit in `retainTokens`.
-The summary uses the agent's model, unless you set `compaction.model`. If the summary fails, the run truncates the older messages instead.
-Compaction within a run changes only the requests: `result.messages` keeps every message.
+The summary uses the agent's model, unless you set `compaction.model`. If the summary fails, the run logs a warning and truncates the older messages instead.
+The summary replaces messages only in the requests: `result.messages` keeps every message that the run loaded and added.
+
+### Compaction in conversations
+
+With a `LazyStateConversation`, the run also stores its summary in the conversation:
+
+```typescript {"CODE_LOAD::agentlib/src/sessions.ts#conversation_compaction"} 
+const longChat = agent({
+  model,
+  instructions: "Use the conversation to remember what the user told you.",
+  compaction: {maxTokens: 64000},
+});
+
+export const compactedChat = restate.object({
+  name: "CompactedChat",
+  handlers: {
+    *ask(message: string) {
+      // The run stores its summaries in the conversation
+      const result = yield* longChat.run(message, {conversation: new LazyStateConversation()});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+});
+```
+
+- The run stores the summary in the [metadata](#storage-layout) at its next save. The next run starts from the summary and the messages after it, so it doesn't summarize the same messages again.
+- A run loads only the messages after the stored summary, so `result.messages` starts there. The object state keeps every message, so `page` still returns them all.
+- A truncation is never stored, so the next run summarizes again.
+- If the run can't store the summary, for example because the summary is longer than 64,000 characters, it logs a warning and continues. The next run loads every message after the last stored summary.
+- A later run can't read a [previewed tool result](#tool-result-previews) from a message that the stored summary replaced. The model receives the error code `unknown_ref`.
 
 ## Tool result previews
 
@@ -167,7 +178,8 @@ Set `toolResults: false` to send every result in full. `result.messages` and the
 
 ## Context window
 
-Set `contextWindow` on the agent to the model's context window in tokens, for example `contextWindow: 200000`. It must be greater than `maxOutputTokens`. Before each model call, the run shrinks a request that wouldn't fit: it summarizes the older messages when `compaction` is set, and truncates them otherwise.
+Set `contextWindow` on the agent to the model's context window in tokens, for example `contextWindow: 200000`. Before each model call, the run shrinks a request that wouldn't fit together with the reply: it summarizes the older messages when `compaction` is set, and truncates them otherwise.
+For the reply, the run reserves `maxOutputTokens`, or 32,768 tokens when `maxOutputTokens` is unset. `contextWindow` must be greater than this reserve, so set `maxOutputTokens` for a model with a smaller context window.
 
 If the provider reports a context overflow, the run shrinks the request once and sends it again. If that request overflows too, the run fails.
 `aiModel` recognizes an overflow only from HTTP `413` or the error code `context_length_exceeded`, which OpenAI returns. Any other overflow error fails the run, so set `contextWindow` for providers that don't return these signals. A [custom model](/agentlib/models#custom-models) reports an overflow by throwing `ContextOverflowError`.
@@ -200,4 +212,4 @@ export const manualChat = restate.object({
 
 A run that throws returns no result. `messagesOf(error)` returns its history up to the failure, with the [note](#failed-runs) on why it failed. Save it only for a `TerminalError`, because Restate retries other errors.
 
-This approach doesn't chunk the history or compact it between runs: each run loads and writes the whole history as one state value. Tool result previews, compaction within a run, and `contextWindow` still apply, because they're agent options.
+This approach doesn't chunk the history or store summaries: each run loads and writes the whole history as one state value. Tool result previews, compaction, and `contextWindow` still apply, because they're agent options, but each run whose request exceeds `maxTokens` summarizes the history again.
