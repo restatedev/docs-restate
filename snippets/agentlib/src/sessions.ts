@@ -21,7 +21,11 @@ export const chatSession = restate.object({
       return yield* new LazyStateConversation().page(from, limit);
     },
   },
-  options: {handlers: {history: {shared: true}}},
+  options: {
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary"]},
+    handlers: {history: {shared: true}},
+  },
 });
 // <end_conversation>
 
@@ -65,7 +69,8 @@ export const aiSession = restate.object({
   name: "AiSession",
   handlers: {doTurn, history, steer, interrupt},
   options: {
-    state: {preload: false}, // fetch conversation chunks when they are read
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary", "active"]},
     handlers: {history: {shared: true}, steer: {shared: true}, interrupt: {shared: true}},
   },
 });
@@ -87,6 +92,7 @@ export const compactedChat = restate.object({
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
   },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
 });
 // <end_conversation_compaction>
 
@@ -110,6 +116,7 @@ export const customSummaryChat = restate.object({
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
   },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
 });
 
 // <start_run_compaction>

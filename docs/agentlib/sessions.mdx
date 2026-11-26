@@ -23,7 +23,11 @@ export const chatSession = restate.object({
       return yield* new LazyStateConversation().page(from, limit);
     },
   },
-  options: {handlers: {history: {shared: true}}},
+  options: {
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary"]},
+    handlers: {history: {shared: true}},
+  },
 });
 ```
 
@@ -31,10 +35,7 @@ export const chatSession = restate.object({
 - Restate runs one exclusive handler per key at a time, so the runs of a session never interleave.
 - A shared handler such as `history` can read the turn that is running. See [Saving progress](#saving-progress).
 - Read the history from a shared handler with `page(from, limit)`, which returns up to `limit` messages (default 100, at most 1000) and `next`, the offset of the following page. Call `history` with `{}` for the first page, then pass `next` as `from` in subsequent requests until the page is empty.
-
-<Tip>
-By default, every invocation of the object receives the whole conversation from Restate, including invocations of shared handlers. For long conversations or large messages, turn on [lazy state](#lazy-state), so each invocation fetches only the chunks that it reads.
-</Tip>
+- `state.preload` lists the conversation's metadata and summary keys, so each invocation receives only those keys from Restate and fetches the chunks that it reads, instead of the whole conversation. See [Lazy state](#lazy-state).
 
 ## Saving progress
 
@@ -72,50 +73,52 @@ A [killed](/services/invocation/managing-invocations#kill) invocation runs no mo
 
 ## Storage layout
 
-`LazyStateConversation` stores the messages in the object's state in chunks of 32, each under its own key, next to a metadata entry. With the default keys, a conversation of 70 messages is stored like this:
+`LazyStateConversation` stores the messages in the object's state in chunks of 8, each under its own key, next to a metadata entry and, after compaction, the summary. With the default keys, a conversation of 20 messages is stored like this:
 
 | Key | Value |
 |---|---|
-| `conversation/meta` | `{count: 70, summary?: {through, text}}` |
-| `conversation/0` | Messages 0 to 31 |
-| `conversation/1` | Messages 32 to 63 |
-| `conversation/2` | Messages 64 to 69 |
+| `conversation/meta` | `{count: 20, summary?: {through}}` |
+| `conversation/summary` | The text of the latest summary, after compaction |
+| `conversation/0` | Messages 0 to 7 |
+| `conversation/1` | Messages 8 to 15 |
+| `conversation/2` | Messages 16 to 19 |
 
 - A run writes only the chunk that it extends, the new chunks, and the metadata, so the size of each write depends on the new messages, not on the length of the conversation.
 - `count` is the number of stored messages and serves as the conversation's version. Before each save, a run checks that `count` hasn't changed since it loaded the conversation or saved last. If another run saved in the meantime, the run throws `ConversationConflictError`, a `TerminalError`.
 - Within one invocation, `LazyStateConversation` reads each state key at most once and keeps the values that it read and wrote, so the saves of a run don't read the chunks again. A shared handler that calls `page` twice in one invocation receives the values from its first read, so call it once per invocation.
-- [Compaction](#compaction-in-conversations) sets `summary`. A run then receives the summary instead of the messages before `through`, and reads only the chunks after it. The messages stay in state, so `page` still returns every message.
+- [Compaction](#compaction-in-conversations) writes the summary's text to `conversation/summary`, and sets `summary.through` in the metadata to the number of messages that the summary replaces. A run then receives the summary instead of the messages before `through`, and reads only the chunks after it. Saves don't rewrite the summary. The messages stay in state, so `page` still returns every message.
 - `LazyStateConversation` reads with shared state and writes with exclusive state. A shared handler can read the conversation while a run is in progress, but only an exclusive handler can save to it.
 
 ### Several conversations
 
-To keep several conversations in one object, give each `LazyStateConversation` its own `stateKey`, for example `new LazyStateConversation({stateKey: "conversation/flights"})`. The chunk keys then start with `conversation/flights/`, and the metadata key is `conversation/flights/meta`. Set `metaKey` only to match a layout that already exists in state.
+To keep several conversations in one object, give each `LazyStateConversation` its own `stateKey`, for example `new LazyStateConversation({stateKey: "conversation/flights"})`. The chunk keys then start with `conversation/flights/`, and the metadata and summary keys are `conversation/flights/meta` and `conversation/flights/summary`. Preload the metadata and summary keys of each conversation. Set `metaKey` only to match a layout that already exists in state. It doesn't change the summary key.
 
 Runs that save to the same conversation must run one after the other. To run agents in parallel or race them in one handler, see [Conversations](/agentlib/multi-agent#conversations).
 
 ## Lazy state
 
-By default, Restate sends all of an object's state to each invocation when it starts, including invocations of shared handlers such as `history` or `steer`. Compaction doesn't remove messages from the state, so every invocation of the session receives the whole conversation, although a run reads only the chunks after the last summary.
+By default, Restate sends all of an object's state to each invocation when it starts, including invocations of shared handlers such as `history` or `steer`. Compaction doesn't remove messages from the state, so every invocation of the session would receive the whole conversation, although a run reads only the chunks after the last summary.
 
-For conversations with many turns or large messages, such as long tool results, turn off preloading in the object's `options`. Each invocation then fetches a chunk when it reads it:
+In each object that uses `LazyStateConversation`, preload only the conversation's metadata and summary keys in the object's `options`. Each invocation then fetches a chunk when it reads it:
 
 ```typescript {"CODE_LOAD::agentlib/src/sessions.ts#lazy_state"} 
 export const aiSession = restate.object({
   name: "AiSession",
   handlers: {doTurn, history, steer, interrupt},
   options: {
-    state: {preload: false}, // fetch conversation chunks when they are read
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary", "active"]},
     handlers: {history: {shared: true}, steer: {shared: true}, interrupt: {shared: true}},
   },
 });
 ```
 
-Keep the default for short conversations. With lazy state:
+- Each load, save, and `page` call reads `conversation/meta` first, and each load of a summarized conversation reads `conversation/summary`, so preload both.
+- Add other small keys that the handlers read on most invocations, such as `active`, which the `steer` and `interrupt` handlers read on the [steering page](/agentlib/steering-and-progress#steering-and-interruption).
+- Each chunk read is a round trip to Restate. Loading the conversation reads each chunk that holds messages after the last summary.
+- On AWS Lambda and other platforms without bidirectional streaming, each read of a key that isn't preloaded suspends the invocation, which replays when Restate sends the requested state.
 
-- Each state read is a round trip to Restate. Loading the conversation reads the metadata key and each chunk that holds messages after the last summary.
-- On AWS Lambda and other platforms without bidirectional streaming, each state read suspends the invocation, which replays when Restate sends the requested state.
-
-To keep small keys preloaded, list them, for example `state: {preload: ["conversation/meta", "active"]}`. Each load, save, and `page` call reads `conversation/meta` first, so preload it. This requires Restate 1.8 or later. You can also set `state` per handler in `options.handlers`. The deprecated `enableLazyState: true` is equivalent to `state: {preload: false}`. See [State](/services/configuration#state) in the service configuration.
+A list of keys to preload requires Restate 1.8 or later. You can also set `state` per handler in `options.handlers`. `state: {preload: false}` preloads no keys, and the deprecated `enableLazyState: true` is equivalent to it. See [State](/services/configuration#state) in the service configuration.
 
 ## Compaction
 
@@ -178,6 +181,7 @@ export const compactedChat = restate.object({
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
   },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
 });
 ```
 

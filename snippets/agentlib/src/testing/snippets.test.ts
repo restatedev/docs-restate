@@ -87,7 +87,7 @@ it("paginates long conversations across chunks", async () => {
 it("reads the conversation with lazy state", async () => {
   for (let i = 1; i <= 17; i++) await ingress().client(aiSession, "erin").doTurn(`m${i}`);
   const page = await ingress().client(aiSession, "erin").history({});
-  expect(page.next).toBe(34); // two runs past the 32-message chunk
+  expect(page.next).toBe(34); // 34 messages in five chunks of 8
   expect(await ingress().client(aiSession, "erin").history({from: 31, limit: 2})).toEqual({
     messages: page.messages.slice(31, 33), next: 33,
   });
@@ -102,11 +102,14 @@ it("stores a run's summary in the conversation", async () => {
   // The run summarizes all but the newest two messages: summary + m5
   expect(await ask(5)).toMatch(/^the\|users:2\|m5 /);
   const state = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
-  expect(state["conversation/meta"]).toEqual({count: 10, summary: {through: 7, text: "Earlier turns, summarized"}});
+  expect(state["conversation/meta"]).toEqual({count: 10, summary: {through: 7}});
+  expect(state["conversation/summary"]).toBe("Earlier turns, summarized");
   // The next run starts from the stored summary: summary + m5 + m6
   expect(await ask(6)).toMatch(/^the\|users:3\|m6 /);
   const after = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
-  expect((after["conversation/0"] as unknown[]).length).toBe(12); // the state keeps every message
+  // The state keeps every message, in chunks of 8
+  expect((after["conversation/0"] as unknown[]).length).toBe(8);
+  expect((after["conversation/1"] as unknown[]).length).toBe(4);
 }, 120_000);
 
 it("summarizes with custom compaction instructions", async () => {
@@ -117,7 +120,7 @@ it("summarizes with custom compaction instructions", async () => {
   expect(before["conversation/meta"]).toEqual({count: 14});
   await chat.ask(`m8 ${"x".repeat(30_000)}`);
   const state = await env.stateOf(customSummaryChat, "frank").getAll<Record<string, unknown>>();
-  expect((state["conversation/meta"] as {summary?: {text: string}}).summary?.text).toBe("Open requests and order IDs");
+  expect(state["conversation/summary"]).toBe("Open requests and order IDs");
 }, 120_000);
 
 it("routes to a specialist", async () => {

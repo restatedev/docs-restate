@@ -124,6 +124,14 @@ export const tripSession = restate.object({
       return {flights: flights.output, hotels: hotels.output};
     },
   },
+  options: {
+    state: {
+      preload: [
+        "conversation/flights/meta", "conversation/flights/summary",
+        "conversation/hotels/meta", "conversation/hotels/summary",
+      ],
+    },
+  },
 });
 // <end_parallel_conversations>
 
@@ -143,6 +151,7 @@ export const racingSession = restate.object({
       return winner.output;
     },
   },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
 });
 // <end_race_conversation>
 
