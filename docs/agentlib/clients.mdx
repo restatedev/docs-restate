@@ -1,0 +1,106 @@
+---
+title: "Clients"
+description: "Send requests to an agent over HTTP or with the TypeScript client, get the answers of long runs, and handle errors."
+icon: "plug"
+---
+
+An agent runs in a Restate handler, so your application sends requests to that handler through the Restate ingress: over HTTP, or with the TypeScript client `@restatedev/restate-sdk-clients`, which runs in Node and in the browser.
+
+## Call the agent
+
+The examples on this page call the following Virtual Object. Its `ask` handler runs the agent with the conversation of the chat ID, which is the object key:
+
+```typescript {"CODE_LOAD::agentlib/src/clients.ts#chat"} 
+export const supportChat = restate.object({
+  name: "SupportChat",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* assistant.run(message, {conversation: new Conversation()});
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+    *history({from, limit}: {from?: number; limit?: number}) {
+      return yield* new Conversation().page(from, limit);
+    },
+  },
+  options: {
+    state: {preload: ["conversation/meta", "conversation/summary"]},
+    handlers: {history: {shared: true}},
+  },
+});
+```
+
+Call `ask` with the chat ID in the path. The response contains the agent's answer:
+
+```bash
+curl localhost:8080/restate/call/SupportChat/chat-1/ask --json '"Where is my order?"'
+```
+
+With the TypeScript client, create a client from the object definition:
+
+```typescript {"CODE_LOAD::agentlib/src/clients.ts#call"} 
+export async function ask(restateUrl: string, chatId: string, message: string) {
+  const ingress = connect({url: restateUrl}); // for example, http://localhost:8080
+  return await ingress.client(supportChat, chatId).ask(message);
+}
+```
+
+- Requests to the same chat ID run one at a time: Restate queues a request until the running `ask` finishes. To add input to a running request instead, [steer](/agentlib/steering-and-progress#steering-and-interruption) it.
+- The shared `history` handler runs immediately, also while `ask` runs. It returns the saved messages from index `from` on, and `next`, the index to read from next time. To show what the agent does during a run, publish [progress events](/agentlib/steering-and-progress#progress-events).
+
+The client of the [agent reference architecture](/ai/reference-architecture) follows a conversation as it grows: it reads the history in pages, and then waits for changes with a long poll. The [AG-UI example](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/18_ag_ui.ts) serves a conversation and its progress to AG-UI clients, such as CopilotKit.
+
+## Long runs
+
+A run can take minutes, for example while it waits for a [human approval](/agentlib/human-approval). If the HTTP connection breaks during that time, for example because a proxy times out, the run continues in Restate, but the client doesn't receive the answer.
+Send such requests with an [idempotency key](/services/invocation/http#using-an-idempotency-key), and attach to them to wait for the answer:
+
+```bash
+curl localhost:8080/restate/send/SupportChat/chat-1/ask \
+  -H 'idempotency-key: request-1' \
+  --json '"Plan my trip to Lisbon"'
+```
+
+Restate responds as soon as it accepts the request, with the invocation ID, for example `{"invocationId": "inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz", "status": "Accepted"}`. Attach with the invocation ID:
+
+```bash
+curl localhost:8080/restate/attach/inv_1gdJBtdVEcM942bjcDmb1c1khoaJe11Hbz
+```
+
+With the TypeScript client:
+
+```typescript {"CODE_LOAD::agentlib/src/clients.ts#send"} 
+export async function askAndAttach(restateUrl: string, chatId: string, message: string, requestId: string) {
+  const ingress = connect({url: restateUrl});
+  // Returns as soon as Restate accepts the request
+  const handle = await ingress
+    .sendClient(supportChat, chatId)
+    .ask(message, rpc.sendOpts({idempotencyKey: requestId}));
+  // Later: wait for the answer
+  return await ingress.result(handle);
+}
+```
+
+A request with the same idempotency key attaches to the running request, or returns its stored answer, instead of adding another turn to the conversation. Use a new idempotency key for each new message.
+To attach with the idempotency key instead of the invocation ID, or to let the TypeScript client retry calls, see [Attach to an invocation](/services/invocation/http#attach-to-an-invocation) and [Automatic retries](/services/invocation/clients/typescript-sdk#automatic-retries).
+
+## Errors
+
+| Outcome | Response |
+|---|---|
+| The run completes, stops, or is interrupted | `200` with the handler's return value. In the example, `ask` returns the run's output, or the reason when a stopped run has no output. |
+| The run fails with a terminal error, for example because the model is unavailable | `500` with the error message, for example `{"code": 500, "message": "The model is unavailable", "source": "invocation"}`. A [`TerminalError`](/develop/ts/error-handling) with an `errorCode` sets another status code. |
+| The invocation is [cancelled](/services/invocation/managing-invocations#cancel) | `409` with `{"code": 409, "message": "Cancelled", "source": "invocation"}` |
+
+- A retryable error, such as a crash of the service, doesn't reach the client. Restate retries the invocation, the run continues from its journal, and the client keeps waiting.
+- The TypeScript client throws an `HttpCallError` with the `status` and the response body in `responseText`.
+- An error with the source `invocation` comes from the handler, so retrying it returns the same error. See [Retrying requests](/services/invocation/http#retrying-requests).
+- The conversation keeps a failed turn, with a note on why it failed. See [Failed runs](/agentlib/sessions#failed-runs).
+
+## Expose the agent to a browser
+
+The Restate ingress doesn't authenticate callers. A caller that reaches it can call every public handler with any key, so a browser that calls the ingress directly can read and write every user's chats. See [Security](/server/security#securing-the-ingress-port).
+
+Put your backend between the browser and Restate. The backend authenticates the user, chooses the chat ID from the user's identity, calls only the handlers that the UI needs, and keeps Restate credentials, such as a Restate Cloud API key, out of the browser.
+The web app of the [agent reference architecture](/ai/reference-architecture) does this with a Next.js route, which maps a fixed set of operations to the agent's handlers.
+Mark handlers that only your services call as [private](/services/configuration#private-services), so that the ingress rejects requests for them.

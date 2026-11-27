@@ -199,3 +199,21 @@ it("denies a tool call in before", async () => {
   expect(await ingress().client(hotelBooking).book({request: "H2", quote})).toContain("Only the quoted hotel");
   expect(await ingress().client(hotelBooking).book({request: "H1", quote})).toContain("bk_H1");
 });
+
+it("returns 409 to a client attached to a cancelled run", async () => {
+  const send = await fetch(`${env.baseUrl()}/restate/send/TicketApproval/ask`, {
+    method: "POST",
+    headers: {"content-type": "application/json"},
+    body: JSON.stringify("Close T-43"),
+  });
+  const {invocationId} = (await send.json()) as {invocationId: string};
+  const attached = fetch(`${env.baseUrl()}/restate/attach/${invocationId}`);
+  // The run waits for the reviewer's decision
+  await vi.waitFor(() => expect(vi.mocked(notifyReviewer)).toHaveBeenCalledWith(
+    expect.objectContaining({call: expect.objectContaining({input: {ticketId: "T-43"}})}),
+  ), {timeout: 3000});
+  await fetch(`${env.adminAPIBaseUrl()}/invocations/${invocationId}/cancel`, {method: "PATCH"});
+  const response = await attached;
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({code: 409, message: "Cancelled", source: "invocation"});
+});
