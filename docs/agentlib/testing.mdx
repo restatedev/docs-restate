@@ -1,0 +1,107 @@
+---
+title: "Testing"
+description: "Test agents against a real Restate server with a fixture model and forced replay."
+icon: "flask"
+---
+
+Test agents with a fixture model instead of a paid model, in a Restate server that forces replay.
+Forced replay runs your handler again from its journal at every suspension point. Code that takes different steps on replay fails with a journal mismatch, and side effects outside journaled steps run again, which your assertions can catch.
+
+<Info>
+**Prerequisites**: Docker, to run the Restate Server in a container.
+</Info>
+
+Install the test dependencies:
+
+```shell
+npm install --save-dev vitest @restatedev/restate-sdk-testcontainers @restatedev/restate-sdk-clients
+```
+
+## Fixture models
+
+A fixture model returns fixed responses based on the request. Wrap it with `journaledModel`, so its responses are journaled like real model calls:
+
+```typescript {"CODE_LOAD::agentlib/src/testing/fixture-model.ts#fixture"} 
+import {journaledModel, type ModelResponse} from "@restatedev/agentlib";
+import {TerminalError} from "@restatedev/restate-sdk";
+import {z} from "zod";
+
+export const fixtureModel = journaledModel(async (request): Promise<ModelResponse> => {
+  if (request.step === 1) {
+    return {type: "tool_calls", calls: [{id: "t1", name: "lookupTicket", input: {ticketId: "T-42"}}]};
+  }
+  const lookup = request.messages.findLast(
+    (message) => message.role === "tool" && message.name === "lookupTicket" && message.callId === "t1",
+  );
+  if (lookup?.role !== "tool" || lookup.result.status !== "success") {
+    throw new TerminalError("Fixture expected a successful lookupTicket result");
+  }
+  const ticket = z.object({ticketId: z.literal("T-42"), status: z.string()}).safeParse(lookup.result.output);
+  if (!ticket.success) throw new TerminalError("Fixture received invalid ticket data");
+  return {type: "final", text: `Ticket ${ticket.data.ticketId} is ${ticket.data.status}.`};
+});
+```
+
+The request contains the `messages` and the available `tools`, and, when they apply, the `instructions`, `maxOutputTokens`, the `step` number, and the `outputSchema` for typed output. A request without a `step` asks for a summary, for example of a stopped run, and its `name` names the summary, such as `Summarize stopped run`. For typed output, return `{type: "final", text: "", output}`.
+This fixture returns an answer only after it receives a successful `lookupTicket` result with valid ticket data. A missing tool or failed lookup fails the test.
+
+## Integration tests
+
+Replace the model provider with the fixture, start the services in a Restate container, and call them through the Restate client:
+
+```typescript {"CODE_LOAD::agentlib/src/testing/ticket-desk.test.ts#test"} 
+import {afterAll, beforeAll, expect, it, vi} from "vitest";
+import {connect} from "@restatedev/restate-sdk-clients";
+import {RestateContainer, RestateTestEnvironment} from "@restatedev/restate-sdk-testcontainers";
+import {ticketDesk} from "../tools.js";
+import {fetchTicket} from "../services.js";
+
+// Replace the model provider and observe the ticket API calls.
+vi.mock("@restatedev/agentlib/provider", async () => {
+  const {fixtureModel} = await import("./fixture-model.js");
+  return {aiModel: () => fixtureModel};
+});
+
+vi.mock("../services.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../services.js")>();
+  return {...original, fetchTicket: vi.fn(original.fetchTicket)};
+});
+
+let env: RestateTestEnvironment;
+
+beforeAll(async () => {
+  env = await RestateTestEnvironment.start({
+    services: [ticketDesk],
+    container: () => new RestateContainer().alwaysReplay().disableRetries(),
+  });
+}, 60_000);
+
+afterAll(async () => {
+  await env?.stop();
+});
+
+it("looks up the ticket once despite replay before it answers", async () => {
+  vi.mocked(fetchTicket).mockClear();
+  const restate = connect({url: env.baseUrl()});
+  const answer = await restate.client(ticketDesk).ask("What is the status of T-42?");
+  expect(answer).toBe("Ticket T-42 is open.");
+  expect(fetchTicket).toHaveBeenCalledExactlyOnceWith("T-42", {signal: expect.any(AbortSignal)});
+});
+
+it("fails when the lookup does not return a ticket", async () => {
+  vi.mocked(fetchTicket).mockResolvedValueOnce(undefined);
+  const restate = connect({url: env.baseUrl()});
+  await expect(restate.client(ticketDesk).ask("What is the status of T-42?")).rejects.toThrow(
+    "Fixture expected a successful lookupTicket result",
+  );
+});
+```
+
+- `vi.mock` replaces `aiModel` with the fixture, so the test imports the same services that your application serves.
+- The `fetchTicket` spy calls the original function and records each call. The assertion verifies that replay doesn't repeat the lookup, and the second test verifies that a failed lookup cannot produce a successful answer.
+- `alwaysReplay()` makes Restate replay the invocation at every suspension point. `disableRetries()` sets the server's default retry policy to one attempt, so an invocation that fails with a retryable error is killed immediately. Retry policies of an `asyncTool`, a model, or a service still apply.
+
+A run rejects a tool call whose ID an earlier message in its conversation already used: the call doesn't run, and the model receives an `invalid_response` note instead. A fixture that returns the same call IDs in every turn therefore fails from the second turn of a conversation. Use a new object key per test, or return unique call IDs per turn.
+
+Assert on observable effects: a tool that must run once runs once, an approval blocks the run until it's resolved, and the losing run of a race is cleaned up.
+The [agentlib integration tests](https://github.com/restatedev/agentlib/blob/main/packages/tests/src/examples.integration.ts) test the tutorial lessons this way.

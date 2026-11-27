@@ -1,0 +1,133 @@
+---
+title: "Guardrails and hooks"
+description: "Enforce policies on tool calls, inputs, and answers, and keep sensitive data out of the conversation."
+icon: "shield-halved"
+---
+
+Guardrails are functions that check a run's input, steering messages, tool calls, tool output, and final answer.
+The model can't bypass them, because they run in your code.
+
+## Tool guardrails
+
+Add `before` to a tool. Return a string to deny the call with that reason, `false` to deny it with a generic reason, and nothing or `true` to allow it:
+
+```typescript {"CODE_LOAD::agentlib/src/guardrails.ts#tool_before"} 
+type Quote = {hotelId: string; quotedTotalCents: number; maxTotalCents: number};
+
+const booking = agent<Quote>({
+  model,
+  tools: {
+    bookHotel: asyncTool({
+      description: "Book the quoted hotel. The application supplies the price.",
+      input: z.object({hotelId: z.string()}), // the model cannot set the price
+      *before({hotelId}, {context}) {
+        if (hotelId !== context.hotelId) return "Only the quoted hotel can be booked";
+        if (context.quotedTotalCents > context.maxTotalCents) return "The quote exceeds the budget";
+      },
+      async execute({hotelId}, {context}) {
+        return await bookRoom(hotelId, context.quotedTotalCents);
+      },
+    }),
+  },
+});
+
+export const hotelBooking = restate.service({
+  name: "HotelBooking",
+  handlers: {
+    *book({request, quote}: {request: string; quote: Quote}) {
+      const result = yield* booking.run(request, {context: quote});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+});
+```
+
+A denied call never runs `execute`. The model receives a `denied` result with the reason.
+
+The price comes from the run context, not from the tool input, so the model can't change it.
+
+## Agent guardrails and hooks
+
+Agent-level hooks check every run of the agent:
+
+| Hook | Checks | A rejection |
+|---|---|---|
+| `beforeRun(messages, ctx)` | The input, once, before the first step | The model receives it as a note after the input. The first step goes ahead. |
+| `beforeSteering(steering, ctx)` | Each steering message | Drops the message. The run continues. |
+| `beforeTool(call, ctx)` | Every call to a known tool, before the tool validates its input | Returns a `denied` result to the model. |
+| `afterTool(output, ctx)` | Every successful tool output | Can't reject. Returns the output to record. |
+| `afterRun(candidate, ctx)` | The run's result | Returns a completed answer to the model with a note, for another step. Fails a stopped or interrupted run with a `GuardrailError` (`denied`). |
+
+Each hook except `afterTool` returns its decision:
+
+| Return | Meaning |
+|---|---|
+| Nothing or `true` | Allow |
+| A string | Reject, with that reason |
+| `false` | Reject, with a generic reason |
+| `{message}` (`beforeRun`, `beforeSteering`) or `{output}` (`afterRun`) | Record this value instead |
+| `{input}` (`beforeTool`) | Run the tool with this input. The history keeps the model's call. |
+
+For example, `beforeTool` can restrict a tool by name. It also checks the tools that you pass to `run` or load from an MCP server:
+
+```typescript {"CODE_LOAD::agentlib/src/guardrails.ts#before_tool"} 
+const assistant = agent<{role: "customer" | "admin"}>({
+  model,
+  tools: {
+    deleteAccount: asyncTool({
+      description: "Delete an account.",
+      input: z.object({accountId: z.string()}),
+      async execute({accountId}) {
+        return {accountId, status: "deleted"};
+      },
+    }),
+  },
+  *beforeTool(call, {context}) {
+    if (call.name === "deleteAccount" && context.role !== "admin") {
+      return "Only admins can delete accounts";
+    }
+  },
+});
+```
+
+To ask a person instead of rejecting, call `yield* ctx.approve(input, {question, details})` in a tool's `before` or in `beforeTool`, where `ctx` is the hook's second argument and `input` is the tool input to show the approver. Return a rejection if it returns `false`. See [Human approval](/agentlib/human-approval).
+
+`beforeStep(request, ctx)` runs before the model call of each step and changes that one request, for example to add retrieved documents. Unlike the other hooks, it doesn't change what the run records.
+Summary calls, such as the summary of a stopped run and compaction summaries, don't run `beforeStep`, so don't use it to remove sensitive data.
+
+## Sensitive data
+
+A rejection doesn't remove data: an input that `beforeRun` rejects stays in the run's history, and so do the arguments of a denied tool call. To keep an input out of the conversation entirely, throw `AgentTerminalError` from `beforeRun`: the run then fails without saving anything.
+To keep data away from the model and out of the saved conversation, replace it where it enters the run:
+
+```typescript {"CODE_LOAD::agentlib/src/guardrails.ts#redact"} 
+const support = agent({
+  model,
+  *beforeRun(messages) {
+    const input = messages.at(-1); // the run's input is the last message
+    if (input?.role === "user") return {message: redact(input.content)};
+  },
+  *beforeSteering({message}) {
+    return {message: redact(message)};
+  },
+  *afterTool(output) {
+    return redactJson(output); // redacts every string in the output
+  },
+});
+```
+
+Later model calls, summaries, `result.messages`, and the saved conversation contain only the values that these hooks return.
+`afterTool` receives only successful output. When a tool fails, the run records the error message unchanged, so keep sensitive data out of the errors that your tools throw.
+
+The Restate journal is separate from the run's history. It stores the handler's input, the payload of every signal, such as a steering message, and the result of every journaled step, such as an `asyncTool`'s output before `afterTool` runs.
+To keep data out of the journal, remove it inside the tool before the tool returns.
+
+## Writing hooks
+
+- **Return the decision.** A rejection or replacement that the hook builds but doesn't return has no effect.
+- **Reject by returning, not by throwing.** A thrown `TerminalError` means that the check itself failed, for example because a policy service is down. The model receives the error, except from `beforeSteering`, which drops the message, and from `afterRun` on a stopped or interrupted run, which fails the run. From `beforeTool` and `afterTool`, an error without its own code gets the code `guardrail_failed`. Throw `AgentTerminalError` to stop the run. See [Error handling](/agentlib/error-handling).
+- **Return the same decision on replay.** Hooks run again when Restate replays the handler. Compute decisions deterministically, or inside `restate.run`, which journals the result.
+- **Don't modify the input.** Hooks receive the run's messages without a copy. Return a replacement instead.
+
+`beforeRun`, `beforeSteering`, and `afterRun` belong to the agent that starts the run. After a [handoff](/agentlib/multi-agent#sub-agents-and-handoffs), the target agent adds its own `beforeStep`, `beforeTool`, and `afterTool`, and the original agent's checks still run.
+A sub-agent that runs through `agentTool` uses only its own guardrails, so set them on the sub-agent.

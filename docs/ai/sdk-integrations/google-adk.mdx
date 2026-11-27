@@ -1,16 +1,196 @@
 ---
 title: "Restate & Google ADK"
 sidebarTitle: "Google ADK"
-icon: "/img/languages/python.svg"
+icon: "/img/ai/icons/google-adk.svg"
 description: "Learn how to use the Google ADK with Restate."
 ---
+
+import {GitHubLink} from "/snippets/blocks/github-link.mdx";
+import InstallRestate from "/snippets/common/install-server-without-running-cli.mdx";
 
 Integrate Google's Agent Development Kit (ADK) with Restate for fault-tolerant agent execution with automatic retries and durable state.
 
 <Card icon="/img/ai/sdk-integrations/google-adk.png" title="Learn more about Google ADK" horizontal href="https://google.github.io/adk-docs/"/>
 
-## Quick Start
-- [Quickstart](/ai-quickstart)
+## Quickstart
+
+<Info>
+**Prerequisites**:
+- Python >= v3.12
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- Google API key (get one at [Google AI Studio](https://aistudio.google.com/apikey))
+</Info>
+
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template for the [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/) and Restate:
+```shell
+restate example python-google-adk-template && cd python-google-adk-template
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/google-adk/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your Google API key and run the agent:
+```shell
+export GOOGLE_API_KEY=your_google_api_key_here
+uv run .
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the agent service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`):
+<Frame>
+    <img src={"/img/ai/registration.png"} alt="Restate UI Playground"/>
+</Frame>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be reachable from your Restate environment.
+You can use a public endpoint or connect a private service through a supported [secure tunnel](/services/deploy/standalone#connecting-private-services-to-restate-cloud-or-byoc).
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/google-adk-playground.png"} alt="Restate UI Playground"/>
+</Frame>
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/restate/call/agent/run --json '{
+    "message": "What is the weather like in San Francisco?",
+    "user_id": "user-123"
+}'
+```
+Output: `The weather in San Francisco is currently 23°C and sunny.`
+
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by adding the `RestatePlugin` to the Google ADK App for durable model calls, and by using [Restate Context actions](/foundations/actions) (e.g. `restate_context().run_typed`) to make the tool executions resilient:
+
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/google-adk/template/agent.py"} 
+import restate
+from restate.ext.adk import RestatePlugin, restate_context
+from google.adk import Runner
+from google.adk.apps import App
+from google.adk.sessions import InMemorySessionService
+from google.genai.types import Content, Part
+from google.adk.agents.llm_agent import Agent
+from pydantic import BaseModel
+
+class WeatherPrompt(BaseModel):
+    user_id: str = "user-123"
+    message: str = "What is the weather like in San Francisco?"
+
+
+# TOOL
+async def get_weather(city: str) -> dict:
+    """Get the current weather for a given city."""
+    # Do durable steps using the Restate context
+    async def call_weather_api(city: str) -> dict:
+        return {"temperature": 23, "description": "Sunny and warm."}
+
+    return await restate_context().run_typed(
+        f"Get weather {city}", call_weather_api, city=city
+    )
+
+
+# AGENT
+# Specify your agent in the default ADK way
+agent = Agent(
+    model="gemini-2.5-flash",
+    name="weather_agent",
+    instruction="You are a helpful agent that provides weather updates.",
+    tools=[get_weather],
+)
+
+APP_NAME = "agents"
+app = App(name=APP_NAME, root_agent=agent, plugins=[RestatePlugin()])
+session_service = InMemorySessionService()
+
+# AGENT SERVICE + HANDLER
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(ctx: restate.Context, req: WeatherPrompt) -> str | None:
+    # Start new session
+    session_id = str(ctx.uuid())
+    session = await session_service.get_session(
+        app_name=APP_NAME, user_id=req.user_id, session_id=session_id
+    )
+    if not session:
+        await session_service.create_session(
+            app_name=APP_NAME, user_id=req.user_id, session_id=session_id
+        )
+
+    # Run the durable agent
+    runner = Runner(app=app, session_service=session_service)
+    events = runner.run_async(
+        user_id=req.user_id,
+        session_id=session_id,
+        new_message=Content(role="user", parts=[Part.from_text(text=req.message)]),
+    )
+
+    final_response = None
+    async for event in events:
+        if event.is_final_response() and event.content and event.content.parts:
+            if event.content.parts[0].text:
+                final_response = event.content.parts[0].text
+    return final_response
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/google-adk/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/google-adk-trace.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+<Accordion title="See how a failing tool call is retried">
+Let the weather tool raise an exception by adding the following line to the `get_weather` function:
+```python
+raise Exception("[👻 SIMULATED] Fetching weather failed: Weather API down...")
+```
+
+You can see in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/google-adk-agent-stuck.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+Fix the problem, by removing the exception again.
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/google-adk-agent-fixed.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+</Accordion>
+
+**Next step:**
+Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate makes your AI agents resilient to failures.
+
+</Step>
+</Steps>
+
+## Resources
 - [Tour of Core Concepts](/ai/patterns/durable-agents)
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/TkGFdildEXk?si=iRgmpT6hIxSlvFFZ" title="YouTube video player" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen></iframe>

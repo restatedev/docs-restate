@@ -1,0 +1,162 @@
+import * as restate from "@restatedev/restate-sdk-gen";
+import {TerminalError} from "@restatedev/restate-sdk";
+import {agent, Conversation, messagesOf, type Message} from "@restatedev/agentlib";
+import {model} from "./model.js";
+
+const assistant = agent({
+  model,
+  instructions: "Use the conversation to remember what the user told you.",
+});
+
+// <start_conversation>
+export const chatSession = restate.object({
+  name: "ChatSession",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* assistant.run(message, {conversation: new Conversation()});
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+    *history({from, limit}: {from?: number; limit?: number}) {
+      return yield* new Conversation().page(from, limit);
+    },
+  },
+  options: {
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary"]},
+    handlers: {history: {shared: true}},
+  },
+});
+// <end_conversation>
+
+// The handlers of the lazy state example, as on the steering page.
+function* doTurn(message: string) {
+  restate.state().set("active", {invocationId: restate.handlerRequest().id});
+  try {
+    const result = yield* assistant.run(message, {
+      conversation: new Conversation(),
+      steeringSignal: "steering",
+      interruptSignal: "interrupt",
+    });
+    if (result.status !== "completed") return result.output ?? result.reason;
+    return result.output;
+  } finally {
+    restate.state().clear("active");
+  }
+}
+
+function* history({from, limit}: {from?: number; limit?: number}) {
+  return yield* new Conversation().page(from, limit);
+}
+
+function* signalActiveTurn(name: string, value: string): restate.Operation<boolean> {
+  const active = yield* restate.sharedState().get<{invocationId: string}>("active");
+  if (!active) return false;
+  restate.invocation(active.invocationId).signal(name).resolve(value);
+  return true;
+}
+
+function* steer(message: string) {
+  return yield* signalActiveTurn("steering", message);
+}
+
+function* interrupt(reason: string) {
+  return yield* signalActiveTurn("interrupt", reason);
+}
+
+// <start_lazy_state>
+export const aiSession = restate.object({
+  name: "AiSession",
+  handlers: {doTurn, history, steer, interrupt},
+  options: {
+    // Fetch the conversation chunks when they are read
+    state: {preload: ["conversation/meta", "conversation/summary", "active"]},
+    handlers: {history: {shared: true}, steer: {shared: true}, interrupt: {shared: true}},
+  },
+});
+// <end_lazy_state>
+
+// <start_conversation_compaction>
+const longChat = agent({
+  model,
+  instructions: "Use the conversation to remember what the user told you.",
+  compaction: {maxTokens: 64000},
+});
+
+export const compactedChat = restate.object({
+  name: "CompactedChat",
+  handlers: {
+    *ask(message: string) {
+      // The run stores its summaries in the conversation
+      const result = yield* longChat.run(message, {conversation: new Conversation()});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
+});
+// <end_conversation_compaction>
+
+// <start_compaction_instructions>
+const supportAgent = agent({
+  model,
+  instructions: "You help customers with their orders.",
+  compaction: {
+    instructions:
+      "Keep the customer's open requests, the order IDs, the refunds issued, and the promises made to the customer. " +
+      "Leave out greetings and small talk. Keep the summary under 500 words.",
+  },
+});
+// <end_compaction_instructions>
+
+export const customSummaryChat = restate.object({
+  name: "CustomSummaryChat",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* supportAgent.run(message, {conversation: new Conversation()});
+      return result.status === "completed" ? result.output : (result.output ?? result.reason);
+    },
+  },
+  options: {state: {preload: ["conversation/meta", "conversation/summary"]}},
+});
+
+// <start_run_compaction>
+// Compacts at 85,708 tokens: 90% of what the window leaves after 32,768 tokens for the reply
+const researcher = agent({model, maxSteps: 40, contextWindow: 128000});
+
+// Compacts at 100,000 tokens, and keeps the newest messages that fit in 25,000 tokens
+const analyst = agent({model, compaction: {maxTokens: 100000, retainTokens: 25000}});
+
+// Truncates instead of summarizing a request that doesn't fit the window
+const classifier = agent({model, contextWindow: 128000, compaction: false});
+// <end_run_compaction>
+
+// <start_tool_results>
+const crawler = agent({
+  model,
+  toolResults: {maxTokens: 5000, previewTokens: 2500}, // the defaults; false sends results in full
+});
+// <end_tool_results>
+
+// <start_messages>
+export const manualChat = restate.object({
+  name: "ManualChat",
+  handlers: {
+    *ask(message: string) {
+      const messages = (yield* restate.state().get<Message[]>("messages")) ?? [];
+      try {
+        const result = yield* assistant.run(message, {messages});
+        restate.state().set("messages", result.messages);
+        if (result.status !== "completed") return result.output ?? result.reason;
+        return result.output;
+      } catch (error) {
+        // Keep the failed turn, with a note on why it failed. Restate retries other errors.
+        const failed = messagesOf(error);
+        if (failed && error instanceof TerminalError) restate.state().set("messages", failed);
+        throw error;
+      }
+    },
+  },
+});
+// <end_messages>
+
+export const agents = {researcher, analyst, classifier, crawler};

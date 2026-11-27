@@ -1,0 +1,122 @@
+---
+title: "Error handling"
+description: "Decide whether the model handles a failure, the run fails, or Restate retries."
+icon: "triangle-exclamation"
+---
+
+The type of an error decides what happens to it: the model handles it, the run fails, or Restate retries it.
+The same rule applies in tools, in handlers that tools call, in sub-agents, and in guardrails.
+
+## Error types
+
+| Error | Handled by | What happens |
+|---|---|---|
+| `TerminalError` or `ToolError` | The model | The model receives the error, as the tool result or as a note before its next step, and decides what to do next. |
+| `AgentTerminalError` | Nobody | The run fails, and so does every agent run that encloses it. The handler fails too, unless it catches the error. |
+| Any other error | Restate | Restate retries the step or the invocation. |
+
+```typescript {"CODE_LOAD::agentlib/src/errors.ts#throw"} 
+const refund: Tool<{customerId: string}> = asyncTool({
+  description: "Refund an order.",
+  input: z.object({orderId: z.string()}),
+  async execute({orderId}, {context, invocationId, name, callId}) {
+    const order = await orders.get(orderId); // a network error: retried
+    if (!order) throw new ToolError(`No order ${orderId}`, "not_found"); // the model receives the code
+    if (order.refunded) throw new TerminalError("The order was already refunded"); // the model decides
+    if (order.customerId !== context.customerId) {
+      throw new AgentTerminalError("The order belongs to another customer"); // the run fails
+    }
+    return await createRefund(orderId, {idempotencyKey: `${invocationId}:${name}:${callId}`});
+  },
+});
+```
+
+- Throw `TerminalError` (from `@restatedev/restate-sdk`) when the model should handle a failure, for example by trying another approach.
+- Throw `ToolError` (from `@restatedev/agentlib`) to also give the model an error code, such as `not_found`.
+- Throw `AgentTerminalError` when the run must fail, for example because the request it serves is no longer valid.
+- Let other errors propagate. In an `asyncTool`, they're retried under the tool's `retry` policy, three attempts by default, and the model receives `tool_failed` once the attempts run out. Model calls are retried under the model's [retry policy](/agentlib/models#retries). In a `tool`, a guardrail, or another hook, the error fails the run, and Restate retries the invocation under the policy configured at the [service or handler level](/services/configuration#retries), or otherwise the [Restate server's default policy](/guides/error-handling#at-invocation-level).
+
+## What the model receives
+
+A `TerminalError` from a tool call fails that call, not the run. The model receives the error as the tool result:
+
+```json
+{"status": "error", "code": "not_found", "message": "No order 42"}
+```
+
+The code is the `ToolError`'s code, or `tool_failed` for any other `TerminalError`. The other tool calls in the same batch keep running.
+A tool call that a guardrail or an approver rejects returns `{"status": "denied", "message": "..."}` instead.
+
+A `TerminalError` from elsewhere in the run, such as a `beforeRun` guardrail, is passed to the model as a note before its next model call.
+These error notes aren't saved to the conversation. Each note emits an `error-note` [progress event](/agentlib/steering-and-progress#progress-events) with the error's origin, code, and message.
+
+Some failures fail the run instead of reaching the model: a failed model call, a failure to load or save the conversation or to list skills, an `afterRun` rejection or error for a stopped or interrupted run, and an error in `onProgress` for a run event or a `tool-end` event.
+A `TerminalError` in `onProgress` for another tool event fails only that tool call. A `TerminalError` in `beforeSteering` drops the steering message instead of reaching the model.
+
+Common codes:
+
+| Code | Meaning |
+|---|---|
+| `tool_failed` | A tool call failed with a `TerminalError` without a code. |
+| `tool_error` | A tool threw a `ToolError` without a code, or an MCP tool returned an error. |
+| `invalid_output` | A tool returned a value that isn't JSON. |
+| `guardrail_failed` | `beforeTool` or `afterTool` failed with a `TerminalError` without a code. |
+| `invalid_input` | The model's arguments failed the tool's input schema. |
+| `unknown_tool` | The model called a tool that the agent doesn't have. |
+| `denied` | `beforeRun`, `beforeStep`, or `afterRun` rejected the input, a step, or an answer. |
+| `agent_stopped` | A sub-agent or fork stopped before finishing. The message contains its summary. |
+| `output_limit` | A tool's output or the model's text exceeds `maxOutputChars`. |
+| `depth_limit` | Nested tool calls exceeded `maxToolDepth`. |
+| `program_error` | A [code mode](/agentlib/tools#code-mode) program failed. The message lists the tool calls that the program made. |
+| `invalid_response`, `incomplete_response` | The model's response was invalid, or ended before it was complete, for example because a content filter stopped it. |
+| `cut_off` | The tool call was in a reply cut off at the output token limit, so it never ran. |
+
+## Stopping a run
+
+The model never receives an `AgentTerminalError`. Wherever it's thrown, it fails the run:
+
+- The other tool calls in the batch are interrupted. The conversation keeps the failed turn, with a note on the failure, and `messagesOf(error)` returns the same history. See [Failed runs](/agentlib/sessions#failed-runs). If `beforeRun` throws the error, the run saves nothing, not even its input.
+- Every enclosing agent run fails too, including a parent that called this agent through `agentTool`, and the agent whose tool called the handler that threw the error.
+- The handler fails with the error, unless it catches it.
+
+Catch it with `isAgentTerminal` to turn a refusal into an answer:
+
+```typescript {"CODE_LOAD::agentlib/src/errors.ts#catch"} 
+*handle({customerId, message}: {customerId: string; message: string}) {
+  try {
+    const result = yield* support.run(message, {context: {customerId}});
+    return result.status === "completed" ? result.output : (result.output ?? result.reason);
+  } catch (error) {
+    if (isAgentTerminal(error)) return `Request refused: ${error.message}`;
+    throw error;
+  }
+},
+```
+
+Use `isAgentTerminal(error)` instead of `instanceof`, because the error might have crossed a journaled step or a service call, which return failures as plain `TerminalError`s.
+agentlib stores the error type in the error metadata, so a `ToolError` keeps its code and an `AgentTerminalError` stays recognizable across service calls and on replay. Error metadata requires Restate Server 1.6 or later.
+
+Pass `{errorCode}` to `AgentTerminalError` to set the status code that the handler's caller receives. The default is `500`.
+
+## Model call failures
+
+A model response that the model can fix goes back to the model: agentlib discards the response, adds a note with the reason, and starts the next step.
+This covers an empty reply, a reply that ended before it was complete, for example at a content filter, a reply that announces tool calls without making any or contains an invalid batch of calls, [typed output](/agentlib/agents#typed-output) that doesn't match the schema, and text longer than `maxOutputChars`.
+Each such step counts toward `maxSteps`.
+
+A reply cut off at the output token limit fails the run with an `AgentTerminalError`, because a new attempt would most likely be cut off too. Raise [`maxOutputTokens`](/agentlib/models#reply-limit), or check whether the model is looping. Before the run fails, it records the cut-off reply in its history:
+
+- The reply's reasoning and partial text, up to `maxOutputChars`, are kept in a message marked `cutOff: true`.
+- Each tool call in the reply with complete arguments gets a failed result with the code `cut_off`, without running. A call whose arguments were cut off is left out.
+- The conversation keeps the turn, with a note on the failure, like any [failed run](/agentlib/sessions#failed-runs).
+
+With `aiModel`, when you set `maxOutputTokens`, a reply that uses the whole limit counts as cut off, whatever finish reason the provider reports, because some providers report a call that was cut off as complete.
+
+A model call that fails is retried under the model's [retry policy](/agentlib/models#retries). If the attempts run out, or the failure can't be fixed by retrying, `run` throws a `TerminalError`.
+A context overflow is handled separately: see [Sessions](/agentlib/sessions#context-window).
+
+## Cancellation
+
+- **Invocation cancellation:** When you [cancel the invocation](/services/invocation/managing-invocations#cancel), the run stops at its next durable operation. Unfinished tool calls are interrupted, child invocations are cancelled, and the handler fails with a `CancelledError`. The conversation keeps the turn, with a `run-cancelled` note. The model of the cancelled run never receives the cancellation.
+- **Interruption:** An [interrupted](/agentlib/steering-and-progress#steering-and-interruption) run isn't an error. It returns the status `interrupted`, and unfinished tool calls are recorded as cancelled.
+- **Background tool cancellation:** When the model cancels a background tool call with `cancelOperationTool`, the call's result is `{status: "cancelled", message}`, with the model's reason as the message, or `Cancelled by the agent` if the model gives no reason.

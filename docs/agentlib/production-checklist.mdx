@@ -1,0 +1,31 @@
+---
+title: "Production checklist"
+description: "Settings to review before you run agents in production."
+icon: "list-check"
+---
+
+Most agentlib defaults suit development. Review these settings before you run agents in production.
+
+## Model calls
+
+- **Fit the timeouts to your slowest model call.** Restate receives no journal entry while a model call runs. If your model calls can take longer than the [inactivity timeout](/services/configuration#timeouts), 1 minute by default, increase the inactivity timeout and the abort timeout of the agent's handlers, so that Restate doesn't abort a call that is still running. See [Timeouts between Restate and the service](/guides/error-handling#timeouts-between-restate-and-the-service).
+- **Set the retry policy of the model.** By default, a model call makes three attempts within about 150 milliseconds, unless the provider requests a longer delay, and the run then fails. Set `retry` on the model to recover from longer provider outages. See [Retries](/agentlib/models#retries).
+- **Set `maxOutputTokens` if you expect long replies.** When it's unset, the provider chooses the limit, and a reply cut off at the limit fails the run. See [Reply limit](/agentlib/models#reply-limit).
+- **Limit concurrent agents** to control model spend, with [concurrency limits](/services/flow-control).
+
+## Limits and context
+
+- **Check the run limits.** By default, a run makes at most 10 model calls (`maxSteps`) and 128 tool calls (`maxToolCalls`). A run that reaches a limit returns the status `stopped`, so handle that status in your handler. See [Limits](/agentlib/agents#limits).
+- **Set `contextWindow` for a model with a context window under 200,000 tokens.** Compaction is on by default and, without `contextWindow`, starts at 170,000 tokens, so the model's window fills up first. See [Compaction](/agentlib/sessions#compaction).
+- **Set `contextWindow`** for providers other than OpenAI. Without it, `aiModel` recovers from a context overflow only when the provider returns HTTP `413` or OpenAI's error code `context_length_exceeded`. Any other overflow error fails the run. See [Context window](/agentlib/sessions#context-window).
+
+## Tools
+
+- **Set a retry policy on tools that call external APIs.** By default, an async tool makes three attempts within about 150 milliseconds, and the model then receives the error. See [Async tools](/agentlib/tools#async-tools).
+- **Make external writes idempotent.** A tool can run again after a retry or a crash. Build an idempotency key from `invocationId`, the run's `name`, and `callId`. See [Async tools](/agentlib/tools#async-tools).
+
+## Sessions
+
+- **Preload only the conversation's metadata and summary.** By default, every invocation of the object receives the whole conversation. Set `state: {preload: ["conversation/meta", "conversation/summary"]}` in the options of each object that uses `Conversation`, so that each invocation fetches only the chunks that it reads. See [Lazy state](/agentlib/sessions#lazy-state).
+- **Send requests with an idempotency key**, so that a client that retries a request doesn't add a second turn to the conversation. See [Long runs](/agentlib/clients#long-runs).
+- **Cancel stuck agents instead of killing them.** A cancelled run gives its unfinished tool calls a result with the reason. See [Failed runs](/agentlib/sessions#failed-runs).

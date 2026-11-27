@@ -1,0 +1,150 @@
+---
+title: "Human approval"
+description: "Pause a tool call until a person approves or denies it."
+icon: "user-check"
+---
+
+A tool that needs approval doesn't run until a person decides.
+While the run waits, the invocation is suspended, so the wait doesn't use a process and has no default time limit.
+
+## Tool approval
+
+Mark the tool with `needsApproval: true`:
+
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#needs_approval"} 
+const support = agent({
+  model,
+  instructions: "Close tickets when the user asks. Closing needs human approval.",
+  tools: {
+    closeTicket: asyncTool({
+      description: "Close a ticket.",
+      input: z.object({ticketId: z.string()}),
+      needsApproval: true,
+      async execute({ticketId}) {
+        return {ticketId, status: "closed"};
+      },
+    }),
+  },
+});
+```
+
+When the model calls the tool, agentlib:
+
+1. Calls `onApproval` with an `ApprovalRequest`, so your code can publish the request.
+2. Waits on a durable [signal](/develop/ts/external-events) for the decision.
+3. Runs the tool if the decision is `true`. If the decision is `false`, the tool doesn't run, and the model receives a denied result.
+
+Publish each request to your review system from `onApproval`. Wrap the notification in `restate.run` so Restate journals it. The review system calls `approve` when the reviewer makes a decision:
+
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_service"} 
+export const ticketApproval = restate.service({
+  name: "TicketApproval",
+  handlers: {
+    *ask(message: string) {
+      const result = yield* support.run(message, {
+        *onApproval(request) {
+          yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+        },
+      });
+      if (result.status !== "completed") return result.output ?? result.reason;
+      return result.output;
+    },
+    *approve({invocationId, signalName, approved}: {invocationId: string; signalName: string; approved: boolean}) {
+      restate.invocation(invocationId).signal(signalName).resolve(approved);
+      return true;
+    },
+  },
+});
+```
+
+`notifyReviewer` is a mock for your review system's notification API:
+
+```typescript {"CODE_LOAD::agentlib/src/services.ts#notify_reviewer"} 
+export async function notifyReviewer(request: ApprovalRequest) {
+  // Replace this mock with your review system's notification API.
+  console.log("Review requested:", request);
+}
+```
+
+Use `invocationId` and `signalName` together as an idempotency key for the notification, since a crash before Restate journals its result can cause it to be sent again.
+Each approval request has its own signal name, so the review system can return decisions independently when several tool calls need approval.
+
+The review system sends the decision to `approve`, using the `invocationId` and `signalName` from the notification:
+
+```shell
+curl localhost:8080/restate/call/TicketApproval/approve \
+  --json '{"invocationId": "inv_...", "signalName": "...", "approved": true}'
+```
+
+An `ApprovalRequest` contains:
+
+| Field | Description |
+|---|---|
+| `invocationId`, `signalName` | The invocation and signal that resolve the decision |
+| `call` | The tool call to approve: the tool name and its arguments |
+| `question` | A question for the approver, when the request has one |
+| `details` | Application data, for example the policy that asked for approval |
+
+If the agent runs in a Virtual Object, make `approve` a shared handler, so the decision doesn't wait for the object's lock, which the waiting run holds.
+
+You can also set `onApproval` on the agent definition. If both the agent and the run set it, agentlib calls both.
+
+## Conditional approval
+
+Pass a generator function to `needsApproval` to require approval only for some calls:
+
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#conditional"} 
+const refunds = asyncTool({
+  description: "Refund an order.",
+  input: z.object({orderId: z.string(), amountCents: z.number().int().positive()}),
+  *needsApproval({amountCents}) {
+    return amountCents > 10_000; // refunds above 100 USD need a person
+  },
+  async execute({orderId, amountCents}) {
+    return {orderId, amountCents, status: "refunded"};
+  },
+});
+```
+
+## Timeouts
+
+`onHumanApproval` replaces the built-in wait and returns the decision. Any `onApproval` handlers still publish the request first.
+To deny a request that nobody answers in time, race the signal against a timer:
+
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#timeout"} 
+const timedSupport = agent({
+  model,
+  tools: {refunds},
+  *onApproval(request) {
+    yield* restate.run(() => notifyReviewer(request), {name: "Notify reviewer"});
+  },
+  *onHumanApproval(request) {
+    const {tag, future} = yield* restate.select({
+      decision: restate.signal<boolean>(request.signalName),
+      timeout: restate.sleep({hours: 24}),
+    });
+    if (tag === "timeout") return false; // deny when nobody answers within a day
+    return (yield* future) as boolean;
+  },
+});
+```
+
+The review system sends its decision to the same `approve` handler shown above.
+You can also use `onHumanApproval` to call an approval service with `restate.client` instead of waiting for a signal.
+
+## Approval tool
+
+`humanApprovalTool` lets the model ask a yes or no question:
+
+```typescript {"CODE_LOAD::agentlib/src/approval.ts#approval_tool"} 
+const planner = agent({
+  model,
+  instructions: "Ask the user for confirmation with askUser before you make irreversible changes.",
+  tools: {askUser: humanApprovalTool()},
+});
+```
+
+`onApproval` receives the request, with the model's question in `question`.
+The tool runs in the background: the model receives a pending result, and the decision in a later step. To block a specific tool until a person approves it, use `needsApproval` on that tool.
+
+A tool's `before` guardrail or the agent's `beforeTool` hook can also ask for approval with `yield* ctx.approve(input, {question, details})`, where `ctx` is the hook's second argument. See [Guardrails](/agentlib/guardrails).

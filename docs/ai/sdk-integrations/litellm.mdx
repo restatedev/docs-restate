@@ -1,15 +1,194 @@
 ---
 title: "Restate & LiteLLM"
 sidebarTitle: "LiteLLM"
-icon: "/img/languages/python.svg"
+icon: "train"
 description: "Learn how to use the LiteLLM with Restate."
 ---
+
+import {GitHubLink} from "/snippets/blocks/github-link.mdx";
+import InstallRestate from "/snippets/common/install-server-without-running-cli.mdx";
 
 LiteLLM is a library that simplifies multiple model providers.
 You can combine it with Restate to build resilient agents that can be customized to your use case.
 You [wrap model calls in `ctx.run`](/ai/sdk-integrations/integration-guide#integrating-llm-sdks) and use Restate context actions to execute tools.
 
 <Card icon="/img/ai/sdk-integrations/lite-llm_icon.webp" title="Learn more about LiteLLM" horizontal href="https://www.litellm.ai/"/>
+
+## Quickstart
+
+<Info>
+**Prerequisites**:
+- Python >= v3.12
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- OpenAI API key (get one at [OpenAI](https://platform.openai.com/))
+</Info>
+<Steps>
+<Step title="Install Restate Server & CLI">
+<InstallRestate/>
+</Step>
+
+<Step title="Get the AI Agent template">
+Get the weather agent template using the [Restate Python SDK](https://docs.restate.dev/develop/python/overview) with a custom agent loop:
+```shell
+restate example python-restate-agent-template && cd python-restate-agent-template
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/python-restate-only/template"}/>
+</Step>
+
+<Step title="Run the AI Agent service">
+Export your OpenAI key and run the agent:
+```shell
+export OPENAI_API_KEY=your_openai_api_key_here
+uv run .
+```
+
+The weather agent is now listening on port 9080.
+</Step>
+
+<Step title="Register the agent service">
+Tell Restate where the service is running (`http://localhost:9080`), so Restate can discover and register the services and handlers behind this endpoint.
+You can do this via the UI (`http://localhost:9070`):
+
+<Frame>
+    <img src={"/img/ai/registration.png"} alt="Restate UI Playground"/>
+</Frame>
+
+If you run Restate with Docker, register `http://host.docker.internal:9080` instead of `http://localhost:9080`.
+
+<Accordion title="Restate Cloud">
+When using [Restate Cloud](https://restate.dev/cloud), your service must be reachable from your Restate environment.
+You can use a public endpoint or connect a private service through a supported [secure tunnel](/services/deploy/standalone#connecting-private-services-to-restate-cloud-or-byoc).
+</Accordion>
+</Step>
+
+<Step title="Send weather requests to the AI Agent">
+Invoke the agent via the Restate UI playground: go to `http://localhost:9070`, click on your service and then on playground.
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/py-restate-only-playground.png"} alt="Restate UI Playground"/>
+</Frame>
+
+Or invoke via `curl`:
+```shell
+curl localhost:8080/restate/call/agent/chat --json '{"message": "What is the weather in San Francisco?"}'
+```
+Output: `The weather in San Francisco is currently 23°C and sunny.`
+</Step>
+
+<Step title="Congratulations, you just ran a Durable AI Agent!">
+
+The agent you just invoked uses Durable Execution to make agents resilient to failures. Restate persisted all LLM calls and tool execution steps, so if anything fails, the agent can resume exactly where it left off.
+
+We did this by building a custom agent loop with the Restate SDK. Each LLM call and tool execution is wrapped in a durable step using `ctx.run`/`ctx.run_typed`, so responses are not re-fetched and side effects are not duplicated on recovery:
+
+```python expandable {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/python-restate-only/template/agent.py"} 
+import json
+import restate
+from pydantic import BaseModel
+from litellm import acompletion
+from litellm.types.utils import Message
+
+
+class WeatherPrompt(BaseModel):
+    message: str = "What is the weather in San Francisco?"
+
+
+# TOOL IMPLEMENTATION
+async def get_weather(city: str) -> str:
+    return json.dumps({"temperature": 23, "condition": "Sunny"})
+
+
+# TOOL DEFINITIONS
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "The city name"}
+                },
+                "required": ["city"],
+            },
+        },
+    }
+]
+
+# AGENT SERVICE
+agent_service = restate.Service("agent")
+
+
+@agent_service.handler()
+async def run(ctx: restate.Context, message: WeatherPrompt) -> str | None:
+    """Handle a user message, calling tools until a final answer is ready."""
+    messages = [
+        {"role": "system", "content": "You are a helpful weather assistant."},
+        {"role": "user", "content": message.message},
+    ]
+
+    while True:
+        # Call the LLM
+        async def call_llm() -> Message:
+            resp = await acompletion(
+                model="gpt-5.4", messages=messages, tools=TOOLS
+            )
+            return resp.choices[0].message
+
+        response = await ctx.run("LLM call", call_llm)
+
+        messages.append(response.model_dump())
+
+        if not response.tool_calls:
+            return response.content
+
+        for tool_call in response.tool_calls:
+            city = json.loads(tool_call.function.arguments).get("city", "")
+            result = await ctx.run_typed(f"get_weather {city}", get_weather, city=city)
+            messages.append(
+                {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+            )
+```
+<GitHubLink url={"https://github.com/restatedev/ai-examples/blob/main/python-restate-only/template/agent.py"}/>
+
+The Invocations tab of the Restate UI shows us how Restate captured each LLM call and tool step in a journal:
+
+<Frame>
+    <img src={"/img/quickstart/agent-quickstart/py-restate-only-trace.png"} alt="Restate UI Playground"/>
+</Frame>
+
+
+<Accordion title="See how a failing tool call is retried">
+Let the weather tool raise an exception by adding the following line to the `get_weather` function:
+```python
+raise Exception("[👻 SIMULATED] Fetching weather failed: Weather API down...")
+```
+
+You can see in the Restate UI how each LLM call and tool step gets durably executed.
+We can see how the weather tool is currently stuck, because the weather API is down.
+
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/py-restate-only-stuck.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+Fix the problem, by removing the exception again.
+
+Once you restart the service, the agent resumes at the weather tool call and successfully completes the request.
+
+<Frame>
+<img src={"/img/quickstart/agent-quickstart/py-restate-only-fixed.png"} alt="Restate UI Journal Entries"/>
+</Frame>
+
+</Accordion>
+
+**Next step:**
+Learn more about [Durable Agents](/ai/patterns/durable-agents) and how Restate makes your AI agents resilient to failures.
+
+</Step>
+</Steps>
+
+## Resources
 
 Have a look at the following resources to get started with Restate and LiteLLM:
 - [Examples](https://github.com/restatedev/ai-examples/tree/main/python-restate-only/tour-of-agents): The examples which use only Restate to implement the agent logic, use LiteLLM to make model calls.
