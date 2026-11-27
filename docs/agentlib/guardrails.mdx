@@ -54,8 +54,8 @@ Agent-level hooks check every run of the agent:
 |---|---|---|
 | `beforeRun(messages, ctx)` | The input, once, before the first step | The model receives it as a note after the input. The first step goes ahead. |
 | `beforeSteering(steering, ctx)` | Each steering message | Drops the message. The run continues. |
-| `beforeTool(call, ctx)` | Every tool call, before input validation | Returns a `denied` result to the model. |
-| `afterTool(output, ctx)` | Every tool output | Can't reject. Returns the output to record. |
+| `beforeTool(call, ctx)` | Every call to a known tool, before the tool validates its input | Returns a `denied` result to the model. |
+| `afterTool(output, ctx)` | Every successful tool output | Can't reject. Returns the output to record. |
 | `afterRun(candidate, ctx)` | The run's result | Returns a completed answer to the model with a note, for another step. Fails a stopped or interrupted run with a `GuardrailError` (`denied`). |
 
 Each hook except `afterTool` returns its decision:
@@ -117,6 +117,7 @@ const support = agent({
 ```
 
 Later model calls, summaries, `result.messages`, and the saved conversation contain only the values that these hooks return.
+`afterTool` receives only successful output. When a tool fails, the run records the error message unchanged, so keep sensitive data out of the errors that your tools throw.
 
 The Restate journal is separate from the run's history. It stores the handler's input, the payload of every signal, such as a steering message, and the result of every journaled step, such as an `asyncTool`'s output before `afterTool` runs.
 To keep data out of the journal, remove it inside the tool before the tool returns.

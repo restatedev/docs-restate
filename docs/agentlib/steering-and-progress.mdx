@@ -18,7 +18,7 @@ export const supportSession = restate.object({
       restate.state().set("active", {invocationId: restate.handlerRequest().id});
       try {
         const result = yield* support.run(message, {
-          conversation: new LazyStateConversation(),
+          conversation: new Conversation(),
           steeringSignal: "steering",
           interruptSignal: "interrupt",
         });
@@ -127,7 +127,7 @@ const streamingModel = aiModel({
 });
 ```
 
-Each attempt of a model call delivers a `start` event, then a `text-delta` or `reasoning-delta` event for each new piece of text, and a `finish` event after a complete response.
+Each attempt of a model call delivers a `start` event, then a `text-delta` or `reasoning-delta` event for each new piece of text, and a `finish` event when the stream ends with a complete response or a reply cut off at the output token limit.
 The second argument contains the request's `step` and the call's abort `signal`.
 Only `aiModel` supports `onChunk`.
 
@@ -146,7 +146,7 @@ Until then, the chunks exist only in the memory of the service process.
 ### Chunk events
 
 - A step can receive several `start` events, one per attempt. When a `start` arrives, discard the text of the step's earlier attempt.
-- `finish` means the provider stream completed. It doesn't confirm that the run accepted the response or that Restate journaled it. Steering can still discard the response after `finish` arrives. If the stream fails or is interrupted before it completes, no `finish` arrives.
+- `finish` means that the provider stream ended. It doesn't confirm that the run accepted the response or that Restate journaled it. Steering can still discard the response after `finish` arrives. If the stream fails, is interrupted, or ends early, for example at the provider's content filter, no `finish` arrives.
 - Chunks arrive before the run checks the response. Text that the run discards later has already reached `onChunk`, for example output that doesn't match the `output` schema, an answer that `afterRun` rejects, or a response that steering discards. If a [guardrail](/agentlib/guardrails) must check text before users see it, don't stream that text.
 - Text and reasoning stream, but tool call arguments don't. With `output`, the `text-delta` events contain the raw JSON text.
 - Every call through the model streams, including summaries: the summary of a stopped run, and compaction summaries that use the same model. These calls have no step, so `onChunk` receives them with `step` 0.

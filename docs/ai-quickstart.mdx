@@ -9,10 +9,11 @@ import {GitHubLink} from "/snippets/blocks/github-link.mdx";
 import InstallRestate from "/snippets/common/install-server-without-running-cli.mdx";
 
 In this quickstart, you run a weather agent on a local Restate Server, call it over HTTP, and inspect the model calls and tool calls that Restate recorded.
-The agent uses [agentlib](/agentlib), Restate's TypeScript library for agents.
+The agent uses Restate [Agentlib](/agentlib), Restate's TypeScript library for agents.
 You need [Node.js](https://nodejs.org/en/) 22.21.1 or later and an OpenAI API key.
 
-To start with another agent SDK, follow the quickstart on its integration page: [Vercel AI SDK](/ai/sdk-integrations/vercel-ai-sdk#quickstart), [OpenAI Agents SDK](/ai/sdk-integrations/openai-agents-sdk#quickstart), [Google ADK](/ai/sdk-integrations/google-adk#quickstart), [Pydantic AI](/ai/sdk-integrations/pydantic-ai#quickstart), or [LangChain](/ai/sdk-integrations/langchain#quickstart). For an agent loop in Python with the Restate SDK, see [LiteLLM](/ai/sdk-integrations/litellm#quickstart).
+<img src="/img/agentlib/quickstart-app.svg" alt="curl sends a request for the key session-1 to the Restate Server on localhost:8080, which stores the conversation and invokes agent/session-1/run in your service on localhost:9080. The handler runs weatherAgent, which calls OpenAI and the getWeather tool. The Restate UI runs on localhost:9070." />
+<GitHubLink url={"https://github.com/restatedev/ai-examples/tree/main/agentlib/template"}/>
 
 ## Start from a prompt
 
@@ -27,7 +28,7 @@ Set up the Restate agentlib template and run it on a local Restate Server:
 3. Start a local Restate Server in the background with `npx @restatedev/restate-server`.
 4. Start the service in the background with `npm run dev`. The service needs the `OPENAI_API_KEY` environment variable. If it isn't set, ask me to set it.
 5. Register the service with `npx @restatedev/restate deployments register http://localhost:9080 --yes`.
-6. Send a test request with `curl localhost:8080/restate/call/agent/run --json '{"prompt": "What is the weather in San Francisco?"}'`.
+6. Send a test request with `curl localhost:8080/restate/call/agent/session-1/run --json '{"prompt": "What is the weather in San Francisco?"}'`.
 
 Then explain how `src/agent.ts` works, and tell me where to find the invocation in the Restate UI at `http://localhost:9070`.
 </Prompt>
@@ -52,11 +53,11 @@ The template enables the Restate plugin for Claude Code and Codex. To add the Re
 </Step>
 
 <Step title="Look at the agent">
-`src/agent.ts` defines a weather agent with one tool, and a service that runs it:
+`src/agent.ts` defines a weather agent with one tool, and a Virtual Object that runs it:
 
 ```typescript src/agent.ts {"CODE_LOAD::https://raw.githubusercontent.com/restatedev/ai-examples/refs/heads/main/agentlib/template/src/agent.ts"} 
 import { openai } from "@ai-sdk/openai";
-import { agent, asyncTool } from "@restatedev/agentlib";
+import { agent, asyncTool, Conversation } from "@restatedev/agentlib";
 import { aiModel } from "@restatedev/agentlib/provider";
 import * as restate from "@restatedev/restate-sdk-gen";
 import { z } from "zod";
@@ -83,7 +84,8 @@ const weatherAgent = agent({
   },
 });
 
-export const weatherService = restate.service({
+// One virtual object per conversation: requests to the same key continue it.
+export const weatherService = restate.object({
   name: "agent",
   handlers: {
     run: restate.schemas(
@@ -94,17 +96,23 @@ export const weatherService = restate.service({
         output: z.string(),
       },
       function* ({ prompt }) {
-        const result = yield* weatherAgent.run(prompt);
+        // The run loads the conversation from this object's state and saves its progress there.
+        const result = yield* weatherAgent.run(prompt, { conversation: new Conversation() });
         return result.status === "completed" ? result.output : result.output ?? result.reason;
       },
     ),
   },
+  options: {
+    // Restate sends these keys with each request. The run reads the message chunks on demand.
+    state: { preload: ["conversation/meta", "conversation/summary"] },
+  },
 });
 ```
 
-- `agent()` defines the agent at module scope, with an OpenAI model, instructions, and a limit of five steps.
+- `agent()` defines the agent at module scope, with an OpenAI model, instructions, and a limit of five steps. [Compaction](/agentlib/sessions#compaction) is on by default, so the run summarizes the older messages of a long conversation.
 - `getWeather` is an `asyncTool`. Restate journals its result, so a replay returns the journaled result instead of running `execute` again.
-- The `run` handler of the `agent` service runs the agent and returns its answer. Each request starts a new run without conversation history.
+- The `run` handler of the `agent` Virtual Object runs the agent with a `Conversation` and returns its answer. The object key identifies the conversation, so requests to the same key continue it. See [Sessions](/agentlib/sessions).
+- `state.preload` sends the conversation's metadata and summary with each request. The run reads the stored messages when it needs them. See [Lazy state](/agentlib/sessions#lazy-state).
 
 `src/app.ts` serves the service on port 9080.
 </Step>
@@ -134,11 +142,13 @@ You can use a public endpoint or connect a private service through a supported [
 </Step>
 
 <Step title="Invoke the agent">
-Send a request to the `run` handler:
+Send a request to the `run` handler of the object with the key `session-1`:
 
 ```shell
-curl localhost:8080/restate/call/agent/run --json '{"prompt": "What is the weather in San Francisco?"}'
+curl localhost:8080/restate/call/agent/session-1/run --json '{"prompt": "What is the weather in San Francisco?"}'
 ```
+
+Send a follow-up to the same key, such as `{"prompt": "And in Paris?"}`. The run loads the earlier messages of the conversation before it calls the model. Use another key to start a new conversation.
 
 Open the Restate UI at `http://localhost:9070` and select the invocation to see the journal entries of the model calls and the tool call.
 Stop and restart the service during a request: Restate replays the journal, and the agent continues without repeating the completed calls.

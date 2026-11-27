@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk-gen";
 import {TerminalError} from "@restatedev/restate-sdk";
-import {agent, agentTool, forkAgentTool, handoff, LazyStateConversation, type Agent, type Message} from "@restatedev/agentlib";
+import {agent, agentTool, forkAgentTool, handoff, Conversation, type Agent, type Message} from "@restatedev/agentlib";
 import {z} from "zod";
 import {model} from "./model.js";
 
@@ -114,11 +114,11 @@ export const tripSession = restate.object({
       const [flights, hotels] = yield* restate.all([
         restate.spawn(flightAgent.run(request, {
           name: "flights",
-          conversation: new LazyStateConversation({stateKey: "conversation/flights"}),
+          conversation: new Conversation({stateKey: "conversation/flights"}),
         })),
         restate.spawn(hotelAgent.run(request, {
           name: "hotels",
-          conversation: new LazyStateConversation({stateKey: "conversation/hotels"}),
+          conversation: new Conversation({stateKey: "conversation/hotels"}),
         })),
       ]);
       return {flights: flights.output, hotels: hotels.output};
@@ -140,7 +140,7 @@ export const racingSession = restate.object({
   name: "RacingSession",
   handlers: {
     *ask(question: string) {
-      const conversation = new LazyStateConversation();
+      const conversation = new Conversation();
       const {messages, version} = yield* conversation.load();
       const winner = yield* firstSuccess([
         restate.spawn(answerWith("fast", fast, question, messages)),

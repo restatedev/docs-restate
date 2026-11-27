@@ -58,7 +58,7 @@ Common codes:
 | Code | Meaning |
 |---|---|
 | `tool_failed` | A tool call failed with a `TerminalError` without a code. |
-| `tool_error` | A tool threw a `ToolError` without a code. |
+| `tool_error` | A tool threw a `ToolError` without a code, or an MCP tool returned an error. |
 | `invalid_output` | A tool returned a value that isn't JSON. |
 | `guardrail_failed` | `beforeTool` or `afterTool` failed with a `TerminalError` without a code. |
 | `invalid_input` | The model's arguments failed the tool's input schema. |
@@ -67,6 +67,7 @@ Common codes:
 | `agent_stopped` | A sub-agent or fork stopped before finishing. The message contains its summary. |
 | `output_limit` | A tool's output or the model's text exceeds `maxOutputChars`. |
 | `depth_limit` | Nested tool calls exceeded `maxToolDepth`. |
+| `program_error` | A [code mode](/agentlib/tools#code-mode) program failed. The message lists the tool calls that the program made. |
 | `invalid_response`, `incomplete_response` | The model's response was invalid, or ended before it was complete, for example because a content filter stopped it. |
 | `cut_off` | The tool call was in a reply cut off at the output token limit, so it never ran. |
 
@@ -100,16 +101,16 @@ Pass `{errorCode}` to `AgentTerminalError` to set the status code that the handl
 ## Model call failures
 
 A model response that the model can fix goes back to the model: agentlib discards the response, adds a note with the reason, and starts the next step.
-This covers an empty reply, a reply stopped by a content filter, a reply that announces tool calls without making any, and text longer than `maxOutputChars`.
+This covers an empty reply, a reply that ended before it was complete, for example at a content filter, a reply that announces tool calls without making any or contains an invalid batch of calls, [typed output](/agentlib/agents#typed-output) that doesn't match the schema, and text longer than `maxOutputChars`.
 Each such step counts toward `maxSteps`.
 
 A reply cut off at the output token limit fails the run with an `AgentTerminalError`, because a new attempt would most likely be cut off too. Raise [`maxOutputTokens`](/agentlib/models#reply-limit), or check whether the model is looping. Before the run fails, it records the cut-off reply in its history:
 
-- The reply's reasoning and partial text are kept, in a message marked `cutOff: true`.
+- The reply's reasoning and partial text, up to `maxOutputChars`, are kept in a message marked `cutOff: true`.
 - Each tool call in the reply with complete arguments gets a failed result with the code `cut_off`, without running. A call whose arguments were cut off is left out.
 - The conversation keeps the turn, with a note on the failure, like any [failed run](/agentlib/sessions#failed-runs).
 
-When you set `maxOutputTokens`, a reply that uses the whole limit counts as cut off, whatever finish reason the provider reports, because some providers report a call that was cut off as complete.
+With `aiModel`, when you set `maxOutputTokens`, a reply that uses the whole limit counts as cut off, whatever finish reason the provider reports, because some providers report a call that was cut off as complete.
 
 A model call that fails is retried under the model's [retry policy](/agentlib/models#retries). If the attempts run out, or the failure can't be fixed by retrying, `run` throws a `TerminalError`.
 A context overflow is handled separately: see [Sessions](/agentlib/sessions#context-window).

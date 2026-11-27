@@ -40,7 +40,7 @@ const support = agent({
 ```
 
 - agentlib journals the result once `execute` succeeds. On replay, the tool returns the journaled result without running `execute` again. The result must be JSON.
-- A thrown `Error` is retried under `retry`, which defaults to three attempts. `retry: {maxAttempts: 1}` turns off these retries, but a crash before agentlib journals the result still runs `execute` again. Make external writes idempotent. After the last attempt, the model receives the error with the code `tool_failed`.
+- A thrown `Error` is retried under `retry`, which defaults to three attempts. A `retry` policy that you pass replaces the default, so set `maxAttempts` in it. `retry: {maxAttempts: 1}` turns off these retries, but a crash before agentlib journals the result still runs `execute` again. Make external writes idempotent. After the last attempt, the model receives the error with the code `tool_failed`.
 - A `TerminalError`, or a `ToolError` with a code such as `not_found`, isn't retried. The model receives the error as the tool result, and the run continues. An `AgentTerminalError` stops the run instead. See [Error handling](/agentlib/error-handling).
 - `signal` aborts when the tool call is cancelled, for example because the run is interrupted, and when the invocation attempt ends. Pass it to APIs such as `fetch`. `callId` is stable across retries. Combine it with `invocationId` and the run's `name` into an idempotency key for external writes, for example `${invocationId}:${name}:${callId}`.
 
@@ -149,7 +149,7 @@ Inside `agent<Ctx>({tools: {...}})`, the tool's `context` is typed from the agen
 
 ## MCP servers
 
-Load an MCP server's tools inside a handler and pass them to the run:
+Load an MCP server's tools with `mcpTools` from `@restatedev/agentlib/mcp` inside a handler, and pass them to the run:
 
 ```typescript {"CODE_LOAD::agentlib/src/tools.ts#mcp"} 
 export const docsGuide = restate.service({
@@ -178,7 +178,7 @@ export const docsGuide = restate.service({
 | `allow` | Filter the tools by their name on the server, before the namespace prefix. |
 | `token` | A generator function that returns a bearer token. |
 | `onAuthorizationRequired` | A generator function that refreshes the credentials when the server requires authorization. Without it, the call fails. |
-| `retry` | Retry policy for tool calls. Default: three attempts. Each call sends an `Idempotency-Key` header, but a server that ignores the header runs a retried call again. |
+| `retry` | Retry policy for tool calls. Default: three attempts. A policy that you pass replaces the default, so set `maxAttempts` in it. Each call sends an `Idempotency-Key` header, but a server that ignores the header runs a retried call again. |
 | `timeoutMs` | Timeout per request. Default: 60000. |
 
 agentlib renames a server tool whose prefixed name isn't a valid tool name, by replacing invalid characters and adding a hash.

@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk-gen";
-import {agent, LazyStateConversation, tool, type ProgressEvent} from "@restatedev/agentlib";
+import {agent, Conversation, tool, type ProgressEvent} from "@restatedev/agentlib";
 import {z} from "zod";
 import {model} from "./model.js";
 
@@ -15,7 +15,7 @@ export const supportSession = restate.object({
       restate.state().set("active", {invocationId: restate.handlerRequest().id});
       try {
         const result = yield* support.run(message, {
-          conversation: new LazyStateConversation(),
+          conversation: new Conversation(),
           steeringSignal: "steering",
           interruptSignal: "interrupt",
         });

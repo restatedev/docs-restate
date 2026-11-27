@@ -61,6 +61,10 @@ for (let i = 1; i <= 3; i++) {
 return code;
 ```
 
+Each request to the writer above repeats the earlier draft. To avoid resending earlier output, run the loop in a Virtual Object and give each agent its own conversation, with its own `stateKey`, such as `new Conversation({stateKey: "writer"})`. The writer's revision request then contains only the reviewer's feedback, as in the [evaluator-optimizer example](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/05_evaluator_optimizer.ts). The same works across handlers: in the [peer review example](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/15_peer_review_rpc.ts), `PeerAuthor.revise` sends only the reviews.
+
+Agents that run in parallel in separate invocations need separate object keys, because Restate runs one exclusive handler per key at a time. The peer review example calls each reviewer under the key `<review key>/<focus>`. To run agents in parallel within one handler, see [Parallel runs](#parallel-runs).
+
 ## Racing
 
 Run agents concurrently, keep the first successful answer, and cancel the other runs:
@@ -107,7 +111,7 @@ Interrupting the losing task cancels its model call and tools, and `restate.allS
 
 ## Conversations
 
-A [`LazyStateConversation`](/agentlib/sessions#conversation-history) accepts the messages of one run at a time. A run loads the conversation when it starts and [saves](/agentlib/sessions#saving-progress) while it runs and when it ends. Two runs that share a conversation in one handler load the same version: the first one to save succeeds, and the other one throws `ConversationConflictError` at its next save, which fails the handler. The saved messages stay in state.
+A [`Conversation`](/agentlib/sessions#conversation-history) accepts the messages of one run at a time. A run loads the conversation when it starts and [saves](/agentlib/sessions#saving-progress) while it runs and when it ends. Two runs that use one conversation at the same time in one handler, for example in `restate.all`, load the same version: the first one to save succeeds, and the other one throws `ConversationConflictError` at its next save, which fails the handler. The saved messages stay in state.
 
 ### Parallel runs
 
@@ -121,11 +125,11 @@ export const tripSession = restate.object({
       const [flights, hotels] = yield* restate.all([
         restate.spawn(flightAgent.run(request, {
           name: "flights",
-          conversation: new LazyStateConversation({stateKey: "conversation/flights"}),
+          conversation: new Conversation({stateKey: "conversation/flights"}),
         })),
         restate.spawn(hotelAgent.run(request, {
           name: "hotels",
-          conversation: new LazyStateConversation({stateKey: "conversation/hotels"}),
+          conversation: new Conversation({stateKey: "conversation/hotels"}),
         })),
       ]);
       return {flights: flights.output, hotels: hotels.output};
@@ -153,7 +157,7 @@ export const racingSession = restate.object({
   name: "RacingSession",
   handlers: {
     *ask(question: string) {
-      const conversation = new LazyStateConversation();
+      const conversation = new Conversation();
       const {messages, version} = yield* conversation.load();
       const winner = yield* firstSuccess([
         restate.spawn(answerWith("fast", fast, question, messages)),
@@ -223,8 +227,8 @@ const lead = agent({
 });
 ```
 
-- **`agentTool`:** The sub-agent receives the task as a new conversation, together with the parent's `context`. Its answer becomes the tool result, and its token usage counts toward the parent's usage. Its progress events reach the parent as `tool-progress` events, and its approval requests reach the parent's `onApproval` handlers. The sub-agent's own `onHumanApproval` and guardrails apply to its tool calls, not the parent's. A sub-agent that stops early returns a tool error with the code `agent_stopped`. Pass `background: true` to let the parent continue while the sub-agent runs.
-- **`handoff`:** After the current tool calls finish, the target agent's model, instructions, and tools take over the same run and its history. Tools that you passed to `run` stay available. The output schema, limits, `beforeRun`, `beforeSteering`, and `afterRun` of the agent that started the run stay in effect, and its `beforeStep`, `beforeTool`, and `afterTool` keep running together with the target's.
+- **`agentTool`:** The sub-agent receives the task as a new conversation, together with the parent's `context`. Its answer becomes the tool result, and its token usage counts toward the parent's usage. Its progress events reach the parent as `tool-progress` events, and its approval requests reach the parent's `onApproval` handlers. The sub-agent's own `onHumanApproval` and guardrails apply to its tool calls, not the parent's. A sub-agent that stops at a limit returns a tool error with the code `agent_stopped` and its summary as the message. An interrupted sub-agent returns a `cancelled` result. Pass `background: true` to let the parent continue while the sub-agent runs.
+- **`handoff`:** After the current tool calls finish, the target agent's model, instructions, and tools take over the same run and its history. Tools that you passed to `run` stay available. The output schema, limits, `beforeRun`, `beforeSteering`, and `afterRun` of the agent that started the run stay in effect, and its `beforeStep`, `beforeTool`, and `afterTool` keep running together with the target's. The `onApproval` handlers of both agents receive approval requests, and the target's `onHumanApproval` decides them if the target sets one. The handoff takes effect only if its tool call succeeds, so a `beforeTool` rejection keeps the current agent. A step can hand off once: the run rejects a batch with two handoffs before any of its calls run.
 
 ## Forks
 

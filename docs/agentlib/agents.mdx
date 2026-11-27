@@ -45,7 +45,18 @@ export const support = restate.service({
 });
 ```
 
-Each call to `run` starts a new run without conversation history. To keep history between requests, see [Sessions](/agentlib/sessions).
+Each call to `run` starts a new run without conversation history. To keep history between requests, see [Choose a service or a Virtual Object](#choose-a-service-or-a-virtual-object).
+
+## Choose a service or a Virtual Object
+
+Ask whether a caller would send a follow-up to the same key, and whether a later request needs what an earlier one produced. If not, run the agent in a service. If so, run it in a [Virtual Object](/foundations/services#virtual-object) with a conversation.
+
+- **Service: each request is a self-contained task.** The handler calls `agent.run(input)` without a conversation, so each request starts a new conversation, and the caller doesn't need a key. Examples: [classify a ticket](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/04_structured_output.ts), [race two agents](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/07_racing_agents.ts), [write a research report](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/08_research_report.ts), [run a coding task in a sandbox](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/11_coding_agent.ts), [book within a budget](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/13_tool_guardrail.ts), [run an audit job](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/16_progress_feed.ts), and [write release notes](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/19_skills.ts).
+- **Virtual Object: requests to the same key are follow-ups.** The handler passes `conversation: new Conversation()` to `run`. The object key identifies the session, customer, or thread. Restate runs one exclusive handler per key at a time, so each conversation has one writer. Examples: [chat](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/03_conversation.ts), [support session](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/09_support_session.ts), [refund chat](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/10_service_tool.ts), [routing per customer](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/12_routing.ts), [follow-up research](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/14_web_search.ts), [docs Q&A](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/17_mcp_tools.ts), [AG-UI thread](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/18_ag_ui.ts), [incident follow-ups](https://github.com/restatedev/ai-examples/blob/main/agentlib/examples/src/lessons/20_forked_agents.ts), and the [quickstart](/ai-quickstart). See [Sessions](/agentlib/sessions).
+
+A conversation can outlive the resources that its runs used. If the agent creates a resource per request, such as the sandbox in the coding task example, the history of a later request refers to a resource that no longer exists. Run such an agent in a service, or keep the resource per key.
+
+A handler that runs the same agent several times in one request can also use a conversation, so that each run receives the earlier output without resending it. See [Review loop](/agentlib/multi-agent#review-loop).
 
 ## Run results
 
@@ -57,11 +68,13 @@ Each call to `run` starts a new run without conversation history. To keep histor
 | `stopped` | The run reached `maxSteps` or `maxToolCalls`. `reason` is `max_steps` or `max_tool_calls`. |
 | `interrupted` | The application [interrupted](/agentlib/steering-and-progress#steering-and-interruption) the run. `reason` holds the interrupt reason. |
 
+If the run fails, for example because a model call fails after its retries or a reply is cut off at the output token limit, `run` throws instead of returning a result. See [Error handling](/agentlib/error-handling).
+
 Read `output` as the answer only when the status is `completed`.
-For a stopped or interrupted run, agentlib makes one more model call, without tools, that summarizes the run, and puts the summary in `output`.
+For a stopped or interrupted run, agentlib makes one more model call, without tools, that summarizes the run, and puts the summary in `output`. If that call fails, `output` holds a note that no summary could be generated.
 Configure that call with `finalize`, which defaults to the agent's model, or set `finalize: false` to skip it.
 
-Every result also includes the number of `steps`, the run's `messages`, and its token `usage`. `messages` is the full history: the earlier messages, from `messages` or the loaded `conversation`, followed by the messages of this run.
+Every result also includes the number of `steps`, the run's `messages`, and its token `usage`. `messages` holds the earlier messages, from `messages` or the loaded `conversation`, followed by the messages of this run. A conversation with a stored [summary](/agentlib/sessions#compaction-in-conversations) loads only the messages after the summary, so `messages` starts there.
 
 ## Typed output
 
@@ -141,10 +154,10 @@ agentlib includes the name in the run's approval signal names, so an approval fo
 
 | Option | Default | Effect |
 |---|---|---|
-| `maxSteps` | 10 | Model calls per run, including the final answer. The run stops with `max_steps` when it reaches the limit. |
-| `maxToolCalls` | 128 | Tool calls per run, including calls made from [code mode](/agentlib/tools#code-mode). If a step requests more calls than remain, none of them run, and the run stops with `max_tool_calls`. |
+| `maxSteps` | 10 | Steps per run, including the final answer. A step whose model call a [guardrail](/agentlib/guardrails) rejects also counts. The run stops with `max_steps` when it reaches the limit. |
+| `maxToolCalls` | 128 | Tool calls per run, including nested calls, such as the calls made from [code mode](/agentlib/tools#code-mode). If a step requests more calls than remain, none of them run, and the run stops with `max_tool_calls`. A nested call over the limit also stops the run. |
 | `maxToolDepth` | 16 | Depth of nested tool calls. A deeper call fails with the code `depth_limit`. |
-| `maxOutputTokens` | Unset | Tokens per model reply during the agent loop. When it's unset, the model's provider chooses the limit. See [Reply limit](/agentlib/models#reply-limit). A reply cut off at the limit fails the run. The finalization call for a stopped or interrupted run doesn't receive this limit. |
+| `maxOutputTokens` | Unset | Tokens per model reply during the agent loop. When it's unset, the model's provider chooses the limit. See [Reply limit](/agentlib/models#reply-limit). A reply cut off at the limit fails the run. The finalization call for a stopped or interrupted run doesn't receive this limit. Compaction summaries that the agent's model writes receive it, and summaries from a separate `compaction.model` don't. |
 | `maxOutputChars` | 128000 | Characters of model text, tool output, and final output. A tool output over the limit fails the tool call with the code `output_limit`. |
 
 Reaching `maxSteps` or `maxToolCalls` stops the run with a result, not an error.
@@ -169,7 +182,7 @@ const writer = agent({
 });
 ```
 
-Skill names have up to 64 lowercase letters, digits, and hyphens. `skills()` throws for an invalid or duplicate skill. The model reads a skill's files with the built-in `read_skill_file` tool.
+A skill name has up to 64 characters: lowercase letters and digits, in groups joined by single hyphens. `skills()` throws for an invalid name, an empty description, or a duplicate name. The model reads a skill's files with the built-in `read_skill_file` tool.
 
 To load skills from files, a repository, or a database, pass your own `SkillSource` with the async functions `list`, `load`, and optionally `read`. The model gets `read_skill_file` only if the source implements `read`. agentlib skips an invalid skill from a custom source and logs a warning.
 agentlib journals each call. `list` runs once per run, so the skill list stays the same for the whole run.

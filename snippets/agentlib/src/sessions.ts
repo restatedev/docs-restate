@@ -1,6 +1,6 @@
 import * as restate from "@restatedev/restate-sdk-gen";
 import {TerminalError} from "@restatedev/restate-sdk";
-import {agent, LazyStateConversation, messagesOf, type Message} from "@restatedev/agentlib";
+import {agent, Conversation, messagesOf, type Message} from "@restatedev/agentlib";
 import {model} from "./model.js";
 
 const assistant = agent({
@@ -13,12 +13,12 @@ export const chatSession = restate.object({
   name: "ChatSession",
   handlers: {
     *ask(message: string) {
-      const result = yield* assistant.run(message, {conversation: new LazyStateConversation()});
+      const result = yield* assistant.run(message, {conversation: new Conversation()});
       if (result.status !== "completed") return result.output ?? result.reason;
       return result.output;
     },
     *history({from, limit}: {from?: number; limit?: number}) {
-      return yield* new LazyStateConversation().page(from, limit);
+      return yield* new Conversation().page(from, limit);
     },
   },
   options: {
@@ -34,7 +34,7 @@ function* doTurn(message: string) {
   restate.state().set("active", {invocationId: restate.handlerRequest().id});
   try {
     const result = yield* assistant.run(message, {
-      conversation: new LazyStateConversation(),
+      conversation: new Conversation(),
       steeringSignal: "steering",
       interruptSignal: "interrupt",
     });
@@ -46,7 +46,7 @@ function* doTurn(message: string) {
 }
 
 function* history({from, limit}: {from?: number; limit?: number}) {
-  return yield* new LazyStateConversation().page(from, limit);
+  return yield* new Conversation().page(from, limit);
 }
 
 function* signalActiveTurn(name: string, value: string): restate.Operation<boolean> {
@@ -88,7 +88,7 @@ export const compactedChat = restate.object({
   handlers: {
     *ask(message: string) {
       // The run stores its summaries in the conversation
-      const result = yield* longChat.run(message, {conversation: new LazyStateConversation()});
+      const result = yield* longChat.run(message, {conversation: new Conversation()});
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
   },
@@ -112,7 +112,7 @@ export const customSummaryChat = restate.object({
   name: "CustomSummaryChat",
   handlers: {
     *ask(message: string) {
-      const result = yield* supportAgent.run(message, {conversation: new LazyStateConversation()});
+      const result = yield* supportAgent.run(message, {conversation: new Conversation()});
       return result.status === "completed" ? result.output : (result.output ?? result.reason);
     },
   },
@@ -120,11 +120,14 @@ export const customSummaryChat = restate.object({
 });
 
 // <start_run_compaction>
-const researcher = agent({
-  model,
-  maxSteps: 40,
-  compaction: {maxTokens: 100000, retainTokens: 25000}, // the defaults
-});
+// Compacts at 85,708 tokens: 90% of what the window leaves after 32,768 tokens for the reply
+const researcher = agent({model, maxSteps: 40, contextWindow: 128000});
+
+// Compacts at 100,000 tokens, and keeps the newest messages that fit in 25,000 tokens
+const analyst = agent({model, compaction: {maxTokens: 100000, retainTokens: 25000}});
+
+// Truncates instead of summarizing a request that doesn't fit the window
+const classifier = agent({model, contextWindow: 128000, compaction: false});
 // <end_run_compaction>
 
 // <start_tool_results>
@@ -156,4 +159,4 @@ export const manualChat = restate.object({
 });
 // <end_messages>
 
-export const agents = {researcher, crawler};
+export const agents = {researcher, analyst, classifier, crawler};

@@ -102,8 +102,8 @@ it("stores a run's summary in the conversation", async () => {
   // The run summarizes all but the newest two messages: summary + m5
   expect(await ask(5)).toMatch(/^the\|users:2\|m5 /);
   const state = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
-  expect(state["conversation/meta"]).toEqual({count: 10, summary: {through: 7}});
-  expect(state["conversation/summary"]).toBe("Earlier turns, summarized");
+  expect(state["conversation/meta"]).toEqual({count: 10});
+  expect(state["conversation/summary"]).toEqual({through: 7, text: "Earlier turns, summarized"});
   // The next run starts from the stored summary: summary + m5 + m6
   expect(await ask(6)).toMatch(/^the\|users:3\|m6 /);
   const after = await env.stateOf(compactedChat, "dave").getAll<Record<string, unknown>>();
@@ -114,13 +114,14 @@ it("stores a run's summary in the conversation", async () => {
 
 it("summarizes with custom compaction instructions", async () => {
   const chat = ingress().client(customSummaryChat, "frank");
-  // About 15,000 tokens per turn: the eighth turn's request exceeds the default maxTokens (100,000)
-  for (let i = 1; i <= 7; i++) await chat.ask(`m${i} ${"x".repeat(30_000)}`);
+  // About 25,000 tokens per turn: the eighth turn's request exceeds the default maxTokens (170,000)
+  for (let i = 1; i <= 7; i++) await chat.ask(`m${i} ${"x".repeat(50_000)}`);
   const before = await env.stateOf(customSummaryChat, "frank").getAll<Record<string, unknown>>();
   expect(before["conversation/meta"]).toEqual({count: 14});
-  await chat.ask(`m8 ${"x".repeat(30_000)}`);
+  expect(before["conversation/summary"]).toBeUndefined();
+  await chat.ask(`m8 ${"x".repeat(50_000)}`);
   const state = await env.stateOf(customSummaryChat, "frank").getAll<Record<string, unknown>>();
-  expect(state["conversation/summary"]).toBe("Open requests and order IDs");
+  expect(state["conversation/summary"]).toMatchObject({text: "Open requests and order IDs"});
 }, 120_000);
 
 it("routes to a specialist", async () => {
